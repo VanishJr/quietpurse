@@ -1,0 +1,23 @@
+node_modules/
+dist/
+
+# secrets and local configuration
+.env
+.env.local
+.env.*.local
+backend/secrets/
+
+# personal notes: the author's own finances, not part of the project
+Report.md
+Strategy.md
+ROADMAP.md
+
+# personal data: database, backups, bank statements
+backend/data/
+*.db
+*.db-shm
+*.db-wal
+*.csv
+
+*.log
+.DS_Store

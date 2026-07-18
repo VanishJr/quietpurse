@@ -1,0 +1,901 @@
+/*
+ * Global stylesheet. Replaces the StyleSheet.create blocks of the old React Native
+ * app: colors come from the CSS variables published by theme.tsx, so a theme switch
+ * repaints everything without re-rendering.
+ *
+ * Layout targets two shapes:
+ *   narrow (<900px)  — one column, bottom tab bar, same as the phone app;
+ *   wide   (>=900px) — sidebar nav, centered content, multi-column blocks.
+ */
+
+/* ---------- base ---------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ink-page);
+  color: var(--ink-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+input,
+textarea {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- app shell ---------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--ink-page);
+}
+
+.screens {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* Screens stay mounted so filters and loaded data survive tab switches. */
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.screen[hidden] {
+  display: none;
+}
+
+.tabbar {
+  display: flex;
+  border-top: 1px solid var(--ink-grid);
+  background: var(--ink-surface);
+  /* iOS home indicator; 0 on everything else */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.tabbar button {
+  flex: 1;
+  padding: 12px 0;
+  font-size: 14px;
+  color: var(--ink-muted);
+}
+
+.tabbar button[aria-current='page'] {
+  color: var(--ink-accent);
+  font-weight: 700;
+}
+
+/* ---------- shared primitives ---------- */
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 12px 0;
+}
+
+.block-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 16px 0 6px;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--ink-muted);
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+
+.error {
+  color: var(--ink-bad);
+  margin: 4px 0;
+}
+
+.empty {
+  color: var(--ink-secondary);
+  margin-top: 24px;
+  line-height: 1.45;
+}
+
+.muted-strike {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.badge {
+  font-size: 10px;
+  color: var(--ink-secondary);
+  background: var(--ink-grid);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.btn {
+  background: var(--ink-accent);
+  color: var(--ink-onAccent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btn-ghost {
+  border: 1px solid var(--ink-accent);
+  color: var(--ink-accent);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.btn-ghost:disabled {
+  opacity: 0.5;
+}
+
+.btn-link {
+  color: var(--ink-accent);
+  font-size: 14px;
+  padding: 6px 0;
+  text-align: left;
+}
+
+.btn-danger {
+  color: var(--ink-bad);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.pill {
+  padding: 6px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--ink-grid);
+  background: var(--ink-surface);
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.input {
+  border: 1px solid var(--ink-grid);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--ink-primary);
+  background: var(--ink-surface);
+  width: 100%;
+}
+
+.input::placeholder {
+  color: var(--ink-muted);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--ink-accent);
+}
+
+.card {
+  border: 1px solid var(--ink-grid);
+  border-radius: 12px;
+  background: var(--ink-surface);
+  padding: 16px;
+}
+
+/* a list row: content left, value right, thin divider under it */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ink-grid);
+  width: 100%;
+  text-align: left;
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-title {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-sub {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+
+.row-value {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---------- chips ---------- */
+
+.chips {
+  display: flex;
+  gap: 6px;
+  padding: 6px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--ink-grid);
+  background: var(--ink-surface);
+  font-size: 13px;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chip[aria-pressed='true'] {
+  background: var(--ink-accent);
+  border-color: var(--ink-accent);
+  color: var(--ink-onAccent);
+  font-weight: 600;
+}
+
+/* chip with a category dot inside */
+.chip-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--ink-grid);
+  font-size: 13px;
+  color: var(--ink-primary);
+  background: var(--ink-surface);
+}
+
+.chip-cat[aria-pressed='true'] {
+  border-color: var(--ink-accent);
+  background: var(--ink-grid);
+}
+
+.chip-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---------- legend (category breakdown) ---------- */
+
+.legend {
+  margin-bottom: 24px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ink-grid);
+  width: 100%;
+  text-align: left;
+}
+
+.legend-name {
+  flex: 1;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.legend-pct {
+  width: 48px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  text-align: right;
+}
+
+.legend-value {
+  width: 100px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.total-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+}
+
+.total-row .legend-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.total-row .legend-value {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* ---------- progress / budget bars ---------- */
+
+.track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--ink-grid);
+  overflow: hidden;
+  margin-top: 14px;
+}
+
+.track-fill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.track-sm {
+  height: 6px;
+  border-radius: 3px;
+  margin-top: 6px;
+}
+
+/* ---------- modal / sheet ---------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--ink-backdrop);
+  display: flex;
+  z-index: 10;
+}
+
+/* phone: sheet slides up from the bottom edge */
+.backdrop-bottom {
+  align-items: flex-end;
+}
+
+.backdrop-center {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.sheet {
+  background: var(--ink-surface);
+  padding: 20px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.backdrop-bottom .sheet {
+  border-radius: 16px 16px 0 0;
+  padding-bottom: 32px;
+}
+
+.backdrop-center .sheet {
+  border-radius: 12px;
+  max-width: 420px;
+}
+
+.sheet-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.sheet-amount {
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.sheet-meta {
+  font-size: 13px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--ink-grid);
+}
+
+.switch-label {
+  font-size: 15px;
+}
+
+.switch-hint {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+/* a real checkbox styled as an iOS-ish switch */
+.switch {
+  appearance: none;
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 13px;
+  background: var(--ink-grid);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s;
+}
+
+.switch:checked {
+  background: var(--ink-accent);
+}
+
+.switch:checked::after {
+  transform: translateX(18px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.btn-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* ---------- overview ---------- */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-hint {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+
+.journal-row {
+  padding: 4px 0;
+}
+
+.journal-text {
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.journal-error {
+  color: var(--ink-bad);
+  font-size: 11px;
+  margin-left: 16px;
+  margin-top: 2px;
+}
+
+.sync-log {
+  color: var(--ink-muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.api-hint {
+  color: var(--ink-muted);
+  font-size: 11px;
+  text-align: center;
+  margin: 8px 0;
+}
+
+/* ---------- analytics ---------- */
+
+.period-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0;
+}
+
+.period-btn {
+  font-size: 26px;
+  color: var(--ink-accent);
+  padding: 4px 20px;
+  line-height: 1;
+}
+
+.period-btn:disabled {
+  opacity: 0.3;
+}
+
+.period-label {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.totals-row {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.total-box {
+  flex: 1;
+  border: 1px solid var(--ink-grid);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--ink-surface);
+  text-align: left;
+}
+
+.total-box[aria-selected='true'] {
+  border-color: var(--ink-accent);
+  box-shadow: inset 0 0 0 1px var(--ink-accent);
+}
+
+.total-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-bottom: 4px;
+}
+
+.total-value {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.chart-wrap {
+  margin: 16px 0;
+  position: relative;
+}
+
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.donut-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.donut-currency {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.average {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  margin-bottom: 6px;
+}
+
+/* ---------- goal (independence) ---------- */
+
+.hero-label {
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.hero-value {
+  font-size: 30px;
+  font-weight: 800;
+  margin-top: 6px;
+}
+
+.hero-permonth {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.hero-sub {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  margin-top: 6px;
+}
+
+.hero-compare {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 10px;
+  line-height: 1.35;
+}
+
+.progress-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 6px;
+}
+
+/* on a <label> too, which would otherwise stay inline and run into the control before it */
+.setting-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 8px;
+}
+
+.inline-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-row .input {
+  flex: 1;
+}
+
+.input-narrow {
+  width: 96px;
+  flex: none;
+}
+
+.input-code {
+  width: 80px;
+  flex: none;
+}
+
+.body-text {
+  font-size: 13px;
+  color: var(--ink-secondary);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.bottom-pad {
+  height: 32px;
+}
+
+/* ---------- onboarding ---------- */
+
+.onboarding {
+  padding-bottom: 48px;
+}
+
+.step {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 24px 0 6px;
+}
+
+.provider {
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 14px;
+}
+
+.csv-input {
+  min-height: 96px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+/* ---------- file drop zone ---------- */
+
+.dropzone {
+  border: 2px dashed var(--ink-grid);
+  border-radius: 12px;
+  background: var(--ink-surface);
+  padding: 28px 16px;
+  text-align: center;
+  cursor: pointer;
+  margin: 12px 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone:hover {
+  border-color: var(--ink-accent);
+}
+
+/* the dragged file is over the zone — make the target unmistakable */
+.dropzone-active {
+  border-color: var(--ink-accent);
+  border-style: solid;
+  background: var(--ink-grid);
+}
+
+.dropzone-icon {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--ink-accent);
+  margin-bottom: 8px;
+}
+
+.dropzone-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dropzone-sub {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+}
+
+details > summary {
+  cursor: pointer;
+  margin-top: 12px;
+}
+
+/* the default triangle plus our own link styling read as two markers */
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary::marker {
+  content: '';
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---------- wide screens ---------- */
+
+@media (min-width: 900px) {
+  .app {
+    flex-direction: row-reverse;
+  }
+
+  .screen {
+    padding: 0 32px;
+  }
+
+  /* content stays readable instead of stretching across the whole monitor */
+  .screen-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding-bottom: 32px;
+  }
+
+  /* bottom tabs become a sidebar */
+  .tabbar {
+    flex-direction: column;
+    border-top: none;
+    border-right: 1px solid var(--ink-grid);
+    width: 200px;
+    flex: none;
+    padding: 16px 0;
+    gap: 2px;
+  }
+
+  .tabbar button {
+    flex: none;
+    text-align: left;
+    padding: 10px 20px;
+    font-size: 15px;
+    border-radius: 0 20px 20px 0;
+    margin-right: 12px;
+  }
+
+  .tabbar button:hover {
+    background: var(--ink-grid);
+  }
+
+  .tabbar button[aria-current='page'] {
+    background: var(--ink-grid);
+  }
+
+  /* the analytics donut and its legend sit side by side */
+  .analytics-split {
+    display: grid;
+    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+
+  /* the goal screen's hero and its month chart, likewise */
+  .goal-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  .backdrop-bottom {
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .backdrop-bottom .sheet {
+    border-radius: 12px;
+    max-width: 560px;
+    padding-bottom: 20px;
+  }
+}
