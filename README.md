@@ -81,6 +81,20 @@ The dev server proxies `/api` to `http://localhost:4000`, so there is no address
 configure. If the backend runs on another port or host, set `BACKEND_URL` (the proxy
 target) or `VITE_API_URL` (the address the browser uses) — see `web/.env.example`.
 
+### Backend in Docker
+
+An alternative to step 1 — requires Docker with the Compose plugin:
+
+```bash
+cp backend/.env.example backend/.env   # optional, an empty file works too
+docker compose up -d --build           # backend on http://localhost:4000
+```
+
+The database stays in `backend/data/` on the host — the same place the non-Docker
+setup uses, so you can switch between the two without losing data. `backend/secrets/`
+is mounted read-only for the Enable Banking key. The web client still runs separately
+(step 2).
+
 ### 3. First run
 
 With an empty database the app opens a short wizard: base currency, the name your bank

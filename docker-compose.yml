@@ -1,0 +1,18 @@
+services:
+  backend:
+    build: ./backend
+    container_name: finto-backend
+    restart: unless-stopped
+    # Change the left side if the backend should listen elsewhere on the host;
+    # PORT inside the container stays 4000.
+    ports:
+      - "4000:4000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    volumes:
+      # SQLite database (plus its -wal/-shm files) — the same directory the
+      # non-Docker setup uses, so switching between the two keeps your data.
+      - ./backend/data:/app/data
+      # Enable Banking private key (EB_PRIVATE_KEY_PATH=./secrets/enablebanking.pem).
+      - ./backend/secrets:/app/secrets:ro
