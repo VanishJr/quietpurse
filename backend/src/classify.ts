@@ -88,8 +88,8 @@ function normalizeName(s: string): string {
  * substring: statements use any order ("Yurii Kalvenko", "Калвенко Юрій"). Single-word
  * names are ignored — far too easy to hit a random merchant.
  */
-function makeOwnerMatcher(): (description: string) => boolean {
-  const names = [...getAppSettings().ownerNames, getMeta('monobank_client_name') ?? '']
+async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
+  const names = [...(await getAppSettings()).ownerNames, (await getMeta('monobank_client_name')) ?? '']
     .map((n) => normalizeName(n).split(' ').filter((w) => w.length >= 3))
     .filter((words) => words.length >= 2);
 
@@ -109,8 +109,10 @@ function makeOwnerMatcher(): (description: string) => boolean {
  * transaction, so the string is guaranteed to match what the bank sends for that
  * group.
  */
-function makeRuleMatcher(): (t: Transaction) => boolean {
-  const rules = new Set(listTransferRules().map((r) => `${r.accountId}\0${r.description}`));
+async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
+  const rules = new Set(
+    (await listTransferRules()).map((r) => `${r.accountId}\0${r.description}`),
+  );
   if (rules.size === 0) return () => false;
   return (t: Transaction) => rules.has(`${t.accountId}\0${t.description}`);
 }
@@ -122,8 +124,8 @@ function makeRuleMatcher(): (t: Transaction) => boolean {
  * owner names: by words, at least two words of 3+ letters. The first matching
  * source (by sort) wins.
  */
-function makeSourceMatcher(): (description: string) => string | undefined {
-  const sources = listIncomeSources()
+async function makeSourceMatcher(): Promise<(description: string) => string | undefined> {
+  const sources = (await listIncomeSources())
     .map((s) => ({
       id: s.id,
       names: s.patterns
@@ -145,8 +147,10 @@ function makeSourceMatcher(): (description: string) => string | undefined {
  * Stronger than the dictionary: the dictionary is a default, a rule is the owner's
  * explicit decision.
  */
-function makeCategoryRuleMatcher(): (description: string) => string | undefined {
-  const rules = listCategoryRules().map((r) => [r.pattern.toLowerCase(), r.category] as const);
+async function makeCategoryRuleMatcher(): Promise<(description: string) => string | undefined> {
+  const rules = (await listCategoryRules()).map(
+    (r) => [r.pattern.toLowerCase(), r.category] as const,
+  );
   if (rules.length === 0) return () => undefined;
   return (description: string) => {
     const d = (description || '').toLowerCase();
@@ -254,11 +258,11 @@ async function ratesOrEmpty(): Promise<Record<string, number>> {
  */
 export async function reclassifyAll(): Promise<number> {
   const rates = await ratesOrEmpty();
-  const isOwner = makeOwnerMatcher();
-  const sourceFor = makeSourceMatcher();
-  const matchesRule = makeRuleMatcher();
-  const userCategory = makeCategoryRuleMatcher();
-  const txs = allTransactions();
+  const isOwner = await makeOwnerMatcher();
+  const sourceFor = await makeSourceMatcher();
+  const matchesRule = await makeRuleMatcher();
+  const userCategory = await makeCategoryRuleMatcher();
+  const txs = await allTransactions();
 
   const result = new Map<string, Classification>(
     txs.map((t) => {
@@ -344,8 +348,8 @@ export async function reclassifyAll(): Promise<number> {
   }
 
   const rows = [...result.values()];
-  applyClassification(rows);
-  setMeta('classify_version', rulesSignature());
+  await applyClassification(rows);
+  await setMeta('classify_version', await rulesSignature());
 
   // base_amount for new transactions: rates on their dates (cached in fx_rates)
   await backfillBaseAmounts();
@@ -360,21 +364,22 @@ export async function reclassifyAll(): Promise<number> {
  * the old tags would stay wrong.
  * (A source's kind is not part of the signature: it affects summaries, not tagging.)
  */
-function rulesSignature(): string {
-  const categoryRules = listCategoryRules()
+async function rulesSignature(): Promise<string> {
+  const categoryRules = (await listCategoryRules())
     .map((r) => `${r.pattern}>${r.category}`)
     .sort()
     .join(';');
-  const sourcePatterns = listIncomeSources()
+  const sourcePatterns = (await listIncomeSources())
     .map((s) => `${s.id}:${s.patterns.join('+')}`)
     .sort()
     .join(';');
-  return `${RULES_VERSION}|${getAppSettings().ownerNames.join(',')}|${sourcePatterns}|${categoryRules}`;
+  const { ownerNames } = await getAppSettings();
+  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}`;
 }
 
 /** Recompute at startup if the tagging rules changed since the last run. */
 export async function reclassifyIfRulesChanged(): Promise<boolean> {
-  if (getMeta('classify_version') === rulesSignature()) return false;
+  if ((await getMeta('classify_version')) === (await rulesSignature())) return false;
   await reclassifyAll();
   return true;
 }

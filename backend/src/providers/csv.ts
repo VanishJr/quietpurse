@@ -259,7 +259,7 @@ const slugify = (s: string): string =>
  * Parses the CSV and inserts the transactions. Classification and currency
  * conversion are the caller's job (the endpoint calls reclassifyAll afterwards).
  */
-export function importCsv(req: CsvImportRequest): CsvImportResult {
+export async function importCsv(req: CsvImportRequest): Promise<CsvImportResult> {
   const accountId = `csv:${slugify(req.accountName)}`;
   const problems: string[] = [];
 
@@ -362,16 +362,16 @@ export function importCsv(req: CsvImportRequest): CsvImportResult {
     );
   }
 
-  upsertAccount({
+  await upsertAccount({
     id: accountId,
     provider: 'csv',
     name: req.accountName,
     currency: req.currency.toUpperCase(),
     balance: 0,
   });
-  const inserted = insertTransactions(txs);
+  const inserted = await insertTransactions(txs);
   // a statement carries no balance - the best approximation is the sum of the account's transactions
-  recalcAccountBalanceFromTransactions(accountId);
+  await recalcAccountBalanceFromTransactions(accountId);
 
   return { accountId, inserted, skipped, total: rows.length - 1, problems };
 }

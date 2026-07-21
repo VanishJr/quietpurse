@@ -1,0 +1,1553 @@
+/**
+ * The data layer: every query the app makes, ported from better-sqlite3 raw SQL
+ * to Drizzle on PostgreSQL. Function names and result types are unchanged from
+ * the SQLite era - only the signatures went async.
+ *
+ * EVERY query in this module is scoped to the current workspace (see
+ * ./workspace.ts): the workspace id comes from AsyncLocalStorage, set by the
+ * session middleware for requests and by the scheduler for background jobs.
+ * A call outside a workspace context throws instead of leaking data.
+ *
+ * Two kinds of queries live here on purpose:
+ *  - plain CRUD goes through the query builder (typed rows, camelCase);
+ *  - the analytical aggregates keep their raw SQL via sql`` - they are the heart
+ *    of the app and easier to review as SQL than as builder chains.
+ *
+ * PG gotchas encoded here so callers never see them:
+ *  - SUM()/COUNT() return bigint/numeric and the driver hands them over as
+ *    strings - every aggregate is wrapped in Number() at the boundary;
+ *  - unquoted SQL aliases fold to lowercase - camelCase aliases are quoted;
+ *  - ROUND(double) is round-half-to-even - money rounding casts to ::numeric
+ *    first, which rounds half away from zero like toCents() in money.ts.
+ */
+import path from 'path';
+import { and, asc, eq, getTableColumns, sql, type SQL } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { Pool } from 'pg';
+import { z } from 'zod';
+import { recurringKey } from '../categorizer';
+import { config } from '../config';
+import { logDb } from '../logger';
+import { fromCents, fromCentsOrUndefined, toCents } from '../money';
+import {
+  Account,
+  CategorySummary,
+  IncomeSourceDef,
+  IncomeSourceKind,
+  MonthTotals,
+  Summary,
+  Transaction,
+  TransferRule,
+} from '../types';
+import * as s from './schema';
+import { currentWorkspaceId } from './workspace';
+
+export { currentWorkspaceId, runWithWorkspace, setWorkspaceFallback } from './workspace';
+
+/**
+ * Any Drizzle PG database: production passes node-postgres, tests pass PGlite.
+ * The schema/HKT generics are erased - this module never uses db.query.*.
+ */
+export type Db = PgDatabase<PgQueryResultHKT, any, any>;
+
+let db: Db | undefined;
+
+/** Injection point: tests hand over a migrated PGlite instance (see test/setup.ts). */
+export function initDb(instance: Db): void {
+  db = instance;
+}
+
+function getDb(): Db {
+  if (!db) throw new Error('database not initialized - call connectDatabase() first');
+  return db;
+}
+
+/** The raw db handle - for the better-auth adapter, which manages its own tables. */
+export function dbInstance(): Db {
+  return getDb();
+}
+
+/** Where drizzle-kit puts the generated SQL migrations (shared with the test setup). */
+export const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'drizzle');
+
+/**
+ * Production startup: connect to DATABASE_URL and apply pending SQL migrations.
+ * Must complete before the HTTP server starts listening. Seeding is per-workspace
+ * now: it runs at registration (see auth.ts) and idempotently at startup for every
+ * existing workspace (see main() in index.ts).
+ */
+export async function connectDatabase(): Promise<void> {
+  const pool = new Pool({ connectionString: config.databaseUrl });
+  const instance = drizzle(pool, { schema: s });
+  await migrate(instance, { migrationsFolder: MIGRATIONS_DIR });
+  initDb(instance);
+  logDb.info('database connected, migrations applied');
+}
+
+/**
+ * The seed every fresh workspace gets (formerly the old SQLite migration 001):
+ * builtin income sources and the initial settings. Idempotent - the tables are
+ * the source of truth after the first run (see appsettings.ts). Runs at
+ * registration and, as an upgrade path, at startup for every workspace.
+ *
+ * OWNER_NAMES and FAMILY_NAMES are the *server operator's* own household names,
+ * and they are personal data: seeding them into every workspace would both
+ * mis-tag a stranger's transactions and show them the operator's relatives in
+ * the settings screen. So env personal data seeds ONLY the owner workspace (the
+ * first one ever created, the same definition sync.ts uses for the global bank
+ * token); everyone else starts empty and fills these in from the app.
+ *
+ * base_currency and sync_interval_min are not personal - they are this
+ * deployment's sensible starting values - so every workspace gets them.
+ */
+export async function seedDefaults(): Promise<void> {
+  const w = currentWorkspaceId();
+  const d = getDb();
+  const isOwner = (await listWorkspaceIds())[0] === w;
+  const ownerNames = isOwner ? config.ownerNames : [];
+  const familyNames = isOwner ? config.familyNames : [];
+  await d
+    .insert(s.incomeSources)
+    .values([
+      { workspaceId: w, id: 'salary', label: 'Salary', kind: 'own', patterns: '[]', sort: 0, builtin: true },
+      {
+        workspaceId: w,
+        id: 'family',
+        label: 'Family support',
+        kind: 'external',
+        patterns: JSON.stringify(familyNames),
+        sort: 1,
+        builtin: true,
+      },
+      { workspaceId: w, id: 'other', label: 'Other', kind: 'own', patterns: '[]', sort: 2, builtin: true },
+    ])
+    .onConflictDoNothing();
+  await d
+    .insert(s.settings)
+    .values([
+      { workspaceId: w, key: 'base_currency', value: config.baseCurrency },
+      { workspaceId: w, key: 'owner_names', value: JSON.stringify(ownerNames) },
+      { workspaceId: w, key: 'sync_interval_min', value: String(config.syncIntervalMin) },
+    ])
+    .onConflictDoNothing();
+}
+
+// ---------- workspaces (the organization table is owned by better-auth) ----------
+
+/** Every workspace on the server, oldest first (the first one is the server owner's). */
+export async function listWorkspaceIds(): Promise<string[]> {
+  const rows = await getDb()
+    .select({ id: s.organization.id })
+    .from(s.organization)
+    .orderBy(asc(s.organization.createdAt), asc(s.organization.id));
+  return rows.map((r) => r.id);
+}
+
+/** The user's workspaces in join order - the first one is their personal workspace. */
+export async function listUserWorkspaceIds(userId: string): Promise<string[]> {
+  const rows = await getDb()
+    .select({ id: s.member.organizationId })
+    .from(s.member)
+    .where(eq(s.member.userId, userId))
+    .orderBy(asc(s.member.createdAt), asc(s.member.id));
+  return rows.map((r) => r.id);
+}
+
+// ---------- raw-SQL helpers ----------
+
+/** Rows of a raw sql`` query; both drivers expose them as `.rows`. */
+async function rowsOf<T>(q: SQL): Promise<T[]> {
+  const res = (await getDb().execute(q)) as unknown as { rows: T[] };
+  return res.rows;
+}
+
+/** Affected-row count of a raw sql`` statement (node-postgres and PGlite spell it differently). */
+async function execCount(q: SQL): Promise<number> {
+  const res = (await getDb().execute(q)) as unknown as {
+    rowCount?: number | null;
+    affectedRows?: number;
+  };
+  return Number(res.rowCount ?? res.affectedRows ?? 0);
+}
+
+/** PG parameter limit is 65535 per statement - large inserts go in chunks. */
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** The workspace filter every raw SQL query carries. Built at call time - the id lives in ALS. */
+const WS = (): SQL => sql`workspace_id = ${currentWorkspaceId()}`;
+
+/**
+ * The effective transfer flag: a manual mark beats auto-detection.
+ * Transfer transactions count as neither income nor spending.
+ */
+const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
+
+/**
+ * Transactions of hidden accounts are neither shown nor counted. They aren't
+ * deleted: the classifier needs them as the other leg of a transfer - hiding N26
+ * shouldn't lose the transfer flag on the matching Revolut income.
+ */
+const VISIBLE_ACCOUNT = (): SQL =>
+  sql`account_id NOT IN (SELECT id FROM accounts WHERE hidden AND workspace_id = ${currentWorkspaceId()})`;
+
+// ---------- settings (key/value, source of truth, see appsettings.ts) ----------
+
+export async function getSetting(key: string): Promise<string | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.settings)
+    .where(and(eq(s.settings.workspaceId, currentWorkspaceId()), eq(s.settings.key, key)));
+  return rows[0]?.value;
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  await getDb()
+    .insert(s.settings)
+    .values({ workspaceId: currentWorkspaceId(), key, value })
+    .onConflictDoUpdate({ target: [s.settings.workspaceId, s.settings.key], set: { value } });
+}
+
+/**
+ * Base currency from settings (falls back to env/config default until seedDefaults
+ * has run). Needed inside the db layer too: inserting transactions fills base_amount
+ * straight away for rows already in the base currency.
+ */
+export async function currentBaseCurrency(): Promise<string> {
+  return (await getSetting('base_currency')) ?? config.baseCurrency;
+}
+
+// ---------- meta ----------
+
+export async function getMeta(key: string): Promise<string | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.meta)
+    .where(and(eq(s.meta.workspaceId, currentWorkspaceId()), eq(s.meta.key, key)));
+  return rows[0]?.value;
+}
+
+export async function setMeta(key: string, value: string): Promise<void> {
+  await getDb()
+    .insert(s.meta)
+    .values({ workspaceId: currentWorkspaceId(), key, value })
+    .onConflictDoUpdate({ target: [s.meta.workspaceId, s.meta.key], set: { value } });
+}
+
+// ---------- accounts ----------
+
+export async function upsertAccount(a: Account): Promise<void> {
+  await getDb()
+    .insert(s.accounts)
+    .values({
+      workspaceId: currentWorkspaceId(),
+      id: a.id,
+      provider: a.provider,
+      name: a.name,
+      currency: a.currency,
+      balanceCents: toCents(a.balance),
+      iban: a.iban ?? null,
+      ebSessionId: a.ebSessionId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [s.accounts.workspaceId, s.accounts.id],
+      set: {
+        name: sql`excluded.name`,
+        currency: sql`excluded.currency`,
+        balanceCents: sql`excluded.balance_cents`,
+        iban: sql`excluded.iban`,
+        ebSessionId: sql`COALESCE(excluded.eb_session_id, accounts.eb_session_id)`,
+      },
+    });
+}
+
+export async function updateAccountBalance(id: string, balance: number): Promise<void> {
+  await getDb()
+    .update(s.accounts)
+    .set({ balanceCents: toCents(balance) })
+    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+}
+
+/**
+ * Balance = the sum of the account's transactions. For CSV accounts a statement
+ * carries no balance, so this is the best approximation (exact with full history).
+ */
+export async function recalcAccountBalanceFromTransactions(accountId: string): Promise<void> {
+  await getDb().execute(sql`
+    UPDATE accounts SET balance_cents = (
+      SELECT COALESCE(SUM(amount_cents), 0) FROM transactions
+      WHERE account_id = ${accountId} AND ${WS()}
+    ) WHERE id = ${accountId} AND ${WS()}`);
+}
+
+export async function markAccountSynced(id: string, when: string): Promise<void> {
+  await getDb()
+    .update(s.accounts)
+    .set({ lastSyncedAt: when })
+    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+}
+
+/** Remembers the earliest date for which the account's history has been fetched. */
+export async function markAccountHistoryFrom(id: string, fromIso: string): Promise<void> {
+  await getDb().execute(sql`
+    UPDATE accounts SET history_from = LEAST(COALESCE(history_from, ${fromIso}), ${fromIso})
+    WHERE id = ${id} AND ${WS()}`);
+}
+
+type AccountRow = typeof s.accounts.$inferSelect;
+
+function rowToAccount(r: AccountRow): Account {
+  return {
+    id: r.id,
+    provider: r.provider as Account['provider'],
+    name: r.name,
+    currency: r.currency,
+    balance: fromCents(r.balanceCents),
+    iban: r.iban ?? undefined,
+    ebSessionId: r.ebSessionId ?? undefined,
+    lastSyncedAt: r.lastSyncedAt ?? undefined,
+    historyFrom: r.historyFrom ?? undefined,
+    hidden: r.hidden,
+  };
+}
+
+/**
+ * Visible accounts only by default: sync relies on this same list, so a hidden
+ * account also stops being synced.
+ */
+export async function listAccounts(includeHidden = false): Promise<Account[]> {
+  const ws = eq(s.accounts.workspaceId, currentWorkspaceId());
+  const rows = await getDb()
+    .select()
+    .from(s.accounts)
+    .where(includeHidden ? ws : and(ws, eq(s.accounts.hidden, false)));
+  return rows
+    .sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name))
+    .map(rowToAccount);
+}
+
+/** Remove an account from the app (or bring it back). Transactions stay in the database. */
+export async function setAccountHidden(
+  id: string,
+  hidden: boolean,
+): Promise<Account | undefined> {
+  const rows = await getDb()
+    .update(s.accounts)
+    .set({ hidden })
+    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)))
+    .returning();
+  return rows[0] ? rowToAccount(rows[0]) : undefined;
+}
+
+export async function getAccount(id: string): Promise<Account | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.accounts)
+    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+  return rows[0] ? rowToAccount(rows[0]) : undefined;
+}
+
+// ---------- transactions ----------
+
+/** Inserts a batch of transactions, silently skipping duplicates (by id). Returns the number of new ones. */
+export async function insertTransactions(txs: Transaction[]): Promise<number> {
+  if (txs.length === 0) return 0;
+  const w = currentWorkspaceId();
+  const baseCurrency = await currentBaseCurrency();
+  // transactions already in the base currency need no conversion - fill it now;
+  // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
+  const values = txs.map((t) => {
+    const amountCents = toCents(t.amount);
+    const isBase = t.currency === baseCurrency;
+    return {
+      workspaceId: w,
+      id: t.id,
+      accountId: t.accountId,
+      provider: t.provider,
+      amountCents,
+      currency: t.currency,
+      date: t.date,
+      description: t.description,
+      mcc: t.mcc ?? null,
+      category: t.category,
+      baseAmountCents: isBase ? amountCents : null,
+      fxRate: isBase ? 1 : null,
+    };
+  });
+  let inserted = 0;
+  await getDb().transaction(async (tx) => {
+    for (const chunk of chunked(values, 1000)) {
+      const res = await tx
+        .insert(s.transactions)
+        .values(chunk)
+        .onConflictDoNothing({ target: [s.transactions.workspaceId, s.transactions.id] })
+        .returning({ id: s.transactions.id });
+      inserted += res.length;
+    }
+  });
+  return inserted;
+}
+
+export interface TxFilter {
+  from?: string;
+  to?: string;
+  accountId?: string;
+  category?: string;
+  limit?: number;
+}
+
+/** Raw-SQL row shape (snake_case): the aggregate queries below select * from transactions. */
+interface TxRow {
+  id: string;
+  account_id: string;
+  provider: string;
+  amount_cents: number;
+  currency: string;
+  date: string;
+  description: string;
+  mcc: number | null;
+  category: string;
+  transfer: boolean;
+  transfer_manual: boolean | null;
+  refund: boolean;
+  base_amount_cents: number | null;
+  fx_rate: number | null;
+  income_source: string | null;
+  income_source_manual: string | null;
+  recurring: boolean;
+  one_off: boolean;
+}
+
+function rowToTx(r: TxRow): Transaction {
+  return {
+    id: r.id,
+    accountId: r.account_id,
+    provider: r.provider as Transaction['provider'],
+    amount: fromCents(r.amount_cents),
+    currency: r.currency,
+    date: r.date,
+    description: r.description,
+    mcc: r.mcc ?? undefined,
+    category: r.category,
+    transfer: r.transfer_manual ?? r.transfer,
+    transferManual: r.transfer_manual,
+    refund: r.refund,
+    baseAmount: fromCentsOrUndefined(r.base_amount_cents),
+    incomeSource:
+      r.amount_cents > 0
+        ? ((r.income_source_manual ?? r.income_source ?? 'other') as Transaction['incomeSource'])
+        : undefined,
+    incomeSourceManual: r.income_source_manual !== null,
+    recurring: r.recurring,
+    oneOff: r.one_off,
+  };
+}
+
+export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
+  const where: SQL[] = [WS(), VISIBLE_ACCOUNT()];
+  if (f.from) where.push(sql`date >= ${f.from}`);
+  // include the whole "to" day when a date without a time is given
+  if (f.to) where.push(sql`date <= ${f.to.length === 10 ? `${f.to}T23:59:59.999Z` : f.to}`);
+  if (f.accountId) where.push(sql`account_id = ${f.accountId}`);
+  if (f.category) where.push(sql`category = ${f.category}`);
+  const limit = f.limit && f.limit > 0 ? f.limit : 1000;
+  const rows = await rowsOf<TxRow>(sql`
+    SELECT * FROM transactions
+    WHERE ${sql.join(where, sql` AND `)}
+    ORDER BY date DESC LIMIT ${limit}`);
+  return rows.map(rowToTx);
+}
+
+/**
+ * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
+ * summaries - otherwise we would be adding euros to hryvnias. After backfillBaseAmounts
+ * (which runs on every recompute) there are normally no such rows.
+ */
+const CONVERTED = sql`base_amount_cents IS NOT NULL`;
+
+/**
+ * Spending by category in the base currency, net: a refund ("Bolt, cancelled")
+ * subtracts from spending in its own category, so a total can go negative if the
+ * purchase was in a previous period and the refund arrived in this one. Categories
+ * that collapse to exactly zero are not shown.
+ */
+export async function summaryByCategory(from: string, to: string): Promise<CategorySummary[]> {
+  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
+    SELECT category, SUM(-base_amount_cents) AS total_cents
+    FROM transactions
+    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+      AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
+    GROUP BY category
+    HAVING SUM(-base_amount_cents) <> 0
+    ORDER BY total_cents DESC`);
+  return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
+}
+
+/** Income by category: transfers between your own accounts and refunds excluded. */
+export async function summaryIncomeByCategory(
+  from: string,
+  to: string,
+): Promise<CategorySummary[]> {
+  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
+    SELECT category, SUM(base_amount_cents) AS total_cents
+    FROM transactions
+    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+      AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
+    GROUP BY category
+    ORDER BY total_cents DESC`);
+  return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
+}
+
+/** Effective income source: a manual mark beats auto-detection, empty = other. */
+const INCOME_SOURCE = sql`COALESCE(income_source_manual, income_source, 'other')`;
+
+/**
+ * External source (kind = external)? A source deleted from income_sources (or an
+ * unknown id) counts as your own - same as the default other.
+ */
+const IS_EXTERNAL = (): SQL =>
+  sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external' AND workspace_id = ${currentWorkspaceId()})`;
+
+/** Income by source in the base currency (id + label + kind). */
+export async function summaryIncomeBySource(
+  from: string,
+  to: string,
+): Promise<Summary['incomeBySource']> {
+  const rows = await rowsOf<
+    Omit<Summary['incomeBySource'][number], 'total'> & { total_cents: string }
+  >(sql`
+    SELECT ${INCOME_SOURCE} AS source,
+           COALESCE(i.label, ${INCOME_SOURCE}) AS label,
+           COALESCE(i.kind, 'own') AS kind,
+           SUM(base_amount_cents) AS total_cents
+    FROM transactions
+    LEFT JOIN income_sources i
+      ON i.id = ${INCOME_SOURCE} AND i.workspace_id = transactions.workspace_id
+    WHERE transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+      AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
+    GROUP BY 1, 2, 3
+    ORDER BY total_cents DESC`);
+  return rows.map(({ total_cents, ...r }) => ({ ...r, total: fromCents(Number(total_cents)) }));
+}
+
+export async function summaryTotals(
+  from: string,
+  to: string,
+): Promise<{ expense: number; income: number }> {
+  const rows = await rowsOf<{ expense_cents: string | null; income_cents: string | null }>(sql`
+    SELECT SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense_cents,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income_cents
+    FROM transactions
+    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}`);
+  const row = rows[0];
+  return {
+    expense: fromCents(Number(row?.expense_cents ?? 0)),
+    income: fromCents(Number(row?.income_cents ?? 0)),
+  };
+}
+
+/**
+ * Spending/income by month in the base currency - for the "over the year" chart and
+ * the independence calculation. Same rules as summaryTotals: transfers between your
+ * own accounts excluded, refunds subtracted from spending. On top of that:
+ *  - expenseOneOff - the share of spending flagged as one-off (amortized);
+ *  - incomeOwn - income from your own sources (kind = own);
+ *  - incomeExternal - help from external sources (kind = external).
+ */
+export async function summaryMonthlyTotals(from: string, to: string): Promise<MonthTotals[]> {
+  // camelCase aliases must be quoted: PG folds unquoted identifiers to lowercase
+  const rows = await rowsOf<{
+    month: string;
+    expense: string;
+    expenseOneOff: string;
+    income: string;
+    incomeOwn: string;
+    incomeExternal: string;
+  }>(sql`
+    SELECT SUBSTR(date, 1, 7) AS month,
+           SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense,
+           SUM(CASE WHEN (amount_cents < 0 OR refund) AND one_off THEN -base_amount_cents ELSE 0 END) AS "expenseOneOff",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND NOT ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeOwn",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeExternal"
+    FROM transactions
+    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY 1 ASC`);
+  // the SUMs above are in cents (bigint strings from the driver) - convert every
+  // money field at the boundary
+  return rows.map((r) => ({
+    month: r.month,
+    expense: fromCents(Number(r.expense)),
+    expenseOneOff: fromCents(Number(r.expenseOneOff)),
+    income: fromCents(Number(r.income)),
+    incomeOwn: fromCents(Number(r.incomeOwn)),
+    incomeExternal: fromCents(Number(r.incomeExternal)),
+  }));
+}
+
+/**
+ * Average monthly spending by category over the window [from, to] in the base
+ * currency: SUM per category / number of months with any money movement. One-off
+ * purchases are excluded - the independence screen amortizes them separately.
+ */
+export async function avgMonthlyByCategory(
+  from: string,
+  to: string,
+  months: number,
+): Promise<CategorySummary[]> {
+  if (months <= 0) return [];
+  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
+    SELECT category, SUM(-base_amount_cents) AS total_cents
+    FROM transactions
+    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND NOT one_off
+      AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
+    GROUP BY category
+    HAVING SUM(-base_amount_cents) > 0
+    ORDER BY total_cents DESC`);
+  // the sum is exact; the division by months is a genuine fraction - round to whole cents
+  return rows.map((r) => ({
+    category: r.category,
+    total: Math.round(Number(r.total_cents) / months) / 100,
+  }));
+}
+
+// ---------- classification (transfers / refunds / categories) ----------
+
+/**
+ * All transactions in chronological order - the input for classify.ts.
+ * Hidden accounts are deliberately NOT filtered out (see VISIBLE_ACCOUNT above):
+ * their transactions remain the other leg of a pair.
+ */
+export async function allTransactions(): Promise<Transaction[]> {
+  const rows = await rowsOf<TxRow>(
+    sql`SELECT * FROM transactions WHERE ${WS()} ORDER BY date ASC`,
+  );
+  return rows.map(rowToTx);
+}
+
+export interface Classification {
+  id: string;
+  category: string;
+  transfer: boolean;
+  refund: boolean;
+  /** income source (income only), null for spending */
+  incomeSource: string | null;
+  /** recurring payment (see the detector in classify.ts) */
+  recurring: boolean;
+}
+
+/**
+ * Writes the classification result. Manual marks (transfer_manual,
+ * income_source_manual, one_off) are left alone - they beat auto-detection.
+ */
+export async function applyClassification(rows: Classification[]): Promise<void> {
+  const w = currentWorkspaceId();
+  await getDb().transaction(async (tx) => {
+    for (const r of rows) {
+      await tx
+        .update(s.transactions)
+        .set({
+          category: r.category,
+          transfer: r.transfer,
+          refund: r.refund,
+          incomeSource: r.incomeSource,
+          recurring: r.recurring,
+        })
+        .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.id, r.id)));
+    }
+  });
+}
+
+export async function getTransaction(id: string): Promise<Transaction | undefined> {
+  const rows = await rowsOf<TxRow>(
+    sql`SELECT * FROM transactions WHERE id = ${id} AND ${WS()}`,
+  );
+  return rows[0] ? rowToTx(rows[0]) : undefined;
+}
+
+/** Manual "this is a transfer between my own accounts" mark. null - hand the decision back to auto-detection. */
+export async function setTransferOverride(
+  id: string,
+  value: boolean | null,
+): Promise<Transaction | undefined> {
+  await getDb()
+    .update(s.transactions)
+    .set({ transferManual: value })
+    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+  return getTransaction(id);
+}
+
+/**
+ * Manual income source mark (an id from income_sources - validated at the API
+ * level). null - hand the decision back to auto-detection.
+ */
+export async function setIncomeSourceOverride(
+  id: string,
+  source: string | null,
+): Promise<Transaction | undefined> {
+  await getDb()
+    .update(s.transactions)
+    .set({ incomeSourceManual: source })
+    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+  return getTransaction(id);
+}
+
+/** Manual "one-off large purchase" mark - amortized in average spending. */
+export async function setOneOff(id: string, value: boolean): Promise<Transaction | undefined> {
+  await getDb()
+    .update(s.transactions)
+    .set({ oneOff: value })
+    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+  return getTransaction(id);
+}
+
+// ---------- income sources ----------
+
+type IncomeSourceRow = typeof s.incomeSources.$inferSelect;
+
+function rowToIncomeSource(r: IncomeSourceRow): IncomeSourceDef {
+  let patterns: string[] = [];
+  try {
+    const v = JSON.parse(r.patterns);
+    if (Array.isArray(v)) patterns = v.map(String);
+  } catch {
+    // corrupted JSON - treat it as having no patterns
+  }
+  return {
+    id: r.id,
+    label: r.label,
+    kind: r.kind as IncomeSourceKind,
+    patterns,
+    sort: r.sort,
+    builtin: r.builtin,
+  };
+}
+
+export async function listIncomeSources(): Promise<IncomeSourceDef[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.incomeSources)
+    .where(eq(s.incomeSources.workspaceId, currentWorkspaceId()))
+    .orderBy(s.incomeSources.sort, s.incomeSources.id);
+  return rows.map(rowToIncomeSource);
+}
+
+export async function getIncomeSource(id: string): Promise<IncomeSourceDef | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.incomeSources)
+    .where(and(eq(s.incomeSources.workspaceId, currentWorkspaceId()), eq(s.incomeSources.id, id)));
+  return rows[0] ? rowToIncomeSource(rows[0]) : undefined;
+}
+
+/**
+ * Creates or edits a source. The kind of a builtin source can be changed (the user
+ * is entitled to decide that "other" is not their own earnings), the id cannot.
+ */
+export async function upsertIncomeSource(
+  def: Pick<IncomeSourceDef, 'id' | 'label' | 'kind'> &
+    Partial<Pick<IncomeSourceDef, 'patterns' | 'sort'>>,
+): Promise<IncomeSourceDef> {
+  const existing = await getIncomeSource(def.id);
+  const nextSort =
+    def.sort ??
+    existing?.sort ??
+    Number(
+      (
+        await rowsOf<{ m: number }>(
+          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM income_sources WHERE ${WS()}`,
+        )
+      )[0].m,
+    ) + 1;
+  const patterns = JSON.stringify(def.patterns ?? existing?.patterns ?? []);
+  await getDb()
+    .insert(s.incomeSources)
+    .values({
+      workspaceId: currentWorkspaceId(),
+      id: def.id,
+      label: def.label,
+      kind: def.kind,
+      patterns,
+      sort: nextSort,
+      builtin: false,
+    })
+    .onConflictDoUpdate({
+      target: [s.incomeSources.workspaceId, s.incomeSources.id],
+      set: { label: def.label, kind: def.kind, patterns, sort: nextSort },
+    });
+  return (await getIncomeSource(def.id))!;
+}
+
+/**
+ * Deletes a source (builtin ones cannot be). Transactions tagged with it (auto or
+ * manual) fall back to 'other' - otherwise their income would silently drop out of
+ * the by-source summaries under an unknown id.
+ */
+export async function deleteIncomeSource(id: string): Promise<boolean> {
+  const src = await getIncomeSource(id);
+  if (!src || src.builtin) return false;
+  const w = currentWorkspaceId();
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(s.transactions)
+      .set({ incomeSource: 'other' })
+      .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.incomeSource, id)));
+    await tx
+      .update(s.transactions)
+      .set({ incomeSourceManual: 'other' })
+      .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.incomeSourceManual, id)));
+    await tx
+      .delete(s.incomeSources)
+      .where(and(eq(s.incomeSources.workspaceId, w), eq(s.incomeSources.id, id)));
+  });
+  return true;
+}
+
+// ---------- "description + account = transfer" rules ----------
+
+type RuleRow = typeof s.transferRules.$inferSelect;
+
+const rowToRule = (r: RuleRow): TransferRule => ({
+  id: r.id,
+  description: r.description,
+  accountId: r.accountId,
+  createdAt: r.createdAt,
+});
+
+export async function listTransferRules(): Promise<TransferRule[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.transferRules)
+    .where(eq(s.transferRules.workspaceId, currentWorkspaceId()))
+    .orderBy(sql`${s.transferRules.createdAt} DESC`);
+  return rows.map(rowToRule);
+}
+
+/** Idempotent: a rule for the same description + account pair is simply returned. */
+export async function addTransferRule(
+  description: string,
+  accountId: string,
+): Promise<TransferRule> {
+  const w = currentWorkspaceId();
+  await getDb()
+    .insert(s.transferRules)
+    .values({ workspaceId: w, description, accountId, createdAt: new Date().toISOString() })
+    .onConflictDoNothing();
+  const rows = await getDb()
+    .select()
+    .from(s.transferRules)
+    .where(
+      and(
+        eq(s.transferRules.workspaceId, w),
+        eq(s.transferRules.description, description),
+        eq(s.transferRules.accountId, accountId),
+      ),
+    );
+  return rowToRule(rows[0]);
+}
+
+export async function deleteTransferRule(id: number): Promise<boolean> {
+  const rows = await getDb()
+    .delete(s.transferRules)
+    .where(and(eq(s.transferRules.workspaceId, currentWorkspaceId()), eq(s.transferRules.id, id)))
+    .returning({ id: s.transferRules.id });
+  return rows.length > 0;
+}
+
+/** How many transactions the rule covers - for the caption in the app. */
+export async function countRuleMatches(description: string, accountId: string): Promise<number> {
+  const rows = await rowsOf<{ n: string }>(
+    sql`SELECT COUNT(*) AS n FROM transactions
+        WHERE description = ${description} AND account_id = ${accountId} AND ${WS()}`,
+  );
+  return Number(rows[0].n);
+}
+
+/**
+ * Clears manual marks from transactions covered by the rule: otherwise an old
+ * manual `transfer_manual = false` would keep overriding the rule that was just
+ * created, and one transaction in the group would stay untagged.
+ */
+export async function clearManualForRule(description: string, accountId: string): Promise<void> {
+  await getDb().execute(sql`
+    UPDATE transactions SET transfer_manual = NULL
+    WHERE description = ${description} AND account_id = ${accountId} AND ${WS()}`);
+}
+
+// ---------- exchange rates and the base amount ----------
+
+export async function getFxRate(day: string, currency: string): Promise<number | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.fxRates)
+    .where(
+      and(
+        eq(s.fxRates.workspaceId, currentWorkspaceId()),
+        eq(s.fxRates.date, day),
+        eq(s.fxRates.currency, currency),
+      ),
+    );
+  return rows[0]?.rate;
+}
+
+export async function saveFxRate(day: string, currency: string, rate: number): Promise<void> {
+  await getDb()
+    .insert(s.fxRates)
+    .values({ workspaceId: currentWorkspaceId(), date: day, currency, rate })
+    .onConflictDoUpdate({
+      target: [s.fxRates.workspaceId, s.fxRates.date, s.fxRates.currency],
+      set: { rate },
+    });
+}
+
+/** Rows already in the base currency need no rate: base_amount = amount. Returns the number updated. */
+export async function setBaseForBaseCurrency(baseCurrency: string): Promise<number> {
+  return execCount(sql`
+    UPDATE transactions SET base_amount_cents = amount_cents, fx_rate = 1
+    WHERE base_amount_cents IS NULL AND currency = ${baseCurrency} AND ${WS()}`);
+}
+
+/**
+ * Changing the base currency: every base_amount is recomputed from scratch - the
+ * old values were computed in the previous currency and cannot be added to the new ones.
+ */
+export async function resetBaseAmounts(): Promise<number> {
+  return execCount(
+    sql`UPDATE transactions SET base_amount_cents = NULL, fx_rate = NULL WHERE ${WS()}`,
+  );
+}
+
+/** "Day + currency" pairs that still need a rate (across all accounts, hidden included). */
+export async function listUnconvertedDays(): Promise<{ day: string; currency: string }[]> {
+  return rowsOf<{ day: string; currency: string }>(sql`
+    SELECT DISTINCT SUBSTR(date, 1, 10) AS day, currency
+    FROM transactions WHERE base_amount_cents IS NULL AND ${WS()} ORDER BY day`);
+}
+
+/**
+ * Fills base_amount for every unconverted row of that day in that currency.
+ * k - units of the base currency per unit of `currency` on that day.
+ * The ::numeric cast matters: ROUND(double) is round-half-to-even in PG, while
+ * ROUND(numeric) rounds half away from zero - the same as toCents() in money.ts.
+ */
+export async function applyBaseRate(day: string, currency: string, k: number): Promise<number> {
+  return execCount(sql`
+    UPDATE transactions
+    SET base_amount_cents = CAST(ROUND((amount_cents * ${k})::numeric) AS integer), fx_rate = ${k}
+    WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day} AND ${WS()}`);
+}
+
+// ---------- recurring payments ----------
+
+export interface RecurringGroup {
+  description: string;
+  category: string;
+  /** in how many calendar months it appears */
+  months: number;
+  count: number;
+  /** average size of a single payment in the base currency */
+  avgAmount: number;
+  /** what the group costs per month (total / months) */
+  monthlyAvg: number;
+  lastDate: string;
+  /** the user hid the group from the Overview; excluded from the monthly total */
+  ignored: boolean;
+}
+
+/** Hide/restore a group of recurring payments (the key is the normalized description). */
+export async function setRecurringIgnored(description: string, ignored: boolean): Promise<void> {
+  const key = recurringKey(description);
+  const w = currentWorkspaceId();
+  if (ignored) {
+    await getDb()
+      .insert(s.recurringIgnores)
+      .values({ workspaceId: w, key, description, createdAt: new Date().toISOString() })
+      .onConflictDoNothing();
+  } else {
+    await getDb()
+      .delete(s.recurringIgnores)
+      .where(and(eq(s.recurringIgnores.workspaceId, w), eq(s.recurringIgnores.key, key)));
+  }
+}
+
+/**
+ * Groups of recurring spending (recurring = true) since sinceIso, across visible
+ * accounts. Grouped by the same normalized key as the detector (digits collapsed):
+ * rent "LEV 01/2026"..."LEV 07/2026" is one group.
+ */
+export async function listRecurringGroups(sinceIso: string): Promise<RecurringGroup[]> {
+  const rows = await rowsOf<{
+    description: string;
+    category: string;
+    date: string;
+    base_amount_cents: number;
+  }>(sql`
+    SELECT description, category, date, base_amount_cents
+    FROM transactions
+    WHERE ${WS()} AND recurring AND amount_cents < 0 AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()}
+      AND base_amount_cents IS NOT NULL AND date >= ${sinceIso}
+    ORDER BY date ASC`);
+
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = recurringKey(r.description);
+    const list = groups.get(key);
+    if (list) list.push(r);
+    else groups.set(key, [r]);
+  }
+
+  const ignoredKeys = new Set(
+    (
+      await getDb()
+        .select({ key: s.recurringIgnores.key })
+        .from(s.recurringIgnores)
+        .where(eq(s.recurringIgnores.workspaceId, currentWorkspaceId()))
+    ).map((r) => r.key),
+  );
+
+  // the total is an exact sum of integer cents; the averages divide it, so they are
+  // rounded back to whole cents
+  const avgCents = (totalCents: number, n: number) => Math.round(totalCents / n) / 100;
+  return [...groups.entries()]
+    .map(([key, list]) => {
+      const months = new Set(list.map((r) => r.date.slice(0, 7))).size;
+      const totalCents = list.reduce((sum, r) => sum - r.base_amount_cents, 0);
+      const last = list[list.length - 1];
+      return {
+        description: last.description, // the most recent spelling in the group
+        category: last.category,
+        months,
+        count: list.length,
+        avgAmount: avgCents(totalCents, list.length),
+        monthlyAvg: avgCents(totalCents, months),
+        lastDate: last.date,
+        ignored: ignoredKeys.has(key),
+      };
+    })
+    .sort((a, b) => b.monthlyAvg - a.monthlyAvg);
+}
+
+// ---------- "description contains X -> category Y" rules ----------
+
+export interface CategoryRule {
+  id: number;
+  pattern: string;
+  category: string;
+  createdAt: string;
+}
+
+export async function listCategoryRules(): Promise<CategoryRule[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.categoryRules)
+    .where(eq(s.categoryRules.workspaceId, currentWorkspaceId()))
+    .orderBy(sql`${s.categoryRules.createdAt} DESC`);
+  return rows.map((r) => ({
+    id: r.id,
+    pattern: r.pattern,
+    category: r.category,
+    createdAt: r.createdAt,
+  }));
+}
+
+/** Idempotent: a rule with the same pattern updates the category. */
+export async function addCategoryRule(pattern: string, category: string): Promise<CategoryRule> {
+  const w = currentWorkspaceId();
+  await getDb()
+    .insert(s.categoryRules)
+    .values({ workspaceId: w, pattern, category, createdAt: new Date().toISOString() })
+    .onConflictDoUpdate({
+      target: [s.categoryRules.workspaceId, s.categoryRules.pattern],
+      set: { category },
+    });
+  const rows = await getDb()
+    .select()
+    .from(s.categoryRules)
+    .where(and(eq(s.categoryRules.workspaceId, w), eq(s.categoryRules.pattern, pattern)));
+  const row = rows[0];
+  return { id: row.id, pattern: row.pattern, category: row.category, createdAt: row.createdAt };
+}
+
+export async function deleteCategoryRule(id: number): Promise<boolean> {
+  const rows = await getDb()
+    .delete(s.categoryRules)
+    .where(and(eq(s.categoryRules.workspaceId, currentWorkspaceId()), eq(s.categoryRules.id, id)))
+    .returning({ id: s.categoryRules.id });
+  return rows.length > 0;
+}
+
+/** How many transactions the pattern covers - for the caption in the app. */
+export async function countCategoryRuleMatches(pattern: string): Promise<number> {
+  const rows = await rowsOf<{ n: string }>(
+    sql`SELECT COUNT(*) AS n FROM transactions
+        WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0 AND ${WS()}`,
+  );
+  return Number(rows[0].n);
+}
+
+// ---------- budgets ----------
+
+export interface Budget {
+  category: string;
+  /** limit for a calendar month in the base currency */
+  monthly: number;
+}
+
+export async function listBudgets(): Promise<Budget[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.budgets)
+    .where(eq(s.budgets.workspaceId, currentWorkspaceId()))
+    .orderBy(sql`${s.budgets.monthlyCents} DESC`);
+  return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthlyCents) }));
+}
+
+/** monthly = null removes the budget from the category. */
+export async function setBudget(category: string, monthly: number | null): Promise<void> {
+  const w = currentWorkspaceId();
+  if (monthly === null) {
+    await getDb()
+      .delete(s.budgets)
+      .where(and(eq(s.budgets.workspaceId, w), eq(s.budgets.category, category)));
+  } else {
+    const monthlyCents = toCents(monthly);
+    await getDb()
+      .insert(s.budgets)
+      .values({ workspaceId: w, category, monthlyCents })
+      .onConflictDoUpdate({
+        target: [s.budgets.workspaceId, s.budgets.category],
+        set: { monthlyCents },
+      });
+  }
+}
+
+// ---------- baseline minimum ----------
+
+export interface BaselineItem {
+  id: number;
+  label: string;
+  monthly: number;
+  sort: number;
+}
+
+type BaselineItemRow = typeof s.baselineItems.$inferSelect;
+
+const rowToBaselineItem = (r: BaselineItemRow): BaselineItem => ({
+  id: r.id,
+  label: r.label,
+  monthly: fromCents(r.monthlyCents),
+  sort: r.sort,
+});
+
+export async function listBaselineItems(): Promise<BaselineItem[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.baselineItems)
+    .where(eq(s.baselineItems.workspaceId, currentWorkspaceId()))
+    .orderBy(s.baselineItems.sort, sql`${s.baselineItems.monthlyCents} DESC`);
+  return rows.map(rowToBaselineItem);
+}
+
+/**
+ * The key is the label: a line item is created and edited by its own name.
+ * sort is optional: editing an amount from the app sends only monthly, and it must
+ * not clobber the item's position - the list would jump under your finger. A new
+ * item without sort goes to the end.
+ */
+export async function upsertBaselineItem(
+  label: string,
+  monthly: number,
+  sort?: number,
+): Promise<BaselineItem> {
+  const w = currentWorkspaceId();
+  const existing = (
+    await getDb()
+      .select()
+      .from(s.baselineItems)
+      .where(and(eq(s.baselineItems.workspaceId, w), eq(s.baselineItems.label, label)))
+  )[0];
+  const nextSort =
+    sort ??
+    existing?.sort ??
+    Number(
+      (
+        await rowsOf<{ m: number }>(
+          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items WHERE ${WS()}`,
+        )
+      )[0].m,
+    ) + 1;
+  const monthlyCents = toCents(monthly);
+  const rows = await getDb()
+    .insert(s.baselineItems)
+    .values({ workspaceId: w, label, monthlyCents, sort: nextSort })
+    .onConflictDoUpdate({
+      target: [s.baselineItems.workspaceId, s.baselineItems.label],
+      set: { monthlyCents, sort: nextSort },
+    })
+    .returning();
+  return rowToBaselineItem(rows[0]);
+}
+
+export async function deleteBaselineItem(label: string): Promise<boolean> {
+  const rows = await getDb()
+    .delete(s.baselineItems)
+    .where(
+      and(eq(s.baselineItems.workspaceId, currentWorkspaceId()), eq(s.baselineItems.label, label)),
+    )
+    .returning({ id: s.baselineItems.id });
+  return rows.length > 0;
+}
+
+/** The sum of all line items is the baseline minimum before any buffer. */
+export async function baselineTotal(): Promise<number> {
+  const rows = await rowsOf<{ total_cents: string }>(
+    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items WHERE ${WS()}`,
+  );
+  return fromCents(Number(rows[0].total_cents));
+}
+
+// ---------- backup / restore (application-level JSON) ----------
+
+/**
+ * "My data is mine": one button in the app. The backup is a JSON dump of the
+ * CURRENT WORKSPACE's rows in every user table - workspace_id itself is stripped
+ * on export and reassigned on restore, so a backup can be moved between
+ * workspaces (and servers) freely. Auth tables are deliberately not included:
+ * users and sessions belong to the server, not to the workspace's data.
+ */
+export interface BackupData {
+  format: 'finto-backup';
+  version: 1;
+  exportedAt: string;
+  tables: Record<string, unknown[]>;
+}
+
+/** Every user table, in the order restore inserts them. */
+const BACKUP_TABLES = {
+  accounts: s.accounts,
+  transactions: s.transactions,
+  fx_rates: s.fxRates,
+  category_rules: s.categoryRules,
+  transfer_rules: s.transferRules,
+  recurring_ignores: s.recurringIgnores,
+  budgets: s.budgets,
+  baseline_items: s.baselineItems,
+  income_sources: s.incomeSources,
+  settings: s.settings,
+  meta: s.meta,
+  eb_sessions: s.ebSessions,
+  eb_auth_state: s.ebAuthState,
+  sync_log: s.syncLog,
+} as const;
+
+/**
+ * Tables with an identity id. On restore their ids are dropped and regenerated:
+ * the backup may come from another workspace/server whose ids are already taken
+ * here (identity sequences are per table, not per workspace). Nothing references
+ * these ids across tables, so renumbering is free.
+ */
+const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items', 'sync_log']);
+
+export async function exportBackup(): Promise<BackupData> {
+  const w = currentWorkspaceId();
+  const tables: Record<string, unknown[]> = {};
+  for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+    const rows = (await getDb()
+      .select()
+      .from(table)
+      .where(eq((table as typeof s.accounts).workspaceId, w))) as Record<string, unknown>[];
+    tables[name] = rows.map(({ workspaceId: _ws, ...rest }) => rest);
+  }
+  return {
+    format: 'finto-backup',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    tables,
+  };
+}
+
+/**
+ * The envelope. Row contents are checked separately, per table, against the real
+ * columns - see sanitizeRow: the shape of a row depends on which table it is, and
+ * a restore file is the one place where a user hands us raw rows to insert.
+ */
+const backupEnvelope = z.object({
+  format: z.literal('finto-backup', {
+    error: 'not a Finto backup file (expected JSON with format: "finto-backup")',
+  }),
+  version: z.literal(1, { error: (issue) => `unsupported backup version: ${String(issue.input)}` }),
+  exportedAt: z.string().optional(),
+  // the per-table arrays are checked below, where the table's name is in hand and
+  // can go into the message - "accounts is not an array" beats "expected array"
+  tables: z.record(z.string(), z.unknown(), { error: 'backup file has no tables' }),
+});
+
+/** Validates an uploaded backup file's envelope. Throws with a human-readable reason. */
+export function parseBackup(input: unknown): BackupData {
+  // handled ahead of the schema so that "this is not a backup file at all" keeps
+  // its own wording instead of zod's generic "expected object, received null"
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('not a Finto backup file (expected JSON with format: "finto-backup")');
+  }
+  const parsed = backupEnvelope.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(parsed.error.issues[0]?.message ?? 'malformed backup file');
+  }
+  for (const [name, rows] of Object.entries(parsed.data.tables)) {
+    if (!Array.isArray(rows)) throw new Error(`backup table ${name} is not an array`);
+  }
+  return { exportedAt: '', ...parsed.data } as BackupData;
+}
+
+/**
+ * Keeps only real columns of the target table, and only values whose type the
+ * column accepts. Without this a restore file is a direct write path into the
+ * database with whatever types the uploader felt like: a string where an integer
+ * lives turns into a driver error mid-transaction (a 500 instead of a "bad file"),
+ * and a JSON object smuggled into a text column reappears everywhere that value is
+ * displayed. Anything unrecognised is dropped rather than rejected, so a backup
+ * from a future version still restores what this version understands.
+ */
+function sanitizeRow(
+  table: (typeof BACKUP_TABLES)[keyof typeof BACKUP_TABLES],
+  row: unknown,
+  tableName: string,
+): Record<string, unknown> {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) {
+    throw new Error(`${tableName}: a row is not an object`);
+  }
+  const columns = getTableColumns(table);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
+    const column = columns[key as keyof typeof columns];
+    if (!column || key === 'workspaceId') continue; // unknown column, or the scope we reassign
+    if (value === null) {
+      if (column.notNull) throw new Error(`${tableName}.${key}: null in a required column`);
+      out[key] = null;
+      continue;
+    }
+    // widened: each column of the union has its own literal dataType, and we need
+    // to compare all of them against the same runtime typeof
+    const dataType: string = column.dataType;
+    if (typeof value !== dataType) {
+      throw new Error(
+        `${tableName}.${key}: expected ${dataType}, got ${Array.isArray(value) ? 'array' : typeof value}`,
+      );
+    }
+    if (dataType === 'number' && !Number.isFinite(value)) {
+      throw new Error(`${tableName}.${key}: not a finite number`);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Restore from a JSON backup: clear the current workspace's tables and load the
+ * dump's rows into it, all in one transaction. Tables the current schema does not
+ * know are skipped (a future version's backup restores what it can). After
+ * restoring, the caller runs a full reclassification - same as after any bulk import.
+ */
+export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
+  const w = currentWorkspaceId();
+  let tables = 0;
+  let rows = 0;
+  await getDb().transaction(async (tx) => {
+    for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+      const incoming = data.tables[name];
+      if (!incoming) continue; // an older backup without this table keeps it empty
+      await tx.execute(sql`DELETE FROM ${sql.raw(name)} WHERE workspace_id = ${w}`);
+      const dropId = IDENTITY_TABLES.has(name);
+      const values = incoming.map((row) => {
+        const { id, ...rest } = sanitizeRow(table, row, name);
+        return dropId ? { ...rest, workspaceId: w } : { ...rest, id, workspaceId: w };
+      });
+      for (const chunk of chunked(values, 500)) {
+        await tx.insert(table).values(chunk as never[]);
+      }
+      tables++;
+      rows += incoming.length;
+    }
+  });
+  return { tables, rows };
+}
+
+// ---------- sync journal ----------
+
+export interface SyncLogEntry {
+  id: number;
+  startedAt: string;
+  finishedAt: string | null;
+  /** true = finished without a fatal error; null = running (or killed midway) */
+  ok: boolean | null;
+  /** new transactions in this run */
+  inserted: number;
+  /** non-fatal errors per account/provider */
+  errors: string[];
+  /** the full text log of the run */
+  log: string[];
+}
+
+export async function startSyncLogEntry(startedAt: string): Promise<number> {
+  const rows = await getDb()
+    .insert(s.syncLog)
+    .values({ workspaceId: currentWorkspaceId(), startedAt })
+    .returning({ id: s.syncLog.id });
+  return rows[0].id;
+}
+
+export async function finishSyncLogEntry(
+  id: number,
+  ok: boolean,
+  inserted: number,
+  errors: string[],
+  log: string[],
+): Promise<void> {
+  await getDb()
+    .update(s.syncLog)
+    .set({
+      finishedAt: new Date().toISOString(),
+      ok,
+      inserted,
+      errors: JSON.stringify(errors),
+      log: JSON.stringify(log),
+    })
+    .where(and(eq(s.syncLog.workspaceId, currentWorkspaceId()), eq(s.syncLog.id, id)));
+}
+
+const parseJsonArray = (raw: string): string[] => {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+};
+
+type SyncLogRow = typeof s.syncLog.$inferSelect;
+
+function rowToSyncLog(r: SyncLogRow): SyncLogEntry {
+  return {
+    id: r.id,
+    startedAt: r.startedAt,
+    finishedAt: r.finishedAt,
+    ok: r.ok,
+    inserted: r.inserted,
+    errors: parseJsonArray(r.errors),
+    log: parseJsonArray(r.log),
+  };
+}
+
+/** The most recent sync runs, newest first. */
+export async function listSyncJournal(limit = 20): Promise<SyncLogEntry[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.syncLog)
+    .where(eq(s.syncLog.workspaceId, currentWorkspaceId()))
+    .orderBy(sql`${s.syncLog.id} DESC`)
+    .limit(limit > 0 ? limit : 20);
+  return rows.map(rowToSyncLog);
+}
+
+/** The last successful run - the basis for "data current as of ...". */
+export async function lastSuccessfulSync(): Promise<SyncLogEntry | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.syncLog)
+    .where(and(eq(s.syncLog.workspaceId, currentWorkspaceId()), eq(s.syncLog.ok, true)))
+    .orderBy(sql`${s.syncLog.id} DESC`)
+    .limit(1);
+  return rows[0] ? rowToSyncLog(rows[0]) : undefined;
+}
+
+// ---------- enable banking: sessions / auth state ----------
+
+export interface EbSession {
+  sessionId: string;
+  aspspName: string;
+  aspspCountry: string;
+  validUntil: string;
+}
+
+export async function saveEbSession(session: EbSession): Promise<void> {
+  const w = currentWorkspaceId();
+  const d = getDb();
+  // one active session per bank: an older one for the same bank is deleted
+  await d
+    .delete(s.ebSessions)
+    .where(
+      and(
+        eq(s.ebSessions.workspaceId, w),
+        eq(s.ebSessions.aspspName, session.aspspName),
+        eq(s.ebSessions.aspspCountry, session.aspspCountry),
+      ),
+    );
+  await d.insert(s.ebSessions).values({
+    workspaceId: w,
+    sessionId: session.sessionId,
+    aspspName: session.aspspName,
+    aspspCountry: session.aspspCountry,
+    validUntil: session.validUntil,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function deleteEbSession(sessionId: string): Promise<void> {
+  await getDb()
+    .delete(s.ebSessions)
+    .where(
+      and(
+        eq(s.ebSessions.workspaceId, currentWorkspaceId()),
+        eq(s.ebSessions.sessionId, sessionId),
+      ),
+    );
+}
+
+export async function listEbSessions(): Promise<EbSession[]> {
+  const rows = await getDb()
+    .select()
+    .from(s.ebSessions)
+    .where(eq(s.ebSessions.workspaceId, currentWorkspaceId()));
+  return rows.map((r) => ({
+    sessionId: r.sessionId,
+    aspspName: r.aspspName,
+    aspspCountry: r.aspspCountry,
+    validUntil: r.validUntil,
+  }));
+}
+
+export async function saveAuthState(
+  state: string,
+  aspspName: string,
+  aspspCountry: string,
+): Promise<void> {
+  await getDb().insert(s.ebAuthState).values({
+    workspaceId: currentWorkspaceId(),
+    state,
+    aspspName,
+    aspspCountry,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function takeAuthState(
+  state: string,
+): Promise<{ aspspName: string; aspspCountry: string } | undefined> {
+  const w = currentWorkspaceId();
+  const rows = await getDb()
+    .select()
+    .from(s.ebAuthState)
+    .where(and(eq(s.ebAuthState.workspaceId, w), eq(s.ebAuthState.state, state)));
+  const row = rows[0];
+  if (!row) return undefined;
+  await getDb()
+    .delete(s.ebAuthState)
+    .where(and(eq(s.ebAuthState.workspaceId, w), eq(s.ebAuthState.state, state)));
+  return { aspspName: row.aspspName, aspspCountry: row.aspspCountry };
+}
