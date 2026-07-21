@@ -5,8 +5,8 @@
  * transfer into savings - the threshold ballooned to something implausible and
  * self-sufficiency halved. The bare minimum does not depend on one-off spending.
  *
- * db.ts opens its own in-memory database on import, so every test needs its own
- * module graph - otherwise a neighbouring test's transactions land in the window.
+ * Every test gets its own module graph AND an empty database - otherwise a
+ * neighbouring test's transactions land in the window.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Transaction } from '../src/types';
@@ -30,17 +30,27 @@ const tx = (over: Partial<Transaction> & { id: string }): Transaction => ({
 async function fresh() {
   vi.resetModules();
   const db = await import('../src/db');
+
+  // the reset module graph lost the database AND the workspace scope from
+  // setup.ts - re-init both on the shared PGlite (freshTestDb truncates every
+  // table; the instance survives on globalThis)
+  const { freshTestDb, TEST_WORKSPACE_ID } = await import('./pglite');
+  db.initDb(await freshTestDb());
+  db.setWorkspaceFallback(TEST_WORKSPACE_ID);
+  await db.seedDefaults();
+
   const { computeIndependence } = await import('../src/independence');
   const { updateSettings } = await import('../src/settings');
-  updateSettings({ goalMode: 'baseline', bufferPct: 10, windowMonths: 6, hourlyRate: 60 });
+  await updateSettings({ goalMode: 'baseline', bufferPct: 10, windowMonths: 6, hourlyRate: 60 });
 
-/** The same expense in each of the window's 6 months. */
-  const spendEveryMonth = (amount: number, prefix: string) =>
-    MONTHS.forEach((m) =>
-      db.insertTransactions([
+  /** The same expense in each of the window's 6 months. */
+  const spendEveryMonth = async (amount: number, prefix: string) => {
+    for (const m of MONTHS) {
+      await db.insertTransactions([
         tx({ id: `${prefix}-${m}`, amount: -amount, date: `2026-${m}-05T12:00:00.000Z` }),
-      ]),
-    );
+      ]);
+    }
+  };
 
   return { ...db, computeIndependence, updateSettings, spendEveryMonth };
 }
@@ -48,11 +58,11 @@ async function fresh() {
 describe('bare minimum', () => {
   it('threshold = sum of the items * (1 + buffer), not the median of spending', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 1000);
-    t.upsertBaselineItem('food', 500);
-    expect(t.baselineTotal()).toBe(1500);
+    await t.upsertBaselineItem('housing', 1000);
+    await t.upsertBaselineItem('food', 500);
+    expect(await t.baselineTotal()).toBe(1500);
 
-    const r = t.computeIndependence(NOW);
+    const r = await t.computeIndependence(NOW);
     expect(r.baselineSum).toBe(1500);
     expect(r.threshold).toBe(1650); // 1500 * 1.10
     expect(r.baselineItems).toHaveLength(2);
@@ -60,15 +70,15 @@ describe('bare minimum', () => {
 
   it('the threshold ignores spending: monthly restaurants only move the lifestyle figure', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 1000);
-    t.spendEveryMonth(1000, 'rent');
-    const before = t.computeIndependence(NOW);
+    await t.upsertBaselineItem('housing', 1000);
+    await t.spendEveryMonth(1000, 'rent');
+    const before = await t.computeIndependence(NOW);
     expect(before.lifestyleThreshold).toBe(1100); // 1000 * 1.10
 
     // it is regular optional spending that inflates the median, not outliers:
     // a single 3000 PC in one month is something the median would survive
-    t.spendEveryMonth(700, 'restaurants');
-    const after = t.computeIndependence(NOW);
+    await t.spendEveryMonth(700, 'restaurants');
+    const after = await t.computeIndependence(NOW);
 
     expect(after.threshold).toBe(before.threshold); // 1100, the minimum did not move
     expect(after.baselineSum).toBe(1000);
@@ -77,9 +87,9 @@ describe('bare minimum', () => {
 
   it('self-sufficiency is measured against the minimum: income 750 on a minimum of 1000 = 75%', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 1000);
-    MONTHS.forEach((m) =>
-      t.insertTransactions([
+    await t.upsertBaselineItem('housing', 1000);
+    for (const m of MONTHS) {
+      await t.insertTransactions([
         tx({
           id: `salary-${m}`,
           amount: 750,
@@ -87,16 +97,16 @@ describe('bare minimum', () => {
           category: 'salary',
           description: 'Lohn',
         }),
-      ]),
-    );
-    expect(t.computeIndependence(NOW).selfSufficiency).toBe(0.75);
+      ]);
+    }
+    expect((await t.computeIndependence(NOW)).selfSufficiency).toBe(0.75);
   });
 
   it('an empty item list falls back to the median rather than a threshold of 0', async () => {
     const t = await fresh();
-    t.spendEveryMonth(800, 'spend');
+    await t.spendEveryMonth(800, 'spend');
 
-    const r = t.computeIndependence(NOW);
+    const r = await t.computeIndependence(NOW);
     expect(r.baselineSum).toBe(0);
     expect(r.threshold).toBe(r.lifestyleThreshold);
     expect(r.threshold).toBeGreaterThan(0);
@@ -106,11 +116,11 @@ describe('bare minimum', () => {
 describe('goalMode: lifestyle - the older formula is unchanged', () => {
   it('threshold = median spending * (1 + buffer), the minimum is ignored', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 1000);
-    t.spendEveryMonth(800, 'spend');
-    t.updateSettings({ goalMode: 'lifestyle' });
+    await t.upsertBaselineItem('housing', 1000);
+    await t.spendEveryMonth(800, 'spend');
+    await t.updateSettings({ goalMode: 'lifestyle' });
 
-    const r = t.computeIndependence(NOW);
+    const r = await t.computeIndependence(NOW);
     expect(r.avgSpend).toBe(800);
     expect(r.threshold).toBe(880); // 800 * 1.10
     expect(r.threshold).toBe(r.lifestyleThreshold);
@@ -120,40 +130,48 @@ describe('goalMode: lifestyle - the older formula is unchanged', () => {
 describe('minimum line items', () => {
   it('editing by label overwrites the item instead of duplicating it', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('Gym', 35);
-    t.upsertBaselineItem('Gym', 45);
-    expect(t.listBaselineItems()).toHaveLength(1);
-    expect(t.baselineTotal()).toBe(45);
+    await t.upsertBaselineItem('Gym', 35);
+    await t.upsertBaselineItem('Gym', 45);
+    expect(await t.listBaselineItems()).toHaveLength(1);
+    expect(await t.baselineTotal()).toBe(45);
   });
 
   it('editing just the amount does not move the item in the list', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 950, 0);
-    t.upsertBaselineItem('Gym', 35, 1);
-    t.upsertBaselineItem('Barber', 30, 2);
+    await t.upsertBaselineItem('housing', 950, 0);
+    await t.upsertBaselineItem('Gym', 35, 1);
+    await t.upsertBaselineItem('Barber', 30, 2);
 
     // this is how the Goal screen edits: it sends only label and monthly
-    t.upsertBaselineItem('Gym', 45);
+    await t.upsertBaselineItem('Gym', 45);
 
-    const gym = t.listBaselineItems().find((i) => i.label === 'Gym');
+    const gym = (await t.listBaselineItems()).find((i) => i.label === 'Gym');
     expect(gym?.monthly).toBe(45);
-    expect(t.listBaselineItems().map((i) => i.label)).toEqual(['housing', 'Gym', 'Barber']);
+    expect((await t.listBaselineItems()).map((i) => i.label)).toEqual([
+      'housing',
+      'Gym',
+      'Barber',
+    ]);
   });
 
   it('a new item without sort goes to the end of the list', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('housing', 950, 0);
-    t.upsertBaselineItem('food', 700, 1);
-    t.upsertBaselineItem('Internet', 30); // no sort
-    expect(t.listBaselineItems().map((i) => i.label)).toEqual(['housing', 'food', 'Internet']);
+    await t.upsertBaselineItem('housing', 950, 0);
+    await t.upsertBaselineItem('food', 700, 1);
+    await t.upsertBaselineItem('Internet', 30); // no sort
+    expect((await t.listBaselineItems()).map((i) => i.label)).toEqual([
+      'housing',
+      'food',
+      'Internet',
+    ]);
   });
 
   it('deleting an item lowers the minimum', async () => {
     const t = await fresh();
-    t.upsertBaselineItem('Gym', 35);
-    t.upsertBaselineItem('Barber', 30);
-    expect(t.deleteBaselineItem('Barber')).toBe(true);
-    expect(t.baselineTotal()).toBe(35);
-    expect(t.deleteBaselineItem('No such item')).toBe(false);
+    await t.upsertBaselineItem('Gym', 35);
+    await t.upsertBaselineItem('Barber', 30);
+    expect(await t.deleteBaselineItem('Barber')).toBe(true);
+    expect(await t.baselineTotal()).toBe(35);
+    expect(await t.deleteBaselineItem('No such item')).toBe(false);
   });
 });
