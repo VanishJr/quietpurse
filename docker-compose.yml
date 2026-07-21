@@ -7,12 +7,42 @@ services:
     # PORT inside the container stays 4000.
     ports:
       - "4000:4000"
+    # NOTE: the file must exist (create an empty one if you have no secrets) -
+    # older docker compose versions cannot mark an env_file as optional.
     env_file:
-      - path: ./backend/.env
-        required: false
+      - ./backend/.env
+    environment:
+      # inside the compose network the DB host is the service name, not localhost.
+      # POSTGRES_PASSWORD comes from the .env next to this file; the dev default
+      # keeps `docker compose up` working on a laptop, and the backend refuses to
+      # start on it under NODE_ENV=production (see assertProductionConfig).
+      DATABASE_URL: postgres://finto:${POSTGRES_PASSWORD:-finto}@postgres:5432/finto
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      # SQLite database (plus its -wal/-shm files) — the same directory the
-      # non-Docker setup uses, so switching between the two keeps your data.
-      - ./backend/data:/app/data
       # Enable Banking private key (EB_PRIVATE_KEY_PATH=./secrets/enablebanking.pem).
       - ./backend/secrets:/app/secrets:ro
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: finto-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finto}
+      POSTGRES_DB: finto
+    # Exposed to the host so `npm run dev` outside Docker reaches the same DB
+    # (matches the DATABASE_URL default in backend/src/config.ts).
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finto -d finto"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
