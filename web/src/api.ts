@@ -38,17 +38,38 @@ export const API_BASE = detectBaseUrl();
 /** Human-readable API address for the "API: …" hint in the UI. */
 export const apiLabel = (): string => API_BASE || `${window.location.origin} (proxy)`;
 
-/** Shared backend secret (API_KEY in backend/.env). Set in web/.env. */
-const API_KEY = import.meta.env.VITE_API_KEY ?? '';
+/**
+ * Thrown when the backend says "sign in required". The app catches it to send the
+ * user back to the login screen instead of showing a raw error on every panel
+ * (a session can expire while the tab sits open).
+ */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('sign in required');
+    this.name = 'UnauthorizedError';
+  }
+}
+
+/** Listeners notified once when any request comes back 401 (App.tsx re-checks the session). */
+const unauthorizedListeners = new Set<() => void>();
+
+export function onUnauthorized(fn: () => void): () => void {
+  unauthorizedListeners.add(fn);
+  return () => unauthorizedListeners.delete(fn);
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      ...(API_KEY ? { 'x-api-key': API_KEY } : {}),
-      ...(init?.headers || {}),
-    },
+    // the session lives in a cookie: it has to ride along on cross-origin
+    // requests too (a production build pointed at VITE_API_URL)
+    credentials: 'include',
+    headers: { ...(init?.headers || {}) },
   });
+  if (res.status === 401) {
+    for (const fn of unauthorizedListeners) fn();
+    throw new UnauthorizedError();
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body.slice(0, 200)}`);
@@ -69,6 +90,88 @@ const json = (method: string, body?: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
+
+// ---------- auth (better-auth, /api/auth/*) ----------
+
+export interface SessionUser {
+  id: string;
+  email: string;
+  name: string;
+}
+
+/**
+ * Auth calls go through their own request function: a 401 here means "wrong
+ * password", not "your session expired", and must not kick the app back to the
+ * login screen it is already on. better-auth reports failures as
+ * { message, code } - the message is what the user should read.
+ */
+async function authRequest<T>(
+  path: string,
+  body?: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
+  const res = await fetch(`${API_BASE}/api/auth${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text.slice(0, 200);
+    try {
+      const parsed = JSON.parse(text) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch {
+      // not JSON - fall back to the raw body
+    }
+    throw new Error(message);
+  }
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+export const auth = {
+  /** The signed-in user, or null. Called once at startup to decide login vs app. */
+  session: async (): Promise<SessionUser | null> => {
+    const res = await fetch(`${API_BASE}/api/auth/get-session`, { credentials: 'include' });
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text) return null;
+    const data = JSON.parse(text) as { user?: SessionUser } | null;
+    return data?.user ?? null;
+  },
+
+  /**
+   * Whether this server lets anyone register or requires an invite code
+   * (SIGNUP_INVITE_CODE on the backend). Open endpoint - safe before signing in.
+   */
+  signupMode: async (): Promise<'open' | 'invite'> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/health`);
+      if (!res.ok) return 'open';
+      return ((await res.json()) as { signup?: string }).signup === 'invite' ? 'invite' : 'open';
+    } catch {
+      return 'open'; // backend unreachable - the form will fail loudly on submit anyway
+    }
+  },
+
+  /**
+   * Registration also creates and seeds the user's personal workspace (backend
+   * side). The invite code, when the server asks for one, travels as a header:
+   * it gates the request rather than being part of the account.
+   */
+  register: (email: string, password: string, name: string, inviteCode?: string) =>
+    authRequest<{ user: SessionUser }>(
+      '/sign-up/email',
+      { email, password, name },
+      inviteCode ? { 'x-invite-code': inviteCode } : undefined,
+    ),
+
+  login: (email: string, password: string) =>
+    authRequest<{ user: SessionUser }>('/sign-in/email', { email, password }),
+
+  logout: () => authRequest<unknown>('/sign-out'),
+};
 
 export const api = {
   /** includeHidden — include hidden accounts (Accounts screen, so they can be restored). */
@@ -218,8 +321,8 @@ export const api = {
 };
 
 /**
- * URL for a full DB backup — opened as a normal link, and a plain navigation can't
- * carry headers, so the key goes as a query parameter (see the backend).
+ * URL for a full backup of the current workspace — opened as a normal link.
+ * The session cookie rides along with the navigation by itself, so unlike the
+ * shared-secret era this needs no credentials in the query string.
  */
-export const backupUrl = (): string =>
-  `${API_BASE}/api/backup${API_KEY ? `?key=${encodeURIComponent(API_KEY)}` : ''}`;
+export const backupUrl = (): string => `${API_BASE}/api/backup`;

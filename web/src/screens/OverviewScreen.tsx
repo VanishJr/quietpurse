@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, apiLabel, backupUrl } from '../api';
+import { api, apiLabel, backupUrl, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
 import { CsvImport } from '../components/CsvImport';
 import { fmtDate, fmtMoney } from '../format';
@@ -24,7 +24,13 @@ const MODE_LABEL: Record<ThemeMode, string> = {
 const hhmm = (iso: string) =>
   new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-export function OverviewScreen() {
+export function OverviewScreen({
+  user,
+  onSignOut,
+}: {
+  user: SessionUser;
+  onSignOut: () => void;
+}) {
   const { mode, setMode } = useTheme();
 
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -304,7 +310,7 @@ export function OverviewScreen() {
             ))}
           {journalOpen && (
             <a className="btn-link" href={backupUrl()} download>
-              ⬇ Download DB backup (.db)
+              ⬇ Download backup (.json)
             </a>
           )}
         </div>
@@ -319,7 +325,14 @@ export function OverviewScreen() {
         {running ? 'Syncing…' : 'Refresh'}
       </button>
 
-      <p className="api-hint">API: {apiLabel()}</p>
+      <p className="api-hint">
+        {user.email} ·{' '}
+        <button className="btn-link" type="button" onClick={onSignOut}>
+          Sign out
+        </button>
+        <br />
+        API: {apiLabel()}
+      </p>
     </div>
   );
 }
