@@ -93,7 +93,8 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    // x-invite-code: without it a cross-origin sign-up fails the preflight
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-invite-code');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
@@ -116,6 +117,14 @@ app.all('/api/auth/*splat', (req, res) => {
     req.get('x-invite-code') !== config.signupInviteCode
   ) {
     res.status(403).json({ error: 'registration on this server is invite-only' });
+    return;
+  }
+  // The organization plugin is mounted for its schema and membership model only,
+  // but that also publishes ~30 endpoints here - create, delete, invite-member.
+  // Nothing in the app calls them (the session middleware below picks the
+  // workspace from `member`), so they stay closed until multi-user workspaces land.
+  if (req.path.startsWith('/api/auth/organization')) {
+    res.status(404).json({ error: 'not found' });
     return;
   }
   void toNodeHandler(getAuth())(req, res);
@@ -777,7 +786,8 @@ app.get('/api/backup', async (_req, res) => {
  */
 app.post(
   '/api/restore',
-  express.raw({ type: 'application/octet-stream', limit: '500mb' }),
+  // same ceiling as the JSON parser above - 25 MB of backup is six figures of transactions
+  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
   async (req, res) => {
     // the file arrives either as a raw octet-stream (Buffer) or, when the client
     // sends application/json, already parsed by the global json middleware
@@ -900,8 +910,10 @@ app.get('/api/enablebanking/aspsps', async (req, res) => {
   res.json(await listAspsps(country.toUpperCase()));
 });
 
-// single error handler (Express 5 catches rejections from async routes itself)
+// single error handler (Express 5 catches rejections from async routes itself).
+// The message goes to the log, not to the client: it tends to carry table names
+// and SQL fragments, and routes with something useful to say answer 400 themselves.
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logHttp.error(err);
-  res.status(500).json({ error: err.message });
+  res.status(500).json({ error: 'internal error' });
 });

@@ -90,14 +90,20 @@ target) or `VITE_API_URL` (the address the browser uses) — see `web/.env.examp
 An alternative to step 1 — requires Docker with the Compose plugin:
 
 ```bash
-cp backend/.env.example backend/.env   # optional, an empty file works too
+cp backend/.env.example backend/.env
+echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> backend/.env
 docker compose up -d --build           # backend on http://localhost:4000
 ```
 
+Unlike `npm run dev`, the image runs with `NODE_ENV=production`, and in production the
+backend refuses to start on development defaults — an unset `BETTER_AUTH_SECRET` above
+all, since sessions would be signed with a key that is published in this repository.
+Hence the second line; an empty `.env` is enough only for `npm run dev`.
+
 This starts Postgres alongside the backend; the data stays in the `pgdata` volume, and
-port 5432 is published so a non-Docker `npm run dev` reaches the same database.
-`backend/secrets/` is mounted read-only for the Enable Banking key. The web client still
-runs separately (step 2).
+port 5432 is published on localhost so a non-Docker `npm run dev` reaches the same
+database. `backend/secrets/` is mounted read-only for the Enable Banking key. The web
+client still runs separately (step 2).
 
 ### 3. First run
 

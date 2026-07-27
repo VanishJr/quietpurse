@@ -148,6 +148,27 @@ describe('two users on one server', () => {
   });
 });
 
+describe('the organization plugin is not a public API', () => {
+  // Mounting the plugin publishes its whole REST surface under /api/auth. Two of
+  // those endpoints matter: create makes a workspace seedDefaults() never ran on,
+  // delete cascades away every transaction a user owns in one request.
+  it('a signed-in user cannot reach its endpoints', async () => {
+    for (const path of [
+      '/api/auth/organization/create',
+      '/api/auth/organization/delete',
+      '/api/auth/organization/invite-member',
+    ]) {
+      const res = await alice.post(path).send({ name: 'sneaky', slug: 'sneaky', organizationId: 'x' });
+      expect(res.status, path).toBe(404);
+    }
+  });
+
+  it('closing it breaks neither the session nor the workspace scope', async () => {
+    expect((await alice.get('/api/auth/get-session')).status).toBe(200);
+    expect((await alice.get('/api/accounts')).status).toBe(200);
+  });
+});
+
 describe('registration gate', () => {
   it('rejects sign-up without the invite code once one is configured', async () => {
     const before = config.signupInviteCode;

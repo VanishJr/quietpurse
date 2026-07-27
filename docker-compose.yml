@@ -32,10 +32,10 @@ services:
       POSTGRES_USER: finto
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finto}
       POSTGRES_DB: finto
-    # Exposed to the host so `npm run dev` outside Docker reaches the same DB
-    # (matches the DATABASE_URL default in backend/src/config.ts).
+    # Exposed to the host so `npm run dev` outside Docker reaches the same DB.
+    # Loopback only: plain "5432:5432" publishes on every interface.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
