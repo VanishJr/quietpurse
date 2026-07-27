@@ -1,7 +1,7 @@
 /**
  * The session middleware, over real HTTP.
  *
- * isolation.test.ts proves the data layer scopes every query to a workspace. It
+ * tenant-isolation.test.ts proves the data layer scopes every query to a workspace. It
  * cannot prove the part that decides WHICH workspace: that lives in app.ts, runs
  * only on a request, and is what actually stands between two users' finances. So
  * this suite drives the whole chain - better-auth cookie, membership lookup,

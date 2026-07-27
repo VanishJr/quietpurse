@@ -167,8 +167,9 @@ it (`npm run db:generate`) into `backend/drizzle/` and applied at startup.
 Every data table is scoped by `workspace_id`, and the data layer takes that scope from
 AsyncLocalStorage rather than from a parameter (see `backend/src/db/workspace.ts`): the
 session middleware sets it per request, background jobs set it per workspace. A db call
-with no scope throws rather than running unscoped — `backend/test/workspace.test.ts` and
-`backend/test/isolation.test.ts` are what keep that honest.
+with no scope throws rather than running unscoped — `backend/test/workspace-scope.test.ts`
+(the mechanism) and `backend/test/tenant-isolation.test.ts` (two workspaces' data) are what
+keep that honest.
 
 An existing SQLite database from the pre-Postgres era is imported with
 `npm run migrate:sqlite` — it loads into one workspace (the oldest by default,
