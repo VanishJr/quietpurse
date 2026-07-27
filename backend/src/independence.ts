@@ -109,8 +109,8 @@ function monthStart(d: Date, delta: number): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + delta, 1));
 }
 
-export function computeIndependence(now = new Date()): Independence {
-  const settings = getSettings();
+export async function computeIndependence(now = new Date()): Promise<Independence> {
+  const settings = await getSettings();
 
   // window - the last windowMonths whole months; amortization - 12 whole months
   const windowFrom = monthStart(now, -settings.windowMonths);
@@ -119,7 +119,7 @@ export function computeIndependence(now = new Date()): Independence {
 
   const fromIso = amortFrom.toISOString();
   const toIso = to.toISOString();
-  const monthly = summaryMonthlyTotals(fromIso, toIso);
+  const monthly = await summaryMonthlyTotals(fromIso, toIso);
 
   // one-off amortization: the 12-month total / 12, even with less than a year of data -
   // still divided by 12, so rare purchases don't spike on a short history
@@ -139,8 +139,8 @@ export function computeIndependence(now = new Date()): Independence {
   const externalAvg = round2(mean(months.map((m) => m.external)));
 
   const buffer = 1 + settings.bufferPct / 100;
-  const baselineItems = listBaselineItems();
-  const baselineSum = baselineTotal();
+  const baselineItems = await listBaselineItems();
+  const baselineSum = await baselineTotal();
   const baselineThreshold = round2(baselineSum * buffer);
   const lifestyleThreshold = round2(avgSpend * buffer);
 
@@ -153,7 +153,7 @@ export function computeIndependence(now = new Date()): Independence {
   const deficit = round2(Math.max(0, threshold - ownIncomeAvg));
   const selfSufficiency = base > 0 ? round2(ownIncomeAvg / base) : 0;
 
-  const byCategory = avgMonthlyByCategory(
+  const byCategory = await avgMonthlyByCategory(
     windowFrom.toISOString(),
     toIso,
     Math.max(1, months.length),
@@ -178,7 +178,7 @@ export function computeIndependence(now = new Date()): Independence {
   }
 
   return {
-    baseCurrency: currentBaseCurrency(),
+    baseCurrency: await currentBaseCurrency(),
     settings,
     from: windowFrom.toISOString().slice(0, 10),
     to: toIso.slice(0, 10),

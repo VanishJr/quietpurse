@@ -112,7 +112,7 @@ export async function completeAuth(
   code: string,
   state: string,
 ): Promise<{ bank: string; accounts: string[] }> {
-  const st = takeAuthState(state);
+  const st = await takeAuthState(state);
   if (!st) throw new Error('Unknown or already used state in the callback');
 
   const session = await ebFetch<{
@@ -125,7 +125,7 @@ export async function completeAuth(
     session.access?.valid_until ||
     new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString();
 
-  saveEbSession({
+  await saveEbSession({
     sessionId: session.session_id,
     aspspName: st.aspspName,
     aspspCountry: st.aspspCountry,
@@ -139,7 +139,7 @@ export async function completeAuth(
       `${st.aspspName} ${acc.product || acc.name || acc.cash_account_type || ''} ${ibanTail}`
         .replace(/\s+/g, ' ')
         .trim();
-    upsertAccount({
+    await upsertAccount({
       id: `eb:${acc.uid}`,
       provider: 'enablebanking',
       name,
@@ -222,7 +222,7 @@ async function syncEbAccount(
   const balData = await ebFetch<{ balances: EbBalance[] }>(`/accounts/${uid}/balances`);
   const bal =
     balData.balances.find((b) => b.balance_type === 'CLBD') || balData.balances[0];
-  if (bal) updateAccountBalance(accountDbId, parseFloat(bal.balance_amount.amount));
+  if (bal) await updateAccountBalance(accountDbId, parseFloat(bal.balance_amount.amount));
 
   // Normally we only fetch the tail (with a 7-day overlap). But if the history isn't
   // loaded as deep as SYNC_START asks, fetch everything from SYNC_START: duplicates
@@ -245,19 +245,19 @@ async function syncEbAccount(
       `/accounts/${uid}/transactions?${qs.toString()}`,
     );
     const booked = page.transactions.filter((t) => !t.status || t.status === 'BOOK');
-    inserted += insertTransactions(booked.map((t) => toTransaction(uid, t)));
+    inserted += await insertTransactions(booked.map((t) => toTransaction(uid, t)));
     continuationKey = page.continuation_key;
   } while (continuationKey);
 
-  markAccountSynced(accountDbId, new Date().toISOString());
-  markAccountHistoryFrom(accountDbId, `${dateFrom}T00:00:00.000Z`);
+  await markAccountSynced(accountDbId, new Date().toISOString());
+  await markAccountHistoryFrom(accountDbId, `${dateFrom}T00:00:00.000Z`);
   r.addInserted(inserted);
   log(`enablebanking: ${accountDbId} new transactions: ${inserted}`);
 }
 
 export async function syncEnableBanking(r: SyncReporter): Promise<void> {
   const log = r.log;
-  const sessions = listEbSessions();
+  const sessions = await listEbSessions();
   if (sessions.length === 0) {
     log('enablebanking: no banks connected (open /api/enablebanking/connect?bank=...&country=...)');
     return;
@@ -274,7 +274,7 @@ export async function syncEnableBanking(r: SyncReporter): Promise<void> {
   }
 
   // listAccounts() without an argument returns visible ones only - sync skips hidden accounts
-  const ebAccounts = listAccounts().filter((a) => a.provider === 'enablebanking');
+  const ebAccounts = (await listAccounts()).filter((a) => a.provider === 'enablebanking');
   for (const acc of ebAccounts) {
     if (!acc.ebSessionId || !validIds.has(acc.ebSessionId)) {
       log(`enablebanking: skipping ${acc.name} - no valid session`);

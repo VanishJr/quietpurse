@@ -128,7 +128,9 @@ async function fetchWindow(
       `/personal/statement/${account.id}/${fromSec}/${curTo}`,
     );
     const accountCurrency = currencyName(account.currencyCode);
-    inserted += insertTransactions(items.map((i) => toTransaction(accountDbId, accountCurrency, i)));
+    inserted += await insertTransactions(
+      items.map((i) => toTransaction(accountDbId, accountCurrency, i)),
+    );
     if (items.length < STATEMENT_PAGE_LIMIT) break;
     // a full page arrived - continue from the oldest operation
     const oldest = items[items.length - 1].time;
@@ -174,11 +176,11 @@ export async function syncMonobank(r: SyncReporter): Promise<void> {
   const info = await monoGet<MonoClientInfo>('/personal/client-info');
 
   // the owner's name is one of the hints for finding transfers between own accounts
-  if (info.name) setMeta('monobank_client_name', info.name);
+  if (info.name) await setMeta('monobank_client_name', info.name);
 
   for (const a of info.accounts) {
     const name = `Mono ${a.type}${a.maskedPan?.[0] ? ' ' + a.maskedPan[0] : ''} (${currencyName(a.currencyCode)})`;
-    upsertAccount({
+    await upsertAccount({
       id: `mono:${a.id}`,
       provider: 'monobank',
       name,
@@ -189,7 +191,7 @@ export async function syncMonobank(r: SyncReporter): Promise<void> {
   }
   log(`monobank: accounts: ${info.accounts.length}`);
 
-  const dbAccounts = new Map(listAccounts(true).map((a) => [a.id, a]));
+  const dbAccounts = new Map((await listAccounts(true)).map((a) => [a.id, a]));
   const nowSec = Math.floor(Date.now() / 1000);
   const syncStartSec = Math.floor(Date.parse(config.monobankSyncStart + 'T00:00:00Z') / 1000);
   const syncStartIso = new Date(syncStartSec * 1000).toISOString();
@@ -237,8 +239,8 @@ export async function syncMonobank(r: SyncReporter): Promise<void> {
           fromSec = toSec + 1;
         }
       }
-      markAccountSynced(dbId, new Date().toISOString());
-      markAccountHistoryFrom(dbId, syncStartIso);
+      await markAccountSynced(dbId, new Date().toISOString());
+      await markAccountHistoryFrom(dbId, syncStartIso);
       r.addInserted(total);
       log(`monobank: ${dbId} new transactions: ${total}`);
     } catch (e) {

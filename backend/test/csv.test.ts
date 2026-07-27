@@ -74,8 +74,8 @@ describe('importCsv: pipeline and deduplication', () => {
     'DE1;06.01.26;Kaffee;Espresso House;-3,50;EUR',
   ].join('\n');
 
-  it('sparkasse preset: parses, categorizes, and does not duplicate files', () => {
-    const r1 = importCsv({
+  it('sparkasse preset: parses, categorizes, and does not duplicate files', async () => {
+    const r1 = await importCsv({
       accountName: 'Sparkasse Giro',
       currency: 'EUR',
       preset: 'sparkasse',
@@ -84,7 +84,7 @@ describe('importCsv: pipeline and deduplication', () => {
     expect(r1.inserted).toBe(4);
     expect(r1.skipped).toBe(0);
 
-    const txs = listTransactions({ accountId: r1.accountId });
+    const txs = await listTransactions({ accountId: r1.accountId });
     expect(txs).toHaveLength(4);
     const rewe = txs.find((t) => t.description.includes('REWE'))!;
     expect(rewe.category).toBe('food');
@@ -93,7 +93,7 @@ describe('importCsv: pipeline and deduplication', () => {
     expect(rewe.description).toBe('REWE Markt REWE SAGT DANKE');
 
     // re-uploading the same file adds nothing
-    const r2 = importCsv({
+    const r2 = await importCsv({
       accountName: 'Sparkasse Giro',
       currency: 'EUR',
       preset: 'sparkasse',
@@ -102,16 +102,16 @@ describe('importCsv: pipeline and deduplication', () => {
     expect(r2.inserted).toBe(0);
 
     // account balance = the sum of its transactions
-    expect(getAccount(r1.accountId)!.balance).toBe(-930.45);
+    expect((await getAccount(r1.accountId))!.balance).toBe(-930.45);
   });
 
-  it('revolut preset: State=COMPLETED filter, currency from the file', () => {
+  it('revolut preset: State=COMPLETED filter, currency from the file', async () => {
     const revolut = [
       'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance',
       'CARD_PAYMENT,Current,2026-02-01 10:00:00,2026-02-02 10:00:00,Uber Trip,-12.50,0,EUR,COMPLETED,100',
       'CARD_PAYMENT,Current,2026-02-03 10:00:00,,Pending Stuff,-5.00,0,EUR,PENDING,95',
     ].join('\n');
-    const r = importCsv({
+    const r = await importCsv({
       accountName: 'Revolut',
       currency: 'EUR',
       preset: 'revolut',
@@ -119,20 +119,20 @@ describe('importCsv: pipeline and deduplication', () => {
     });
     expect(r.inserted).toBe(1);
     expect(r.skipped).toBe(1);
-    const [t] = listTransactions({ accountId: r.accountId });
+    const [t] = await listTransactions({ accountId: r.accountId });
     expect(t.category).toBe('transport');
     expect(t.date).toBe('2026-02-02T10:00:00.000Z');
   });
 
-  it('generic: column auto-detection; an unreadable file gives a clear error', () => {
+  it('generic: column auto-detection; an unreadable file gives a clear error', async () => {
     const generic = ['Date,Amount,Description', '2026-03-01,-10,Something'].join('\n');
-    const r = importCsv({ accountName: 'Bank X', currency: 'USD', csv: generic });
+    const r = await importCsv({ accountName: 'Bank X', currency: 'USD', csv: generic });
     expect(r.inserted).toBe(1);
-    const [t] = listTransactions({ accountId: r.accountId });
+    const [t] = await listTransactions({ accountId: r.accountId });
     expect(t.currency).toBe('USD');
 
-    expect(() =>
+    await expect(
       importCsv({ accountName: 'Bad', currency: 'EUR', csv: 'foo,bar\n1,2' }),
-    ).toThrow(/could not find date\/amount\/description columns/);
+    ).rejects.toThrow(/could not find date\/amount\/description columns/);
   });
 });

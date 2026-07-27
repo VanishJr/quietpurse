@@ -30,8 +30,8 @@ const DEFAULTS: Settings = {
 
 const META_KEY = 'settings';
 
-export function getSettings(): Settings {
-  const raw = getMeta(META_KEY);
+export async function getSettings(): Promise<Settings> {
+  const raw = await getMeta(META_KEY);
   if (!raw) return { ...DEFAULTS };
   try {
     return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) };
@@ -41,8 +41,8 @@ export function getSettings(): Settings {
 }
 
 /** Partial update; unknown fields are dropped, bounds are clamped. */
-export function updateSettings(patch: Partial<Settings>): Settings {
-  const cur = getSettings();
+export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
+  const cur = await getSettings();
   const next: Settings = {
     bufferPct: clamp(num(patch.bufferPct, cur.bufferPct), 0, 100),
     windowMonths: Math.round(clamp(num(patch.windowMonths, cur.windowMonths), 1, 24)),
@@ -58,7 +58,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
         ? patch.goalMode
         : cur.goalMode,
   };
-  setMeta(META_KEY, JSON.stringify(next));
+  await setMeta(META_KEY, JSON.stringify(next));
   return next;
 }
 

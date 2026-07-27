@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# better-sqlite3 needs a C++ toolchain when no prebuilt binary matches the
-# platform, so dependencies are installed in a throwaway stage.
+# better-sqlite3 (a devDependency now, used only by the SQLite import script) needs
+# a C++ toolchain when no prebuilt binary matches - hence a throwaway stage.
 FROM node:20-bookworm-slim AS deps
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 make g++ \
@@ -17,8 +17,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json tsconfig.json ./
 COPY src ./src
-# data/ (SQLite + WAL) and secrets/ (Enable Banking key) are volumes, never baked in.
-RUN mkdir -p data secrets && chown -R node:node /app
+# generated migrations: applied at startup, so the container will not boot without them
+COPY drizzle ./drizzle
+# secrets/ (Enable Banking key) is a mounted volume, never baked in
+RUN mkdir -p secrets && chown -R node:node /app
 USER node
 EXPOSE 4000
 CMD ["npm", "run", "start"]

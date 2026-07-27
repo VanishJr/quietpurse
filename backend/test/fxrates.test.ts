@@ -21,7 +21,7 @@ describe('resolveRate: ECB for its own currencies, NBU for the hryvnia', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     expect(await resolveRate('2026-03-02', 'USD', 'EUR')).toBe(0.9);
-    expect(getFxRate('2026-03-02', 'USD:EUR')).toBe(0.9);
+    expect(await getFxRate('2026-03-02', 'USD:EUR')).toBe(0.9);
 
     // the second call comes from the cache, the network is untouched
     expect(await resolveRate('2026-03-02', 'USD', 'EUR')).toBe(0.9);
@@ -40,7 +40,7 @@ describe('resolveRate: ECB for its own currencies, NBU for the hryvnia', () => {
     // 1 UAH = 1/48 EUR
     expect(await resolveRate('2026-03-02', 'UAH', 'EUR')).toBeCloseTo(1 / 48, 6);
     // the NBU leg is cached in the old format (day, currency) -> hryvnia per unit
-    expect(getFxRate('2026-03-02', 'EUR')).toBe(48.0);
+    expect(await getFxRate('2026-03-02', 'EUR')).toBe(48.0);
   });
 
   it('an identical pair is 1 without network; an unknown currency is null, not a throw', async () => {
@@ -62,10 +62,10 @@ describe('resolveRate: ECB for its own currencies, NBU for the hryvnia', () => {
       expect(String(url)).toContain('bank.gov.ua');
       return mockJson([]);
     }) as unknown as typeof fetch;
-    saveFxRate('2026-03-06', 'PLN', 11.5);
-    saveFxRate('2026-03-06', 'EUR', 48.0);
+    await saveFxRate('2026-03-06', 'PLN', 11.5);
+    await saveFxRate('2026-03-06', 'EUR', 48.0);
     expect(await nbuProvider.getRate('2026-03-07', 'PLN', 'EUR')).toBeCloseTo(11.5 / 48, 6);
     // and Saturday is cached under the requested day - a repeat needs no network
-    expect(getFxRate('2026-03-07', 'PLN')).toBe(11.5);
+    expect(await getFxRate('2026-03-07', 'PLN')).toBe(11.5);
   });
 });

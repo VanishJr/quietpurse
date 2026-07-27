@@ -24,8 +24,8 @@ const tx = (over: Partial<Transaction>): Transaction => ({
 });
 
 describe('income_sources', () => {
-  it('defaults are seeded by the migration, family gets its patterns from FAMILY_NAMES', () => {
-    const sources = listIncomeSources();
+  it('defaults are seeded, family gets its patterns from FAMILY_NAMES', async () => {
+    const sources = await listIncomeSources();
     const ids = sources.map((s) => s.id);
     expect(ids).toContain('salary');
     expect(ids).toContain('family');
@@ -38,13 +38,13 @@ describe('income_sources', () => {
   });
 
   it('a custom source with patterns tags income and shows up in the by-kind summaries', async () => {
-    upsertIncomeSource({
+    await upsertIncomeSource({
       id: 'scholarship',
       label: 'Stipend',
       kind: 'external',
       patterns: ['Musterstiftung Musterstadt'],
     });
-    insertTransactions([
+    await insertTransactions([
       tx({
         id: 'stip-1',
         amount: 300,
@@ -60,25 +60,24 @@ describe('income_sources', () => {
     ]);
     await reclassifyAll();
 
-    expect(getTransaction('stip-1')!.incomeSource).toBe('scholarship');
+    expect((await getTransaction('stip-1'))!.incomeSource).toBe('scholarship');
 
-    const march = summaryMonthlyTotals(
-      '2026-03-01T00:00:00.000Z',
-      '2026-03-31T23:59:59.999Z',
+    const march = (
+      await summaryMonthlyTotals('2026-03-01T00:00:00.000Z', '2026-03-31T23:59:59.999Z')
     ).find((m) => m.month === '2026-03')!;
     // the stipend is external, an unrelated income is own (falls into other)
     expect(march.incomeExternal).toBe(300);
     expect(march.incomeOwn).toBeGreaterThanOrEqual(50);
 
     // deleting a source returns its transactions to other
-    expect(deleteIncomeSource('scholarship')).toBe(true);
-    expect(getTransaction('stip-1')!.incomeSource).toBe('other');
+    expect(await deleteIncomeSource('scholarship')).toBe(true);
+    expect((await getTransaction('stip-1'))!.incomeSource).toBe('other');
   });
 
-  it('a builtin source cannot be deleted, a manual mark beats auto-detection', () => {
-    expect(deleteIncomeSource('salary')).toBe(false);
-    insertTransactions([tx({ id: 'manual-src', amount: 77, description: 'Von: Random' })]);
-    expect(setIncomeSourceOverride('manual-src', 'family')!.incomeSource).toBe('family');
-    expect(setIncomeSourceOverride('manual-src', null)!.incomeSource).toBe('other');
+  it('a builtin source cannot be deleted, a manual mark beats auto-detection', async () => {
+    expect(await deleteIncomeSource('salary')).toBe(false);
+    await insertTransactions([tx({ id: 'manual-src', amount: 77, description: 'Von: Random' })]);
+    expect((await setIncomeSourceOverride('manual-src', 'family'))!.incomeSource).toBe('family');
+    expect((await setIncomeSourceOverride('manual-src', null))!.incomeSource).toBe('other');
   });
 });

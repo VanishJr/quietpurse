@@ -44,7 +44,7 @@ describe('canPair: pairing rules without touching the database', () => {
 
 describe('reclassifyAll: integration on an in-memory database', () => {
   it('transfers, false pairs, family, rent, recurring', async () => {
-    insertTransactions([
+    await insertTransactions([
       // a real transfer between own accounts: a p2p MCC on both sides, same minute
       tx({
         id: 'leg-out',
@@ -132,38 +132,38 @@ describe('reclassifyAll: integration on an in-memory database', () => {
     await reclassifyAll();
 
     // the real pair is flagged on both sides
-    expect(getTransaction('leg-out')!.transfer).toBe(true);
-    expect(getTransaction('leg-in')!.transfer).toBe(true);
+    expect((await getTransaction('leg-out'))!.transfer).toBe(true);
+    expect((await getTransaction('leg-in'))!.transfer).toBe(true);
 
     // the merchant purchase did not get glued to anything
-    expect(getTransaction('miele')!.transfer).toBe(false);
-    expect(getTransaction('miele')!.category).toBe('shopping');
-    expect(getTransaction('stranger')!.transfer).toBe(false);
+    expect((await getTransaction('miele'))!.transfer).toBe(false);
+    expect((await getTransaction('miele'))!.category).toBe('shopping');
+    expect((await getTransaction('stranger'))!.transfer).toBe(false);
 
     // family: income, not a transfer, not paired with an unrelated expense
-    const family = getTransaction('family')!;
+    const family = (await getTransaction('family'))!;
     expect(family.transfer).toBe(false);
     expect(family.incomeSource).toBe('family');
-    expect(getTransaction('unrelated-expense')!.transfer).toBe(false);
+    expect((await getTransaction('unrelated-expense'))!.transfer).toBe(false);
 
     // the owner's name marks a transfer between own accounts
-    expect(getTransaction('own-name')!.transfer).toBe(true);
+    expect((await getTransaction('own-name'))!.transfer).toBe(true);
 
     // salary: category + source
-    const salary = getTransaction('salary')!;
+    const salary = (await getTransaction('salary'))!;
     expect(salary.category).toBe('salary');
     expect(salary.incomeSource).toBe('salary');
 
     // rent: housing category + recurring (±20% of the median keeps the 1020 month)
     for (const m of [1, 2, 3, 4]) {
-      const rent = getTransaction(`rent-${m}`)!;
+      const rent = (await getTransaction(`rent-${m}`))!;
       expect(rent.category).toBe('housing');
       expect(rent.recurring).toBe(true);
     }
 
     // base_amount: rows already in the base currency get it on insert
-    expect(getTransaction('salary')!.baseAmount).toBe(1500);
+    expect((await getTransaction('salary'))!.baseAmount).toBe(1500);
     // UAH rows stay unconverted without network (filled in when the NBU is reachable)
-    expect(getTransaction('family')!.baseAmount).toBeUndefined();
+    expect((await getTransaction('family'))!.baseAmount).toBeUndefined();
   });
 });

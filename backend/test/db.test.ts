@@ -22,34 +22,34 @@ const tx = (over: Partial<Transaction>): Transaction => ({
 });
 
 describe('insertTransactions', () => {
-  it('deduplication by id: a repeated insert is silently skipped', () => {
-    expect(insertTransactions([tx({})])).toBe(1);
-    expect(insertTransactions([tx({}), tx({ id: 'dup-2' })])).toBe(1);
+  it('deduplication by id: a repeated insert is silently skipped', async () => {
+    expect(await insertTransactions([tx({})])).toBe(1);
+    expect(await insertTransactions([tx({}), tx({ id: 'dup-2' })])).toBe(1);
   });
 
-  it('the base currency gets base_amount at once, the rest get null', () => {
-    insertTransactions([
+  it('the base currency gets base_amount at once, the rest get null', async () => {
+    await insertTransactions([
       tx({ id: 'eur-1', amount: -50, currency: 'EUR' }),
       tx({ id: 'uah-1', amount: -2000, currency: 'UAH' }),
     ]);
-    expect(getTransaction('eur-1')!.baseAmount).toBe(-50);
-    expect(getTransaction('uah-1')!.baseAmount).toBeUndefined();
+    expect((await getTransaction('eur-1'))!.baseAmount).toBe(-50);
+    expect((await getTransaction('uah-1'))!.baseAmount).toBeUndefined();
   });
 });
 
 describe('setOneOff', () => {
-  it('the mark lives in its own column and survives repeated calls', () => {
-    insertTransactions([tx({ id: 'big-1', amount: -768, currency: 'EUR' })]);
-    expect(setOneOff('big-1', true)!.oneOff).toBe(true);
-    expect(setOneOff('big-1', false)!.oneOff).toBe(false);
-    expect(setOneOff('missing', true)).toBeUndefined();
+  it('the mark lives in its own column and survives repeated calls', async () => {
+    await insertTransactions([tx({ id: 'big-1', amount: -768, currency: 'EUR' })]);
+    expect((await setOneOff('big-1', true))!.oneOff).toBe(true);
+    expect((await setOneOff('big-1', false))!.oneOff).toBe(false);
+    expect(await setOneOff('missing', true)).toBeUndefined();
   });
 });
 
 describe('hiding recurring groups', () => {
-  it('ignored is set by the normalized key and can be cleared again', () => {
+  it('ignored is set by the normalized key and can be cleared again', async () => {
     // three months of "rent" with a changing month in the description - one group
-    insertTransactions(
+    await insertTransactions(
       [1, 2, 3].map((m) =>
         tx({
           id: `rent-ign-${m}`,
@@ -60,7 +60,7 @@ describe('hiding recurring groups', () => {
         }),
       ),
     );
-    applyClassification(
+    await applyClassification(
       [1, 2, 3].map((m) => ({
         id: `rent-ign-${m}`,
         category: 'housing',
@@ -71,19 +71,19 @@ describe('hiding recurring groups', () => {
       })),
     );
 
-    const before = listRecurringGroups('2026-01-01T00:00:00.000Z');
+    const before = await listRecurringGroups('2026-01-01T00:00:00.000Z');
     const group = before.find((g) => g.description.startsWith('Miete'))!;
     expect(group.ignored).toBe(false);
 
     // hide by one spelling - the whole group hides (the key is normalized)
-    setRecurringIgnored('Miete 01/2026', true);
-    const hidden = listRecurringGroups('2026-01-01T00:00:00.000Z').find((g) =>
+    await setRecurringIgnored('Miete 01/2026', true);
+    const hidden = (await listRecurringGroups('2026-01-01T00:00:00.000Z')).find((g) =>
       g.description.startsWith('Miete'),
     )!;
     expect(hidden.ignored).toBe(true);
 
-    setRecurringIgnored('Miete 03/2026', false);
-    const restored = listRecurringGroups('2026-01-01T00:00:00.000Z').find((g) =>
+    await setRecurringIgnored('Miete 03/2026', false);
+    const restored = (await listRecurringGroups('2026-01-01T00:00:00.000Z')).find((g) =>
       g.description.startsWith('Miete'),
     )!;
     expect(restored.ignored).toBe(false);

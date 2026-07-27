@@ -1,23 +1,14 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  backupTo,
+  exportBackup,
   getTransaction,
   insertTransactions,
   listTransactions,
-  migrateAfterRestore,
-  restoreFrom,
+  parseBackup,
+  restoreBackup,
   setOneOff,
 } from '../src/db';
 import { Transaction } from '../src/types';
-
-const tmp = path.join(os.tmpdir(), `finto-test-backup-${process.pid}.db`);
-
-afterAll(() => {
-  fs.rmSync(tmp, { force: true });
-});
 
 const tx = (id: string, amount: number): Transaction => ({
   id,
@@ -30,23 +21,38 @@ const tx = (id: string, amount: number): Transaction => ({
   category: 'other',
 });
 
-describe('backup and restore', () => {
-  it('a dump restores the data, manual marks included', async () => {
-    insertTransactions([tx('bk-1', -10), tx('bk-2', -20)]);
-    setOneOff('bk-1', true);
+describe('backup and restore (JSON)', () => {
+  it('a backup restores the data, manual marks included', async () => {
+    await insertTransactions([tx('bk-1', -10), tx('bk-2', -20)]);
+    await setOneOff('bk-1', true);
 
-    await backupTo(tmp);
-    expect(fs.readFileSync(tmp).subarray(0, 15).toString()).toBe('SQLite format 3');
+    const data = await exportBackup();
+    expect(data.format).toBe('finto-backup');
+    expect(data.tables.transactions.length).toBeGreaterThanOrEqual(2);
 
-    // "disaster": the mark is cleared, then we restore from the dump
-    setOneOff('bk-1', false);
-    expect(getTransaction('bk-1')!.oneOff).toBe(false);
+    // the file survives a JSON round-trip (that is exactly what the endpoint sends)
+    const reparsed = parseBackup(JSON.parse(JSON.stringify(data)));
 
-    const { tables, rows } = restoreFrom(tmp);
-    migrateAfterRestore();
+    // "disaster": the mark is cleared, then we restore from the backup
+    await setOneOff('bk-1', false);
+    expect((await getTransaction('bk-1'))!.oneOff).toBe(false);
+
+    const { tables, rows } = await restoreBackup(reparsed);
     expect(tables).toBeGreaterThan(0);
     expect(rows).toBeGreaterThan(0);
-    expect(getTransaction('bk-1')!.oneOff).toBe(true);
-    expect(listTransactions({ accountId: 'acc1' }).length).toBeGreaterThanOrEqual(2);
+    expect((await getTransaction('bk-1'))!.oneOff).toBe(true);
+    expect((await listTransactions({ accountId: 'acc1' })).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('parseBackup rejects files that are not a Finto backup', () => {
+    expect(() => parseBackup(null)).toThrow(/not a Finto backup/);
+    expect(() => parseBackup({ format: 'something-else' })).toThrow(/not a Finto backup/);
+    expect(() => parseBackup({ format: 'finto-backup', version: 99, tables: {} })).toThrow(
+      /unsupported backup version/,
+    );
+    expect(() => parseBackup({ format: 'finto-backup', version: 1 })).toThrow(/no tables/);
+    expect(() =>
+      parseBackup({ format: 'finto-backup', version: 1, tables: { accounts: 'oops' } }),
+    ).toThrow(/is not an array/);
   });
 });

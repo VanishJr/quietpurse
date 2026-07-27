@@ -21,38 +21,41 @@ export interface AppSettings {
   syncIntervalMin: number;
 }
 
-export function getAppSettings(): AppSettings {
-  let ownerNames: string[] = config.ownerNames;
-  const raw = getSetting('owner_names');
+export async function getAppSettings(): Promise<AppSettings> {
+  // No env fallback: OWNER_NAMES is the operator's own household, so falling back
+  // to it would show those names in another user's settings. seedDefaults() writes
+  // the key for every workspace, empty for all but the owner's.
+  let ownerNames: string[] = [];
+  const raw = await getSetting('owner_names');
   if (raw !== undefined) {
     try {
       const v = JSON.parse(raw);
       if (Array.isArray(v)) ownerNames = v.map(String).filter(Boolean);
     } catch {
-      // corrupted value - stay on the fallback from env
+      // corrupted value - treat it as not set
     }
   }
-  const interval = parseInt(getSetting('sync_interval_min') ?? '', 10);
+  const interval = parseInt((await getSetting('sync_interval_min')) ?? '', 10);
   return {
-    baseCurrency: currentBaseCurrency(),
+    baseCurrency: await currentBaseCurrency(),
     ownerNames,
     syncIntervalMin: Number.isFinite(interval) ? interval : config.syncIntervalMin,
   };
 }
 
 /** Partial update. Returns the new settings and exactly what changed. */
-export function updateAppSettings(patch: {
+export async function updateAppSettings(patch: {
   baseCurrency?: unknown;
   ownerNames?: unknown;
   syncIntervalMin?: unknown;
-}): { settings: AppSettings; baseCurrencyChanged: boolean; ownerNamesChanged: boolean } {
-  const before = getAppSettings();
+}): Promise<{ settings: AppSettings; baseCurrencyChanged: boolean; ownerNamesChanged: boolean }> {
+  const before = await getAppSettings();
 
   let baseCurrencyChanged = false;
   if (typeof patch.baseCurrency === 'string' && /^[A-Za-z]{3}$/.test(patch.baseCurrency.trim())) {
     const next = patch.baseCurrency.trim().toUpperCase();
     if (next !== before.baseCurrency) {
-      setSetting('base_currency', next);
+      await setSetting('base_currency', next);
       baseCurrencyChanged = true;
     }
   }
@@ -61,15 +64,15 @@ export function updateAppSettings(patch: {
   if (Array.isArray(patch.ownerNames)) {
     const next = patch.ownerNames.map(String).map((s) => s.trim()).filter(Boolean);
     if (JSON.stringify(next) !== JSON.stringify(before.ownerNames)) {
-      setSetting('owner_names', JSON.stringify(next));
+      await setSetting('owner_names', JSON.stringify(next));
       ownerNamesChanged = true;
     }
   }
 
   if (typeof patch.syncIntervalMin === 'number' && Number.isFinite(patch.syncIntervalMin)) {
     const next = Math.max(0, Math.min(24 * 60, Math.round(patch.syncIntervalMin)));
-    setSetting('sync_interval_min', String(next));
+    await setSetting('sync_interval_min', String(next));
   }
 
-  return { settings: getAppSettings(), baseCurrencyChanged, ownerNamesChanged };
+  return { settings: await getAppSettings(), baseCurrencyChanged, ownerNamesChanged };
 }

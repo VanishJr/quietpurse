@@ -56,7 +56,7 @@ export const ecbProvider: RateProvider = {
   supports: (from, to) => ECB_CURRENCIES.has(from) && ECB_CURRENCIES.has(to),
   async getRate(day, from, to) {
     const cacheKey = `${from}:${to}`;
-    const cached = getFxRate(day, cacheKey);
+    const cached = await getFxRate(day, cacheKey);
     if (cached !== undefined) return cached;
 
     const url = `${FRANKFURTER}/${day}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`;
@@ -65,7 +65,7 @@ export const ecbProvider: RateProvider = {
     const data = (await res.json()) as { rates?: Record<string, number> };
     const rate = data.rates?.[to];
     if (typeof rate !== 'number' || rate <= 0) return null;
-    saveFxRate(day, cacheKey, rate);
+    await saveFxRate(day, cacheKey, rate);
     return rate;
   },
 };
@@ -103,17 +103,17 @@ async function fetchNbuRate(currency: string, day: string): Promise<number | nul
  */
 export async function rateToUah(currency: string, day: string): Promise<number | null> {
   if (currency === 'UAH') return 1;
-  const cached = getFxRate(day, currency);
+  const cached = await getFxRate(day, currency);
   if (cached !== undefined) return cached;
 
   for (let back = 0; back <= MAX_LOOKBACK_DAYS; back++) {
     const probeDay = shiftDay(day, -back);
-    const probeCached = back > 0 ? getFxRate(probeDay, currency) : undefined;
+    const probeCached = back > 0 ? await getFxRate(probeDay, currency) : undefined;
     const rate = probeCached ?? (await fetchNbuRate(currency, probeDay));
     if (rate !== null && rate !== undefined) {
       // cache it under the REQUESTED day: weekends always resolve to Friday, and
       // a repeat request for the same day then never goes to the network
-      saveFxRate(day, currency, rate);
+      await saveFxRate(day, currency, rate);
       return rate;
     }
   }
@@ -171,10 +171,10 @@ export async function resolveRate(day: string, from: string, to: string): Promis
 export async function backfillBaseAmounts(
   log: (s: string) => void = (s) => logFx.info(s),
 ): Promise<number> {
-  const base = currentBaseCurrency();
-  let done = setBaseForBaseCurrency(base);
+  const base = await currentBaseCurrency();
+  let done = await setBaseForBaseCurrency(base);
 
-  const keys = listUnconvertedDays();
+  const keys = await listUnconvertedDays();
   if (keys.length === 0) return done;
 
   log(`converting to ${base}: days needing a rate: ${keys.length}...`);
@@ -187,7 +187,7 @@ export async function backfillBaseAmounts(
         log(`rate ${currency} -> ${base} on ${day}: no provider returned one`);
         continue;
       }
-      done += applyBaseRate(day, currency, k);
+      done += await applyBaseRate(day, currency, k);
     } catch (e) {
       failures++;
       log(`rate ${currency} on ${day} not fetched: ${(e as Error).message}`);

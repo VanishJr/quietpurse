@@ -7,10 +7,11 @@ dist/
 .env.*.local
 backend/secrets/
 
-# personal notes: the author's own finances, not part of the project
+# personal notes and internal planning, not part of the project
 Report.md
 Strategy.md
 ROADMAP.md
+docs/
 
 # personal data: database, backups, bank statements
 backend/data/
