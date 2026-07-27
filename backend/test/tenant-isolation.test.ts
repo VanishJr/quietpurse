@@ -45,13 +45,15 @@ import {
   upsertIncomeSource,
 } from '../src/db';
 import { TEST_WORKSPACE_ID } from './pglite';
-import { Transaction } from '../src/types';
+import { NewTransaction } from '../src/types';
 
 /** The neighbour: a second workspace, populated with its own conflicting data. */
 const OTHER = 'other-workspace';
 
-const tx = (over: Partial<Transaction>): Transaction => ({
-  id: 'iso-1',
+/** The id both workspaces' first row is forced to carry - see forceSharedId. */
+const SHARED_TX_ID = 'shared-tx-id';
+
+const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   accountId: 'acc-shared-id',
   provider: 'monobank',
   amount: -100,
@@ -62,6 +64,21 @@ const tx = (over: Partial<Transaction>): Transaction => ({
   ...over,
 });
 
+/**
+ * Gives a workspace's row the SAME id its neighbour's row has. This is
+ * deliberate, not a leftover: transaction ids are surrogate UUIDs now, so the
+ * collision this suite is built to catch - a query that filters by id and forgets
+ * the workspace - can no longer happen by accident, and a test that waits for it
+ * to happen by accident proves nothing. So it is manufactured here, directly in
+ * SQL, and every assertion below is then about the composite key doing its job.
+ */
+async function forceSharedId(workspaceId: string, description: string): Promise<void> {
+  await dbInstance().execute(
+    sql`UPDATE transactions SET id = ${SHARED_TX_ID}
+        WHERE workspace_id = ${workspaceId} AND description = ${description}`,
+  );
+}
+
 const JAN = '2026-01-01T00:00:00.000Z';
 const DEC = '2026-12-31T23:59:59.999Z';
 
@@ -71,10 +88,11 @@ beforeAll(async () => {
         ON CONFLICT (id) DO NOTHING`,
   );
 
-  // Both workspaces deliberately use the SAME ids everywhere: account id,
-  // transaction id, setting key, budget category, rule pattern. Composite
-  // primary keys make that legal, and it is the case that would break if a
-  // query filtered by id alone.
+  // Both workspaces deliberately collide on everything they can: account id,
+  // transaction id (forced, see forceSharedId), transaction dedup key, setting
+  // key, budget category, rule pattern. Composite primary keys and
+  // workspace-scoped unique indexes make that legal, and it is the case that
+  // would break if a query filtered by id alone.
   await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
     await upsertAccount({
       id: 'acc-shared-id',
@@ -84,8 +102,8 @@ beforeAll(async () => {
       balance: 10,
     });
     await insertTransactions([
-      tx({ id: 'shared-tx-id', amount: -100, description: 'mine: groceries' }),
-      tx({ id: 'mine-only', amount: 500, description: 'mine: salary' }),
+      tx({ amount: -100, description: 'mine: groceries' }),
+      tx({ amount: 500, description: 'mine: salary' }),
     ]);
     await setSetting('base_currency', 'EUR');
     await setMeta('shared_key', 'mine');
@@ -108,8 +126,8 @@ beforeAll(async () => {
       balance: 99,
     });
     await insertTransactions([
-      tx({ id: 'shared-tx-id', amount: -7777, description: 'theirs: rent' }),
-      tx({ id: 'theirs-only', amount: 4242, description: 'theirs: bonus' }),
+      tx({ amount: -7777, description: 'theirs: rent' }),
+      tx({ amount: 4242, description: 'theirs: bonus' }),
     ]);
     await setSetting('base_currency', 'USD');
     await setMeta('shared_key', 'theirs');
@@ -121,23 +139,52 @@ beforeAll(async () => {
     const run = await startSyncLogEntry('2026-03-02T00:00:00.000Z');
     await finishSyncLogEntry(run, true, 2, [], ['theirs']);
   });
+
+  await forceSharedId(TEST_WORKSPACE_ID, 'mine: groceries');
+  await forceSharedId(OTHER, 'theirs: rent');
 });
 
 describe('workspace isolation', () => {
   it('transactions: neither workspace sees the other, same id included', async () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
       const all = await listTransactions({ limit: 100 });
-      expect(all.map((t) => t.id).sort()).toEqual(['mine-only', 'shared-tx-id']);
+      expect(all.map((t) => t.description).sort()).toEqual(['mine: groceries', 'mine: salary']);
       // the id exists in both workspaces - it must resolve to OUR row
-      expect((await getTransaction('shared-tx-id'))!.amount).toBe(-100);
-      expect(await getTransaction('theirs-only')).toBeUndefined();
+      expect((await getTransaction(SHARED_TX_ID))!.amount).toBe(-100);
+      const theirsOnly = all.find((t) => t.description === 'theirs: bonus');
+      expect(theirsOnly).toBeUndefined();
     });
     await runWithWorkspace(OTHER, async () => {
       const all = await listTransactions({ limit: 100 });
-      expect(all.map((t) => t.id).sort()).toEqual(['shared-tx-id', 'theirs-only']);
-      expect((await getTransaction('shared-tx-id'))!.amount).toBe(-7777);
-      expect(await getTransaction('mine-only')).toBeUndefined();
+      expect(all.map((t) => t.description).sort()).toEqual(['theirs: bonus', 'theirs: rent']);
+      expect((await getTransaction(SHARED_TX_ID))!.amount).toBe(-7777);
     });
+  });
+
+  /**
+   * The dedup rule is UNIQUE (workspace_id, account_id, dedup_key). Drop the
+   * workspace from it and two users importing the same statement would silently
+   * be one user's data: the second import would be swallowed as a duplicate.
+   */
+  it('an identical transaction in two workspaces is two transactions', async () => {
+    const row = tx({
+      accountId: 'acc-collision',
+      amount: -13.5,
+      date: '2026-04-01T09:00:00.000Z',
+      description: 'the very same coffee',
+    });
+    try {
+      expect(await runWithWorkspace(TEST_WORKSPACE_ID, () => insertTransactions([row]))).toBe(1);
+      // byte-for-byte the same row, and it is not ours - it must be inserted
+      expect(await runWithWorkspace(OTHER, () => insertTransactions([row]))).toBe(1);
+      // while within one workspace it still deduplicates
+      expect(await runWithWorkspace(TEST_WORKSPACE_ID, () => insertTransactions([row]))).toBe(0);
+    } finally {
+      // the aggregates asserted below must not count this row
+      await dbInstance().execute(
+        sql`DELETE FROM transactions WHERE account_id = 'acc-collision'`,
+      );
+    }
   });
 
   it('accounts: the same account id is a different account in each workspace', async () => {
@@ -156,11 +203,11 @@ describe('workspace isolation', () => {
   it('a write in one workspace cannot touch the other workspace row with the same id', async () => {
     try {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-        await setOneOff('shared-tx-id', true);
-        await setTransferOverride('shared-tx-id', true);
+        await setOneOff(SHARED_TX_ID, true);
+        await setTransferOverride(SHARED_TX_ID, true);
       });
       await runWithWorkspace(OTHER, async () => {
-        const theirs = (await getTransaction('shared-tx-id'))!;
+        const theirs = (await getTransaction(SHARED_TX_ID))!;
         expect(theirs.oneOff).toBe(false);
         expect(theirs.transfer).toBe(false);
       });
@@ -168,8 +215,8 @@ describe('workspace isolation', () => {
       // put the row back: a transfer flag would drop it out of the aggregates the
       // next test sums, and no test here should depend on declaration order
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-        await setOneOff('shared-tx-id', false);
-        await setTransferOverride('shared-tx-id', null);
+        await setOneOff(SHARED_TX_ID, false);
+        await setTransferOverride(SHARED_TX_ID, null);
       });
     }
   });
@@ -235,8 +282,10 @@ describe('workspace isolation', () => {
 
   it('a backup contains only the exporting workspace, with no workspace_id in it', async () => {
     const mine = await runWithWorkspace(TEST_WORKSPACE_ID, () => exportBackup());
-    const ids = (mine.tables.transactions as { id: string }[]).map((t) => t.id).sort();
-    expect(ids).toEqual(['mine-only', 'shared-tx-id']);
+    const descriptions = (mine.tables.transactions as { description: string }[])
+      .map((t) => t.description)
+      .sort();
+    expect(descriptions).toEqual(['mine: groceries', 'mine: salary']);
     // workspace_id is stripped on export: a backup can be restored into any workspace
     for (const rows of Object.values(mine.tables)) {
       for (const row of rows as Record<string, unknown>[]) {

@@ -19,6 +19,7 @@
  * else's).
  */
 import 'dotenv/config';
+import crypto from 'crypto';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
@@ -26,6 +27,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgTable } from 'drizzle-orm/pg-core';
 import { Pool } from 'pg';
+import { computedDedupKey, dedupGroup } from '../src/db/dedup';
 import * as s from '../src/db/schema';
 
 const args = process.argv.slice(2);
@@ -43,6 +45,69 @@ const databaseUrl = process.env.DATABASE_URL || 'postgres://finto:finto@localhos
 const asBool = (v: unknown): boolean | null => (v === null ? null : Number(v) === 1);
 
 /**
+ * old transaction id -> new dedup_key, filled by dedupKeysFor() before the copy.
+ * The transaction mapper is per-row, but the ordinal in a computed key depends on
+ * the whole table, so it is worked out in one pass up front.
+ */
+const dedupKeys = new Map<string, string>();
+
+/**
+ * Reconstructs the new-shape dedup keys for a SQLite history (see ROADMAP 4.2).
+ *
+ * The old id WAS the dedup key, so carrying it over verbatim would be the easy
+ * move - and would leave the migrated history unreproducible by any later parse:
+ * a re-import of the same statement computes a key in the new format, matches
+ * nothing, and duplicates everything. So the keys are derived in the format the
+ * app now uses:
+ *
+ *  - monobank: the id is already `mono:<operation id>`, the bank's own reference;
+ *  - enablebanking: `eb:<account uid>:<entry_reference>` loses the uid, which the
+ *    unique index now carries as account_id;
+ *  - anything hashed (`...:h:<hash>` - CSV, and EB without an entry_reference)
+ *    gets a computed key, numbered within its (account, day, amount, currency)
+ *    group.
+ *
+ * Numbering order inside a group is irrelevant - only the count is - so old id
+ * order is used for determinism. No two source rows can collide: they were unique
+ * by their old hash, and n distinct rows take n distinct ordinals, so nothing in
+ * the user's history is merged away.
+ */
+function dedupKeysFor(rows: Row[]): void {
+  const computed: Row[] = [];
+  for (const r of rows) {
+    const id = String(r.id);
+    const accountPrefix = `${String(r.account_id)}:`;
+    const rest = id.startsWith(accountPrefix) ? id.slice(accountPrefix.length) : '';
+    if (r.provider === 'monobank') {
+      dedupKeys.set(id, id);
+    } else if (r.provider === 'enablebanking' && rest && !rest.startsWith('h:')) {
+      dedupKeys.set(id, `eb:${rest}`);
+    } else {
+      computed.push(r);
+    }
+  }
+  const ordinals = new Map<string, number>();
+  for (const r of computed.sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+    const day = String(r.date).slice(0, 10);
+    const amountCents = Number(r.amount_cents);
+    const currency = String(r.currency);
+    const group = dedupGroup(String(r.account_id), day, amountCents, currency);
+    const n = (ordinals.get(group) ?? 0) + 1;
+    ordinals.set(group, n);
+    dedupKeys.set(String(r.id), computedDedupKey(day, amountCents, currency, n));
+  }
+}
+
+/**
+ * dedupKeysFor covers every row, so this is unreachable - but a transfer of
+ * somebody's whole financial history should stop rather than write a row whose
+ * identity it could not work out.
+ */
+function missingKey(r: Row): never {
+  throw new Error(`no dedup key derived for transaction ${String(r.id)} - refusing to transfer it`);
+}
+
+/**
  * table -> [pg table, sqlite row -> pg insert values]. Money stays integer cents;
  * only the 0/1 flags change representation. workspace_id is added by the caller -
  * it is the same for every row, so the mappers stay free of it.
@@ -51,6 +116,9 @@ const asBool = (v: unknown): boolean | null => (v === null ? null : Number(v) ==
  * deliberately NOT carried over: those sequences are per table, not per
  * workspace, so a dump's ids can collide with rows another workspace already
  * owns. Nothing references them across tables, so renumbering costs nothing.
+ *
+ * Transaction ids are not carried over either, for a different reason: they used
+ * to be content hashes and are now surrogates. See dedupKeysFor above.
  */
 type Row = Record<string, unknown>;
 const TABLES: [string, PgTable, (r: Row) => Row][] = [
@@ -74,7 +142,9 @@ const TABLES: [string, PgTable, (r: Row) => Row][] = [
     'transactions',
     s.transactions,
     (r) => ({
-      id: r.id,
+      // the id becomes a surrogate; what the old id meant now lives in dedup_key
+      id: crypto.randomUUID(),
+      dedupKey: dedupKeys.get(String(r.id)) ?? missingKey(r),
       accountId: r.account_id,
       provider: r.provider,
       amountCents: r.amount_cents,
@@ -233,6 +303,8 @@ async function main(): Promise<void> {
         .get(name) as { n: number };
       const rows =
         exists.n > 0 ? (sqlite.prepare(`SELECT * FROM ${name}`).all() as Row[]) : [];
+      // ordinals need the whole table, so the keys are worked out before mapping
+      if (name === 'transactions') dedupKeysFor(rows);
       const values = rows
         .map(map)
         .filter((v) => name !== 'meta' || !META_SKIP.has(String(v.key)))

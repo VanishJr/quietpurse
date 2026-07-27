@@ -7,19 +7,18 @@
  * CSV takes no part in periodic syncing (it's a push model), so it isn't in
  * SYNC_PROVIDERS - see providers/provider.ts.
  *
- * Deduplication: CSV rows have no bank id, so the id is a hash of the contents
- * (date + amount + description + ordinal among identical rows in the file).
- * Re-uploading the same (or an overlapping) file creates no duplicates, while two
- * identical coffees on the same day stay two transactions.
+ * Deduplication: a CSV row carries no bank reference, so this parser supplies no
+ * dedupKey and insertTransactions computes one from the row's stable fields. That
+ * requires the whole file to be inserted in one call, which it is - a statement
+ * covers whole days, so every group of identical rows arrives complete.
  */
-import crypto from 'crypto';
 import { categorize } from '../categorizer';
 import {
   insertTransactions,
   recalcAccountBalanceFromTransactions,
   upsertAccount,
 } from '../db';
-import { Transaction } from '../types';
+import { NewTransaction } from '../types';
 
 // ---------- CSV parsing ----------
 
@@ -225,7 +224,7 @@ export function parseCsvDate(raw: string, format: CsvMapping['dateFormat'] = 'au
 // ---------- import ----------
 
 export interface CsvImportRequest {
-  /** the account name in the app ("Sparkasse Giro"); also the dedup key */
+  /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
   accountName: string;
   /** the account's currency (if the file has no currency column) */
   currency: string;
@@ -305,9 +304,7 @@ export async function importCsv(req: CsvImportRequest): Promise<CsvImportResult>
     ? { col: colIndex(effective.onlyWhen.column), equals: effective.onlyWhen.equals }
     : null;
 
-  const txs: Transaction[] = [];
-  // the ordinal among identical rows of the file is part of the id (see the file header)
-  const seen = new Map<string, number>();
+  const txs: NewTransaction[] = [];
   let skipped = 0;
 
   for (let i = 1; i < rows.length; i++) {
@@ -335,17 +332,7 @@ export async function importCsv(req: CsvImportRequest): Promise<CsvImportResult>
         ? row[currencyCol].trim().toUpperCase()
         : req.currency.toUpperCase();
 
-    const contentKey = `${date}|${amount}|${description}|${currency}`;
-    const n = (seen.get(contentKey) ?? 0) + 1;
-    seen.set(contentKey, n);
-    const hash = crypto
-      .createHash('sha256')
-      .update(`${contentKey}|${n}`)
-      .digest('hex')
-      .slice(0, 32);
-
     txs.push({
-      id: `${accountId}:h:${hash}`,
       accountId,
       provider: 'csv',
       amount,

@@ -88,6 +88,18 @@ export interface Transaction {
   oneOff?: boolean;
 }
 
+/**
+ * A parsed transaction on its way into the database. It has no id yet: the id is
+ * a surrogate assigned by insertTransactions, and nothing outside the data layer
+ * constructs one.
+ *
+ * dedupKey is the provider's own stable reference to the operation (Monobank's
+ * operation id, Enable Banking's entry_reference). Providers that have no such
+ * reference — CSV, and the banks that omit entry_reference — leave it unset and
+ * insertTransactions computes one.
+ */
+export type NewTransaction = Omit<Transaction, 'id'> & { dedupKey?: string };
+
 /** Total for a category in the base currency. */
 export interface CategorySummary {
   category: string;

@@ -20,6 +20,7 @@
  *  - ROUND(double) is round-half-to-even - money rounding casts to ::numeric
  *    first, which rounds half away from zero like toCents() in money.ts.
  */
+import crypto from 'crypto';
 import path from 'path';
 import { and, asc, eq, getTableColumns, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -37,10 +38,12 @@ import {
   IncomeSourceDef,
   IncomeSourceKind,
   MonthTotals,
+  NewTransaction,
   Summary,
   Transaction,
   TransferRule,
 } from '../types';
+import { computedDedupKey, dedupGroup } from './dedup';
 import * as s from './schema';
 import { currentWorkspaceId } from './workspace';
 
@@ -354,20 +357,64 @@ export async function getAccount(id: string): Promise<Account | undefined> {
 
 // ---------- transactions ----------
 
-/** Inserts a batch of transactions, silently skipping duplicates (by id). Returns the number of new ones. */
-export async function insertTransactions(txs: Transaction[]): Promise<number> {
+/**
+ * Inserts a batch of transactions, silently skipping ones already there. Returns
+ * the number of genuinely new rows.
+ *
+ * Identity and deduplication are two different things here (see ROADMAP 4.2):
+ * `id` is a fresh UUID that never changes, and duplicates are caught by the
+ * UNIQUE (workspace_id, account_id, dedup_key) index instead.
+ *
+ * Providers that have a stable reference of their own supply it as dedupKey; the
+ * rest get one computed here (the format, and why the description is not part of
+ * it, are in ./dedup.ts).
+ *
+ * Ordinals for computed keys are numbered from 1 within each group, over the
+ * whole batch (before chunking - restarting per chunk would collide the second
+ * chunk's rows with the first's and drop them). Numbering from 1 rather than
+ * continuing from what the database already holds is what makes re-importing
+ * idempotent: existing ordinals in a group are dense 1..E, so of k incoming rows
+ * the first min(E, k) collide and are skipped, and only a genuinely larger k
+ * inserts anything. The database does the comparison, via the unique index.
+ *
+ * This is exact as long as a batch is complete for every group it touches - all
+ * k rows of a day arrive in one call. Statement windows are whole days, so a CSV
+ * file is; providers that paginate must accumulate their pages before calling
+ * (see enablebanking.ts).
+ *
+ * A duplicate is skipped, never merged: the existing row keeps its description,
+ * its category and the user's manual marks. Correcting facts on a re-parse is
+ * the imports table's job (ROADMAP 4.4), not this one's.
+ */
+export async function insertTransactions(txs: NewTransaction[]): Promise<number> {
   if (txs.length === 0) return 0;
   const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
-  // transactions already in the base currency need no conversion - fill it now;
-  // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
-  const values = txs.map((t) => {
+  const ordinals = new Map<string, number>();
+  // a provider handing us the same native reference twice in one batch: PG would
+  // resolve it, but the returned count is easier to trust if it never happens
+  const batchKeys = new Set<string>();
+  const values: (typeof s.transactions.$inferInsert)[] = [];
+  for (const t of txs) {
     const amountCents = toCents(t.amount);
+    let dedupKey = t.dedupKey;
+    if (!dedupKey) {
+      const day = t.date.slice(0, 10);
+      const group = dedupGroup(t.accountId, day, amountCents, t.currency);
+      const n = (ordinals.get(group) ?? 0) + 1;
+      ordinals.set(group, n);
+      dedupKey = computedDedupKey(day, amountCents, t.currency, n);
+    }
+    if (batchKeys.has(`${t.accountId}|${dedupKey}`)) continue;
+    batchKeys.add(`${t.accountId}|${dedupKey}`);
+    // transactions already in the base currency need no conversion - fill it now;
+    // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
     const isBase = t.currency === baseCurrency;
-    return {
+    values.push({
       workspaceId: w,
-      id: t.id,
+      id: crypto.randomUUID(),
       accountId: t.accountId,
+      dedupKey,
       provider: t.provider,
       amountCents,
       currency: t.currency,
@@ -377,15 +424,17 @@ export async function insertTransactions(txs: Transaction[]): Promise<number> {
       category: t.category,
       baseAmountCents: isBase ? amountCents : null,
       fxRate: isBase ? 1 : null,
-    };
-  });
+    });
+  }
   let inserted = 0;
   await getDb().transaction(async (tx) => {
     for (const chunk of chunked(values, 1000)) {
       const res = await tx
         .insert(s.transactions)
         .values(chunk)
-        .onConflictDoNothing({ target: [s.transactions.workspaceId, s.transactions.id] })
+        .onConflictDoNothing({
+          target: [s.transactions.workspaceId, s.transactions.accountId, s.transactions.dedupKey],
+        })
         .returning({ id: s.transactions.id });
       inserted += res.length;
     }
