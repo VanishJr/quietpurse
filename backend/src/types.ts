@@ -1,4 +1,5 @@
-export type Provider = 'monobank' | 'enablebanking' | 'csv';
+/** Where the data came from. 'upload' is a statement the user brought in, in any format. */
+export type Provider = 'monobank' | 'enablebanking' | 'upload';
 
 export interface Account {
   id: string;

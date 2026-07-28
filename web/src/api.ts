@@ -71,8 +71,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new UnauthorizedError();
   }
   if (!res.ok) {
+    // the API reports a failure as { error } and the sentence in it is written for
+    // the user ("export the statement as CSV or Excel…"); showing the raw body
+    // buries it in JSON on every screen
     const body = await res.text();
-    throw new Error(`${res.status}: ${body.slice(0, 200)}`);
+    let message = `${res.status}: ${body}`;
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed.error === 'string') message = parsed.error;
+    } catch {
+      // not JSON — the status and the body are all there is
+    }
+    throw new Error(message.slice(0, 200));
   }
   return (await res.json()) as T;
 }
@@ -309,15 +319,16 @@ export const api = {
 
   onboardingStatus: () => request<OnboardingStatus>('/api/onboarding/status'),
 
-  /** CSV statement import: any bank without an API. */
-  csvImport: (payload: {
-    accountName: string;
-    currency: string;
-    preset?: string;
-    csv: string;
-  }) => request<CsvImportResult>('/api/csv/import', json('POST', payload)),
+  /**
+   * Statement import: any bank without an API. One endpoint for every format —
+   * the file field carries the bytes and the backend works out what they are. No
+   * Content-Type here on purpose: the browser sets it, with the multipart boundary.
+   */
+  importStatement: (form: FormData) =>
+    request<CsvImportResult>('/api/imports', { method: 'POST', body: form }),
 
-  csvPresets: () => request<{ presets: { key: string; title: string }[] }>('/api/csv/presets'),
+  importPresets: () =>
+    request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),
 };
 
 /**

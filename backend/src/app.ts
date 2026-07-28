@@ -6,6 +6,8 @@
  * scoping are the parts most worth testing, and they only exist here.
  */
 import express from 'express';
+import multer from 'multer';
+import { z } from 'zod';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { ensureWorkspace, getAuth } from './auth';
 import { CATEGORIES } from './categorizer';
@@ -63,9 +65,10 @@ import {
 } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
-import { logCsv, logHttp, logger } from './logger';
-import { CSV_PRESETS, CsvImportRequest, importCsv } from './providers/csv';
+import { logHttp, logImport, logger } from './logger';
+import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { completeAuth, ebConfigured, listAspsps, startAuth } from './providers/enablebanking';
+import { importStatement } from './providers/statement';
 import { getAppSettings, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
 import { getSyncStatus, scheduleAutoSync, startSync } from './sync';
@@ -174,8 +177,9 @@ app.use(async (req, res, next) => {
 
 // Body parsing sits AFTER the session check on purpose: with a 25 MB limit,
 // parsing before authenticating would let anyone who can reach the port make the
-// server chew through 25 MB of JSON per request for free.
-// (The limit itself is for CSV statements covering years - 100 kb is not enough.)
+// server chew through 25 MB of JSON per request for free. The multipart parser on
+// /api/imports obeys the same rule, and for the same reason.
+// (The limit itself is for a backup restored as JSON - 100 kb is not enough.)
 app.use(express.json({ limit: '25mb' }));
 
 const q = (v: unknown): string | undefined =>
@@ -723,55 +727,199 @@ app.get('/api/export.csv', async (req, res) => {
   res.send('\uFEFF' + [header, ...lines].join('\n'));
 });
 
-// ---------- CSV import ----------
+// ---------- imports: the one upload surface, and provenance ----------
+
+/** 25 MB of statement is years of transactions in any format we read. */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** One constant per limit, so the number enforced and the number in the message agree. */
+const UPLOAD_LIMITS = {
+  fileSize: MAX_UPLOAD_BYTES,
+  files: 1,
+  fields: 10,
+  fieldSize: 1024 * 1024, // multer's own default, written down
+};
+
+/**
+ * The file lands in memory, never on disk: the hash is over the bytes and the XLSX
+ * reader takes a Buffer. Mounted per route rather than globally, and therefore
+ * below the session check - a global multipart parser would let anyone who can
+ * reach the port make the server buffer 25 MB per request (see the note there).
+ */
+const upload = multer({ storage: multer.memoryStorage(), limits: UPLOAD_LIMITS });
+
+/**
+ * multer's own errors, answered by this endpoint instead of as a 500 by the global
+ * handler. One message per code: a field over the size limit reported as a problem
+ * with the file field sends the caller looking in the wrong place, and the caller
+ * that hits these is the mobile client, which has no screen to read the code off.
+ */
+function uploadError(err: unknown): string {
+  if (!(err instanceof multer.MulterError)) return 'the upload is not a valid multipart form';
+  // caller-supplied, and on its way into a response body
+  const field = String(err.field ?? 'form').slice(0, 40);
+  const mb = (bytes: number): number => bytes / 1024 / 1024;
+  switch (err.code) {
+    case 'LIMIT_FILE_SIZE':
+      return `the file is larger than ${mb(UPLOAD_LIMITS.fileSize)} MB`;
+    case 'LIMIT_UNEXPECTED_FILE':
+    case 'LIMIT_FILE_COUNT':
+    case 'LIMIT_PART_COUNT':
+      return 'the upload must carry exactly one file field named "file"';
+    case 'LIMIT_FIELD_VALUE':
+      return `the "${field}" field is larger than ${mb(UPLOAD_LIMITS.fieldSize)} MB - it carries text, not the statement`;
+    case 'LIMIT_FIELD_COUNT':
+      return `the upload carries more than ${UPLOAD_LIMITS.fields} form fields`;
+    case 'LIMIT_FIELD_KEY':
+      return `a form field name is too long ("${field}")`;
+    default:
+      return `the upload could not be read (${err.code})`;
+  }
+}
+
+const uploadFile: express.RequestHandler = (req, res, next) => {
+  upload.single('file')(req, res, (err: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    res.status(400).json({ error: uploadError(err) });
+  });
+};
+
+/** A column name from the file's header. Empty is not a name - it resolves to nothing. */
+const column = (field: string) =>
+  z
+    .string({ error: `mapping.${field} must be a string` })
+    .trim()
+    .min(1, { error: `mapping.${field} must not be empty` });
+
+/**
+ * The mapping is the one field of this request the user writes by hand, so it is
+ * checked rather than cast: a number where a column name belongs used to reach the
+ * parser, throw "name.trim is not a function", and land that string in the import's
+ * error_detail. Strict, because a stripped unknown key ("date_format" for
+ * "dateFormat") imports the file against the wrong date format and answers 200.
+ *
+ * Tied to CsvMapping at both ends: the shape must name every column of it, and the
+ * result must still be one - a field added there cannot quietly go unchecked here.
+ */
+const mappingSchema: z.ZodType<Partial<CsvMapping>> = z.strictObject({
+  date: column('date').optional(),
+  amount: column('amount').optional(),
+  description: z
+    .union([column('description'), z.array(column('description')).min(1)], {
+      error: 'mapping.description must be a column name or a list of column names',
+    })
+    .optional(),
+  currency: column('currency').optional(),
+  dateFormat: z
+    .enum(['iso', 'dmy', 'auto'], { error: 'mapping.dateFormat must be iso, dmy or auto' })
+    .optional(),
+  decimal: z
+    .enum([',', '.', 'auto'], { error: "mapping.decimal must be ',', '.' or auto" })
+    .optional(),
+  // parseCsv compares one character at a time, so a longer delimiter never matches
+  // and the whole file parses as a single column
+  delimiter: z
+    .string({ error: 'mapping.delimiter must be a string' })
+    .length(1, { error: 'mapping.delimiter must be a single character' })
+    .optional(),
+  onlyWhen: z
+    .strictObject({
+      column: column('onlyWhen.column'),
+      equals: z.string({ error: 'mapping.onlyWhen.equals must be a string' }),
+    })
+    .optional(),
+} satisfies Record<keyof CsvMapping, z.ZodType>);
+
+type ParsedMapping = { ok: true; mapping: Partial<CsvMapping> } | { ok: false; error: string };
+
+/** The mapping travels as a JSON string: multipart carries text fields, not objects. */
+function parseMapping(raw: string): ParsedMapping {
+  let input: unknown;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: 'mapping must be a JSON object' };
+  }
+  // ahead of the schema, so "this is not a mapping at all" keeps its own wording
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, error: 'mapping must be a JSON object' };
+  }
+  const parsed = mappingSchema.safeParse(input);
+  if (parsed.success) return { ok: true, mapping: parsed.data };
+  const issue = parsed.error.issues[0];
+  return {
+    ok: false,
+    error:
+      issue?.code === 'unrecognized_keys'
+        ? `mapping has an unknown field: ${issue.keys.map((k) => `"${k}"`).join(', ')}`
+        : (issue?.message ?? 'mapping is not a valid column mapping'),
+  };
+}
 
 /** Mapping presets + generic with column auto-detection. */
-app.get('/api/csv/presets', (_req, res) => {
+app.get('/api/imports/presets', (_req, res) => {
   res.json({
     presets: [
-      { key: 'generic', title: 'Any CSV (auto-detect date/amount/description columns)' },
+      { key: 'generic', title: 'Any statement (auto-detect the date, amount and description columns)' },
       ...Object.entries(CSV_PRESETS).map(([key, p]) => ({ key, title: p.title })),
     ],
   });
 });
 
 /**
- * A statement from any bank. The rows go through the common pipeline: insert ->
- * reclassify -> convert to the base currency. A file already imported into this
- * workspace answers 200 with duplicate: true and is not parsed again; rows that
- * survive that and are already in the database are dropped by the dedup key.
+ * A statement from any bank, in whatever format it was downloaded: the file type
+ * is sniffed from its bytes, not from its name. The rows go through the common
+ * pipeline: insert -> reclassify -> convert to the base currency. A file already
+ * imported into this workspace answers 200 with duplicate: true and is not parsed
+ * again; rows that survive that and are already in the database are dropped by the
+ * dedup key.
  */
-app.post('/api/csv/import', async (req, res) => {
-  const body = req.body as Partial<CsvImportRequest>;
-  if (typeof body.accountName !== 'string' || !body.accountName.trim()) {
+app.post('/api/imports', uploadFile, async (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const accountName = typeof body.accountName === 'string' ? body.accountName.trim() : '';
+  const currency = typeof body.currency === 'string' ? body.currency.trim() : '';
+  if (!accountName) {
     res.status(400).json({ error: 'accountName field required' });
     return;
   }
-  if (typeof body.currency !== 'string' || !/^[A-Za-z]{3}$/.test(body.currency.trim())) {
+  if (!/^[A-Za-z]{3}$/.test(currency)) {
     res.status(400).json({ error: 'currency field required (3-letter ISO code)' });
     return;
   }
-  if (typeof body.csv !== 'string' || !body.csv.trim()) {
-    res.status(400).json({ error: 'csv field required with the file contents' });
+  if (!req.file) {
+    res.status(400).json({ error: 'file field required (the statement itself)' });
     return;
   }
+  const rawMapping = typeof body.mapping === 'string' ? body.mapping.trim() : '';
+  let mapping: Partial<CsvMapping> | undefined;
+  if (rawMapping) {
+    const parsed = parseMapping(rawMapping);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
+      return;
+    }
+    mapping = parsed.mapping;
+  }
   try {
-    const result = await importCsv({
-      accountName: body.accountName.trim(),
-      currency: body.currency.trim(),
+    const result = await importStatement({
+      accountName,
+      currency,
       preset: typeof body.preset === 'string' ? body.preset : undefined,
-      mapping: typeof body.mapping === 'object' && body.mapping ? body.mapping : undefined,
-      csv: body.csv,
-      originalFilename: typeof body.originalFilename === 'string' ? body.originalFilename : undefined,
+      mapping,
+      bytes: req.file.buffer,
+      originalFilename: req.file.originalname || undefined,
       uploadedBy: res.locals.userId as string | undefined,
     });
     if (result.duplicate) {
       const where = result.accountIds.join(', ') || 'no account (its rows were already there)';
-      logCsv.info(`already imported as ${result.importId}, rows in ${where}`);
+      logImport.info(`already imported as ${result.importId}, rows in ${where}`);
       res.json(result);
       return;
     }
-    logCsv.info(
+    logImport.info(
       `import into ${result.accountId}: new ${result.inserted}, skipped ${result.skipped} of ${result.total}`,
     );
     await reclassifyAll(); // categories, transfers, sources, base_amount
@@ -780,8 +928,6 @@ app.post('/api/csv/import', async (req, res) => {
     res.status(400).json({ error: (e as Error).message });
   }
 });
-
-// ---------- imports (provenance) ----------
 
 app.get('/api/imports', async (_req, res) => {
   res.json({ imports: await listImports() });

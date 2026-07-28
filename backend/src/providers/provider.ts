@@ -4,10 +4,10 @@
  * (Monobank - 31-day windows with a 60 s pause, Enable Banking - continuation_key);
  * all it exposes is "am I configured" and "sync, reporting back here".
  *
- * CSV is a provider too, but a push-model one: it has no sync (the user brings the
- * statement in through POST /api/csv/import), so it is not in the SYNC_PROVIDERS
- * registry. The shared part of the pipeline - insertTransactions + reclassifyAll -
- * is the same for all of them.
+ * An uploaded statement is a provider too, but a push-model one: it has no sync
+ * (the user brings the file in through POST /api/imports), so it is not in the
+ * SYNC_PROVIDERS registry. The shared part of the pipeline - insertTransactions +
+ * reclassifyAll - is the same for all of them.
  */
 
 /** Where a provider reports progress during a sync. */

@@ -3,6 +3,7 @@ import { api, apiLabel, backupUrl, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
 import { CsvImport } from '../components/CsvImport';
 import { fmtDate, fmtMoney } from '../format';
+import { providerLabel } from '../providers';
 import { ThemeMode, useTheme } from '../theme';
 import { Account, RecurringSummary, SyncJournalRun, SyncStatus } from '../types';
 
@@ -183,7 +184,7 @@ export function OverviewScreen({
           <div className="row-main">
             <div className={`row-title${item.hidden ? ' muted-strike' : ''}`}>{item.name}</div>
             <div className="row-sub">
-              {item.provider}
+              {providerLabel(item.provider)}
               {item.hidden ? ' · removed' : ''}
             </div>
           </div>

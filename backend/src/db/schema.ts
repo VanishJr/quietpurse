@@ -175,10 +175,10 @@ export const imports = pgTable(
   {
     workspaceId: workspaceId(),
     id: text('id').notNull(),
-    // sha256 of the bytes handed to the parser - not necessarily the bytes on the
-    // user's disk (today the CSV arrives as a JSON string, see providers/csv.ts)
+    // sha256 of the raw uploaded bytes - the file on the user's disk, hashed
+    // before any decoding, sniffing or parsing (see providers/statement.ts)
     fileHash: text('file_hash').notNull(),
-    sourceType: text('source_type', { enum: ['csv'] }).notNull(),
+    sourceType: text('source_type', { enum: ['csv', 'xlsx'] }).notNull(),
     originalFilename: text('original_filename'),
     // user.id at upload time, deliberately NOT a foreign key: a backup restores
     // onto another server, where that user does not exist

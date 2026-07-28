@@ -3,8 +3,16 @@ import { api } from '../api';
 import { CsvImportResult } from '../types';
 import { Chips } from './Chips';
 
-/** Fallback if /api/csv/presets is unreachable — the backend ships these too. */
-const FALLBACK_PRESETS = [{ key: 'generic', title: 'Any CSV' }];
+/** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
+const FALLBACK_PRESETS = [{ key: 'generic', title: 'Any statement' }];
+
+const ACCEPTED =
+  '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+const isCsvName = (name: string): boolean => /\.csv$/i.test(name);
+
+/** Above this a file is not read in the browser just to count its lines. */
+const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 interface Props {
   /** Shown as a panel with a back link; omitted — inline (the first-run wizard). */
@@ -26,7 +34,10 @@ export function CsvImport({ onBack, onImported }: Props) {
   const [accountName, setAccountName] = useState('');
   const [currency, setCurrency] = useState('EUR');
   const [csvText, setCsvText] = useState('');
-  const [fileName, setFileName] = useState('');
+  /** the chosen file itself: a workbook is bytes, and only the backend can read it */
+  const [file, setFile] = useState<File | null>(null);
+  /** row count for the preview — null for a file we can't count lines in */
+  const [fileRows, setFileRows] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,31 +46,37 @@ export function CsvImport({ onBack, onImported }: Props) {
 
   // the preset list lives on the backend; keeping a second copy here would drift
   useEffect(() => {
-    api.csvPresets().then((r) => setPresets(r.presets)).catch(() => {});
+    api.importPresets().then((r) => setPresets(r.presets)).catch(() => {});
   }, []);
 
-  const takeFile = async (file: File | undefined) => {
-    if (!file) return;
+  const takeFile = async (picked: File | undefined) => {
+    if (!picked) return;
     setError(null);
     setResult(null);
-    setFileName(file.name);
-    setCsvText(await file.text());
+    setFile(picked);
+    setCsvText('');
+    // lines are a row count for a CSV and nonsense for a workbook, which is a zip —
+    // and a big file is not worth reading into the tab twice just to count them
+    const lines =
+      isCsvName(picked.name) && picked.size <= MAX_PREVIEW_BYTES
+        ? (await picked.text()).trim().split(/\r?\n/).length - 1
+        : null;
+    setFileRows(lines);
     // a sensible default the user can still edit
-    if (!accountName.trim()) setAccountName(file.name.replace(/\.csv$/i, ''));
+    if (!accountName.trim()) setAccountName(picked.name.replace(/\.(csv|xlsx)$/i, ''));
   };
-
-  const rowCount = csvText ? csvText.trim().split(/\r?\n/).length - 1 : 0;
 
   const runImport = async () => {
     setBusy(true);
     try {
       setError(null);
-      const r = await api.csvImport({
-        accountName: accountName.trim(),
-        currency: currency.trim(),
-        preset,
-        csv: csvText,
-      });
+      const form = new FormData();
+      form.append('accountName', accountName.trim());
+      form.append('currency', currency.trim());
+      form.append('preset', preset);
+      // the paste fallback goes through the same endpoint: it is a file too
+      form.append('file', file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' }));
+      const r = await api.importStatement(form);
       setResult(r);
       onImported?.();
     } catch (e) {
@@ -82,7 +99,7 @@ export function CsvImport({ onBack, onImported }: Props) {
 
       <p className="hint">
         Any bank that lets you download a statement works here, whether it has an API or
-        not. Export it as CSV — in most banks that's "Export" or "Download" in the
+        not. Export it as CSV or Excel — in most banks that's "Export" or "Download" in the
         transaction list — and drop the file below. Nothing is uploaded anywhere: the file
         goes to your own backend and into your own database.
       </p>
@@ -114,21 +131,26 @@ export function CsvImport({ onBack, onImported }: Props) {
         }}
         role="button"
         tabIndex={0}
-        aria-label="Choose a CSV statement file"
+        aria-label="Choose a CSV or Excel statement file"
       >
         <div className="dropzone-icon" aria-hidden="true">
           ⭳
         </div>
-        {fileName ? (
+        {file ? (
           <>
-            <div className="dropzone-title">{fileName}</div>
+            <div className="dropzone-title">{file.name}</div>
             <div className="dropzone-sub">
-              {rowCount > 0 ? `${rowCount} rows` : 'empty file'} · click to choose another
+              {fileRows === null
+                ? `${Math.max(1, Math.round(file.size / 1024))} kB`
+                : fileRows > 0
+                  ? `${fileRows} rows`
+                  : 'empty file'}{' '}
+              · click to choose another
             </div>
           </>
         ) : (
           <>
-            <div className="dropzone-title">Drop a .csv statement here</div>
+            <div className="dropzone-title">Drop a .csv or .xlsx statement here</div>
             <div className="dropzone-sub">or click to choose a file</div>
           </>
         )}
@@ -136,7 +158,7 @@ export function CsvImport({ onBack, onImported }: Props) {
       <input
         ref={fileInput}
         type="file"
-        accept=".csv,text/csv"
+        accept={ACCEPTED}
         hidden
         onChange={(e) => takeFile(e.target.files?.[0])}
       />
@@ -145,14 +167,14 @@ export function CsvImport({ onBack, onImported }: Props) {
         Column layout
       </label>
       <Chips
-        label="CSV preset"
+        label="Statement preset"
         options={presets.map((p) => ({ key: p.key, label: p.title }))}
         selected={preset}
         onSelect={setPreset}
       />
       <p className="hint">
-        Pick your bank if it's listed. "Any CSV" reads the header and finds the date,
-        amount and description columns on its own — try it first.
+        Pick your bank if it's listed. "Any statement" reads the header and finds the
+        date, amount and description columns on its own — try it first.
       </p>
 
       <label className="setting-label" htmlFor="csv-account">
@@ -183,16 +205,22 @@ export function CsvImport({ onBack, onImported }: Props) {
       {/* paste fallback: some banks only show the statement in a browser window */}
       <details>
         <summary className="btn-link">…or paste the contents instead</summary>
+        <p className="hint" style={{ marginTop: 8 }}>
+          Pasting here replaces the chosen file.
+        </p>
         <textarea
           className="input csv-input"
-          style={{ marginTop: 8 }}
           value={csvText}
           onChange={(e) => {
             setCsvText(e.target.value);
-            setFileName('');
+            setFile(null);
+            setFileRows(null);
+            // a success card left standing over new input reads as this one's result
+            setError(null);
+            setResult(null);
           }}
           placeholder="Buchungstag;Betrag;Verwendungszweck…"
-          aria-label="CSV contents"
+          aria-label="Statement contents"
         />
       </details>
 
@@ -201,7 +229,7 @@ export function CsvImport({ onBack, onImported }: Props) {
       <button
         className="btn"
         style={{ display: 'block', width: '100%', marginTop: 12 }}
-        disabled={busy || !accountName.trim() || !csvText.trim()}
+        disabled={busy || !accountName.trim() || (!file && !csvText.trim())}
         onClick={runImport}
       >
         {busy ? 'Importing…' : 'Import'}
