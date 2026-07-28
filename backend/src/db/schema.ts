@@ -10,9 +10,11 @@
  *  - fx_rate is a ratio, not money - double precision.
  * What did change: INTEGER 0/1 flags became real booleans.
  */
+import { sql } from 'drizzle-orm';
 import {
   boolean,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -163,6 +165,67 @@ export const accounts = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.id] })],
 );
 
+/**
+ * One uploaded file, and the provenance of everything it produced (ROADMAP 4.4).
+ * Deleting a row here takes its transactions with it - that is the whole point,
+ * and deleteImport (./index.ts) is the only sanctioned path to it.
+ */
+export const imports = pgTable(
+  'imports',
+  {
+    workspaceId: workspaceId(),
+    id: text('id').notNull(),
+    // sha256 of the bytes handed to the parser - not necessarily the bytes on the
+    // user's disk (today the CSV arrives as a JSON string, see providers/csv.ts)
+    fileHash: text('file_hash').notNull(),
+    sourceType: text('source_type', { enum: ['csv'] }).notNull(),
+    originalFilename: text('original_filename'),
+    // user.id at upload time, deliberately NOT a foreign key: a backup restores
+    // onto another server, where that user does not exist
+    uploadedBy: text('uploaded_by'),
+    uploadedAt: text('uploaded_at').notNull(),
+    // per parser, keyed by source_type: what makes re-parsing targetable later
+    parserVersion: integer('parser_version').notNull(),
+    /**
+     * pending = written, outcome unknown (the process died mid-import, same
+     * convention as sync_log.ok = NULL); committed = its rows are in the
+     * database; failed = the import did not complete. Usually that means the
+     * parse threw before anything was written, but the failure is caught around
+     * the inserts too - so whatever rows a failed import did write stay attached
+     * to it, and go with it when it is deleted.
+     *
+     * ROADMAP 4.4 expects this column to also carry *parsed but unconfirmed*, so
+     * that roadmap item 7 needs no staging table. This lifecycle does not deliver
+     * that: rows exist only for committed imports. Item 7 has to add either an
+     * insert at `pending` plus a status filter on every read path, or the staging
+     * table this was meant to avoid.
+     */
+    status: text('status', { enum: ['pending', 'committed', 'failed'] }).notNull(),
+    // rows the parser turned into transactions, and rows it could not use. How many
+    // of the accepted ones were genuinely new is a COUNT over transactions.import_id
+    rowsAccepted: integer('rows_accepted').notNull().default(0),
+    rowsRejected: integer('rows_rejected').notNull().default(0),
+    // the failure message, truncated; never a stack trace - it lands in the backup
+    errorDetail: text('error_detail'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.id] }),
+    /**
+     * Layer 1 of the duplicate defence (ROADMAP 4.3): the same file twice.
+     * Only `committed` blocks - a failed parse must be retryable with the same
+     * bytes, and a `pending` corpse must not answer "already imported" for rows
+     * that were never written.
+     *
+     * The cost: two concurrent uploads of one file no longer serialise on this
+     * index. Accepted - the transactions dedup index still refuses the duplicate
+     * rows, so the worst case is a second imports row owning nothing.
+     */
+    uniqueIndex('imports_file_hash_unique')
+      .on(t.workspaceId, t.fileHash)
+      .where(sql`status = 'committed'`),
+  ],
+);
+
 export const transactions = pgTable(
   'transactions',
   {
@@ -198,15 +261,32 @@ export const transactions = pgTable(
     recurring: boolean('recurring').notNull().default(false),
     // one-off large purchase: spread over 12 months in the goal calculation
     oneOff: boolean('one_off').notNull().default(false),
+    /**
+     * The import that FIRST wrote this row, or NULL for a bank sync. First
+     * writer, not every attestation: a later import whose file contains the same
+     * row inserts nothing and is recorded nowhere, so deleting this import
+     * removes the row even though that later import still asserts it (ROADMAP
+     * 4.4).
+     */
+    importId: text('import_id'),
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.id] }),
+    // composite, so a row can never point at another workspace's import. MATCH
+    // SIMPLE: with import_id NULL the constraint is not checked at all, which is
+    // what bank-sync rows need.
+    foreignKey({
+      columns: [t.workspaceId, t.importId],
+      foreignColumns: [imports.workspaceId, imports.id],
+    }).onDelete('cascade'),
     // the deduplication rule itself: one transaction per key per account. Scoped
     // to the workspace - two users importing the same statement must both keep
     // their rows.
     uniqueIndex('transactions_dedup_unique').on(t.workspaceId, t.accountId, t.dedupKey),
     index('idx_tx_account').on(t.workspaceId, t.accountId),
     index('idx_tx_date').on(t.workspaceId, t.date),
+    // PG does not index a foreign key for you, and the cascade delete scans on this
+    index('idx_tx_import').on(t.workspaceId, t.importId),
   ],
 );
 

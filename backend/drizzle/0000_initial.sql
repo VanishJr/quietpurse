@@ -77,6 +77,22 @@ CREATE TABLE "fx_rates" (
 	CONSTRAINT "fx_rates_workspace_id_date_currency_pk" PRIMARY KEY("workspace_id","date","currency")
 );
 --> statement-breakpoint
+CREATE TABLE "imports" (
+	"workspace_id" text NOT NULL,
+	"id" text NOT NULL,
+	"file_hash" text NOT NULL,
+	"source_type" text NOT NULL,
+	"original_filename" text,
+	"uploaded_by" text,
+	"uploaded_at" text NOT NULL,
+	"parser_version" integer NOT NULL,
+	"status" text NOT NULL,
+	"rows_accepted" integer DEFAULT 0 NOT NULL,
+	"rows_rejected" integer DEFAULT 0 NOT NULL,
+	"error_detail" text,
+	CONSTRAINT "imports_workspace_id_id_pk" PRIMARY KEY("workspace_id","id")
+);
+--> statement-breakpoint
 CREATE TABLE "income_sources" (
 	"workspace_id" text NOT NULL,
 	"id" text NOT NULL,
@@ -183,6 +199,7 @@ CREATE TABLE "transactions" (
 	"income_source_manual" text,
 	"recurring" boolean DEFAULT false NOT NULL,
 	"one_off" boolean DEFAULT false NOT NULL,
+	"import_id" text,
 	CONSTRAINT "transactions_workspace_id_id_pk" PRIMARY KEY("workspace_id","id")
 );
 --> statement-breakpoint
@@ -222,6 +239,7 @@ ALTER TABLE "category_rules" ADD CONSTRAINT "category_rules_workspace_id_organiz
 ALTER TABLE "eb_auth_state" ADD CONSTRAINT "eb_auth_state_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "eb_sessions" ADD CONSTRAINT "eb_sessions_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "fx_rates" ADD CONSTRAINT "fx_rates_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "imports" ADD CONSTRAINT "imports_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "income_sources" ADD CONSTRAINT "income_sources_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invitation" ADD CONSTRAINT "invitation_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "invitation" ADD CONSTRAINT "invitation_inviter_id_user_id_fk" FOREIGN KEY ("inviter_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -233,9 +251,11 @@ ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("
 ALTER TABLE "settings" ADD CONSTRAINT "settings_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sync_log" ADD CONSTRAINT "sync_log_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_workspace_id_import_id_imports_workspace_id_id_fk" FOREIGN KEY ("workspace_id","import_id") REFERENCES "public"."imports"("workspace_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_rules" ADD CONSTRAINT "transfer_rules_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "baseline_items_label_unique" ON "baseline_items" USING btree ("workspace_id","label");--> statement-breakpoint
 CREATE UNIQUE INDEX "category_rules_pattern_unique" ON "category_rules" USING btree ("workspace_id","pattern");--> statement-breakpoint
+CREATE UNIQUE INDEX "imports_file_hash_unique" ON "imports" USING btree ("workspace_id","file_hash") WHERE status = 'committed';--> statement-breakpoint
 CREATE INDEX "idx_member_user" ON "member" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_member_org" ON "member" USING btree ("organization_id");--> statement-breakpoint
 CREATE INDEX "idx_session_user" ON "session" USING btree ("user_id");--> statement-breakpoint
@@ -243,4 +263,5 @@ CREATE INDEX "idx_sync_log_started" ON "sync_log" USING btree ("workspace_id","s
 CREATE UNIQUE INDEX "transactions_dedup_unique" ON "transactions" USING btree ("workspace_id","account_id","dedup_key");--> statement-breakpoint
 CREATE INDEX "idx_tx_account" ON "transactions" USING btree ("workspace_id","account_id");--> statement-breakpoint
 CREATE INDEX "idx_tx_date" ON "transactions" USING btree ("workspace_id","date");--> statement-breakpoint
+CREATE INDEX "idx_tx_import" ON "transactions" USING btree ("workspace_id","import_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "transfer_rules_desc_account_unique" ON "transfer_rules" USING btree ("workspace_id","description","account_id");

@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commitImport,
+  createImport,
   exportBackup,
   getTransaction,
   insertTransactions,
+  listImports,
   listTransactions,
   parseBackup,
   restoreBackup,
@@ -45,6 +48,28 @@ describe('backup and restore (JSON)', () => {
     // keep the identity the annotations were attached to
     expect((await getTransaction(marked))!.oneOff).toBe(true);
     expect((await listTransactions({ accountId: 'acc1' })).length).toBeGreaterThanOrEqual(2);
+  });
+
+  /** imports restore before transactions, or import_id would have nothing to point at. */
+  it('an import and the provenance of its rows survive the round-trip', async () => {
+    const record = await createImport({
+      fileHash: 'backup-hash',
+      sourceType: 'csv',
+      parserVersion: 1,
+      originalFilename: 'statement.csv',
+    });
+    await commitImport(record.id, 1, 0);
+    await insertTransactions([tx('backup provenance', -33)], record.id);
+
+    await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
+
+    const restored = (await listImports()).find((i) => i.id === record.id)!;
+    expect(restored).toMatchObject({
+      fileHash: 'backup-hash',
+      originalFilename: 'statement.csv',
+      status: 'committed',
+    });
+    expect(restored.transactions).toBe(1);
   });
 
   it('parseBackup rejects files that are not a Finto backup', () => {

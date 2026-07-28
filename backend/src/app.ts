@@ -24,7 +24,9 @@ import {
   listWorkspaceIds,
   runWithWorkspace,
   deleteCategoryRule,
+  deleteImport,
   exportBackup,
+  listImports,
   parseBackup,
   restoreBackup,
   deleteIncomeSource,
@@ -165,6 +167,8 @@ app.use(async (req, res, next) => {
     active && memberships.includes(active)
       ? active
       : (memberships[0] ?? (await ensureWorkspace(dbInstance(), session.user.id)));
+  // who is acting, for the routes that record it (imports.uploaded_by)
+  res.locals.userId = session.user.id;
   runWithWorkspace(workspaceId, () => next());
 });
 
@@ -733,8 +737,9 @@ app.get('/api/csv/presets', (_req, res) => {
 
 /**
  * A statement from any bank. The rows go through the common pipeline: insert ->
- * reclassify -> convert to the base currency. Duplicates on a repeated upload are
- * filtered out by a hash of the row's contents.
+ * reclassify -> convert to the base currency. A file already imported into this
+ * workspace answers 200 with duplicate: true and is not parsed again; rows that
+ * survive that and are already in the database are dropped by the dedup key.
  */
 app.post('/api/csv/import', async (req, res) => {
   const body = req.body as Partial<CsvImportRequest>;
@@ -757,7 +762,15 @@ app.post('/api/csv/import', async (req, res) => {
       preset: typeof body.preset === 'string' ? body.preset : undefined,
       mapping: typeof body.mapping === 'object' && body.mapping ? body.mapping : undefined,
       csv: body.csv,
+      originalFilename: typeof body.originalFilename === 'string' ? body.originalFilename : undefined,
+      uploadedBy: res.locals.userId as string | undefined,
     });
+    if (result.duplicate) {
+      const where = result.accountIds.join(', ') || 'no account (its rows were already there)';
+      logCsv.info(`already imported as ${result.importId}, rows in ${where}`);
+      res.json(result);
+      return;
+    }
     logCsv.info(
       `import into ${result.accountId}: new ${result.inserted}, skipped ${result.skipped} of ${result.total}`,
     );
@@ -766,6 +779,24 @@ app.post('/api/csv/import', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
+});
+
+// ---------- imports (provenance) ----------
+
+app.get('/api/imports', async (_req, res) => {
+  res.json({ imports: await listImports() });
+});
+
+/** Removes the import AND the transactions it wrote - the count is in the answer. */
+app.delete('/api/imports/:id', async (req, res) => {
+  const result = await deleteImport(req.params.id);
+  if (!result) {
+    res.status(404).json({ error: 'import not found' });
+    return;
+  }
+  logger.info(`import ${req.params.id} deleted: ${result.removed} transactions removed`);
+  await reclassifyAll(); // transfer pairing changes when the other leg disappears
+  res.json({ deleted: true, transactions: result.removed });
 });
 
 // ---------- backup / restore ----------

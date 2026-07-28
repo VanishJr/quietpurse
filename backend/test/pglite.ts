@@ -19,6 +19,7 @@ import { sql } from 'drizzle-orm';
  */
 const TABLES = [
   'accounts',
+  'imports',
   'transactions',
   'fx_rates',
   'category_rules',
