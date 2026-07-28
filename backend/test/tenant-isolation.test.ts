@@ -15,9 +15,14 @@ import {
   addCategoryRule,
   addTransferRule,
   baselineTotal,
+  commitImport,
+  createImport,
   dbInstance,
+  deleteImport,
   exportBackup,
+  findCommittedImportByHash,
   finishSyncLogEntry,
+  listImports,
   getMeta,
   getSetting,
   getTransaction,
@@ -82,6 +87,22 @@ async function forceSharedId(workspaceId: string, description: string): Promise<
 const JAN = '2026-01-01T00:00:00.000Z';
 const DEC = '2026-12-31T23:59:59.999Z';
 
+/** Both workspaces import a file with the same hash - see the imports test below. */
+const SHARED_FILE_HASH = 'the-same-statement-pdf';
+let myImportId = '';
+let theirImportId = '';
+
+async function importOf(label: string): Promise<string> {
+  const record = await createImport({
+    fileHash: SHARED_FILE_HASH,
+    sourceType: 'csv',
+    parserVersion: 1,
+    originalFilename: `${label}.csv`,
+  });
+  await commitImport(record.id, 1, 0);
+  return record.id;
+}
+
 beforeAll(async () => {
   await dbInstance().execute(
     sql`INSERT INTO organization (id, name, created_at) VALUES (${OTHER}, ${OTHER}, now())
@@ -114,6 +135,7 @@ beforeAll(async () => {
     await upsertIncomeSource({ id: 'freelance', label: 'Mine freelance', kind: 'own' });
     const run = await startSyncLogEntry('2026-03-01T00:00:00.000Z');
     await finishSyncLogEntry(run, true, 2, [], ['mine']);
+    myImportId = await importOf('mine');
   });
 
   await runWithWorkspace(OTHER, async () => {
@@ -138,6 +160,7 @@ beforeAll(async () => {
     await upsertIncomeSource({ id: 'freelance', label: 'Theirs freelance', kind: 'external' });
     const run = await startSyncLogEntry('2026-03-02T00:00:00.000Z');
     await finishSyncLogEntry(run, true, 2, [], ['theirs']);
+    theirImportId = await importOf('theirs');
   });
 
   await forceSharedId(TEST_WORKSPACE_ID, 'mine: groceries');
@@ -277,6 +300,43 @@ describe('workspace isolation', () => {
       const runs = await listSyncJournal(10);
       expect(runs).toHaveLength(1);
       expect(runs[0].log).toEqual(['theirs']);
+    });
+  });
+
+  /**
+   * The two imports share a file hash on purpose: the unique index behind the
+   * "already imported" check is workspace-scoped, so two people uploading the
+   * same statement must both get their own import - and neither may reach the
+   * other's, least of all with the delete that takes transactions with it.
+   */
+  it('imports are invisible and undeletable from another workspace', async () => {
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect((await listImports()).map((i) => i.id)).toEqual([myImportId]);
+      expect((await findCommittedImportByHash(SHARED_FILE_HASH))!.id).toBe(myImportId);
+      expect(await deleteImport(theirImportId)).toBeUndefined();
+    });
+    await runWithWorkspace(OTHER, async () => {
+      expect((await listImports()).map((i) => i.id)).toEqual([theirImportId]);
+      expect((await findCommittedImportByHash(SHARED_FILE_HASH))!.id).toBe(theirImportId);
+      expect(await deleteImport(myImportId)).toBeUndefined();
+    });
+  });
+
+  /** The composite foreign key: (workspace_id, import_id), not import_id alone. */
+  it('a transaction cannot be attached to another workspace import', async () => {
+    await expect(
+      runWithWorkspace(TEST_WORKSPACE_ID, () =>
+        insertTransactions(
+          // its own dedup group, or it would be skipped as a duplicate and the
+          // foreign key would never be reached
+          [tx({ description: 'stolen provenance', amount: -4321, date: '2026-09-09T00:00:00.000Z' })],
+          theirImportId,
+        ),
+      ),
+    ).rejects.toThrow();
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      const all = await listTransactions({ limit: 100 });
+      expect(all.find((t) => t.description === 'stolen provenance')).toBeUndefined();
     });
   });
 

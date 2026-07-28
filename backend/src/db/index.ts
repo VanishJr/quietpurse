@@ -22,7 +22,7 @@
  */
 import crypto from 'crypto';
 import path from 'path';
-import { and, asc, eq, getTableColumns, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -43,7 +43,15 @@ import {
   Transaction,
   TransferRule,
 } from '../types';
-import { computedDedupKey, dedupGroup } from './dedup';
+import {
+  COMPUTED_PREFIX,
+  computedDedupKey,
+  computedGroupPrefix,
+  computedKeyOrdinal,
+  dedupGroup,
+  parkedDedupKey,
+  withOrdinal,
+} from './dedup';
 import * as s from './schema';
 import { currentWorkspaceId } from './workspace';
 
@@ -385,8 +393,15 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  * A duplicate is skipped, never merged: the existing row keeps its description,
  * its category and the user's manual marks. Correcting facts on a re-parse is
  * the imports table's job (ROADMAP 4.4), not this one's.
+ *
+ * importId is the provenance of the rows this call actually inserts, and only
+ * those - a skipped duplicate keeps whatever import first wrote it (see
+ * transactions.import_id in ./schema.ts). Bank syncs pass nothing.
  */
-export async function insertTransactions(txs: NewTransaction[]): Promise<number> {
+export async function insertTransactions(
+  txs: NewTransaction[],
+  importId?: string,
+): Promise<number> {
   if (txs.length === 0) return 0;
   const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
@@ -424,6 +439,7 @@ export async function insertTransactions(txs: NewTransaction[]): Promise<number>
       category: t.category,
       baseAmountCents: isBase ? amountCents : null,
       fxRate: isBase ? 1 : null,
+      importId: importId ?? null,
     });
   }
   let inserted = 0;
@@ -664,6 +680,317 @@ export async function avgMonthlyByCategory(
     category: r.category,
     total: Math.round(Number(r.total_cents) / months) / 100,
   }));
+}
+
+// ---------- imports (provenance, ROADMAP 4.4) ----------
+
+type ImportRow = typeof s.imports.$inferSelect;
+
+export type ImportSourceType = ImportRow['sourceType'];
+export type ImportStatus = ImportRow['status'];
+
+export interface ImportRecord {
+  id: string;
+  fileHash: string;
+  sourceType: ImportSourceType;
+  originalFilename: string | null;
+  uploadedBy: string | null;
+  uploadedAt: string;
+  parserVersion: number;
+  status: ImportStatus;
+  /** rows the parser accepted / could not use */
+  rowsAccepted: number;
+  rowsRejected: number;
+  errorDetail: string | null;
+  /** transactions this import still owns - see transactions.import_id (first writer) */
+  transactions: number;
+}
+
+/** Long enough for any message the parsers produce; the rest is noise in a backup. */
+const ERROR_DETAIL_MAX = 500;
+
+const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => ({
+  id: r.id,
+  fileHash: r.fileHash,
+  sourceType: r.sourceType,
+  originalFilename: r.originalFilename,
+  uploadedBy: r.uploadedBy,
+  uploadedAt: r.uploadedAt,
+  parserVersion: r.parserVersion,
+  status: r.status,
+  rowsAccepted: r.rowsAccepted,
+  rowsRejected: r.rowsRejected,
+  errorDetail: r.errorDetail,
+  transactions: r.transactions ?? 0,
+});
+
+/**
+ * Layer 1 of the duplicate defence: has this exact file already been imported?
+ * Committed imports only: neither `failed` nor `pending` promises anything about
+ * what is in the database (see imports.status), and both must stay retryable
+ * with the same bytes.
+ */
+export async function findCommittedImportByHash(
+  fileHash: string,
+): Promise<ImportRecord | undefined> {
+  const rows = await getDb()
+    .select()
+    .from(s.imports)
+    .where(
+      and(
+        eq(s.imports.workspaceId, currentWorkspaceId()),
+        eq(s.imports.fileHash, fileHash),
+        eq(s.imports.status, 'committed'),
+      ),
+    );
+  return rows[0] ? rowToImport(rows[0]) : undefined;
+}
+
+/** The import row, written BEFORE parsing so that a crashed parse leaves a record. */
+export async function createImport(input: {
+  fileHash: string;
+  sourceType: ImportSourceType;
+  parserVersion: number;
+  originalFilename?: string;
+  uploadedBy?: string;
+}): Promise<ImportRecord> {
+  const rows = await getDb()
+    .insert(s.imports)
+    .values({
+      workspaceId: currentWorkspaceId(),
+      id: crypto.randomUUID(),
+      fileHash: input.fileHash,
+      sourceType: input.sourceType,
+      originalFilename: input.originalFilename ?? null,
+      uploadedBy: input.uploadedBy ?? null,
+      uploadedAt: new Date().toISOString(),
+      parserVersion: input.parserVersion,
+      status: 'pending',
+    })
+    .returning();
+  return rowToImport(rows[0]);
+}
+
+/** The parse worked and the rows are in: this is what makes the file a duplicate. */
+export async function commitImport(
+  id: string,
+  rowsAccepted: number,
+  rowsRejected: number,
+): Promise<void> {
+  await getDb()
+    .update(s.imports)
+    .set({ status: 'committed', rowsAccepted, rowsRejected })
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+}
+
+/**
+ * The import did not complete - the parse threw, or an insert after it did. The
+ * message only, truncated: it ends up in the JSON backup.
+ */
+export async function failImport(id: string, message: string): Promise<void> {
+  await getDb()
+    .update(s.imports)
+    .set({ status: 'failed', errorDetail: message.slice(0, ERROR_DETAIL_MAX) })
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+}
+
+/**
+ * Newest first, each with how many transactions it still owns - which is not
+ * rows_accepted: a row an earlier import already wrote belongs to that one.
+ */
+export async function listImports(limit = 100): Promise<ImportRecord[]> {
+  const w = currentWorkspaceId();
+  const rows = await getDb()
+    .select()
+    .from(s.imports)
+    .where(eq(s.imports.workspaceId, w))
+    .orderBy(sql`${s.imports.uploadedAt} DESC`, sql`${s.imports.id} DESC`)
+    .limit(limit > 0 ? limit : 100);
+  // counted separately rather than as a correlated subquery: inside a select
+  // field, drizzle renders a column reference unqualified, and the correlation
+  // quietly binds to the subquery's own table instead
+  const counts = await getDb()
+    .select({ importId: s.transactions.importId, n: sql<string>`COUNT(*)` })
+    .from(s.transactions)
+    .where(and(eq(s.transactions.workspaceId, w), isNotNull(s.transactions.importId)))
+    .groupBy(s.transactions.importId);
+  const owned = new Map(counts.map((c) => [c.importId, Number(c.n)]));
+  return rows.map((r) => rowToImport({ ...r, transactions: owned.get(r.id) ?? 0 }));
+}
+
+/**
+ * Where an import's rows actually are - which is not where a caller asked for
+ * them to go. Empty when the import owns nothing: everything it accepted had
+ * already been written by an earlier import (see transactions.import_id). That
+ * is not "nothing was imported".
+ */
+export async function listImportAccountIds(importId: string): Promise<string[]> {
+  const rows = await getDb()
+    .selectDistinct({ accountId: s.transactions.accountId })
+    .from(s.transactions)
+    .where(
+      and(
+        eq(s.transactions.workspaceId, currentWorkspaceId()),
+        eq(s.transactions.importId, importId),
+      ),
+    );
+  return rows.map((r) => r.accountId).sort();
+}
+
+/** Anything that can run a raw statement: the pool, or an open transaction. */
+type Executor = { execute: (q: SQL) => Promise<unknown> };
+
+async function rowsVia<T>(d: Executor, q: SQL): Promise<T[]> {
+  const res = (await d.execute(q)) as unknown as { rows: T[] };
+  return res.rows;
+}
+
+/**
+ * The (account, group prefix) pairs whose computed ordinals are about to lose
+ * rows. Called before the delete, while those rows still exist. A statement of a
+ * few thousand rows produces nearly as many groups, so everything downstream of
+ * this works on the whole set at once rather than per group.
+ */
+async function computedGroupsOf(
+  d: Executor,
+  importId: string,
+): Promise<{ accountId: string; prefix: string }[]> {
+  const rows = await rowsVia<{ account_id: string; dedup_key: string }>(
+    d,
+    sql`SELECT DISTINCT account_id, dedup_key FROM transactions
+        WHERE ${WS()} AND import_id = ${importId}
+          AND starts_with(dedup_key, ${COMPUTED_PREFIX})`,
+  );
+  const seen = new Map<string, { accountId: string; prefix: string }>();
+  for (const r of rows) {
+    const prefix = computedGroupPrefix(r.dedup_key);
+    seen.set(`${r.account_id}|${prefix}`, { accountId: r.account_id, prefix });
+  }
+  return [...seen.values()];
+}
+
+/** Rows are matched by (account, group prefix) pairs joined in as VALUES. */
+const groupPairs = (groups: { accountId: string; prefix: string }[]): SQL =>
+  sql.join(
+    groups.map((g) => sql`(${g.accountId}::text, ${g.prefix}::text)`),
+    sql`, `,
+  );
+
+/** id -> new dedup_key, applied in one statement per chunk. */
+const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
+  sql.join(
+    rows.map((r) => sql`(${r.id}::text, ${r.key}::text)`),
+    sql`, `,
+  );
+
+/**
+ * Rewrites the ordinals of every group the delete touched back to a dense 1..n,
+ * in the order they already had. Nothing here touches identity: `id` is the
+ * surrogate every annotation and foreign key points at, and dedup_key is the
+ * column ROADMAP 4.2 made recomputable precisely so this is allowed.
+ *
+ * Two passes over the rows that actually move, because the final key of one row
+ * is often the current key of another. Between them the affected slots are all
+ * free, so a concurrent import into one of these groups can take a slot and make
+ * the second pass violate the unique index - which rolls the whole delete back
+ * rather than corrupting anything. Fail-safe, and acceptable while a workspace is
+ * one person uploading files.
+ *
+ * The statement count is bounded by the chunk size, not by the size of the
+ * deleted import: rolling back a bad 2000-row statement is the thing this whole
+ * feature is for, and it must not cost 2000 round trips.
+ */
+async function renumberGroups(
+  d: Executor,
+  groups: { accountId: string; prefix: string }[],
+): Promise<void> {
+  const survivors: { id: string; account_id: string; dedup_key: string }[] = [];
+  for (const chunk of chunked(groups, 500)) {
+    survivors.push(
+      ...(await rowsVia<{ id: string; account_id: string; dedup_key: string }>(
+        d,
+        sql`SELECT t.id, t.account_id, t.dedup_key FROM transactions t
+            JOIN (VALUES ${groupPairs(chunk)}) AS g(account_id, prefix)
+              ON t.account_id = g.account_id AND starts_with(t.dedup_key, g.prefix)
+            WHERE t.${WS()}`,
+      )),
+    );
+  }
+
+  const byGroup = new Map<string, { id: string; dedup_key: string }[]>();
+  for (const r of survivors) {
+    const key = `${r.account_id}|${computedGroupPrefix(r.dedup_key)}`;
+    const list = byGroup.get(key);
+    if (list) list.push(r);
+    else byGroup.set(key, [r]);
+  }
+
+  const moves: { id: string; key: string }[] = [];
+  for (const rows of byGroup.values()) {
+    const ordered = rows.sort(
+      (a, b) => computedKeyOrdinal(a.dedup_key) - computedKeyOrdinal(b.dedup_key),
+    );
+    if (ordered.every((r, i) => computedKeyOrdinal(r.dedup_key) === i + 1)) continue;
+    ordered.forEach((r, i) => moves.push({ id: r.id, key: withOrdinal(r.dedup_key, i + 1) }));
+  }
+  if (moves.length === 0) return;
+
+  // every parking chunk before any final chunk: a final key is only free once
+  // its whole group has left
+  const park = moves.map((m) => ({ id: m.id, key: parkedDedupKey(m.id) }));
+  for (const pass of [park, moves]) {
+    for (const chunk of chunked(pass, 1000)) {
+      await d.execute(sql`
+        UPDATE transactions AS t SET dedup_key = v.new_key
+        FROM (VALUES ${keyAssignments(chunk)}) AS v(id, new_key)
+        WHERE t.${WS()} AND t.id = v.id`);
+    }
+  }
+}
+
+/**
+ * Deletes an import and, by the ON DELETE CASCADE on transactions.import_id, its
+ * transactions. **This is the only sanctioned path that deletes a user's
+ * transactions** - anything else that ever needs to must be as visible as this,
+ * not a call buried in a helper.
+ *
+ * What it removes is exactly the rows this import first wrote: not another
+ * import's, not another workspace's (the foreign key is composite), and not a
+ * bank sync's (their import_id is NULL). It does not remove the account, whose
+ * balance is recomputed afterwards.
+ *
+ * The ordinals of whatever survives in the affected groups are renumbered in the
+ * same transaction - see renumberGroup, and ROADMAP 4.4 for what a hole does.
+ */
+export async function deleteImport(
+  id: string,
+): Promise<{ removed: number; accountIds: string[] } | undefined> {
+  const w = currentWorkspaceId();
+  const existing = await getDb()
+    .select({ id: s.imports.id })
+    .from(s.imports)
+    .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+  if (!existing[0]) return undefined;
+
+  const owned = await rowsOf<{ account_id: string; n: string }>(
+    sql`SELECT account_id, COUNT(*) AS n FROM transactions
+        WHERE ${WS()} AND import_id = ${id} GROUP BY account_id`,
+  );
+  const accountIds = owned.map((r) => r.account_id);
+  const removed = owned.reduce((sum, r) => sum + Number(r.n), 0);
+
+  await getDb().transaction(async (tx) => {
+    const groups = await computedGroupsOf(tx, id);
+    await tx
+      .delete(s.imports)
+      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+    await renumberGroups(tx, groups);
+  });
+
+  for (const accountId of accountIds) {
+    await recalcAccountBalanceFromTransactions(accountId);
+  }
+  return { removed, accountIds };
 }
 
 // ---------- classification (transfers / refunds / categories) ----------
@@ -1280,6 +1607,8 @@ export interface BackupData {
 /** Every user table, in the order restore inserts them. */
 const BACKUP_TABLES = {
   accounts: s.accounts,
+  // before transactions: import_id points at it, and restore inserts in this order
+  imports: s.imports,
   transactions: s.transactions,
   fx_rates: s.fxRates,
   category_rules: s.categoryRules,

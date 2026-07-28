@@ -92,13 +92,16 @@ describe('importCsv: pipeline and deduplication', () => {
     // the description is joined from the payee and the purpose
     expect(rewe.description).toBe('REWE Markt REWE SAGT DANKE');
 
-    // re-uploading the same file adds nothing
+    // re-uploading the same file is caught by its hash before any parsing
+    // happens at all (ROADMAP 4.3); see imports.test.ts for that layer
     const r2 = await importCsv({
       accountName: 'Sparkasse Giro',
       currency: 'EUR',
       preset: 'sparkasse',
       csv: sparkasse,
     });
+    expect(r2.duplicate).toBe(true);
+    expect(r2.importId).toBe(r1.importId);
     expect(r2.inserted).toBe(0);
 
     // account balance = the sum of its transactions
