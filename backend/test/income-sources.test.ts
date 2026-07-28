@@ -9,10 +9,10 @@ import {
   summaryMonthlyTotals,
   upsertIncomeSource,
 } from '../src/db';
-import { Transaction } from '../src/types';
+import { NewTransaction } from '../src/types';
+import { idOf } from './helpers';
 
-const tx = (over: Partial<Transaction>): Transaction => ({
-  id: over.id ?? Math.random().toString(36).slice(2),
+const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   accountId: 'acc1',
   provider: 'monobank',
   amount: 100,
@@ -46,13 +46,11 @@ describe('income_sources', () => {
     });
     await insertTransactions([
       tx({
-        id: 'stip-1',
         amount: 300,
         date: '2026-03-05T12:00:00.000Z',
         description: 'Von: Musterstiftung  Musterstadt  Stipendium 03/26',
       }),
       tx({
-        id: 'plain-income',
         amount: 50,
         date: '2026-03-06T12:00:00.000Z',
         description: 'Von: Random Person',
@@ -60,7 +58,8 @@ describe('income_sources', () => {
     ]);
     await reclassifyAll();
 
-    expect((await getTransaction('stip-1'))!.incomeSource).toBe('scholarship');
+    const stipend = await idOf('Von: Musterstiftung  Musterstadt  Stipendium 03/26');
+    expect((await getTransaction(stipend))!.incomeSource).toBe('scholarship');
 
     const march = (
       await summaryMonthlyTotals('2026-03-01T00:00:00.000Z', '2026-03-31T23:59:59.999Z')
@@ -71,13 +70,14 @@ describe('income_sources', () => {
 
     // deleting a source returns its transactions to other
     expect(await deleteIncomeSource('scholarship')).toBe(true);
-    expect((await getTransaction('stip-1'))!.incomeSource).toBe('other');
+    expect((await getTransaction(stipend))!.incomeSource).toBe('other');
   });
 
   it('a builtin source cannot be deleted, a manual mark beats auto-detection', async () => {
     expect(await deleteIncomeSource('salary')).toBe(false);
-    await insertTransactions([tx({ id: 'manual-src', amount: 77, description: 'Von: Random' })]);
-    expect((await setIncomeSourceOverride('manual-src', 'family'))!.incomeSource).toBe('family');
-    expect((await setIncomeSourceOverride('manual-src', null))!.incomeSource).toBe('other');
+    await insertTransactions([tx({ amount: 77, description: 'Von: Random' })]);
+    const id = await idOf('Von: Random');
+    expect((await setIncomeSourceOverride(id, 'family'))!.incomeSource).toBe('family');
+    expect((await setIncomeSourceOverride(id, null))!.incomeSource).toBe('other');
   });
 });

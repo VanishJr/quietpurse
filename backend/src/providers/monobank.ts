@@ -21,7 +21,7 @@ import {
   upsertAccount,
 } from '../db';
 import { SyncReporter } from './provider';
-import { Transaction } from '../types';
+import { NewTransaction } from '../types';
 
 const API = 'https://api.monobank.ua';
 const MAX_RANGE_SEC = 2_682_000; // 31 days + 1 hour
@@ -94,13 +94,15 @@ async function monoGet<T>(path: string, attempt = 0): Promise<T> {
   return (await res.json()) as T;
 }
 
-function toTransaction(accountDbId: string, accountCurrency: string, item: MonoStatementItem): Transaction {
+function toTransaction(accountDbId: string, accountCurrency: string, item: MonoStatementItem): NewTransaction {
   // amount is already in the account's currency; currencyCode on a statement item is
   // the currency of the OPERATION (contrary to the Monobank docs), so the account's
   // currency is used instead of it
   const amount = item.amount / 100;
   return {
-    id: `mono:${item.id}`,
+    // Monobank gives every operation a stable id of its own - the dedup key needs
+    // nothing computed, and paging a statement window is therefore harmless
+    dedupKey: `mono:${item.id}`,
     accountId: accountDbId,
     provider: 'monobank',
     amount,
@@ -145,7 +147,7 @@ async function fetchWindow(
  * - the "tail" - from the last sync until now (with an hour of slack);
  * - the "history backfill" - from SYNC_START to the earliest transaction already
  *   loaded, if SYNC_START moved deeper (e.g. the default became a year, not 90 days).
- * Duplicates are dropped by id on insert anyway, so overlaps are harmless.
+ * Duplicates are dropped on insert by the operation id, so overlaps are harmless.
  */
 export function windowsToFetch(
   syncStartSec: number,

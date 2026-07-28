@@ -29,7 +29,7 @@ import {
   upsertAccount,
 } from '../db';
 import { SyncReporter } from './provider';
-import { Transaction } from '../types';
+import { NewTransaction } from '../types';
 
 const API = 'https://api.enablebanking.com';
 const SESSION_DAYS = 90; // consent lifetime (PSD2)
@@ -183,21 +183,18 @@ function txDescription(t: EbTransaction): string {
   return t.note || '';
 }
 
-function txId(accountUid: string, t: EbTransaction): string {
-  if (t.entry_reference) return `eb:${accountUid}:${t.entry_reference}`;
-  // some banks have no entry_reference - a deterministic hash of the contents
-  const hash = crypto.createHash('sha256').update(JSON.stringify(t)).digest('hex').slice(0, 32);
-  return `eb:${accountUid}:h:${hash}`;
-}
-
-function toTransaction(accountUid: string, t: EbTransaction): Transaction {
+function toTransaction(accountUid: string, t: EbTransaction): NewTransaction {
   const abs = Math.abs(parseFloat(t.transaction_amount.amount));
   const amount = t.credit_debit_indicator === 'DBIT' ? -abs : abs;
   const date = t.booking_date || t.transaction_date || t.value_date || '';
   const description = txDescription(t);
   const mcc = t.merchant_category_code ? parseInt(t.merchant_category_code, 10) : undefined;
   return {
-    id: txId(accountUid, t),
+    // entry_reference is the bank's own stable handle on the operation. Some banks
+    // omit it; those rows get a computed key from insertTransactions instead. What
+    // is NOT acceptable is hashing the whole transaction JSON, which this used to
+    // do: any field the bank spells differently next time makes a new transaction.
+    dedupKey: t.entry_reference ? `eb:${t.entry_reference}` : undefined,
     accountId: `eb:${accountUid}`,
     provider: 'enablebanking',
     amount,
@@ -226,7 +223,7 @@ async function syncEbAccount(
 
   // Normally we only fetch the tail (with a 7-day overlap). But if the history isn't
   // loaded as deep as SYNC_START asks, fetch everything from SYNC_START: duplicates
-  // are dropped by id, and the missing year appears.
+  // are dropped on insert, and the missing year appears.
   const needHistory = !historyFrom || historyFrom.slice(0, 10) > config.syncStart;
   const dateFrom =
     !needHistory && lastSyncedAt
@@ -236,7 +233,12 @@ async function syncEbAccount(
       : config.syncStart;
   if (needHistory) log(`enablebanking: ${accountDbId} backfilling history since ${config.syncStart}`);
 
-  let inserted = 0;
+  // Every page first, then one insert. Rows whose bank omits entry_reference get a
+  // dedup key computed from an ordinal among identical rows of the batch, and that
+  // ordinal is only right if the batch holds the whole day: inserting page by page
+  // would restart the numbering and silently drop the second of two identical
+  // transactions that happened to straddle a page boundary.
+  const booked: EbTransaction[] = [];
   let continuationKey: string | undefined;
   do {
     const qs = new URLSearchParams({ date_from: dateFrom });
@@ -244,10 +246,10 @@ async function syncEbAccount(
     const page = await ebFetch<{ transactions: EbTransaction[]; continuation_key?: string }>(
       `/accounts/${uid}/transactions?${qs.toString()}`,
     );
-    const booked = page.transactions.filter((t) => !t.status || t.status === 'BOOK');
-    inserted += await insertTransactions(booked.map((t) => toTransaction(uid, t)));
+    booked.push(...page.transactions.filter((t) => !t.status || t.status === 'BOOK'));
     continuationKey = page.continuation_key;
   } while (continuationKey);
+  const inserted = await insertTransactions(booked.map((t) => toTransaction(uid, t)));
 
   await markAccountSynced(accountDbId, new Date().toISOString());
   await markAccountHistoryFrom(accountDbId, `${dateFrom}T00:00:00.000Z`);

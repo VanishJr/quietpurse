@@ -130,9 +130,12 @@ export const invitation = pgTable('invitation', {
 
 /**
  * Every data table starts with this column. Deleting a workspace cascades into
- * its data. Provider-derived ids (accounts, transactions) are only unique per
- * workspace - two users importing the same CSV produce the same content hashes -
- * so those tables use a composite (workspace_id, id) primary key.
+ * its data. Account ids are provider-derived and only unique per workspace - two
+ * users connecting the same bank produce the same id - so those tables use a
+ * composite (workspace_id, id) primary key. Transactions keep the composite key
+ * too, even though their id is a UUID: nothing else in the schema is keyed by id
+ * alone, and a query that forgets the workspace filter must not compile a path
+ * to somebody else's row.
  */
 const workspaceId = () =>
   text('workspace_id')
@@ -164,8 +167,13 @@ export const transactions = pgTable(
   'transactions',
   {
     workspaceId: workspaceId(),
+    // surrogate: a UUID assigned on insert, never derived from the row's contents
+    // and never changing. Annotations and every future foreign key point at this.
     id: text('id').notNull(),
     accountId: text('account_id').notNull(),
+    // "which transaction is this" as the provider sees it - the deduplication key,
+    // deliberately separate from the identity above (see insertTransactions)
+    dedupKey: text('dedup_key').notNull(),
     provider: text('provider').notNull(),
     amountCents: integer('amount_cents').notNull(),
     currency: text('currency').notNull(),
@@ -193,6 +201,10 @@ export const transactions = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.id] }),
+    // the deduplication rule itself: one transaction per key per account. Scoped
+    // to the workspace - two users importing the same statement must both keep
+    // their rows.
+    uniqueIndex('transactions_dedup_unique').on(t.workspaceId, t.accountId, t.dedupKey),
     index('idx_tx_account').on(t.workspaceId, t.accountId),
     index('idx_tx_date').on(t.workspaceId, t.date),
   ],

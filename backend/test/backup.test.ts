@@ -8,23 +8,24 @@ import {
   restoreBackup,
   setOneOff,
 } from '../src/db';
-import { Transaction } from '../src/types';
+import { NewTransaction } from '../src/types';
+import { idOf } from './helpers';
 
-const tx = (id: string, amount: number): Transaction => ({
-  id,
+const tx = (description: string, amount: number): NewTransaction => ({
   accountId: 'acc1',
   provider: 'monobank',
   amount,
   currency: 'EUR',
   date: '2026-01-10T12:00:00.000Z',
-  description: 'backup test',
+  description,
   category: 'other',
 });
 
 describe('backup and restore (JSON)', () => {
   it('a backup restores the data, manual marks included', async () => {
-    await insertTransactions([tx('bk-1', -10), tx('bk-2', -20)]);
-    await setOneOff('bk-1', true);
+    await insertTransactions([tx('backup marked', -10), tx('backup plain', -20)]);
+    const marked = await idOf('backup marked');
+    await setOneOff(marked, true);
 
     const data = await exportBackup();
     expect(data.format).toBe('finto-backup');
@@ -34,13 +35,15 @@ describe('backup and restore (JSON)', () => {
     const reparsed = parseBackup(JSON.parse(JSON.stringify(data)));
 
     // "disaster": the mark is cleared, then we restore from the backup
-    await setOneOff('bk-1', false);
-    expect((await getTransaction('bk-1'))!.oneOff).toBe(false);
+    await setOneOff(marked, false);
+    expect((await getTransaction(marked))!.oneOff).toBe(false);
 
     const { tables, rows } = await restoreBackup(reparsed);
     expect(tables).toBeGreaterThan(0);
     expect(rows).toBeGreaterThan(0);
-    expect((await getTransaction('bk-1'))!.oneOff).toBe(true);
+    // the id survives the round-trip too: a restore is not a re-import, the rows
+    // keep the identity the annotations were attached to
+    expect((await getTransaction(marked))!.oneOff).toBe(true);
     expect((await listTransactions({ accountId: 'acc1' })).length).toBeGreaterThanOrEqual(2);
   });
 

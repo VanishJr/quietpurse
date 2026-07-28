@@ -124,6 +124,65 @@ describe('importCsv: pipeline and deduplication', () => {
     expect(t.date).toBe('2026-02-02T10:00:00.000Z');
   });
 
+  /**
+   * The case the surrogate-key split exists for (ROADMAP 4.2): two statements
+   * whose windows overlap. Every repeated row has to be recognised as the same
+   * transaction, and only the genuinely new ones may be inserted.
+   */
+  it('overlapping statements insert only the rows the first one did not have', async () => {
+    const rows = {
+      mar05: '2026-03-05,-40.00,Mar 5 pharmacy',
+      mar20: '2026-03-20,-60.00,Mar 20 hardware store',
+      mar28: '2026-03-28,-15.00,Mar 28 bakery',
+      apr02: '2026-04-02,-25.00,Apr 2 books',
+      apr10: '2026-04-10,-35.00,Apr 10 cinema',
+    };
+    const file = (...keys: (keyof typeof rows)[]) =>
+      ['date,amount,description', ...keys.map((k) => rows[k])].join('\n');
+
+    const first = await importCsv({
+      accountName: 'Overlap Bank',
+      currency: 'EUR',
+      csv: file('mar05', 'mar20', 'mar28'),
+    });
+    expect(first.inserted).toBe(3);
+
+    // Mar 15 - Apr 15: repeats Mar 20 and Mar 28, adds two April rows
+    const second = await importCsv({
+      accountName: 'Overlap Bank',
+      currency: 'EUR',
+      csv: file('mar20', 'mar28', 'apr02', 'apr10'),
+    });
+    expect(second.inserted).toBe(2);
+
+    const all = await listTransactions({ accountId: first.accountId });
+    expect(all).toHaveLength(5);
+  });
+
+  it('a re-parse with a longer description does not become a second row', async () => {
+    const statement = (description: string) =>
+      ['date,amount,description', `2026-05-04,-23.45,${description}`].join('\n');
+
+    const first = await importCsv({
+      accountName: 'Reparse Bank',
+      currency: 'EUR',
+      csv: statement('REWE SAGT DANKE'),
+    });
+    expect(first.inserted).toBe(1);
+
+    // the same statement through an improved parser: one more field extracted
+    const second = await importCsv({
+      accountName: 'Reparse Bank',
+      currency: 'EUR',
+      csv: statement('REWE SAGT DANKE 12345'),
+    });
+    expect(second.inserted).toBe(0);
+
+    const all = await listTransactions({ accountId: first.accountId });
+    expect(all).toHaveLength(1);
+    expect(all[0].description).toBe('REWE SAGT DANKE');
+  });
+
   it('generic: column auto-detection; an unreadable file gives a clear error', async () => {
     const generic = ['Date,Amount,Description', '2026-03-01,-10,Something'].join('\n');
     const r = await importCsv({ accountName: 'Bank X', currency: 'USD', csv: generic });

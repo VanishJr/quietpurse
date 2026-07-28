@@ -166,6 +166,7 @@ CREATE TABLE "transactions" (
 	"workspace_id" text NOT NULL,
 	"id" text NOT NULL,
 	"account_id" text NOT NULL,
+	"dedup_key" text NOT NULL,
 	"provider" text NOT NULL,
 	"amount_cents" integer NOT NULL,
 	"currency" text NOT NULL,
@@ -239,6 +240,7 @@ CREATE INDEX "idx_member_user" ON "member" USING btree ("user_id");--> statement
 CREATE INDEX "idx_member_org" ON "member" USING btree ("organization_id");--> statement-breakpoint
 CREATE INDEX "idx_session_user" ON "session" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_sync_log_started" ON "sync_log" USING btree ("workspace_id","started_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "transactions_dedup_unique" ON "transactions" USING btree ("workspace_id","account_id","dedup_key");--> statement-breakpoint
 CREATE INDEX "idx_tx_account" ON "transactions" USING btree ("workspace_id","account_id");--> statement-breakpoint
 CREATE INDEX "idx_tx_date" ON "transactions" USING btree ("workspace_id","date");--> statement-breakpoint
 CREATE UNIQUE INDEX "transfer_rules_desc_account_unique" ON "transfer_rules" USING btree ("workspace_id","description","account_id");

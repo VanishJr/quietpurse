@@ -1,5 +1,5 @@
 {
-  "id": "71e597aa-bcc4-4315-bba1-77621cbfa6ac",
+  "id": "f3dd87c4-ee59-4ee7-8905-55a0ee74c498",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1351,6 +1351,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "dedup_key": {
+          "name": "dedup_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "provider": {
           "name": "provider",
           "type": "text",
@@ -1455,6 +1461,33 @@
         }
       },
       "indexes": {
+        "transactions_dedup_unique": {
+          "name": "transactions_dedup_unique",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dedup_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "idx_tx_account": {
           "name": "idx_tx_account",
           "columns": [

@@ -9,13 +9,13 @@
  * neighbouring test's transactions land in the window.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { Transaction } from '../src/types';
+import { NewTransaction } from '../src/types';
 
 const NOW = new Date('2026-07-14T00:00:00.000Z');
 /** Whole months of the window when NOW = July: 2026-01 ... 2026-06. */
 const MONTHS = ['01', '02', '03', '04', '05', '06'];
 
-const tx = (over: Partial<Transaction> & { id: string }): Transaction => ({
+const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   accountId: 'acc1',
   provider: 'monobank',
   amount: -100,
@@ -43,11 +43,21 @@ async function fresh() {
   const { updateSettings } = await import('../src/settings');
   await updateSettings({ goalMode: 'baseline', bufferPct: 10, windowMonths: 6, hourlyRate: 60 });
 
-  /** The same expense in each of the window's 6 months. */
-  const spendEveryMonth = async (amount: number, prefix: string) => {
+  /**
+   * The same expense in each of the window's 6 months. Each series gets its own
+   * account: deduplication is per account, day and amount, so two series that
+   * happened to spend the same amount on the same day would otherwise collapse
+   * into one.
+   */
+  const spendEveryMonth = async (amount: number, series: string) => {
     for (const m of MONTHS) {
       await db.insertTransactions([
-        tx({ id: `${prefix}-${m}`, amount: -amount, date: `2026-${m}-05T12:00:00.000Z` }),
+        tx({
+          accountId: series,
+          description: series,
+          amount: -amount,
+          date: `2026-${m}-05T12:00:00.000Z`,
+        }),
       ]);
     }
   };
@@ -91,7 +101,6 @@ describe('bare minimum', () => {
     for (const m of MONTHS) {
       await t.insertTransactions([
         tx({
-          id: `salary-${m}`,
           amount: 750,
           date: `2026-${m}-20T12:00:00.000Z`,
           category: 'salary',
