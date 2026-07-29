@@ -207,7 +207,7 @@ export function OverviewScreen({
 
       {visible.length === 0 && !loading && (
         <p className="empty">
-          No accounts yet. Click "Import" to load a CSV statement — the fastest way to see
+          No accounts yet. Click "Import" to load a statement — the fastest way to see
           real data — or "Refresh" to sync a bank (needs a MONOBANK_TOKEN or a bank
           connected via Enable Banking).
         </p>

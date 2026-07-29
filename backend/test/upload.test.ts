@@ -11,6 +11,8 @@
  * http-auth.test.ts: with it armed a request that never entered a workspace
  * context would answer from the test workspace instead of throwing.
  */
+import http from 'http';
+import { AddressInfo } from 'net';
 import ExcelJS from 'exceljs';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,8 +24,10 @@ import { TEST_WORKSPACE_ID } from './pglite';
 const csvFile = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
 
-async function xlsxFile(label: string): Promise<Buffer> {
+async function xlsxFile(label: string, skippedSheet = false): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
+  // formatted past the row guard, so it is never read and the parser has to say so
+  if (skippedSheet) wb.addWorksheet('Cover').getRow(600_000).height = 20;
   const ws = wb.addWorksheet('Statement');
   ws.addRow(['date', 'amount', 'description']);
   ws.addRow([new Date('2026-04-01T00:00:00.000Z'), -20.5, label]);
@@ -31,6 +35,8 @@ async function xlsxFile(label: string): Promise<Buffer> {
 }
 
 let agent: request.Agent;
+/** The same session as `agent`, for the requests driven without supertest. */
+let sessionCookie: string;
 
 /** The workspace's imports, newest first. */
 const imports = async (): Promise<{ sourceType: string; originalFilename: string | null }[]> =>
@@ -45,6 +51,9 @@ beforeAll(async () => {
     .post('/api/auth/sign-up/email')
     .send({ email: 'uploader@example.com', password: 'correct-horse-battery', name: 'uploader' });
   expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+  sessionCookie = (res.headers['set-cookie'] as unknown as string[])
+    .map((c) => c.split(';')[0])
+    .join('; ');
 });
 
 afterAll(() => {
@@ -93,6 +102,36 @@ describe('POST /api/imports', () => {
 
     const [latest] = await imports();
     expect(latest.sourceType).toBe('xlsx');
+  });
+
+  /**
+   * The response body is the wire contract, and toMatchObject would not notice a key
+   * added to it. A sheet the parser never read reaches the client in `problems` and
+   * nowhere else - the same sentence sent twice under two names is the contract
+   * drifting, which is the thing a mobile client cannot follow.
+   */
+  it('a skipped sheet reaches the client in problems, and adds no field to the body', async () => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', 'Skipped Sheet Bank')
+      .field('currency', 'EUR')
+      .attach('file', await xlsxFile('behind the cover', true), 'statement.xlsx');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual([
+      'accountId',
+      'accountIds',
+      'importId',
+      'inserted',
+      'problems',
+      'skipped',
+      'total',
+    ]);
+    // without this the key set would also pass in the world where the notice stopped
+    // reaching the client at all
+    expect(res.body.problems[0]).toMatch(
+      /^sheet "Cover" \(600000 rows\) was too large to read and was skipped/,
+    );
   });
 
   it('the same file twice answers duplicate without parsing it again', async () => {
@@ -214,7 +253,22 @@ describe('POST /api/imports', () => {
       '{"date":"d","amount":"a","description":"x","date_format":"dmy"}',
     );
     expect(unknownKey.status).toBe(400);
-    expect(unknownKey.body.error).toMatch(/date_format/);
+    expect(unknownKey.body.error).toBe('mapping has an unknown field: "date_format"');
+
+    // an unknown key one level down has to name the level it is on
+    const nestedKey = await send(
+      'Nested Key Bank',
+      '{"date":"d","amount":"a","description":"x","onlyWhen":{"column":"State","equals":"OK","nope":1}}',
+    );
+    expect(nestedKey.status).toBe(400);
+    expect(nestedKey.body.error).toBe('mapping.onlyWhen has an unknown field: "nope"');
+
+    // the one mapping error that used to answer with zod's own wording and no field
+    const emptyList = await send('Empty List Bank', '{"date":"d","amount":"a","description":[]}');
+    expect(emptyList.status).toBe(400);
+    expect(emptyList.body.error).toBe(
+      'mapping.description must be a column name or a list of column names',
+    );
 
     expect(await imports()).toHaveLength(before);
   });
@@ -274,5 +328,184 @@ describe('the routes around it', () => {
   it('the JSON CSV endpoints are gone', async () => {
     expect((await agent.post('/api/csv/import').send({ csv: 'a,b' })).status).toBe(404);
     expect((await agent.get('/api/csv/presets')).status).toBe(404);
+  });
+});
+
+// ---------- the workspace context and how the body arrives ----------
+
+const BOUNDARY = '----fintoChunkedBoundary';
+
+/** A multipart body built by hand, so the test owns exactly which bytes go out when. */
+function multipartBody(fields: Record<string, string>, filename: string, bytes: Buffer): Buffer {
+  const parts = Object.entries(fields).map(([name, value]) =>
+    Buffer.from(
+      `--${BOUNDARY}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+      'utf8',
+    ),
+  );
+  parts.push(
+    Buffer.from(
+      `--${BOUNDARY}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+        'Content-Type: text/csv\r\n\r\n',
+      'utf8',
+    ),
+    bytes,
+    Buffer.from(`\r\n--${BOUNDARY}--\r\n`, 'utf8'),
+  );
+  return Buffer.concat(parts);
+}
+
+/**
+ * One request over a real socket, with the body written in `pieces` writes and the
+ * event loop turning between them. supertest hands its body to the socket in one
+ * go, so it cannot express this - and this is the only variable that matters here.
+ */
+async function sendInPieces(
+  path: string,
+  contentType: string,
+  body: Buffer,
+  pieces: number,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  try {
+    const { port } = server.address() as AddressInfo;
+    return await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          method: 'POST',
+          path,
+          agent: false,
+          headers: {
+            'content-type': contentType,
+            'content-length': String(body.length),
+            connection: 'close',
+            cookie: sessionCookie,
+          },
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : {} });
+          });
+        },
+      );
+      req.on('error', reject);
+      const size = Math.ceil(body.length / pieces);
+      void (async () => {
+        for (let at = 0; at < body.length; at += size) {
+          if (at > 0) await new Promise((r) => setTimeout(r, 15));
+          req.write(body.subarray(at, at + size));
+        }
+        req.end();
+      })();
+    });
+  } finally {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      server.closeAllConnections();
+    });
+  }
+}
+
+/**
+ * A body that arrives in more than one socket read.
+ *
+ * The session middleware wraps next() in runWithWorkspace(), and that store is live
+ * for the synchronous run plus whatever inherits from it. The socket was created
+ * when the connection was accepted - outside the run - so a parser that finishes on
+ * a later socket read calls next() from the socket's context, with an empty store,
+ * and the handler's first db call throws. A browser streams a multipart body, so
+ * this is every real upload; supertest's fixtures fit one read, which is why the
+ * suite never saw it.
+ *
+ * The trigger is the number of reads, not the size of the body: 60 bytes in three
+ * writes reproduces it and 58 KB in one write does not. The primary case below
+ * therefore drives the delivery itself rather than betting that this machine's
+ * receive buffer is smaller than some fixture.
+ */
+describe('a body that spans socket reads keeps its workspace', () => {
+  it('a multipart upload written in three pieces still imports', async () => {
+    const body = multipartBody(
+      { accountName: 'Chunked Bank', currency: 'EUR', preset: 'generic' },
+      'chunked.csv',
+      csvFile('chunked groceries'),
+    );
+    // the fixture is tiny on purpose: a megabyte one would be asserting the size of
+    // this machine's socket buffer instead of the mechanism
+    expect(body.length).toBeLessThan(1024);
+
+    const res = await sendInPieces(
+      '/api/imports',
+      `multipart/form-data; boundary=${BOUNDARY}`,
+      body,
+      3,
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ accountId: 'csv:chunked-bank', inserted: 1, total: 1 });
+    // the answer alone is not enough - the row has to be in this workspace
+    const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
+    expect(rows.filter((t) => /chunked groceries/.test(t.description))).toHaveLength(1);
+  });
+
+  /**
+   * The delivery the user actually hit: one .attach() large enough that supertest's
+   * own write does not reach the server in a single read. Cheaper to read and weaker
+   * to trust - the size at which it trips belongs to the operating system - so it
+   * stands beside the case above, never instead of it.
+   */
+  it('a 256 KB upload through supertest still imports', async () => {
+    const padded = Buffer.from(
+      [
+        'date,amount,description,note',
+        // the padding sits in a column no mapping reads, so the bulk never reaches the database
+        `2026-05-01,-12.34,padded statement,${'x'.repeat(256 * 1024)}`,
+      ].join('\n'),
+      'utf8',
+    );
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', 'Big Body Bank')
+      .field('currency', 'EUR')
+      .attach('file', padded, 'big.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ accountId: 'csv:big-body-bank', inserted: 1, total: 1 });
+    const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
+    expect(rows.filter((t) => /padded statement/.test(t.description))).toHaveLength(1);
+  });
+
+  /**
+   * The JSON and raw paths, chunked the same way. Both of these pass on the code the
+   * case above fails, and they are not redundant: body-parser hands next() a plain
+   * callback exactly as multer does, and the only reason it survives is that raw-body
+   * binds that callback through AsyncResource itself. That is a property of a
+   * transitive dependency, not of this app. These two exist to fail the day it stops
+   * being true - and that is the only day they will look worth their keep.
+   *
+   * The backup carries no tables, so it restores nothing and leaves the rows above
+   * alone: what is under test is the context restoreBackup runs in, not the restore.
+   */
+  const emptyBackup = Buffer.from(
+    JSON.stringify({ format: 'finto-backup', version: 1, tables: {} }),
+    'utf8',
+  );
+
+  it('a chunked JSON body keeps its workspace', async () => {
+    const res = await sendInPieces('/api/restore', 'application/json', emptyBackup, 4);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ restored: true });
+  });
+
+  it('a chunked octet-stream body keeps its workspace', async () => {
+    const res = await sendInPieces('/api/restore', 'application/octet-stream', emptyBackup, 4);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ restored: true });
   });
 });

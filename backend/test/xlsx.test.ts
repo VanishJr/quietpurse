@@ -10,8 +10,9 @@
  * failures announce themselves, that one does not.
  */
 import ExcelJS from 'exceljs';
-import { describe, expect, it } from 'vitest';
-import { getAccount, listAccounts, listImports, listTransactions } from '../src/db';
+import { describe, expect, it, vi } from 'vitest';
+import { ERROR_DETAIL_MAX, getAccount, listAccounts, listImports, listTransactions } from '../src/db';
+import { logImport } from '../src/logger';
 import { importStatement } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import { XLSX_PARSER_VERSION } from '../src/providers/xlsx';
@@ -279,6 +280,35 @@ describe('xlsx: finding the statement', () => {
   });
 
   /**
+   * Every sheet hidden means no sheet was ever eligible to have columns, so the
+   * usual refusal blames a header row that was never read - and lists the sheets it
+   * looked at, of which there are none. A refusal has to name its own cause.
+   */
+  it('a workbook with no visible sheet is refused as that, not as a column problem', async () => {
+    const book = await xlsx((wb) => {
+      const notes = wb.addWorksheet('Notes', { state: 'hidden' });
+      notes.addRow(['date', 'amount', 'description']);
+      notes.addRow([utc('2026-01-02'), -9, 'never read']);
+      const secret = wb.addWorksheet('Statement', { state: 'veryHidden' });
+      secret.addRow(['date', 'amount', 'description']);
+      secret.addRow([utc('2026-01-03'), -8, 'also never read']);
+    });
+
+    const thrown = await importFile('All Hidden Bank', book).catch((e) => e as Error);
+    expect(thrown.message).toBe(
+      'this workbook has no visible sheet - unhide the sheet holding the statement, or export the statement again',
+    );
+    expect(thrown.message).not.toMatch(/looked at|the columns must include/);
+
+    // the loader had to open the file to find this out, so it does leave a failed row
+    const failed = (await listImports()).filter((i) =>
+      /no visible sheet/.test(i.errorDetail ?? ''),
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].errorDetail).toBe(thrown.message);
+  });
+
+  /**
    * The XLSX path used to answer "pick a preset" to a user who had picked one. The
    * CSV of the same statement names the column that is missing; the scan computes
    * that sentence for every row it rejects, so it costs nothing to report it.
@@ -427,6 +457,39 @@ describe('the row guard', () => {
     const r = await importFile('Cover Sheet Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([3, 3, 0]);
     expect(await getAccount('csv:cover-sheet-bank')).toBeDefined();
+    // the counts above are what pins it: the notice is a fact about the file, not a row
+    expect(r.problems).toEqual([
+      'sheet "Cover" (600000 rows) was too large to read and was skipped - these rows come from "Statement"',
+    ]);
+  });
+
+  /**
+   * The reason it is said on the success path and not only in the refusal: a
+   * Januar/Februar workbook whose January sheet is formatted past the cap imports
+   * February and answers 200. Without the notice the user reads a success card and
+   * believes January is loaded.
+   */
+  it('a skipped sheet is announced even when another sheet imports', async () => {
+    const book = await xlsx((wb) => {
+      const januar = wb.addWorksheet('Januar');
+      januar.addRow(['date', 'amount', 'description']);
+      januar.addRow([utc('2026-01-05'), -10, 'never read']);
+      januar.getRow(600_000).height = 20;
+      const februar = wb.addWorksheet('Februar');
+      februar.addRow(['date', 'amount', 'description']);
+      februar.addRow([utc('2026-02-05'), -20, 'februar one']);
+      februar.addRow([utc('2026-02-06'), -21, 'februar two']);
+    });
+
+    const r = await importFile('Two Months Bank', book);
+    expect([r.total, r.inserted, r.skipped]).toEqual([2, 2, 0]);
+    expect(r.problems).toEqual([
+      'sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+    ]);
+    expect((await rowsOf(r.accountId)).map((row) => row[2])).toEqual([
+      'februar one',
+      'februar two',
+    ]);
   });
 
   /**
@@ -453,6 +516,154 @@ describe('the row guard', () => {
     );
     expect(refused).toHaveLength(2);
     expect(refused.every((i) => i.status === 'failed' && i.transactions === 0)).toBe(true);
+  });
+
+  /**
+   * Both clauses at once is where the message used to overrun what error_detail
+   * stores, and it lost its tail in the most informative case. The clause that says
+   * a sheet was never read comes first and survives whole; the one that refines a
+   * sentence already true is what gets shortened.
+   */
+  it('a refusal carrying both clauses fits what the import stores', async () => {
+    const header = Array.from({ length: 12 }, (_, i) => `Spalte-sehr-ausfuehrlich-${i}`);
+    const book = await xlsx((wb) => {
+      const huge = wb.addWorksheet('Huge');
+      huge.getRow(600_000).height = 20;
+      const ws = wb.addWorksheet('Statement');
+      ws.addRow(header);
+      ws.addRow(header.map(() => 'x'));
+    });
+
+    const thrown = await importFile('Both Clauses Bank', book).catch((e) => e as Error);
+    expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+    expect(thrown.message).toContain(' - skipped as too large to read: Huge (600000 rows)');
+    expect(thrown.message).toMatch(
+      / - the closest row \(sheet "Statement", row 1\) does not match: .*\.\.\.$/,
+    );
+
+    // nothing was cut on the way into the database, which is the whole point
+    const failed = (await listImports()).filter((i) =>
+      /Spalte-sehr-ausfuehrlich-0/.test(i.errorDetail ?? ''),
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].errorDetail).toBe(thrown.message);
+  });
+
+  /**
+   * The budget is spent in order, so the list that spends first has to leave the one
+   * behind it room for its own last resort - which is a count, and a count is still
+   * characters. Nine oversized sheets is where the too-large list ate all but two of
+   * them and the base list emitted its count anyway, five characters past what
+   * error_detail keeps.
+   */
+  it('a workbook of nothing but oversized sheets still fits what the import stores', async () => {
+    const book = await xlsx((wb) => {
+      for (let i = 1; i <= 9; i++) {
+        wb.addWorksheet(`Kontoauszug 0${i}-2026`).getRow(600_000).height = 20;
+      }
+    });
+
+    const thrown = await importFile('Nine Sheets Bank', book).catch((e) => e as Error);
+    expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+    expect(thrown.message).toContain(
+      ' - skipped as too large to read: Kontoauszug 01-2026 (600000 rows)',
+    );
+
+    const failed = (await listImports()).filter((i) =>
+      /Kontoauszug 01-2026/.test(i.errorDetail ?? ''),
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].errorDetail).toBe(thrown.message);
+  });
+
+  /**
+   * When nothing parsed the user reads one sentence - the client cuts at 200
+   * characters - and it has to be the one they can act on. A workbook whose amounts
+   * are formulas with no stored result says so; that a sheet was skipped follows.
+   */
+  it('nothing parsed: the row reason comes first and the notice follows it', async () => {
+    const book = await xlsx((wb) => {
+      const januar = wb.addWorksheet('Januar');
+      januar.getRow(600_000).height = 20;
+      const februar = wb.addWorksheet('Februar');
+      februar.addRow(['date', 'amount', 'description']);
+      for (const day of ['2026-02-05', '2026-02-06']) {
+        const row = februar.addRow([utc(day), null, 'uncached amount']);
+        row.getCell(2).value = { formula: 'D1*2' } as ExcelJS.CellFormulaValue;
+      }
+    });
+
+    const thrown = await importFile('No Rows Bank', book).catch((e) => e as Error);
+    expect(thrown.message).toBe(
+      'no row could be parsed (2 skipped): row 2: the amount cell is a formula with no stored result - open the file in Excel, re-save it, and upload again' +
+        ' - sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+    );
+  });
+
+  /**
+   * The other arm: a row reason long enough that the notice no longer fits. It is
+   * dropped whole rather than cut - and the fact it carried is not lost with it,
+   * because the log runs at the parser and not on the successful path. On a refusal
+   * `problems` is never sent and the `imports` row stores only the message.
+   */
+  it('nothing parsed and no room for the notice: it is dropped, and logged instead', async () => {
+    // sized so that the row reason alone fits error_detail and the notice behind it does not
+    const longCell = 'Ruecklastschrift wegen Widerspruch '.repeat(12).slice(0, 400);
+    const book = await xlsx((wb) => {
+      wb.addWorksheet('Januar').getRow(600_000).height = 20;
+      const februar = wb.addWorksheet('Februar');
+      februar.addRow(['date', 'amount', 'description']);
+      februar.addRow([longCell, 'xx', 'the only row']);
+    });
+
+    const warn = vi.spyOn(logImport, 'warn').mockImplementation(() => {});
+    const thrown = await importFile('Dropped Notice Bank', book).catch((e) => e as Error);
+    // read before restoring: mockRestore clears the calls with the implementation
+    const logged = warn.mock.calls.map((args) => String(args[0]));
+    warn.mockRestore();
+
+    // if the row reason alone overran the budget, failImport would have sliced and
+    // the drop arm would not be the thing under test
+    expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+    expect(thrown.message).toContain(`could not parse the date "${longCell}"`);
+    expect(thrown.message).not.toContain('too large to read');
+
+    const failed = (await listImports()).filter((i) =>
+      /Ruecklastschrift/.test(i.errorDetail ?? ''),
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0].errorDetail).toBe(thrown.message);
+
+    expect(logged).toContainEqual(
+      expect.stringContaining('sheet "Januar" (600000 rows) was too large to read'),
+    );
+  });
+
+  /**
+   * A notice and row problems both up against the cap - the combination no case
+   * covered. The notice keeps the head of the array, where the client's window is,
+   * and costs the rows one slot rather than pushing the total to six.
+   */
+  it('a notice and row problems share one cap, the notice first', async () => {
+    const book = await xlsx((wb) => {
+      wb.addWorksheet('Januar').getRow(600_000).height = 20;
+      const februar = wb.addWorksheet('Februar');
+      februar.addRow(['date', 'amount', 'description']);
+      februar.addRow([utc('2026-02-01'), -10, 'the one that parses']);
+      for (let i = 1; i <= 6; i++) februar.addRow(['not a date', 'not a number', `bad ${i}`]);
+    });
+
+    const r = await importFile('Capped Problems Bank', book);
+    expect([r.total, r.inserted, r.skipped]).toEqual([7, 1, 6]);
+    expect(r.problems).toHaveLength(5);
+    expect(r.problems[0]).toBe(
+      'sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+    );
+    expect(r.problems.slice(1)).toEqual(
+      [3, 4, 5, 6].map(
+        (row) => `row ${row}: could not parse the date "not a date" or the amount "not a number"`,
+      ),
+    );
   });
 });
 

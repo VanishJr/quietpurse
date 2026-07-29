@@ -15,6 +15,7 @@
  * will ever fix a workbook whose amounts were never computed.
  */
 import ExcelJS from 'exceljs';
+import { ERROR_DETAIL_MAX } from '../db';
 import { Cell, MAX_DATA_ROWS, Sheet, cellText, hasContent } from './sheet';
 
 /**
@@ -35,6 +36,9 @@ const MAX_SHEET_ROWS = 10 * MAX_DATA_ROWS;
 
 /** The reason the closest row was rejected is the user's, but not at any length. */
 const CLOSEST_CLAUSE_MAX = 300;
+
+/** Under this what is left buys a fragment, not a clause - and a fragment misnames. */
+const CLOSEST_CLAUSE_MIN = 60;
 
 const UNCACHED_FORMULA =
   'is a formula with no stored result - open the file in Excel, re-save it, and upload again';
@@ -57,6 +61,12 @@ interface Candidate {
   sheetRow: number;
   filled: number;
   error: string;
+}
+
+/** A sheet the early-out disqualified: named whether or not another one worked out. */
+interface Oversized {
+  name: string;
+  rowCount: number;
 }
 
 /**
@@ -83,7 +93,7 @@ export async function readXlsx(
   const date1904 = workbook.properties?.date1904 === true;
 
   const tried: string[] = [];
-  const tooLarge: string[] = [];
+  const tooLarge: Oversized[] = [];
   let closest: Candidate | null = null;
 
   for (const worksheet of workbook.worksheets) {
@@ -95,7 +105,7 @@ export async function readXlsx(
     // statement sitting behind it. Before readRows - never walking such a sheet is
     // the whole point of the early-out.
     if (worksheet.rowCount > MAX_SHEET_ROWS) {
-      tooLarge.push(`${worksheet.name} (${worksheet.rowCount} rows)`);
+      tooLarge.push({ name: worksheet.name, rowCount: worksheet.rowCount });
       continue;
     }
     const rows = readRows(worksheet);
@@ -123,24 +133,100 @@ export async function readXlsx(
       rowLabel: (i) => kept[i]?.sheetRow ?? i + 1,
       note: (row, col) => kept[row]?.notes.get(col),
       date1904,
+      notices: tooLarge.length ? [skippedNotice(tooLarge, worksheet.name)] : undefined,
     };
   }
-  throw new Error(
-    `could not find a header row in any sheet of the workbook (looked at: ${tried.join(', ')}) - the columns must include a date, an amount and a description, or pick a preset` +
-      closestClause(closest) +
-      (tooLarge.length ? ` - skipped as too large to read: ${tooLarge.join(', ')}` : ''),
-  );
+  throw new Error(notFound(tried, tooLarge, closest));
 }
+
+/**
+ * A sheet that was never read is reported on the way out as well as on the way
+ * down. A workbook whose January sheet is formatted past the cap imports February,
+ * answers 200 and shows a success card; without this nothing the user is shown says
+ * that a month is missing. importStatement warns per notice, but a log answers a
+ * support question, not the person looking at their own statement, and the `imports`
+ * row records nothing about a skipped sheet at all. One entry however many sheets
+ * were skipped - it shares the problems array with the row-level messages.
+ */
+function skippedNotice(tooLarge: Oversized[], used: string): string {
+  const names = tooLarge.map((s) => `"${s.name}" (${s.rowCount} rows)`).join(', ');
+  return tooLarge.length === 1
+    ? `sheet ${names} was too large to read and was skipped - these rows come from "${used}"`
+    : `sheets ${names} were too large to read and were skipped - these rows come from "${used}"`;
+}
+
+/**
+ * Why the workbook yielded nothing, composed to the length error_detail keeps: past
+ * that, failImport's slice cuts the tail, and the tail is where the clauses are.
+ * The fixed prose is never shortened - only the sheet lists and the closest-row
+ * clause, in that order of preference. A sheet that was never read is a refusal
+ * cause with no other channel; the closest row only refines a sentence that is
+ * already true, so it yields first. The client renders the whole of this budget
+ * (MAX_ERROR_CHARS in web/src/api.ts), so the preference is the only thing standing
+ * between a clause and the reader: what yields here is gone, not further down.
+ */
+function notFound(tried: string[], tooLarge: Oversized[], closest: Candidate | null): string {
+  // no sheet was ever eligible to have columns, so naming them is a false diagnosis
+  // and the list they would be named beside is empty
+  if (tried.length === 0) {
+    return 'this workbook has no visible sheet - unhide the sheet holding the statement, or export the statement again';
+  }
+  const head = 'could not find a header row in any sheet of the workbook (looked at: ';
+  const tail = ') - the columns must include a date, an amount and a description, or pick a preset';
+  const largeHead = ' - skipped as too large to read: ';
+
+  let left = ERROR_DETAIL_MAX - head.length - tail.length - (tooLarge.length ? largeHead.length : 0);
+  const listed = tooLarge.map((s) => `${s.name} (${s.rowCount} rows)`);
+  // joinBounded's last resort is a count, and a count still costs characters: hold
+  // back what the base list will spend on one even if it can afford no name at all,
+  // or a workbook of nothing but oversized sheets composes past what error_detail keeps
+  const floor = sheetCount(tried.length).length;
+  const large = tooLarge.length ? joinBounded(listed, left - floor) : '';
+  left -= large.length;
+  const looked = joinBounded(tried, left);
+  left -= looked.length;
+
+  return head + looked + tail + (large ? largeHead + large : '') + closestClause(closest, left);
+}
+
+/**
+ * As many names as the budget leaves, then a count of the rest. A workbook may carry
+ * any number of sheets, and without this it is the actionable half of the sentence
+ * that falls off the end rather than the list.
+ */
+function joinBounded(names: string[], budget: number): string {
+  let out = '';
+  for (let i = 0; i < names.length; i++) {
+    const next = out ? `${out}, ${names[i]}` : names[i];
+    const rest = names.length - i - 1;
+    if (next.length + (rest ? ` and ${rest} more`.length : 0) > budget) {
+      return out ? `${out} and ${names.length - i} more` : sheetCount(names.length);
+    }
+    out = next;
+  }
+  return out;
+}
+
+/**
+ * The count string in one place: notFound reserves exactly what joinBounded's last
+ * resort will spend, so a plural fixed in one and not the other leaks a character
+ * off the budget at one sheet - which is the arm no test with several can see.
+ */
+const sheetCount = (n: number): string => `${n} sheet${n === 1 ? '' : 's'}`;
 
 /**
  * Why the nearest thing to a header was not one. Without it a mismatched preset
  * reads as "pick a preset", which is what the user just did - the CSV of the same
- * statement names the missing column, and this is where that sentence went.
+ * statement names the missing column, and this is where that sentence went. Dropped
+ * whole when what is left buys only a fragment: ` - the closest row (sheet "Umsä`
+ * names a sheet that does not exist.
  */
-function closestClause(candidate: Candidate | null): string {
+function closestClause(candidate: Candidate | null, budget: number): string {
   if (!candidate) return '';
   const clause = ` - the closest row (sheet "${candidate.sheet}", row ${candidate.sheetRow}) does not match: ${candidate.error}`;
-  return clause.length > CLOSEST_CLAUSE_MAX ? `${clause.slice(0, CLOSEST_CLAUSE_MAX)}...` : clause;
+  const room = Math.min(CLOSEST_CLAUSE_MAX, budget);
+  if (room < CLOSEST_CLAUSE_MIN) return '';
+  return clause.length <= room ? clause : `${clause.slice(0, room - 3)}...`;
 }
 
 /** Rows that carry something, in sheet order, each remembering where it came from. */

@@ -19,6 +19,7 @@
 import crypto from 'crypto';
 import { categorize } from '../categorizer';
 import {
+  ERROR_DETAIL_MAX,
   ImportSourceType,
   commitImport,
   createImport,
@@ -29,6 +30,7 @@ import {
   recalcAccountBalanceFromTransactions,
   upsertAccount,
 } from '../db';
+import { logImport } from '../logger';
 import { NewTransaction } from '../types';
 import {
   CSV_PARSER_VERSION,
@@ -52,6 +54,9 @@ const MAX_XLSX_BYTES = 10 * 1024 * 1024;
 
 /** How many bytes of a text file are searched for the NUL that says it is not one. */
 const NUL_SCAN_BYTES = 8192;
+
+/** Notices and row problems share this budget - the client renders the first three. */
+const MAX_PROBLEMS = 5;
 
 export interface StatementImportRequest {
   /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
@@ -210,6 +215,10 @@ export async function importStatement(
   });
   try {
     const sheet = await readSheet(req, sourceType, preset);
+    // logged here rather than in the route because the route only sees the
+    // successful path: `problems` is never sent on a failure and nothing about a
+    // skipped sheet is stored, so this is the only trace when the import throws
+    for (const notice of sheet.notices ?? []) logImport.warn(`import ${record.id}: ${notice}`);
     return await mapAndStore(req, sheet, preset, accountId, record.id);
   } catch (e) {
     await failImport(record.id, (e as Error).message);
@@ -320,7 +329,12 @@ async function mapAndStore(
   }
 
   const txs: NewTransaction[] = [];
-  const problems: string[] = [];
+  // a notice is a fact about the file, not a rejected row: it goes in front of the
+  // row problems (the client shows the first three) and touches no count. The two
+  // are kept apart so that neither has to be recovered from the other by index -
+  // an extra notice would silently make problems[0] the wrong kind of sentence
+  const notices = sheet.notices ?? [];
+  const rowProblems: string[] = [];
   let skipped = 0;
 
   for (let i = 1; i < sheet.rows.length; i++) {
@@ -333,8 +347,8 @@ async function mapAndStore(
     const amount = cellAmount(row[amountCol], mapping.decimal);
     if (date === null || amount === null || amount === 0) {
       skipped++;
-      if (problems.length < 5) {
-        problems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount }));
+      if (notices.length + rowProblems.length < MAX_PROBLEMS) {
+        rowProblems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount }));
       }
       continue;
     }
@@ -360,9 +374,7 @@ async function mapAndStore(
   }
 
   if (txs.length === 0) {
-    throw new Error(
-      `no row could be parsed (${skipped} skipped)${problems.length ? ': ' + problems[0] : ''}`,
-    );
+    throw new Error(noRowsParsed(skipped, rowProblems, notices));
   }
 
   await upsertAccount({
@@ -383,9 +395,26 @@ async function mapAndStore(
     inserted,
     skipped,
     total,
-    problems,
+    problems: [...notices, ...rowProblems],
     importId,
   };
+}
+
+/**
+ * Why nothing parsed, ordered by what yields rather than by what is read first: the
+ * client renders the whole of what error_detail keeps (MAX_ERROR_CHARS in
+ * web/src/api.ts), so the last clause is the one that gets dropped, not the one that
+ * goes unread. The row's own reason is the actionable half - "the amount cells are
+ * formulas with no stored result" is something the user can fix, "these rows come
+ * from Februar" is not - so the sheet notice is what yields, and only whole. The
+ * `problems` array is not reordered: there the notice stays at the head, which is
+ * the window the client renders.
+ */
+function noRowsParsed(skipped: number, rowProblems: string[], notices: string[]): string {
+  const reason = rowProblems[0];
+  const head = `no row could be parsed (${skipped} skipped)${reason ? ': ' + reason : ''}`;
+  const notice = notices.length ? ` - ${notices.join(' - ')}` : '';
+  return head.length + notice.length <= ERROR_DETAIL_MAX ? head + notice : head;
 }
 
 /**

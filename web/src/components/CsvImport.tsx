@@ -9,10 +9,27 @@ const FALLBACK_PRESETS = [{ key: 'generic', title: 'Any statement' }];
 const ACCEPTED =
   '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-const isCsvName = (name: string): boolean => /\.csv$/i.test(name);
-
 /** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+
+/** How much of the file is looked at to decide whether counting lines means anything. */
+const SNIFF_BYTES = 8192;
+
+/** Zip (so .xlsx), PDF, the older Excel format, gzip — the backend's own signatures. */
+const BINARY_SIGNATURES = [
+  [0x50, 0x4b, 0x03, 0x04],
+  [0x25, 0x50, 0x44, 0x46],
+  [0xd0, 0xcf, 0x11, 0xe0],
+  [0x1f, 0x8b],
+];
+
+/**
+ * By content, never by the name: a bank that calls its workbook statement.csv is not
+ * hypothetical, and the backend deliberately ignores the extension. Counting the
+ * newlines of a decoded zip puts an invented row count on the screen.
+ */
+const looksLikeText = (head: Uint8Array): boolean =>
+  !BINARY_SIGNATURES.some((sig) => sig.every((b, i) => head[i] === b)) && !head.includes(0);
 
 interface Props {
   /** Shown as a panel with a back link; omitted — inline (the first-run wizard). */
@@ -43,27 +60,47 @@ export function CsvImport({ onBack, onImported }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CsvImportResult | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /** which input a pending read belongs to — a slow one must not label a newer one */
+  const pickSeq = useRef(0);
 
   // the preset list lives on the backend; keeping a second copy here would drift
   useEffect(() => {
     api.importPresets().then((r) => setPresets(r.presets)).catch(() => {});
   }, []);
 
-  const takeFile = async (picked: File | undefined) => {
-    if (!picked) return;
+  /**
+   * New input, whichever way it arrived: the pending read no longer describes it,
+   * and neither does the last import's outcome. One place, so a pick and a paste
+   * cannot come to disagree about which of the three they invalidate.
+   */
+  const newInput = (): number => {
+    setFileRows(null);
     setError(null);
     setResult(null);
+    return ++pickSeq.current;
+  };
+
+  const takeFile = async (picked: File | undefined) => {
+    if (!picked) return;
+    // before the first await, and fileRows is left cleared if a read throws: the
+    // previous file's count standing beside this file's name is an invented number
+    const seq = newInput();
     setFile(picked);
     setCsvText('');
-    // lines are a row count for a CSV and nonsense for a workbook, which is a zip —
-    // and a big file is not worth reading into the tab twice just to count them
-    const lines =
-      isCsvName(picked.name) && picked.size <= MAX_PREVIEW_BYTES
-        ? (await picked.text()).trim().split(/\r?\n/).length - 1
-        : null;
-    setFileRows(lines);
     // a sensible default the user can still edit
     if (!accountName.trim()) setAccountName(picked.name.replace(/\.(csv|xlsx)$/i, ''));
+    // a big file is not worth reading into the tab twice just to count its lines
+    if (picked.size > MAX_PREVIEW_BYTES) return;
+    try {
+      const head = new Uint8Array(await picked.slice(0, SNIFF_BYTES).arrayBuffer());
+      if (!looksLikeText(head)) return;
+      const rows = (await picked.text()).trim().split(/\r?\n/).length - 1;
+      // a 1 MB .csv followed at once by a workbook, or by a paste: this read
+      // finishes last, and without the check it labels whatever came after it
+      if (seq === pickSeq.current) setFileRows(rows);
+    } catch {
+      // the size is shown instead; the import itself reads the bytes on the backend
+    }
   };
 
   const runImport = async () => {
@@ -212,12 +249,9 @@ export function CsvImport({ onBack, onImported }: Props) {
           className="input csv-input"
           value={csvText}
           onChange={(e) => {
+            newInput();
             setCsvText(e.target.value);
             setFile(null);
-            setFileRows(null);
-            // a success card left standing over new input reads as this one's result
-            setError(null);
-            setResult(null);
           }}
           placeholder="Buchungstag;Betrag;Verwendungszweck…"
           aria-label="Statement contents"

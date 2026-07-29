@@ -170,8 +170,10 @@ app.use(async (req, res, next) => {
     active && memberships.includes(active)
       ? active
       : (memberships[0] ?? (await ensureWorkspace(dbInstance(), session.user.id)));
-  // who is acting, for the routes that record it (imports.uploaded_by)
+  // who is acting, for the routes that record it (imports.uploaded_by), and where -
+  // the workspace travels as data too, for the body parsers below (see withWorkspace)
   res.locals.userId = session.user.id;
+  res.locals.workspaceId = workspaceId;
   runWithWorkspace(workspaceId, () => next());
 });
 
@@ -180,7 +182,31 @@ app.use(async (req, res, next) => {
 // server chew through 25 MB of JSON per request for free. The multipart parser on
 // /api/imports obeys the same rule, and for the same reason.
 // (The limit itself is for a backup restored as JSON - 100 kb is not enough.)
-app.use(express.json({ limit: '25mb' }));
+//
+// And every parser that reads the body is mounted through withWorkspace(). The
+// runWithWorkspace() above holds its store for the synchronous run of next() and
+// for whatever inherits from it; the socket was created when the connection was
+// accepted, outside that run, so a parser finishing on a later socket read calls
+// next() with an empty store and the handler's first db call throws. A browser
+// streams a multipart body, so that is every real upload. body-parser hands next()
+// a plain callback in exactly the same way and survives only because raw-body binds
+// it through AsyncResource - that package's choice, not a rule this app can rest
+// its central invariant on.
+export const withWorkspace =
+  (mw: express.RequestHandler): express.RequestHandler =>
+  (req, res, next) => {
+    mw(req, res, (err?: unknown) => {
+      const ws = res.locals.workspaceId as string | undefined;
+      // /api/health calls next() before the workspace is resolved
+      if (!ws) {
+        next(err);
+        return;
+      }
+      runWithWorkspace(ws, () => next(err));
+    });
+  };
+
+app.use(withWorkspace(express.json({ limit: '25mb' })));
 
 const q = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -778,7 +804,7 @@ function uploadError(err: unknown): string {
 }
 
 const uploadFile: express.RequestHandler = (req, res, next) => {
-  upload.single('file')(req, res, (err: unknown) => {
+  withWorkspace(upload.single('file'))(req, res, (err: unknown) => {
     if (!err) {
       next();
       return;
@@ -808,9 +834,17 @@ const mappingSchema: z.ZodType<Partial<CsvMapping>> = z.strictObject({
   date: column('date').optional(),
   amount: column('amount').optional(),
   description: z
-    .union([column('description'), z.array(column('description')).min(1)], {
-      error: 'mapping.description must be a column name or a list of column names',
-    })
+    .union(
+      [
+        column('description'),
+        // the bound carries the sentence itself: the union's own error covers a
+        // wrong type, not an array that is merely empty
+        z
+          .array(column('description'))
+          .min(1, { error: 'mapping.description must be a column name or a list of column names' }),
+      ],
+      { error: 'mapping.description must be a column name or a list of column names' },
+    )
     .optional(),
   currency: column('currency').optional(),
   dateFormat: z
@@ -854,7 +888,8 @@ function parseMapping(raw: string): ParsedMapping {
     ok: false,
     error:
       issue?.code === 'unrecognized_keys'
-        ? `mapping has an unknown field: ${issue.keys.map((k) => `"${k}"`).join(', ')}`
+        ? // the path is where the key sits, so a key inside onlyWhen names onlyWhen
+          `${['mapping', ...issue.path].join('.')} has an unknown field: ${issue.keys.map((k) => `"${k}"`).join(', ')}`
         : (issue?.message ?? 'mapping is not a valid column mapping'),
   };
 }
@@ -964,7 +999,7 @@ app.get('/api/backup', async (_req, res) => {
 app.post(
   '/api/restore',
   // same ceiling as the JSON parser above - 25 MB of backup is six figures of transactions
-  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
+  withWorkspace(express.raw({ type: 'application/octet-stream', limit: '25mb' })),
   async (req, res) => {
     // the file arrives either as a raw octet-stream (Buffer) or, when the client
     // sends application/json, already parsed by the global json middleware

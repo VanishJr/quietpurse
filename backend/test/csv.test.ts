@@ -206,6 +206,26 @@ describe('a CSV statement: pipeline and deduplication', () => {
       }),
     ).rejects.toThrow(/could not find date\/amount\/description columns/);
   });
+
+  /**
+   * The promise of the typed cell seam: a CSV cell is a string, so the CSV path
+   * takes only the string branches and its messages are what they always were.
+   * Asserted with toBe rather than a regex - it has to fail if the CSV path ever
+   * acquires a sheet notice (the sentence would grow a " - …" tail), if the prose
+   * changes, or if the row label drifts off the CSV line number.
+   */
+  it('nothing parsed: the CSV message is the row reason and nothing else', async () => {
+    const unreadable = ['date,amount,description', 'not a date,not a number,broken'].join('\n');
+    const thrown = await importStatement({
+      accountName: 'Unreadable Bank',
+      currency: 'EUR',
+      bytes: Buffer.from(unreadable, 'utf8'),
+    }).catch((e) => e as Error);
+
+    expect(thrown.message).toBe(
+      'no row could be parsed (1 skipped): row 2: could not parse the date "not a date" or the amount "not a number"',
+    );
+  });
 });
 
 /**

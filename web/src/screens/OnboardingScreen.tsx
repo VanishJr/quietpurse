@@ -3,8 +3,8 @@
  * (GET /api/onboarding/status). Three steps on one scroll:
  *   1) base currency and owner name (needed by the transfer classifier);
  *   2) connecting a bank: Monobank (token in .env), Enable Banking (a browser
- *      on the machine running the backend), a CSV statement (paste the file text
- *      or drop the file in);
+ *      on the machine running the backend), a statement file (drop in whatever the
+ *      bank exports, or paste the text);
  *   3) the first sync.
  * All of this can be done later too — the wizard just gathers the knobs you need
  * in one place and disappears as soon as the first account shows up.
@@ -159,7 +159,7 @@ export function OnboardingScreen({
           </p>
         )}
 
-        <h3 className="provider">CSV statement (any bank)</h3>
+        <h3 className="provider">Statement file (any bank)</h3>
         <CsvImport />
         <p className="hint">
           You can come back to this any time: Accounts → Import.

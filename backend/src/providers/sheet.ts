@@ -21,6 +21,12 @@ export interface Sheet {
   rowLabel: (i: number) => number;
   /** why the frontend blanked a cell (an uncached formula, an error value) */
   note?: (row: number, col: number) => string | undefined;
+  /**
+   * What the frontend knows about the file that the mapper cannot see and the user
+   * has to be told anyway - a sheet that was never read. These reach `problems`
+   * ahead of the row-level ones; they are facts about the file, not rejected rows.
+   */
+  notices?: string[];
   /** the workbook's date system: serial day 0 is 1904-01-01, not 1899-12-30 */
   date1904?: boolean;
 }

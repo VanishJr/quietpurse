@@ -2,7 +2,7 @@
  * The current workspace, carried through async call chains with AsyncLocalStorage.
  *
  * Why implicit context and not a workspaceId parameter on every db function: the
- * data layer is called from ~10 modules (handlers, classify, sync, fxrates, csv),
+ * data layer is called from ~10 modules (handlers, classify, sync, fxrates, statement),
  * and none of them make workspace decisions - the workspace is fixed once at the
  * boundary (the session middleware for requests, the scheduler for background
  * jobs). Threading the id through every signature would touch every caller for
