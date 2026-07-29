@@ -207,6 +207,21 @@ export const imports = pgTable(
     rowsRejected: integer('rows_rejected').notNull().default(0),
     // the failure message, truncated; never a stack trace - it lands in the backup
     errorDetail: text('error_detail'),
+    /**
+     * The pointer to the stored source document (ROADMAP 4.5). It records two
+     * things and deliberately not a third: that a document can be read for this
+     * row, and which key layout it was written under. NOT the key itself - the key
+     * is derived at read time from (current workspace, import id), because a key
+     * read out of this row is a string a restored backup gets to choose.
+     *
+     * NULL means no document can be READ - the layout its bytes were written under
+     * is not recorded. It does NOT mean there are no bytes on disk: an import from
+     * before 4.5, a row restored from a backup (restoreBackup strips this column),
+     * or one that died between the blob landing and this column being set all have
+     * NULL here and may well have a document. Nothing that deletes may treat it as
+     * though it meant "no document" - see deleteImport.
+     */
+    documentKeyVersion: integer('document_key_version'),
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.id] }),

@@ -22,6 +22,13 @@ const DEV_AUTH_SECRET = 'finto-dev-secret-change-me';
 /** The password the docker-compose postgres uses when none is configured. */
 const DEV_DB_PASSWORD = 'finto';
 
+/**
+ * The document-sealing key `npm run dev` falls back to. Named so
+ * assertProductionConfig() can recognise it: a deployed server still on this key
+ * has its users' bank statements readable by anyone who has read the source.
+ */
+const DEV_DOCUMENT_KEY = 'finto-dev-document-key-change-me';
+
 export const config = {
   port,
   /**
@@ -121,6 +128,21 @@ export const config = {
    * env is the seed at the initial migration.
    */
   syncIntervalMin: parseInt(process.env.SYNC_INTERVAL_MIN || '360', 10) || 0,
+  /**
+   * Where the uploaded statements themselves are kept (ROADMAP 4.5). A relative
+   * path is resolved from backend/, the same rule ebPrivateKey() uses below. The
+   * default is where docker-compose mounts the documents volume, so it is also the
+   * correct production value - which is why there is no production guard on it.
+   */
+  documentStorePath: process.env.DOCUMENT_STORE_PATH || './data/documents',
+  /**
+   * The secret every stored document is sealed with (AES-256-GCM, via HKDF - see
+   * documents.ts, so any string of any length works). The dev fallback keeps
+   * `npm run dev` and the tests working out of the box; a real deployment must set
+   * its own, and losing or changing it makes every document already written
+   * unreadable - there is no way to hold the old key and the new one at once.
+   */
+  documentEncryptionKey: process.env.DOCUMENT_ENCRYPTION_KEY || DEV_DOCUMENT_KEY,
 };
 
 /**
@@ -144,6 +166,11 @@ export function assertProductionConfig(): void {
   if (new URL(config.baseUrl).protocol !== 'https:' && !isLocal(config.baseUrl)) {
     problems.push(
       `BETTER_AUTH_URL is ${config.baseUrl}: without https the session cookie is not marked Secure and travels in clear text. Terminate TLS in front of the backend and point this at the https address.`,
+    );
+  }
+  if (config.documentEncryptionKey === DEV_DOCUMENT_KEY) {
+    problems.push(
+      'DOCUMENT_ENCRYPTION_KEY is unset, so every stored bank statement is sealed with the public dev key - anyone who has read the source can decrypt them. Generate one: openssl rand -base64 32',
     );
   }
   if (dbPassword(config.databaseUrl) === DEV_DB_PASSWORD) {

@@ -129,6 +129,8 @@ Secrets and process settings live in `backend/.env` (see `.env.example`):
 | `MONOBANK_TOKEN` | token from [api.monobank.ua](https://api.monobank.ua) |
 | `EB_APP_ID`, `EB_PRIVATE_KEY_PATH` | Enable Banking credentials |
 | `DATABASE_URL` | PostgreSQL connection string, defaults to the `postgres` service in `docker-compose.yml` |
+| `DOCUMENT_ENCRYPTION_KEY` | key the uploaded statements are sealed with on disk. **Set this on any real deployment** (`openssl rand -base64 32`); the backend refuses to start under `NODE_ENV=production` on the public dev fallback. Changing or losing it makes every document already stored unreadable |
+| `DOCUMENT_STORE_PATH` | where those documents are kept, defaults to `./data/documents` (relative to `backend/`), which is where `docker-compose.yml` mounts the `documents` volume |
 
 There is no client-side secret: `web/` ships no credentials at all. Access is a cookie
 session obtained from the login screen.

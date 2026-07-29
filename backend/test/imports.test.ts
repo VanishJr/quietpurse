@@ -8,18 +8,25 @@
  * keys with holes yet, so this test is the only thing that will ever notice if
  * the renumbering in deleteImport goes away.
  */
+import fs from 'fs/promises';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
   dbInstance,
   deleteImport,
   getAccount,
+  getImportDocumentRef,
   insertTransactions,
   listImports,
   listTransactions,
+  runWithWorkspace,
 } from '../src/db';
+import { DOCUMENT_STORE_REFUSED, getDocument } from '../src/documents';
 import { importStatement } from '../src/providers/statement';
+import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
+import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
 
 /** A generic-preset file: one line per row, all of them parseable. */
 const csvFile = (...rows: string[]): string =>
@@ -34,6 +41,13 @@ const importFile = (accountName: string, csv: string) =>
 
 const countFor = async (accountId: string): Promise<number> =>
   (await listTransactions({ accountId, limit: 500 })).length;
+
+/** Whether a blob exists, addressed by hand rather than through the key registry. */
+const blobExists = async (workspaceId: string, importId: string): Promise<boolean> =>
+  fs
+    .access(path.join(storageRoot(), workspaceId, importId))
+    .then(() => true)
+    .catch(() => false);
 
 /** The stored dedup keys of an account, in insertion-independent order. */
 async function dedupKeys(accountId: string): Promise<string[]> {
@@ -148,6 +162,124 @@ describe('imports: the file layer', () => {
 
   it('deleting a missing import is a no-op, not a throw', async () => {
     expect(await deleteImport('no-such-import')).toBeUndefined();
+  });
+
+  it('a committed import keeps the uploaded file itself, byte for byte', async () => {
+    const csv = csvFile('2026-06-01,-12.00,Stored document');
+    const result = await importFile('Document Bank', csv);
+
+    const ref = await getImportDocumentRef(result.importId);
+    expect(ref).toBeDefined();
+    expect(await getDocument(ref!)).toEqual(Buffer.from(csv, 'utf8'));
+  });
+
+  /**
+   * The reason the document is written BEFORE the parse (ROADMAP 4.5): "my import
+   * came out wrong" is undiagnosable without the input, and the imports that went
+   * wrong are exactly the failed ones.
+   */
+  it('a failed parse keeps its document', async () => {
+    const csv = ['col a;col b;col c', '05.02.2026;-11,00;Kiosk'].join('\n');
+    await expect(importFile('Failed Document Bank', csv)).rejects.toThrow(
+      /could not find date\/amount\/description columns/,
+    );
+
+    const failed = (await listImports()).find((i) => i.errorDetail?.includes('col a'))!;
+    expect(failed.status).toBe('failed');
+    const ref = await getImportDocumentRef(failed.id);
+    expect(await getDocument(ref!)).toEqual(Buffer.from(csv, 'utf8'));
+  });
+
+  it('deleting an import destroys its document too', async () => {
+    const result = await importFile('Delete Document Bank', csvFile('2026-06-02,-13.00,Gone'));
+    expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(true);
+
+    expect((await deleteImport(result.importId))!.removed).toBe(1);
+    expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(false);
+    expect(await getImportDocumentRef(result.importId)).toBeUndefined();
+  });
+
+  /**
+   * The rows are already gone when the blob delete runs, so its failure is logged
+   * and swallowed: raising would send the user to press a button whose import no
+   * longer exists, and the second press answers "not found". Nothing but this test
+   * holds that - the catch is reachable from user data, not only from a broken disk
+   * (a restored `imports.id` outside the key charset makes the key refuse before any
+   * disk access), and removing it 500s the route AFTER the delete has happened.
+   *
+   * The failure is forced with a non-empty directory where the blob belongs, so the
+   * unlink fails with something that is not ENOENT on every platform this runs on.
+   */
+  it('a document that cannot be removed does not fail the delete of its import', async () => {
+    const result = await importFile('Stuck Document Bank', csvFile('2026-06-04,-16.00,Stuck'));
+    const blob = path.join(storageRoot(), TEST_WORKSPACE_ID, result.importId);
+    await fs.rm(blob, { force: true });
+    await fs.mkdir(path.join(blob, 'inner'), { recursive: true });
+
+    try {
+      expect((await deleteImport(result.importId))!.removed).toBe(1);
+      expect(await countFor(result.accountId)).toBe(0);
+      // the blob path is still there (as the directory), which is only true when
+      // the removal really failed: without it the two assertions above are also
+      // satisfied by an ordinary delete, and the fixture could rot unnoticed
+      expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(true);
+    } finally {
+      await fs.rm(blob, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The document cannot be stored: the import is REFUSED, not committed with a
+   * warning. Committing would claim the file hash forever, so the same bytes would
+   * answer "already imported" on every retry and the one artefact that cannot be
+   * recovered later could never be captured for that file at all.
+   *
+   * The failure is forced by putting a plain file where the workspace's directory
+   * belongs - no chmod, identical on Windows and Linux - and in a workspace of its
+   * own, because in the shared one that path is a directory full of the other
+   * tests' documents and clearing it would mean deleting them.
+   */
+  it('an import whose document cannot be stored is refused, and the bytes stay re-uploadable', async () => {
+    const workspace = 'doc-storage-failure';
+    await createWorkspace(dbInstance(), workspace);
+    const csv = csvFile('2026-06-03,-14.00,Refused');
+    const blocked = path.join(storageRoot(), workspace);
+    await fs.mkdir(storageRoot(), { recursive: true });
+    await fs.writeFile(blocked, 'a file where the workspace directory belongs');
+
+    try {
+      await runWithWorkspace(workspace, async () => {
+        const failure = await importFile('Storage Failure Bank', csv).catch((e: Error) => e);
+        expect(failure).toBeInstanceOf(Error);
+        // asserted by identity: a regex alone stays green on a message "improved"
+        // to splice in a cause chain that happens to carry no drive letter
+        expect((failure as Error).message).toBe(DOCUMENT_STORE_REFUSED);
+        expect((failure as Error).message).not.toMatch(
+          /[A-Za-z]:\\|\/tmp\/|EEXIST|ENOTDIR|EACCES/,
+        );
+
+        const rows = await listImports();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ status: 'failed', errorDetail: DOCUMENT_STORE_REFUSED });
+        expect(rows[0].transactions).toBe(0);
+        expect(await listTransactions({ limit: 10 })).toHaveLength(0);
+      });
+
+      // the disk is fixed: the same bytes go in, because only a `committed` import
+      // ever claimed the hash (ROADMAP 4.3)
+      await fs.rm(blocked, { force: true });
+      await runWithWorkspace(workspace, async () => {
+        const retried = await importFile('Storage Failure Bank', csv);
+        expect(retried.duplicate).toBeUndefined();
+        expect(retried.inserted).toBe(1);
+        expect(await blobExists(workspace, retried.importId)).toBe(true);
+      });
+    } finally {
+      // only while it is still the blocking FILE - on the way out of the happy path
+      // this same path is the workspace's directory, holding the retry's document
+      const stat = await fs.stat(blocked).catch(() => undefined);
+      if (stat?.isFile()) await fs.rm(blocked, { force: true });
+    }
   });
 
   it('transactions from a bank sync survive an import deletion', async () => {

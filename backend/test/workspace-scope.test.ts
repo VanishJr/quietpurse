@@ -18,10 +18,12 @@ import {
   getSetting,
   listAccounts,
   listIncomeSources,
+  recordImportDocument,
   runWithWorkspace,
   seedDefaults,
   setWorkspaceFallback,
 } from '../src/db';
+import { deleteDocument, getDocument, putDocument } from '../src/documents';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
 
 describe('workspace scoping', () => {
@@ -29,8 +31,34 @@ describe('workspace scoping', () => {
     setWorkspaceFallback(undefined);
     try {
       await expect(listAccounts()).rejects.toThrow(/no workspace context/);
+      // a write as well as a read: an UPDATE ... WHERE id = ? that lost its
+      // workspace clause matches whatever row holds that id, and no other test
+      // in the suite would notice
+      await expect(recordImportDocument('scope-import', 1)).rejects.toThrow(
+        /no workspace context/,
+      );
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
+      setWorkspaceFallback(TEST_WORKSPACE_ID);
+    }
+  });
+
+  /**
+   * The document store is scoped by the same mechanism and not by a parameter:
+   * every key has the current workspace as its first segment, so outside a context
+   * there is no key to build and nothing can be written, read or deleted.
+   */
+  it('the document store has no key outside a workspace context either', async () => {
+    setWorkspaceFallback(undefined);
+    try {
+      await expect(putDocument('scope-import', Buffer.from('x'))).rejects.toThrow(
+        /no workspace context/,
+      );
+      await expect(
+        getDocument({ importId: 'scope-import', keyVersion: 1, fileHash: 'x' }),
+      ).rejects.toThrow(/no workspace context/);
+      await expect(deleteDocument('scope-import')).rejects.toThrow(/no workspace context/);
+    } finally {
       setWorkspaceFallback(TEST_WORKSPACE_ID);
     }
   });

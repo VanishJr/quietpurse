@@ -30,7 +30,8 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 import { recurringKey } from '../categorizer';
 import { config } from '../config';
-import { logDb } from '../logger';
+import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
+import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents } from '../money';
 import {
   Account,
@@ -792,6 +793,38 @@ export async function commitImport(
 }
 
 /**
+ * The bytes are on disk: the row may now claim them. A separate write rather than
+ * a field on createImport/commitImport/failImport, because the put happens between
+ * the first and the other two - and a FAILED import keeps its document, which is
+ * the case ROADMAP 4.5 wants it for.
+ *
+ * Never called before the put: a row claiming a document that is not there is the
+ * state every read would have to distrust.
+ */
+export async function recordImportDocument(id: string, keyVersion: number): Promise<void> {
+  await getDb()
+    .update(s.imports)
+    .set({ documentKeyVersion: keyVersion })
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+}
+
+/**
+ * What getDocument needs to open this import's stored document, or undefined when
+ * the row is absent, belongs to another workspace, or records no readable one.
+ * The only honest way to obtain a DocumentRef, which is what stops the hash check
+ * in getDocument from being skippable.
+ */
+export async function getImportDocumentRef(id: string): Promise<DocumentRef | undefined> {
+  const rows = await getDb()
+    .select({ fileHash: s.imports.fileHash, keyVersion: s.imports.documentKeyVersion })
+    .from(s.imports)
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+  const row = rows[0];
+  if (!row || row.keyVersion === null) return undefined;
+  return { importId: id, keyVersion: row.keyVersion, fileHash: row.fileHash };
+}
+
+/**
  * The import did not complete - the parse threw, or an insert after it did. The
  * message only, truncated: it ends up in the JSON backup.
  */
@@ -969,13 +1002,18 @@ async function renumberGroups(
  *
  * The ordinals of whatever survives in the affected groups are renumbered in the
  * same transaction - see renumberGroup, and ROADMAP 4.4 for what a hole does.
+ *
+ * It is also the only path that deletes a stored source document (ROADMAP 4.5),
+ * for the same reason and with the same visibility.
  */
 export async function deleteImport(
   id: string,
 ): Promise<{ removed: number; accountIds: string[] } | undefined> {
   const w = currentWorkspaceId();
   const existing = await getDb()
-    .select({ id: s.imports.id })
+    // the version is read for the diagnostic below only - never to decide whether
+    // to delete the blob, which is unconditional (see deleteDocument)
+    .select({ id: s.imports.id, keyVersion: s.imports.documentKeyVersion })
     .from(s.imports)
     .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
   if (!existing[0]) return undefined;
@@ -994,6 +1032,31 @@ export async function deleteImport(
       .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
     await renumberGroups(tx, groups);
   });
+
+  // The rows are gone; the blob goes second, on its own, and before the balance
+  // recalcs so a slow recalc does not widen the window. A filesystem delete cannot
+  // join the transaction above, so the order is the choice: a blob that survives
+  // its row is garbage - unreadable, unreachable, removable by hand - while a row
+  // that survives its blob is a lie every read has to distrust.
+  //
+  // A failure here is logged rather than raised: the rows really are deleted, and
+  // reporting otherwise would send the user to press the button again. It is logged
+  // in a form an operator can act on, because "delete my data" that quietly leaves
+  // the bank statement on disk is ROADMAP 6.1's failure.
+  try {
+    await deleteDocument(id);
+  } catch (e) {
+    logDb.error(
+      { err: e },
+      `import ${id} deleted, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
+    );
+  }
+  const claimed = existing[0].keyVersion;
+  if (claimed !== null && !knowsKeyVersion(claimed)) {
+    logDb.error(
+      `import ${id} deleted, but its document was written under key layout ${claimed}, which this server cannot address - remove it by hand`,
+    );
+  }
 
   for (const accountId of accountIds) {
     await recalcAccountBalanceFromTransactions(accountId);
@@ -1692,6 +1755,32 @@ export function parseBackup(input: unknown): BackupData {
 }
 
 /**
+ * Columns a restore may never carry over from the file. workspaceId is the scope
+ * the restore reassigns. documentKeyVersion is a claim about bytes on THIS
+ * server's disk, and the backup carries no documents - a restored row that kept it
+ * would promise a file that is not there or, from a crafted backup whose rows name
+ * another workspace's import ids, somebody else's.
+ *
+ * Checked against the row type rather than left as bare strings: the set matches TS
+ * property names, so a renamed property would silently stop the strip from firing -
+ * no compile error, no runtime error, and a restore quietly carrying a foreign
+ * workspace's pointer again.
+ *
+ * The cost, accepted: because restoreBackup keeps import ids, a workspace restoring
+ * its OWN backup reproduces the exact keys its blobs already sit under, and
+ * stripping the pointer makes those documents unreadable anyway. They are not
+ * unreachable - deleteImport removes a document without consulting this column -
+ * so what is lost is a future re-parse skipping those imports. The alternative
+ * (keep the pointer where a document exists at the derived key) makes a database
+ * restore depend on disk state inside its own transaction, for a feature that does
+ * not exist yet.
+ */
+const NEVER_RESTORED = new Set<string>([
+  'workspaceId' satisfies keyof ImportRow,
+  'documentKeyVersion' satisfies keyof ImportRow,
+]);
+
+/**
  * Keeps only real columns of the target table, and only values whose type the
  * column accepts. Without this a restore file is a direct write path into the
  * database with whatever types the uploader felt like: a string where an integer
@@ -1712,7 +1801,7 @@ function sanitizeRow(
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
     const column = columns[key as keyof typeof columns];
-    if (!column || key === 'workspaceId') continue; // unknown column, or the scope we reassign
+    if (!column || NEVER_RESTORED.has(key)) continue; // unknown column, or one a restore may not carry
     if (value === null) {
       if (column.notNull) throw new Error(`${tableName}.${key}: null in a required column`);
       out[key] = null;
@@ -1739,6 +1828,14 @@ function sanitizeRow(
  * dump's rows into it, all in one transaction. Tables the current schema does not
  * know are skipped (a future version's backup restores what it can). After
  * restoring, the caller runs a full reclassification - same as after any bulk import.
+ *
+ * What it leaves behind, and what is accepted: this deletes the workspace's
+ * `imports` rows, and every source document those rows had stays on disk (ROADMAP
+ * 4.5 - the backup is JSON and carries no documents). The ones whose import id
+ * comes back in the file are still removable, because deleteImport addresses a
+ * document without consulting the pointer this strips; the ones whose row is not
+ * reinstated are referenced by nothing and no sweeper is in scope. Both are
+ * data-subject-deletion lines written up for ROADMAP 6.1, not bugs to fix here.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const w = currentWorkspaceId();

@@ -9,6 +9,7 @@
  * catalogues, journal), because the risk is a missed WHERE clause somewhere, not
  * a subtle bug in any one of them.
  */
+import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
@@ -22,6 +23,7 @@ import {
   exportBackup,
   findCommittedImportByHash,
   finishSyncLogEntry,
+  getImportDocumentRef,
   listImports,
   getMeta,
   getSetting,
@@ -35,6 +37,7 @@ import {
   listSyncJournal,
   listTransactions,
   listTransferRules,
+  recordImportDocument,
   runWithWorkspace,
   seedDefaults,
   setBudget,
@@ -49,6 +52,7 @@ import {
   upsertBaselineItem,
   upsertIncomeSource,
 } from '../src/db';
+import { getDocument, putDocument } from '../src/documents';
 import { TEST_WORKSPACE_ID } from './pglite';
 import { NewTransaction } from '../src/types';
 
@@ -322,6 +326,38 @@ describe('workspace isolation', () => {
     });
   });
 
+  /**
+   * A stored document is reached through a key whose first segment is the CURRENT
+   * workspace, never one read out of the row - so the second assertion here holds
+   * even with the row-level guard bypassed on purpose.
+   */
+  it('a stored document is invisible and unreadable from another workspace', async () => {
+    const statement = Buffer.from('date,amount,description\n2026-04-04,-7.00,Mine\n', 'utf8');
+    // the fixture's imports were created with a fake file_hash, so the ref below is
+    // built by hand - which is also what makes it a forgery when OTHER uses it
+    const ref = {
+      importId: myImportId,
+      keyVersion: 1,
+      fileHash: crypto.createHash('sha256').update(statement).digest('hex'),
+    };
+
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      await recordImportDocument(myImportId, await putDocument(myImportId, statement));
+      expect(await getImportDocumentRef(myImportId)).toMatchObject({ keyVersion: 1 });
+      expect(await getDocument(ref)).toEqual(statement);
+    });
+
+    await runWithWorkspace(OTHER, async () => {
+      expect(await getImportDocumentRef(myImportId)).toBeUndefined();
+      await expect(getDocument(ref)).rejects.toThrow(/no bytes at/);
+    });
+
+    // the neighbour's attempt neither read nor damaged it
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect(await getDocument(ref)).toEqual(statement);
+    });
+  });
+
   /** The composite foreign key: (workspace_id, import_id), not import_id alone. */
   it('a transaction cannot be attached to another workspace import', async () => {
     await expect(
@@ -352,5 +388,44 @@ describe('workspace isolation', () => {
         expect(row).not.toHaveProperty('workspaceId');
       }
     }
+  });
+
+  /**
+   * Last on purpose: it is the only case here that adds import rows, and the
+   * assertions above count what each workspace can see.
+   *
+   * The primary key is (workspace_id, id), so the same import id in two
+   * workspaces is legal - and it is what a restored backup produces, since
+   * restoreBackup keeps the ids out of the file. recordImportDocument's UPDATE
+   * must therefore be scoped by workspace, not by id alone. Dropping the clause
+   * while keeping the currentWorkspaceId() call leaves every other test green:
+   * the import's own row is still updated, and the damage lands on the
+   * neighbour, which is what this asserts on.
+   */
+  it('recordImportDocument cannot touch a neighbour row carrying the same id', async () => {
+    const SHARED = 'shared-import-id';
+    const force = async (ws: string, from: string) => {
+      await dbInstance().execute(
+        sql`UPDATE imports SET id = ${SHARED} WHERE workspace_id = ${ws} AND id = ${from}`,
+      );
+    };
+    const newImport = (fileHash: string, originalFilename: string) =>
+      createImport({ fileHash, sourceType: 'csv', parserVersion: 1, originalFilename });
+
+    await runWithWorkspace(OTHER, async () => {
+      const theirs = await newImport('collide-theirs', 't.csv');
+      await force(OTHER, theirs.id);
+    });
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      const mine = await newImport('collide-mine', 'm.csv');
+      await force(TEST_WORKSPACE_ID, mine.id);
+      await recordImportDocument(SHARED, 1);
+    });
+
+    const stored = (await dbInstance().execute(
+      sql`SELECT document_key_version FROM imports WHERE workspace_id = ${OTHER} AND id = ${SHARED}`,
+    )) as unknown as { rows: { document_key_version: number | null }[] };
+    expect(stored.rows).toHaveLength(1);
+    expect(stored.rows[0].document_key_version).toBeNull();
   });
 });

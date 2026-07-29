@@ -1,5 +1,5 @@
 {
-  "id": "5377dd83-a3cf-4176-8757-b99bd0e993eb",
+  "id": "c4c3b533-30d3-4962-bfd4-ea9229dfd4da",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -701,6 +701,12 @@
         "error_detail": {
           "name": "error_detail",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "document_key_version": {
+          "name": "document_key_version",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         }
