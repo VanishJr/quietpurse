@@ -13,7 +13,7 @@ export function fmtMoney(n: number, currency?: string): string {
   return `${sign}${grouped}${fracPart}${currency ? ' ' + currency : ''}`;
 }
 
-/** Compact, for chart axes: 950 → "950", 30,500 → "30.5k", 1,200,000 → "1.2M". */
+/** Compact, for chart axes: 950 → "950", 1,200 → "1.2k", 30,500 → "31k", 1,200,000 → "1.2M". */
 export function fmtShort(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? '−' : '';

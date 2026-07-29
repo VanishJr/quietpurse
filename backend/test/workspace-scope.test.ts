@@ -69,7 +69,7 @@ describe('workspace scoping', () => {
     expect(family!.patterns).toEqual(['ANNA BECKER', 'Becker Anna']);
 
     const newcomer = 'seed-newcomer-workspace';
-    await createWorkspace(dbInstance() as never, newcomer);
+    await createWorkspace(dbInstance(), newcomer);
     await runWithWorkspace(newcomer, async () => {
       await seedDefaults();
       expect(JSON.parse((await getSetting('owner_names'))!)).toEqual([]);
