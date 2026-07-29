@@ -1,6 +1,7 @@
 /**
- * Shared test environment: an embedded PGlite Postgres (no Docker, no external
- * server - see ./pglite.ts) and deterministic .env values.
+ * Shared test environment: a migrated Postgres (embedded PGlite by default, a real
+ * server when TEST_DATABASE_URL is set - see ./pglite.ts) and deterministic .env
+ * values.
  *
  * The env vars are set BEFORE src/config is imported, so the real backend/.env has
  * no effect on the tests. That is why the db modules are loaded with dynamic

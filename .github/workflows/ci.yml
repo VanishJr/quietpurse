@@ -30,8 +30,47 @@ jobs:
       - run: npm test
         if: always()
 
+  backend-postgres:
+    name: backend (tests on real Postgres)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      # 16-alpine, matching docker-compose.yml: that file is the closest thing to
+      # a statement about which server this runs on in production.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: finto
+          POSTGRES_PASSWORD: finto
+          # the suite truncates every table it connects to and refuses a database
+          # not named for the purpose (test/pglite.ts)
+          POSTGRES_DB: finto_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finto -d finto_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # no typecheck here: the job above already ran it, and this one exists for
+      # the behaviour PGlite cannot reach - one connection means it never sees a
+      # unique index lose a race, or two writers meet
+      - run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://finto:finto@localhost:5432/finto_test
+
   web:
-    name: web (typecheck + build)
+    name: web (typecheck + tests + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,5 +86,10 @@ jobs:
       # `npm run build` type-checks too, but as its first half: a type error would
       # report as a build failure. Split so the checklist says which one broke.
       - run: npm run typecheck
+      # pure functions only - formatting, the slug dictionaries, how a refusal
+      # becomes a sentence. Components and screens have no harness; a green run
+      # here says nothing about what the browser does.
+      - run: npm test
+        if: always()
       - run: npm run build
         if: always()
