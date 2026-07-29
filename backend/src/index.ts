@@ -19,11 +19,17 @@ import {
 } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { logClassify, logger } from './logger';
+import { assertStorageWritable } from './storage';
 import { scheduleAutoSync } from './sync';
 
 async function main(): Promise<void> {
   // refuse to boot a production server on dev secrets - before anything listens
   assertProductionConfig();
+
+  // and refuse to boot with a document store nobody can write to: the failure it
+  // catches is a volume that arrives owned by root while the container runs as
+  // `node`, which is otherwise discovered by the first user whose import is refused
+  await assertStorageWritable();
 
   // connect + migrate before anything touches the data layer; auth needs the db
   await connectDatabase();

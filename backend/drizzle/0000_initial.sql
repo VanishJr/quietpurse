@@ -90,6 +90,7 @@ CREATE TABLE "imports" (
 	"rows_accepted" integer DEFAULT 0 NOT NULL,
 	"rows_rejected" integer DEFAULT 0 NOT NULL,
 	"error_detail" text,
+	"document_key_version" integer,
 	CONSTRAINT "imports_workspace_id_id_pk" PRIMARY KEY("workspace_id","id")
 );
 --> statement-breakpoint

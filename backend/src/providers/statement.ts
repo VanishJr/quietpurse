@@ -28,8 +28,10 @@ import {
   insertTransactions,
   listImportAccountIds,
   recalcAccountBalanceFromTransactions,
+  recordImportDocument,
   upsertAccount,
 } from '../db';
+import { putDocument } from '../documents';
 import { logImport } from '../logger';
 import { NewTransaction } from '../types';
 import {
@@ -214,6 +216,18 @@ export async function importStatement(
     uploadedBy: req.uploadedBy,
   });
   try {
+    // The file itself, before the parse and inside the same catch (ROADMAP 4.5).
+    // Before, because the imports that FAILED are precisely the ones support needs
+    // the input for - so a failed import keeps its document, and so does a `pending`
+    // one left by a process that died between here and the parse.
+    //
+    // If it cannot be stored the import is refused rather than committed with a
+    // warning: committing would claim the file hash forever, and the same bytes
+    // would then answer "already imported" on every retry, so the one artefact that
+    // cannot be recovered later could never be captured for that file at all. The
+    // throw lands in the catch below - a `failed` row with no transactions, and
+    // bytes that stay re-uploadable because only `committed` blocks (ROADMAP 4.3).
+    await recordImportDocument(record.id, await putDocument(record.id, req.bytes));
     const sheet = await readSheet(req, sourceType, preset);
     // logged here rather than in the route because the route only sees the
     // successful path: `problems` is never sent on a failure and nothing about a
