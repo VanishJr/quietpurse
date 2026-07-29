@@ -18,7 +18,7 @@ import {
   listImports,
   listTransactions,
 } from '../src/db';
-import { importCsv } from '../src/providers/csv';
+import { importStatement } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
 
 /** A generic-preset file: one line per row, all of them parseable. */
@@ -30,7 +30,7 @@ const repeated = (n: number, row: string): string =>
   csvFile(...Array.from({ length: n }, () => row));
 
 const importFile = (accountName: string, csv: string) =>
-  importCsv({ accountName, currency: 'EUR', csv });
+  importStatement({ accountName, currency: 'EUR', bytes: Buffer.from(csv, 'utf8') });
 
 const countFor = async (accountId: string): Promise<number> =>
   (await listTransactions({ accountId, limit: 500 })).length;
@@ -108,10 +108,10 @@ describe('imports: the file layer', () => {
     expect(await getAccount('csv:retry-bank')).toBeUndefined();
 
     // a failed import does not claim the file - only a committed one does
-    const retried = await importCsv({
+    const retried = await importStatement({
       accountName: 'Retry Bank',
       currency: 'EUR',
-      csv,
+      bytes: Buffer.from(csv, 'utf8'),
       mapping: {
         date: 'when',
         amount: 'how much',

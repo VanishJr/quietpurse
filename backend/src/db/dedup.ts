@@ -9,9 +9,10 @@
  */
 
 /**
- * The key for a provider that has no stable reference of its own (CSV, and the
- * banks that omit entry_reference): the calendar day, the amount in minor units,
- * the currency, and the ordinal among otherwise identical rows.
+ * The key for a provider that has no stable reference of its own (an uploaded
+ * statement in any format, and the banks that omit entry_reference): the calendar
+ * day, the amount in minor units, the currency, and the ordinal among otherwise
+ * identical rows.
  *
  * **The description is deliberately not in here**, which looks like an omission
  * and is not. It is the least stable field a parser produces: with the

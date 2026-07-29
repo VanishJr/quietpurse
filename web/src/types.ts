@@ -1,6 +1,6 @@
 // Mirror of backend/src/types.ts
 
-export type Provider = 'monobank' | 'enablebanking' | 'csv';
+export type Provider = 'monobank' | 'enablebanking' | 'upload';
 
 /** Income source — id from the income_sources table (salary/family/other + custom). */
 export type IncomeSource = string;

@@ -3,7 +3,7 @@
  * default), format JSON; with a live terminal (or LOG_PRETTY=1) - human-readable
  * output through pino-pretty.
  *
- * Each module gets its own child with a mod field: sync, classify, fx, http, db, csv.
+ * Each module gets its own child with a mod field: sync, classify, fx, http, db, import.
  */
 import pino from 'pino';
 
@@ -28,4 +28,4 @@ export const logSync = logger.child({ mod: 'sync' });
 export const logClassify = logger.child({ mod: 'classify' });
 export const logFx = logger.child({ mod: 'fx' });
 export const logHttp = logger.child({ mod: 'http' });
-export const logCsv = logger.child({ mod: 'csv' });
+export const logImport = logger.child({ mod: 'import' });

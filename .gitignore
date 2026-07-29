@@ -12,6 +12,12 @@ Report.md
 Strategy.md
 ROADMAP.md
 docs/
+ARCHITECTURE-REVIEW.md
+
+# agent pipeline: prompts, task briefs, memos, reviews
+CLAUDE.md
+.claude/
+.agents/
 
 # personal data: database, backups, bank statements
 backend/data/

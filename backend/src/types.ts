@@ -1,4 +1,5 @@
-export type Provider = 'monobank' | 'enablebanking' | 'csv';
+/** Where the data came from. 'upload' is a statement the user brought in, in any format. */
+export type Provider = 'monobank' | 'enablebanking' | 'upload';
 
 export interface Account {
   id: string;
@@ -95,8 +96,8 @@ export interface Transaction {
  *
  * dedupKey is the provider's own stable reference to the operation (Monobank's
  * operation id, Enable Banking's entry_reference). Providers that have no such
- * reference — CSV, and the banks that omit entry_reference — leave it unset and
- * insertTransactions computes one.
+ * reference — an uploaded statement in any format, and the banks that omit
+ * entry_reference — leave it unset and insertTransactions computes one.
  */
 export type NewTransaction = Omit<Transaction, 'id'> & { dedupKey?: string };
 

@@ -58,6 +58,21 @@ export function onUnauthorized(fn: () => void): () => void {
   return () => unauthorizedListeners.delete(fn);
 }
 
+/**
+ * The backend composes a refusal to exactly this budget (ERROR_DETAIL_MAX in
+ * backend/src/db/index.ts) and orders the clauses of the long ones on the premise
+ * that all of it is read. Cutting it shorter here drops the clause it put last and
+ * ends the sentence mid-token.
+ */
+const MAX_ERROR_CHARS = 500;
+
+/** A proxy's error page is unbounded and is not written for a person to read. */
+const MAX_RAW_BODY_CHARS = 200;
+
+/** Cut with a mark, so a message with more behind it does not read as a broken one. */
+const bounded = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -71,8 +86,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new UnauthorizedError();
   }
   if (!res.ok) {
+    // the API reports a failure as { error } and the sentence in it is written for
+    // the user ("export the statement as CSV or Excel…"); showing the raw body
+    // buries it in JSON on every screen
     const body = await res.text();
-    throw new Error(`${res.status}: ${body.slice(0, 200)}`);
+    let message = bounded(`${res.status}: ${body}`, MAX_RAW_BODY_CHARS);
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed.error === 'string') message = bounded(parsed.error, MAX_ERROR_CHARS);
+    } catch {
+      // not JSON — the status and the body are all there is
+    }
+    throw new Error(message);
   }
   return (await res.json()) as T;
 }
@@ -309,15 +334,16 @@ export const api = {
 
   onboardingStatus: () => request<OnboardingStatus>('/api/onboarding/status'),
 
-  /** CSV statement import: any bank without an API. */
-  csvImport: (payload: {
-    accountName: string;
-    currency: string;
-    preset?: string;
-    csv: string;
-  }) => request<CsvImportResult>('/api/csv/import', json('POST', payload)),
+  /**
+   * Statement import: any bank without an API. One endpoint for every format —
+   * the file field carries the bytes and the backend works out what they are. No
+   * Content-Type here on purpose: the browser sets it, with the multipart boundary.
+   */
+  importStatement: (form: FormData) =>
+    request<CsvImportResult>('/api/imports', { method: 'POST', body: form }),
 
-  csvPresets: () => request<{ presets: { key: string; title: string }[] }>('/api/csv/presets'),
+  importPresets: () =>
+    request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),
 };
 
 /**

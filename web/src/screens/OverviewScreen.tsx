@@ -3,6 +3,7 @@ import { api, apiLabel, backupUrl, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
 import { CsvImport } from '../components/CsvImport';
 import { fmtDate, fmtMoney } from '../format';
+import { providerLabel } from '../providers';
 import { ThemeMode, useTheme } from '../theme';
 import { Account, RecurringSummary, SyncJournalRun, SyncStatus } from '../types';
 
@@ -183,7 +184,7 @@ export function OverviewScreen({
           <div className="row-main">
             <div className={`row-title${item.hidden ? ' muted-strike' : ''}`}>{item.name}</div>
             <div className="row-sub">
-              {item.provider}
+              {providerLabel(item.provider)}
               {item.hidden ? ' · removed' : ''}
             </div>
           </div>
@@ -206,7 +207,7 @@ export function OverviewScreen({
 
       {visible.length === 0 && !loading && (
         <p className="empty">
-          No accounts yet. Click "Import" to load a CSV statement — the fastest way to see
+          No accounts yet. Click "Import" to load a statement — the fastest way to see
           real data — or "Refresh" to sync a bank (needs a MONOBANK_TOKEN or a bank
           connected via Enable Banking).
         </p>

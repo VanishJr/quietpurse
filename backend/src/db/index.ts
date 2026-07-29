@@ -267,6 +267,14 @@ export async function upsertAccount(a: Account): Promise<void> {
     })
     .onConflictDoUpdate({
       target: [s.accounts.workspaceId, s.accounts.id],
+      // `hidden` is deliberately not in the set below, and the consequence is sharp
+      // enough to write down: hiding an account is not a delete. Its transactions
+      // stay, so importing into a hidden account answers 200 `inserted: N` for rows
+      // nothing displays - VISIBLE_ACCOUNT() keeps them out of the list, every
+      // summary and the CSV export - while their dedup keys go on blocking a
+      // re-import of the same statement. Clearing `hidden` here is not the fix
+      // (an import must not silently un-hide an account the user hid); a real
+      // account delete, taking the transactions and their imports with it, is.
       set: {
         name: sql`excluded.name`,
         currency: sql`excluded.currency`,
@@ -285,8 +293,8 @@ export async function updateAccountBalance(id: string, balance: number): Promise
 }
 
 /**
- * Balance = the sum of the account's transactions. For CSV accounts a statement
- * carries no balance, so this is the best approximation (exact with full history).
+ * Balance = the sum of the account's transactions. An uploaded statement carries
+ * no balance, so this is the best approximation (exact with full history).
  */
 export async function recalcAccountBalanceFromTransactions(accountId: string): Promise<void> {
   await getDb().execute(sql`
@@ -386,9 +394,9 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  * inserts anything. The database does the comparison, via the unique index.
  *
  * This is exact as long as a batch is complete for every group it touches - all
- * k rows of a day arrive in one call. Statement windows are whole days, so a CSV
- * file is; providers that paginate must accumulate their pages before calling
- * (see enablebanking.ts).
+ * k rows of a day arrive in one call. Statement windows are whole days, so an
+ * uploaded file is; providers that paginate must accumulate their pages before
+ * calling (see enablebanking.ts).
  *
  * A duplicate is skipped, never merged: the existing row keeps its description,
  * its category and the user's manual marks. Correcting facts on a re-parse is
@@ -707,7 +715,7 @@ export interface ImportRecord {
 }
 
 /** Long enough for any message the parsers produce; the rest is noise in a backup. */
-const ERROR_DETAIL_MAX = 500;
+export const ERROR_DETAIL_MAX = 500;
 
 const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => ({
   id: r.id,

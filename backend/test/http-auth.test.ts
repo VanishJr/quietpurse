@@ -52,13 +52,15 @@ beforeAll(async () => {
     [bob, 'bob'],
   ] as const) {
     const res = await agent
-      .post('/api/csv/import')
-      .send({
-        accountName: `${label} bank`,
-        currency: 'EUR',
-        preset: 'generic',
-        csv: csvFor(label, label === 'alice' ? '10.00' : '77.00'),
-      });
+      .post('/api/imports')
+      .field('accountName', `${label} bank`)
+      .field('currency', 'EUR')
+      .field('preset', 'generic')
+      .attach(
+        'file',
+        Buffer.from(csvFor(label, label === 'alice' ? '10.00' : '77.00'), 'utf8'),
+        'statement.csv',
+      );
     expect(res.status, `import failed: ${JSON.stringify(res.body)}`).toBe(200);
     expect(res.body.inserted).toBe(2);
   }
