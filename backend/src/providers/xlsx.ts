@@ -40,8 +40,29 @@ const CLOSEST_CLAUSE_MAX = 300;
 /** Under this what is left buys a fragment, not a clause - and a fragment misnames. */
 const CLOSEST_CLAUSE_MIN = 60;
 
+/** A twelve-month workbook would name every month; the rest becomes a count. */
+const UNUSED_LIST_MAX = 150;
+
+/**
+ * What the whole notice may spend. noRowsParsed appends it behind the row's own
+ * reason whole or not at all, so a notice past this costs the too-large clause as
+ * well as the unused one - and that clause reached the user before this one existed.
+ * What ERROR_DETAIL_MAX leaves after the longest reason the parser composes from
+ * fixed prose, the 3 characters that join the two, and 8 of margin. That reason is
+ * 199, measured at the extreme of every number it carries: a row label at Excel's
+ * own ceiling, MAX_DATA_ROWS skipped, and -Number.MAX_VALUE in the date cell at 24
+ * characters. 298 is therefore the exact bound - the margin is there because this
+ * number has been derived three times and been wrong twice. The too-large list is
+ * not bounded by it and predates it, so when the two together do not fit it is the
+ * unused clause that yields.
+ */
+const NOTICE_MAX = ERROR_DETAIL_MAX - 210;
+
 const UNCACHED_FORMULA =
   'is a formula with no stored result - open the file in Excel, re-save it, and upload again';
+
+const NOT_A_WORKBOOK =
+  'this is a zip archive but not an Excel workbook (.xlsx) - .ods and .numbers are not supported; export the statement as .xlsx or CSV';
 
 interface Normalised {
   value: Cell;
@@ -65,9 +86,19 @@ interface Candidate {
 
 /** A sheet the early-out disqualified: named whether or not another one worked out. */
 interface Oversized {
+  /** the key the notice excludes it by, so no sheet is named in both of its clauses */
+  id: number;
   name: string;
   rowCount: number;
 }
+
+/**
+ * The one definition of a sheet this importer can see: the selection loop's skip and
+ * the notice's list both read it, so the two cannot disagree about which sheets a
+ * workbook has. Positive rather than `!== 'hidden'` - a state exceljs has yet to
+ * learn would otherwise read as a statement.
+ */
+const isVisible = (ws: ExcelJS.Worksheet): boolean => ws.state === 'visible';
 
 /**
  * The workbook's rows, from the header down. isHeader is the mapper's own column
@@ -86,26 +117,28 @@ export async function readXlsx(
     // Buffer; the loader reads a Node Buffer
     await workbook.xlsx.load(bytes as unknown as ArrayBuffer);
   } catch {
-    throw new Error(
-      'this is a zip archive but not an Excel workbook (.xlsx) - .ods and .numbers are not supported; export the statement as .xlsx or CSV',
-    );
+    throw new Error(NOT_A_WORKBOOK);
   }
+  // a .zip holding anything else loads clean and empty rather than throwing above:
+  // the same file, so the same answer - it has no sheet to be told to unhide
+  const sheets = workbook.worksheets;
+  if (sheets.length === 0) throw new Error(NOT_A_WORKBOOK);
   const date1904 = workbook.properties?.date1904 === true;
 
   const tried: string[] = [];
   const tooLarge: Oversized[] = [];
   let closest: Candidate | null = null;
 
-  for (const worksheet of workbook.worksheets) {
+  for (const worksheet of sheets) {
     // a hidden sheet is hidden for a reason: never the statement
-    if (worksheet.state === 'hidden' || worksheet.state === 'veryHidden') continue;
+    if (!isVisible(worksheet)) continue;
     tried.push(worksheet.name);
     // an implausible sheet is disqualified the way a hidden one is, not the
     // workbook with it: a cover sheet formatted to the bottom must not refuse the
     // statement sitting behind it. Before readRows - never walking such a sheet is
     // the whole point of the early-out.
     if (worksheet.rowCount > MAX_SHEET_ROWS) {
-      tooLarge.push({ name: worksheet.name, rowCount: worksheet.rowCount });
+      tooLarge.push({ id: worksheet.id, name: worksheet.name, rowCount: worksheet.rowCount });
       continue;
     }
     const rows = readRows(worksheet);
@@ -128,12 +161,13 @@ export async function readXlsx(
     if (header < 0) continue;
     // kept[0] is the header row: rowLabel and note are only ever asked about 1..n
     const kept = rows.slice(header);
+    const note = sheetNotice(sheets, worksheet, tooLarge);
     return {
       rows: kept.map((r) => r.cells),
       rowLabel: (i) => kept[i]?.sheetRow ?? i + 1,
       note: (row, col) => kept[row]?.notes.get(col),
       date1904,
-      notices: tooLarge.length ? [skippedNotice(tooLarge, worksheet.name)] : undefined,
+      notices: note ? [note] : undefined,
     };
   }
   throw new Error(notFound(tried, tooLarge, closest));
@@ -143,16 +177,54 @@ export async function readXlsx(
  * A sheet that was never read is reported on the way out as well as on the way
  * down. A workbook whose January sheet is formatted past the cap imports February,
  * answers 200 and shows a success card; without this nothing the user is shown says
- * that a month is missing. importStatement warns per notice, but a log answers a
- * support question, not the person looking at their own statement, and the `imports`
- * row records nothing about a skipped sheet at all. One entry however many sheets
- * were skipped - it shares the problems array with the row-level messages.
+ * that a month is missing. The loop above returns at the first sheet whose header
+ * resolves, so the same silence covers every sheet behind that one - a two-month
+ * workbook imports January and says nothing whatever about February, which is why
+ * the unused list is derived here from the workbook rather than from `tried`.
+ * importStatement warns per notice, but a log answers a support question, not the
+ * person looking at their own statement, and the `imports` row records nothing about
+ * a skipped sheet at all. Hidden and empty sheets are never named: the selector will
+ * not read a hidden sheet either, and a blank Tabelle2 rides along in half the
+ * workbooks people export - naming either puts a notice on an import with nothing
+ * wrong with it. One entry however many sheets and however many causes - it shares
+ * the problems array with the row-level messages.
+ *
+ * Re-uploading the file is deliberately not offered: once this import is confirmed
+ * the same bytes answer "already imported" without being parsed, so the only exit
+ * that works is saving the other sheets as files of their own.
  */
-function skippedNotice(tooLarge: Oversized[], used: string): string {
+function sheetNotice(
+  sheets: ExcelJS.Worksheet[],
+  used: ExcelJS.Worksheet,
+  tooLarge: Oversized[],
+): string | undefined {
+  const oversized = new Set(tooLarge.map((s) => s.id));
+  const unused = sheets
+    .filter((w) => w.id !== used.id && isVisible(w) && w.rowCount > 0 && !oversized.has(w.id))
+    .map((w) => `"${w.name}"`);
+  if (!tooLarge.length && !unused.length) return undefined;
+
   const names = tooLarge.map((s) => `"${s.name}" (${s.rowCount} rows)`).join(', ');
-  return tooLarge.length === 1
-    ? `sheet ${names} was too large to read and was skipped - these rows come from "${used}"`
-    : `sheets ${names} were too large to read and were skipped - these rows come from "${used}"`;
+  const skipped =
+    tooLarge.length === 0
+      ? ''
+      : tooLarge.length === 1
+        ? `sheet ${names} was too large to read and was skipped - `
+        : `sheets ${names} were too large to read and were skipped - `;
+  const base = `${skipped}these rows come from "${used.name}"`;
+  if (!unused.length) return base;
+
+  const tail =
+    unused.length === 1
+      ? ' was not imported - save it as a separate file to import it'
+      : ' were not imported - save them as separate files to import them';
+  const clause = (listed: string): string => ` - ${listed}${tail}`;
+  // what the too-large list left, and never less than joinBounded's last resort
+  // costs: a clause that cannot afford even a count is dropped whole, because half a
+  // sheet name is a sheet the workbook has not got
+  const room = Math.min(UNUSED_LIST_MAX, NOTICE_MAX - base.length - clause('').length);
+  if (room < sheetCount(unused.length).length) return tooLarge.length ? base : undefined;
+  return base + clause(joinBounded(unused, room));
 }
 
 /**
