@@ -11,7 +11,6 @@ import {
   IncomeSourceDef,
   IncomeSourceKind,
   MonthlySummary,
-  OnboardingStatus,
   RecurringSummary,
   Settings,
   Summary,
@@ -322,8 +321,6 @@ export const api = {
   appSettings: () => request<AppSettings>('/api/app-settings'),
   updateAppSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>('/api/app-settings', json('PATCH', patch)),
-
-  onboardingStatus: () => request<OnboardingStatus>('/api/onboarding/status'),
 
   /**
    * Statement import: any bank without an API. One endpoint for every format —

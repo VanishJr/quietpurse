@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, apiLabel, backupUrl, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
+import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { CsvImport } from '../components/CsvImport';
 import { fmtDate, fmtMoney } from '../format';
 import { providerLabel } from '../providers';
@@ -31,9 +32,12 @@ export function OverviewScreen({
 }) {
   const { mode, setMode } = useTheme();
 
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  /**
+   * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
+   * is how a failed request came to render as "you have no accounts".
+   */
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   /** edit mode: show hidden accounts and the "remove" / "restore" buttons */
   const [editing, setEditing] = useState(false);
@@ -49,8 +53,6 @@ export function OverviewScreen({
       api.recurring().then(setRecurring).catch(() => {});
     } catch (e) {
       setError((e as Error).message);
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -58,7 +60,7 @@ export function OverviewScreen({
     try {
       setError(null);
       const updated = await api.setAccountHidden(a.id, !a.hidden);
-      setAccounts((list) => list.map((x) => (x.id === updated.id ? updated : x)));
+      setAccounts((list) => list?.map((x) => (x.id === updated.id ? updated : x)) ?? null);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -79,8 +81,9 @@ export function OverviewScreen({
   }, [load]);
 
   // outside edit mode, hidden accounts aren't shown at all
-  const visible = editing ? accounts : accounts.filter((a) => !a.hidden);
-  const hiddenCount = accounts.filter((a) => a.hidden).length;
+  const loaded = accounts ?? [];
+  const visible = editing ? loaded : loaded.filter((a) => !a.hidden);
+  const hiddenCount = loaded.filter((a) => a.hidden).length;
 
   // outside edit mode — only visible ones; in edit mode — all, hidden ones at the
   // end with a "Restore" button (like removed accounts)
@@ -121,6 +124,10 @@ export function OverviewScreen({
         </div>
       </div>
 
+      {/* above the content, not below it: a refusal read after the list is a refusal
+          the reader has already acted on */}
+      {error && <p className="error">Error: {error}</p>}
+
       {editing && (
         <p className="edit-hint">
           A removed account isn't shown and doesn't count in analytics. Its transactions
@@ -157,11 +164,19 @@ export function OverviewScreen({
         </div>
       ))}
 
-      {visible.length === 0 && !loading && (
-        <p className="empty">
-          No accounts yet. Click "Import" and load a bank statement — CSV, XLSX, or a
-          spreadsheet you exported yourself.
-        </p>
+      {/* hiddenCount, because "no accounts yet" over accounts the user removed is the
+          same untruth as over accounts that never loaded — the hidden line above says
+          what is actually true, and how to undo it */}
+      {accounts !== null && visible.length === 0 && hiddenCount === 0 && (
+        <div className="empty">
+          <p>
+            No accounts yet. Load a bank statement — a .csv or .xlsx export — and the
+            accounts, balances and categories all come out of the file.
+          </p>
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => setImporting(true)}>
+            ⭳ Import a statement
+          </button>
+        </div>
       )}
 
       {recurring && recurring.groups.length > 0 && (
@@ -223,7 +238,7 @@ export function OverviewScreen({
         </section>
       )}
 
-      {error && <p className="error">Error: {error}</p>}
+      <AppSettingsBlock />
 
       {/* the only user-reachable data export: unconditional on purpose - it used to
           sit inside the sync journal, which a workspace that never synced never had */}

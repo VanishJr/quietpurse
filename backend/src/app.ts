@@ -67,7 +67,7 @@ import { computeIndependence } from './independence';
 import { logHttp, logImport, logger } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { importStatement } from './providers/statement';
-import { getAppSettings, updateAppSettings } from './appsettings';
+import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
 import { Summary } from './types';
 
@@ -534,9 +534,12 @@ app.get('/api/app-settings', async (_req, res) => {
  * changing the owner names re-tags transfers immediately.
  */
 app.patch('/api/app-settings', async (req, res) => {
-  const { settings, baseCurrencyChanged, ownerNamesChanged } = await updateAppSettings(
-    req.body as Record<string, unknown>,
-  );
+  const parsed = parseAppSettingsPatch(req.body as { baseCurrency?: unknown; ownerNames?: unknown });
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.error });
+    return;
+  }
+  const { settings, baseCurrencyChanged, ownerNamesChanged } = await updateAppSettings(parsed.patch);
   if (baseCurrencyChanged) {
     const reset = await resetBaseAmounts();
     logger.info(`base currency -> ${settings.baseCurrency}: recomputing base_amount for ${reset} transactions`);
@@ -546,18 +549,6 @@ app.patch('/api/app-settings', async (req, res) => {
   }
   if (ownerNamesChanged) await reclassifyAll();
   res.json(settings);
-});
-
-// ---------- onboarding ----------
-
-/** What is already configured: the wizard shows while there is not a single account. */
-app.get('/api/onboarding/status', async (_req, res) => {
-  const accounts = await listAccounts(true);
-  res.json({
-    needed: accounts.length === 0,
-    accounts: accounts.length,
-    settings: await getAppSettings(),
-  });
 });
 
 // ---------- baseline minimum ----------

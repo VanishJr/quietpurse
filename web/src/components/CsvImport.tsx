@@ -33,20 +33,18 @@ const looksLikeText = (head: Uint8Array): boolean =>
   !BINARY_SIGNATURES.some((sig) => sig.every((b, i) => head[i] === b)) && !head.includes(0);
 
 interface Props {
-  /** Shown as a panel with a back link; omitted — inline (the first-run wizard). */
-  onBack?: () => void;
+  /** Leaves the panel. Required: a mount with no way back strands the user here. */
+  onBack: () => void;
   /**
    * Called once rows have actually landed, so the caller can refresh its data —
    * which is after Confirm, not after the upload: an upload writes nothing.
    */
-  onImported?: () => void;
+  onImported: () => void;
 }
 
 /**
- * Importing a bank statement — the only way data enters the product.
- *
- * Available both in the first-run wizard and from the Overview screen: a statement is
- * not a one-off setup step — next month there will be another one.
+ * Importing a bank statement — the only way data enters the product. Reached from
+ * Overview, and a statement is not a one-off setup step: next month there is another.
  */
 export function CsvImport({ onBack, onImported }: Props) {
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
@@ -138,7 +136,7 @@ export function CsvImport({ onBack, onImported }: Props) {
     try {
       setError(null);
       setConfirmed(await api.confirmImport(summary.importId));
-      onImported?.();
+      onImported();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -179,14 +177,10 @@ export function CsvImport({ onBack, onImported }: Props) {
 
   return (
     <section>
-      {onBack && (
-        <>
-          <button className="btn-link" onClick={onBack}>
-            ← Back to accounts
-          </button>
-          <h1 className="title">Import a statement</h1>
-        </>
-      )}
+      <button className="btn-link" onClick={onBack}>
+        ← Back to accounts
+      </button>
+      <h1 className="title">Import a statement</h1>
 
       <p className="hint">
         Any bank that lets you download a statement works here, whether it has an API or

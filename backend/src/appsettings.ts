@@ -38,29 +38,71 @@ export async function getAppSettings(): Promise<AppSettings> {
   };
 }
 
-/** Partial update. Returns the new settings and exactly what changed. */
-export async function updateAppSettings(patch: {
+declare const checked: unique symbol;
+
+/**
+ * A patch that has been through parseAppSettingsPatch, and the only thing
+ * updateAppSettings accepts. The brand is what carries the rule: this function used
+ * to take `unknown` fields and drop a bad currency in silence, so the route could
+ * answer 200 on a change that never happened. A guard at the route would only move
+ * that defect one caller away - the next one, on the mobile client's behalf, would
+ * meet it again. With the brand it cannot be called with an unchecked body at all.
+ */
+export type AppSettingsPatch = {
+  baseCurrency?: string;
+  ownerNames?: string[];
+} & { readonly [checked]: true };
+
+export type ParsedAppSettingsPatch =
+  | { ok: true; patch: AppSettingsPatch }
+  | { ok: false; error: string };
+
+/**
+ * An absent key means "leave it alone"; a present one that cannot be stored is
+ * refused rather than coerced - EURO is not somebody's guess at EUR.
+ */
+export function parseAppSettingsPatch(body: {
   baseCurrency?: unknown;
   ownerNames?: unknown;
-}): Promise<{ settings: AppSettings; baseCurrencyChanged: boolean; ownerNamesChanged: boolean }> {
+}): ParsedAppSettingsPatch {
+  const patch: { baseCurrency?: string; ownerNames?: string[] } = {};
+
+  if (body.baseCurrency !== undefined) {
+    if (typeof body.baseCurrency !== 'string' || !/^[A-Za-z]{3}$/.test(body.baseCurrency.trim())) {
+      return { ok: false, error: 'baseCurrency: a three-letter ISO code, e.g. EUR' };
+    }
+    patch.baseCurrency = body.baseCurrency.trim().toUpperCase();
+  }
+
+  if (body.ownerNames !== undefined) {
+    if (!Array.isArray(body.ownerNames) || body.ownerNames.some((n) => typeof n !== 'string')) {
+      return { ok: false, error: 'ownerNames: an array of strings' };
+    }
+    patch.ownerNames = (body.ownerNames as string[]).map((s) => s.trim()).filter(Boolean);
+  }
+
+  return { ok: true, patch: patch as AppSettingsPatch };
+}
+
+/** Partial update. Returns the new settings and exactly what changed. */
+export async function updateAppSettings(
+  patch: AppSettingsPatch,
+): Promise<{ settings: AppSettings; baseCurrencyChanged: boolean; ownerNamesChanged: boolean }> {
   const before = await getAppSettings();
 
   let baseCurrencyChanged = false;
-  if (typeof patch.baseCurrency === 'string' && /^[A-Za-z]{3}$/.test(patch.baseCurrency.trim())) {
-    const next = patch.baseCurrency.trim().toUpperCase();
-    if (next !== before.baseCurrency) {
-      await setSetting('base_currency', next);
-      baseCurrencyChanged = true;
-    }
+  if (patch.baseCurrency !== undefined && patch.baseCurrency !== before.baseCurrency) {
+    await setSetting('base_currency', patch.baseCurrency);
+    baseCurrencyChanged = true;
   }
 
   let ownerNamesChanged = false;
-  if (Array.isArray(patch.ownerNames)) {
-    const next = patch.ownerNames.map(String).map((s) => s.trim()).filter(Boolean);
-    if (JSON.stringify(next) !== JSON.stringify(before.ownerNames)) {
-      await setSetting('owner_names', JSON.stringify(next));
-      ownerNamesChanged = true;
-    }
+  if (
+    patch.ownerNames !== undefined &&
+    JSON.stringify(patch.ownerNames) !== JSON.stringify(before.ownerNames)
+  ) {
+    await setSetting('owner_names', JSON.stringify(patch.ownerNames));
+    ownerNamesChanged = true;
   }
 
   return { settings: await getAppSettings(), baseCurrencyChanged, ownerNamesChanged };
