@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
   BackupData,
-  commitImport,
   createImport,
   dbInstance,
   deleteImport,
@@ -22,11 +21,10 @@ import {
   setOneOff,
 } from '../src/db';
 import { getDocument, putDocument } from '../src/documents';
-import { importStatement } from '../src/providers/statement';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
-import { idOf } from './helpers';
+import { idOf, importAndConfirm, markImportCommitted } from './helpers';
 
 const tx = (description: string, amount: number): NewTransaction => ({
   accountId: 'acc1',
@@ -72,7 +70,7 @@ describe('backup and restore (JSON)', () => {
       parserVersion: 1,
       originalFilename: 'statement.csv',
     });
-    await commitImport(record.id, 1, 0);
+    await markImportCommitted(record.id, 1, 0);
     await insertTransactions([tx('backup provenance', -33)], record.id);
 
     await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
@@ -95,7 +93,7 @@ describe('backup and restore (JSON)', () => {
    */
   it('a restore leaves the documents on disk, and deleting the import still removes them', async () => {
     const csv = 'date,amount,description\n2026-05-05,-21.00,Restore then delete\n';
-    const imported = await importStatement({
+    const imported = await importAndConfirm({
       accountName: 'Restore Document Bank',
       currency: 'EUR',
       bytes: Buffer.from(csv, 'utf8'),
@@ -133,7 +131,7 @@ describe('backup and restore (JSON)', () => {
 
     const victimImportId = await runWithWorkspace(victim, async () => {
       const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
-      await commitImport(record.id, 1, 0);
+      await markImportCommitted(record.id, 1, 0);
       await recordImportDocument(record.id, await putDocument(record.id, statement));
       return record.id;
     });

@@ -16,8 +16,9 @@ import {
   addCategoryRule,
   addTransferRule,
   baselineTotal,
-  commitImport,
+  confirmImport,
   createImport,
+  discardImport,
   dbInstance,
   deleteImport,
   exportBackup,
@@ -29,6 +30,7 @@ import {
   getSetting,
   getTransaction,
   insertTransactions,
+  stageImport,
   listAccounts,
   listBaselineItems,
   listBudgets,
@@ -53,6 +55,7 @@ import {
   upsertIncomeSource,
 } from '../src/db';
 import { getDocument, putDocument } from '../src/documents';
+import { markImportCommitted } from './helpers';
 import { TEST_WORKSPACE_ID } from './pglite';
 import { NewTransaction } from '../src/types';
 
@@ -96,6 +99,12 @@ const SHARED_FILE_HASH = 'the-same-statement-pdf';
 let myImportId = '';
 let theirImportId = '';
 
+/**
+ * A committed import of the shared file. Fabricated rather than staged and
+ * confirmed: a real confirm creates an account and a transaction, and the
+ * assertions below count exactly what each workspace can see. The confirmation
+ * lifecycle has its own suite (confirmation.test.ts).
+ */
 async function importOf(label: string): Promise<string> {
   const record = await createImport({
     fileHash: SHARED_FILE_HASH,
@@ -103,7 +112,7 @@ async function importOf(label: string): Promise<string> {
     parserVersion: 1,
     originalFilename: `${label}.csv`,
   });
-  await commitImport(record.id, 1, 0);
+  await markImportCommitted(record.id, 1, 0);
   return record.id;
 }
 
@@ -323,6 +332,47 @@ describe('workspace isolation', () => {
       expect((await listImports()).map((i) => i.id)).toEqual([theirImportId]);
       expect((await findCommittedImportByHash(SHARED_FILE_HASH))!.id).toBe(theirImportId);
       expect(await deleteImport(myImportId)).toBeUndefined();
+    });
+  });
+
+  /**
+   * The confirmation routes take an import id from the URL, which is the shape that
+   * leaks: the primary key is (workspace_id, id), so the same id is legal in two
+   * workspaces and a restored backup produces exactly that. Both answer "no such
+   * import" - the conditional UPDATE matches nothing inside the workspace scope, so
+   * an absent id and a foreign one are the same code path - and neither may move
+   * the neighbour's row.
+   */
+  it('confirm and discard cannot reach another workspace import', async () => {
+    const staged = await runWithWorkspace(OTHER, async () => {
+      const record = await createImport({
+        fileHash: 'cross-workspace-confirm',
+        sourceType: 'csv',
+        parserVersion: 1,
+      });
+      await stageImport(
+        record.id,
+        [tx({ accountId: 'csv:theirs-staged', provider: 'upload', description: 'theirs: staged' })],
+        0,
+        { name: 'Theirs Staged', currency: 'EUR' },
+      );
+      return record.id;
+    });
+
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect(await confirmImport(staged)).toBeUndefined();
+      expect(await discardImport(staged)).toBeUndefined();
+      expect(await listTransactions({ limit: 100 })).toHaveLength(2);
+    });
+
+    // still exactly as it was left: awaiting confirmation, its rows still staged
+    await runWithWorkspace(OTHER, async () => {
+      expect((await listImports()).find((i) => i.id === staged)!.status).toBe(
+        'awaiting_confirmation',
+      );
+      const confirmed = await confirmImport(staged);
+      expect(confirmed).toMatchObject({ confirmed: true, inserted: 1 });
+      await deleteImport(staged);
     });
   });
 

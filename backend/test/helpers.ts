@@ -4,7 +4,9 @@
  * id back up by whatever actually distinguishes the row - which is closer to how
  * the app works anyway: the client gets its ids from a list endpoint too.
  */
-import { allTransactions } from '../src/db';
+import { sql } from 'drizzle-orm';
+import { allTransactions, confirmImport, currentWorkspaceId, dbInstance } from '../src/db';
+import { StatementImportRequest, importStatement } from '../src/providers/statement';
 import { Transaction } from '../src/types';
 
 /** The one stored transaction matching the predicate. Throws if it isn't unique. */
@@ -19,3 +21,67 @@ export async function findTx(match: (t: Transaction) => boolean): Promise<Transa
 /** Shorthand for the common case: a row identified by its description. */
 export const idOf = async (description: string): Promise<string> =>
   (await findTx((t) => t.description === description)).id;
+
+/**
+ * Marks a fabricated import committed, in SQL. There is no data-layer function for
+ * this any more and there must not be: confirmImport is the only thing that puts an
+ * import into `committed`, and it does so in the same transaction as the rows. This
+ * is for fixtures that need a committed import without a real file behind it.
+ */
+export async function markImportCommitted(
+  id: string,
+  rowsAccepted: number,
+  rowsRejected: number,
+): Promise<void> {
+  await dbInstance().execute(sql`
+    UPDATE imports SET status = 'committed', rows_accepted = ${rowsAccepted},
+      rows_rejected = ${rowsRejected}
+    WHERE workspace_id = ${currentWorkspaceId()} AND id = ${id}`);
+}
+
+/** What an upload used to answer, before it stopped importing anything. */
+export interface ImportedStatement {
+  accountId: string;
+  accountIds: string[];
+  inserted: number;
+  skipped: number;
+  total: number;
+  problems: string[];
+  importId: string;
+  duplicate?: boolean;
+  uploadedAt?: string;
+}
+
+/**
+ * Upload and confirm in one call, answering in the shape the upload had before the
+ * confirmation step existed (ROADMAP 5.3). It is here so that the cases about
+ * parsing, deduplication and provenance keep asserting exactly what they asserted
+ * before - a test rewritten around the new response is no longer evidence that the
+ * old guarantee still holds.
+ *
+ * The confirmation step itself is deliberately NOT tested through this: see
+ * confirmation.test.ts, which drives importStatement and confirmImport apart.
+ */
+export async function importAndConfirm(
+  req: StatementImportRequest,
+): Promise<ImportedStatement> {
+  const staged = await importStatement(req);
+  if (staged.outcome === 'duplicate') {
+    const { outcome: _outcome, ...rest } = staged;
+    return { ...rest, inserted: 0, problems: [], duplicate: true };
+  }
+  const { summary } = staged;
+  const confirmed = await confirmImport(summary.importId);
+  if (!confirmed || !confirmed.confirmed) {
+    throw new Error(`confirming ${summary.importId} failed: ${JSON.stringify(confirmed)}`);
+  }
+  return {
+    accountId: confirmed.accountId,
+    accountIds: confirmed.accountIds,
+    inserted: confirmed.inserted,
+    skipped: summary.skipped,
+    total: summary.total,
+    problems: summary.problems,
+    importId: summary.importId,
+  };
+}

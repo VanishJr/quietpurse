@@ -1,5 +1,5 @@
 {
-  "id": "c4c3b533-30d3-4962-bfd4-ea9229dfd4da",
+  "id": "62e107a9-326c-46e6-ac9f-eb0a85f66feb",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -656,6 +656,18 @@
         },
         "original_filename": {
           "name": "original_filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_name": {
+          "name": "account_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_currency": {
+          "name": "account_currency",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1348,6 +1360,125 @@
           "columns": [
             "workspace_id",
             "key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.staged_transactions": {
+      "name": "staged_transactions",
+      "schema": "",
+      "columns": {
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "import_id": {
+          "name": "import_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "row_no": {
+          "name": "row_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "mcc": {
+          "name": "mcc",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'other'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "staged_transactions_workspace_id_organization_id_fk": {
+          "name": "staged_transactions_workspace_id_organization_id_fk",
+          "tableFrom": "staged_transactions",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "staged_transactions_workspace_id_import_id_imports_workspace_id_id_fk": {
+          "name": "staged_transactions_workspace_id_import_id_imports_workspace_id_id_fk",
+          "tableFrom": "staged_transactions",
+          "tableTo": "imports",
+          "columnsFrom": [
+            "workspace_id",
+            "import_id"
+          ],
+          "columnsTo": [
+            "workspace_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "staged_transactions_workspace_id_import_id_row_no_pk": {
+          "name": "staged_transactions_workspace_id_import_id_row_no_pk",
+          "columns": [
+            "workspace_id",
+            "import_id",
+            "row_no"
           ]
         }
       },

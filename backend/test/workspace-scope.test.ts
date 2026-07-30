@@ -13,8 +13,10 @@ import type { Request, RequestHandler, Response } from 'express';
 import { describe, expect, it } from 'vitest';
 import { withWorkspace } from '../src/app';
 import {
+  confirmImport,
   currentWorkspaceId,
   dbInstance,
+  discardImport,
   getSetting,
   listAccounts,
   listIncomeSources,
@@ -22,6 +24,7 @@ import {
   runWithWorkspace,
   seedDefaults,
   setWorkspaceFallback,
+  stageImport,
 } from '../src/db';
 import { deleteDocument, getDocument, putDocument } from '../src/documents';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
@@ -37,6 +40,13 @@ describe('workspace scoping', () => {
       await expect(recordImportDocument('scope-import', 1)).rejects.toThrow(
         /no workspace context/,
       );
+      // the confirmation lifecycle, all three of them writes: staging rows, and two
+      // conditional UPDATEs that would otherwise match whatever row holds that id
+      await expect(
+        stageImport('scope-import', [], 0, { name: 'Scope', currency: 'EUR' }),
+      ).rejects.toThrow(/no workspace context/);
+      await expect(confirmImport('scope-import')).rejects.toThrow(/no workspace context/);
+      await expect(discardImport('scope-import')).rejects.toThrow(/no workspace context/);
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
       setWorkspaceFallback(TEST_WORKSPACE_ID);

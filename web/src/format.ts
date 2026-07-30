@@ -45,6 +45,15 @@ export function fmtDate(iso: string): string {
   return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
+/**
+ * dd.mm.yyyy from a plain YYYY-MM-DD. Not fmtDate: `new Date('2026-02-01')` is UTC
+ * midnight, which reads back as the 31st for anyone west of UTC - and these are
+ * calendar days off a bank statement, so that would be wrong every time, not
+ * occasionally. A calendar date is split on the string and never turned into an
+ * instant; fmtDate stays right for a real timestamp.
+ */
+export const fmtDay = (isoDay: string): string => isoDay.split('-').reverse().join('.');
+
 /** YYYY-MM-DD in local time */
 export function isoDay(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0');

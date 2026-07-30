@@ -161,12 +161,65 @@ export interface OnboardingStatus {
   };
 }
 
-export interface CsvImportResult {
+/**
+ * What an uploaded statement was read as, for the user to accept or reject. None of
+ * it is in the database yet — the rows are staged on the backend and become data
+ * only when the import is confirmed.
+ */
+export interface ImportSummary {
+  importId: string;
+  /** where the rows will go: the derived id, the name as typed, and whether it exists */
   accountId: string;
+  accountName: string;
+  accountExists: boolean;
+  /** data rows in the file */
+  total: number;
+  /** rows that could be read */
+  accepted: number;
+  /** rows the parser could not use */
+  skipped: number;
+  problems: string[];
+  /**
+   * Of `accepted`, how many are not already in the database. A snapshot: another
+   * import landing in between can take one of these, which is why the confirmed
+   * panel reads its own number rather than repeating this one.
+   */
+  newRows: number;
+  alreadyPresent: number;
+  /** YYYY-MM-DD */
+  from: string;
+  to: string;
+  /** net movement per currency: a file with a currency column carries more than one */
+  totals: { currency: string; net: number }[];
+  /** an earlier upload of these same bytes was waiting, and has been discarded */
+  supersededImportId?: string;
+}
+
+/**
+ * An upload imports nothing. Either these bytes are already in the database, or
+ * there is a summary to confirm — and the union is what stops a summary being
+ * rendered for a duplicate, or an "imported N" line for something that has not been.
+ */
+export type CsvImportResult =
+  | {
+      outcome: 'duplicate';
+      importId: string;
+      accountId: string;
+      accountIds: string[];
+      uploadedAt: string;
+      skipped: number;
+      total: number;
+    }
+  | { outcome: 'awaiting_confirmation'; summary: ImportSummary };
+
+/** What actually landed. `inserted` is the backend's own count, not the preview's. */
+export interface ImportConfirmed {
+  importId: string;
+  accountId: string;
+  accountIds: string[];
   inserted: number;
   skipped: number;
   total: number;
-  problems: string[];
 }
 
 // ---------- recurring payments ----------

@@ -1,8 +1,11 @@
 /**
  * The one ingestion surface (ROADMAP 5.1): POST /api/imports hands the raw bytes
- * here, this file decides what they are, picks a parser, and pushes the rows
- * through the same pipeline as the bank APIs: insertTransactions -> reclassifyAll
- * -> backfillBaseAmounts. The classifier doesn't care where a transaction came from.
+ * here, this file decides what they are, picks a parser, and stages the rows behind
+ * a summary the user has to accept. Confirm is what puts them through the same
+ * pipeline as the bank APIs - insertTransactions -> reclassifyAll ->
+ * backfillBaseAmounts - and it lives in the data layer (confirmImport, db/index.ts)
+ * because it is one database transaction. The classifier doesn't care where a
+ * transaction came from.
  *
  * An uploaded statement is a provider too, but a push-model one: it has no sync,
  * so it is not in the SYNC_PROVIDERS registry - see providers/provider.ts.
@@ -17,22 +20,24 @@
  * bytes and never parsed a second time (ROADMAP 4.3, 4.4).
  */
 import crypto from 'crypto';
+import { uploadAccountId } from '../accountid';
 import { categorize } from '../categorizer';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
-  commitImport,
+  countNewKeys,
   createImport,
   failImport,
   findCommittedImportByHash,
-  insertTransactions,
+  getAccount,
   listImportAccountIds,
-  recalcAccountBalanceFromTransactions,
   recordImportDocument,
-  upsertAccount,
+  stageImport,
+  supersedeStagedImports,
 } from '../db';
 import { putDocument } from '../documents';
 import { logImport } from '../logger';
+import { fromCents, toCents } from '../money';
 import { NewTransaction } from '../types';
 import {
   CSV_PARSER_VERSION,
@@ -77,37 +82,69 @@ export interface StatementImportRequest {
   uploadedBy?: string;
 }
 
-export interface StatementImportResult {
-  /** accountIds[0], or the requested account when the import owns no rows */
-  accountId: string;
-  /**
-   * Where the rows are. On a duplicate this is the earlier import's accounts,
-   * which need not be the account this upload asked for. Empty means the import
-   * owns no rows because an earlier one had already written every one of them -
-   * not that nothing was imported.
-   */
-  accountIds: string[];
-  /** new transactions */
-  inserted: number;
-  /** rows skipped (unparsable or filtered out) */
-  skipped: number;
-  /** total data rows in the file */
-  total: number;
-  /** the first parsing errors - so the user can see what went wrong */
-  problems: string[];
-  /** the import this upload created, or the earlier one that already holds the file */
+/**
+ * What was read, for the user to accept or reject. Nothing here is in the database
+ * yet: the rows are staged (ROADMAP 5.3) and become data only on Confirm.
+ */
+export interface ImportSummary {
+  /** the import awaiting confirmation - Confirm and Discard address it */
   importId: string;
-  /** this file was already imported: nothing was parsed and nothing was written */
-  duplicate?: boolean;
-  /** when the earlier import happened (duplicates only) */
-  uploadedAt?: string;
+  /** where the rows will go: the derived id, the name as typed, and whether it exists */
+  accountId: string;
+  accountName: string;
+  accountExists: boolean;
+  /** data rows in the file */
+  total: number;
+  /** rows that became staged transactions */
+  accepted: number;
+  /** rows the parser could not use */
+  skipped: number;
+  /** the first parsing errors, plus any notice about the file itself */
+  problems: string[];
+  /**
+   * Of `accepted`, how many are not already in the database - the number the user
+   * reads before deciding. A snapshot: another import committing between now and
+   * Confirm can take one of these slots, and the confirm reports what landed.
+   */
+  newRows: number;
+  alreadyPresent: number;
+  /** earliest and latest row date, YYYY-MM-DD */
+  from: string;
+  to: string;
+  /** net total per currency: a file with a currency column can carry more than one */
+  totals: { currency: string; net: number }[];
+  /**
+   * An earlier upload of these same bytes was still awaiting confirmation and has
+   * been discarded to make room for this one. A field rather than a sentence: the
+   * REST API is the contract iOS and Android read too, and an optional field is
+   * something a test can assert the absence of.
+   */
+  supersededImportId?: string;
 }
 
-const slugify = (s: string): string =>
-  s
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '') || 'account';
+/**
+ * Nothing is imported by an upload any more. Either the file is one this workspace
+ * already committed - which is not something to confirm, and must not render as an
+ * empty summary - or it is parsed, staged, and waiting for the user.
+ */
+export type StatementImportResult =
+  | {
+      outcome: 'duplicate';
+      /** the earlier import that already holds the file */
+      importId: string;
+      /** accountIds[0], or the requested account when that import owns no rows */
+      accountId: string;
+      /**
+       * Where the earlier import's rows are, which need not be the account this
+       * upload asked for. Empty means it owns none because an even earlier import
+       * had already written every one of them - not that nothing was imported.
+       */
+      accountIds: string[];
+      uploadedAt: string;
+      skipped: number;
+      total: number;
+    }
+  | { outcome: 'awaiting_confirmation'; summary: ImportSummary };
 
 /**
  * What the bytes are, by content only - never by the extension or the browser's
@@ -153,26 +190,23 @@ export function sniff(bytes: Buffer): ImportSourceType {
 }
 
 /**
- * Parses the statement and inserts the transactions. Classification and currency
- * conversion are the caller's job (the endpoint calls reclassifyAll afterwards).
+ * Parses the statement and stages what it read. Nothing reaches `transactions`
+ * here, and nothing on any screen moves until confirmImport runs.
  *
  * Order of operations (ROADMAP 5.1): hash and check before parsing, so a
- * re-upload costs nothing; write the import row before touching transactions, so
+ * re-upload costs nothing; write the import row before touching anything else, so
  * a failure leaves a failed import rather than nothing at all. The import row is
  * deliberately NOT in a transaction with the parse - a rollback would take the
  * failure record with it.
  *
- * The catch is around the inserts as well as the parse: a throw after some rows
- * have landed leaves them attached to a failed import, which is recoverable
+ * The catch is around the staging as well as the parse: a throw after some rows
+ * have been staged leaves them attached to a failed import, which is recoverable
  * (delete it and they go too), where leaving them unattributed would not be.
  */
 export async function importStatement(
   req: StatementImportRequest,
 ): Promise<StatementImportResult> {
-  // the prefix is an opaque id, not a claim about the format: one bank uploaded as
-  // CSV one month and as XLSX the next has to land in one account, or every
-  // overlapping row inserts twice (ROADMAP 4.2)
-  const accountId = `csv:${slugify(req.accountName)}`;
+  const accountId = uploadAccountId(req.accountName);
   const fileHash = crypto.createHash('sha256').update(req.bytes).digest('hex');
 
   const already = await findCommittedImportByHash(fileHash);
@@ -181,14 +215,12 @@ export async function importStatement(
     // imported under whatever name it was given the first time
     const accountIds = await listImportAccountIds(already.id);
     return {
+      outcome: 'duplicate',
       accountId: accountIds[0] ?? accountId,
       accountIds,
-      inserted: 0,
       skipped: already.rowsRejected,
       total: already.rowsAccepted + already.rowsRejected,
-      problems: [],
       importId: already.id,
-      duplicate: true,
       uploadedAt: already.uploadedAt,
     };
   }
@@ -233,7 +265,7 @@ export async function importStatement(
     // successful path: `problems` is never sent on a failure and nothing about a
     // skipped sheet is stored, so this is the only trace when the import throws
     for (const notice of sheet.notices ?? []) logImport.warn(`import ${record.id}: ${notice}`);
-    return await mapAndStore(req, sheet, preset, accountId, record.id);
+    return await mapAndStore(req, sheet, preset, accountId, record.id, fileHash);
   } catch (e) {
     await failImport(record.id, (e as Error).message);
     throw e;
@@ -327,6 +359,7 @@ async function mapAndStore(
   preset: CsvMapping | null,
   accountId: string,
   importId: string,
+  fileHash: string,
 ): Promise<StatementImportResult> {
   if (sheet.rows.length < 2) throw new Error('the file has no data rows (header only, or empty)');
 
@@ -391,27 +424,66 @@ async function mapAndStore(
     throw new Error(noRowsParsed(skipped, rowProblems, notices));
   }
 
-  await upsertAccount({
-    id: accountId,
-    provider: 'upload',
+  // The account is deliberately NOT created here. One created now would stand on
+  // Overview with a balance of 0 before the user confirmed anything, and would
+  // outlive a discard permanently - there is no account delete yet. So the name and
+  // the currency go on the `imports` row and the account appears at confirm.
+  //
+  const newRows = await countNewKeys(txs);
+  await stageImport(importId, txs, skipped, {
     name: req.accountName,
     currency: req.currency.toUpperCase(),
-    balance: 0,
   });
-  const inserted = await insertTransactions(txs, importId);
-  // a statement carries no balance - the best approximation is the sum of the account's transactions
-  await recalcAccountBalanceFromTransactions(accountId);
-  await commitImport(importId, txs.length, skipped);
+  // Last, and after the staging rather than before it: a failure anywhere above must
+  // not have taken the outstanding import the user is still looking at with it. The
+  // reverse order is the one that costs something - two staged copies of one file
+  // coexist safely, where a discarded original and no replacement is a summary the
+  // user lost.
+  //
+  // "Safely" is load-bearing and it is not free: it holds because the supersede is
+  // strictly one-directional (see supersedeStagedImports). Discarding any *other*
+  // outstanding copy is symmetric, so two uploads racing would each take the other
+  // and leave nothing confirmable at all. With only an older one taken, the worst
+  // case is two confirmable copies, and the second confirm meets
+  // imports_file_hash_unique and answers 409 rather than importing anything twice.
+  const superseded = await supersedeStagedImports(fileHash, importId);
 
+  const days = txs.map((t) => t.date.slice(0, 10)).sort();
   return {
-    accountId,
-    accountIds: [accountId],
-    inserted,
-    skipped,
-    total,
-    problems: [...notices, ...rowProblems],
-    importId,
+    outcome: 'awaiting_confirmation',
+    summary: {
+      importId,
+      accountId,
+      accountName: req.accountName,
+      accountExists: (await getAccount(accountId)) !== undefined,
+      total,
+      accepted: txs.length,
+      skipped,
+      problems: [...notices, ...rowProblems],
+      newRows,
+      alreadyPresent: txs.length - newRows,
+      from: days[0],
+      to: days[days.length - 1],
+      totals: netByCurrency(txs),
+      ...(superseded[0] ? { supersededImportId: superseded[0] } : {}),
+    },
   };
+}
+
+/**
+ * The net movement of the file, per currency. Summed in minor units rather than in
+ * decimals for the same reason the database stores them that way - a sum of floats
+ * drifts (see money.ts). One line for the overwhelming case; a file with a currency
+ * column carries more than one, and a single labelled number would be wrong for it.
+ */
+function netByCurrency(txs: NewTransaction[]): { currency: string; net: number }[] {
+  const cents = new Map<string, number>();
+  for (const t of txs) {
+    cents.set(t.currency, (cents.get(t.currency) ?? 0) + toCents(t.amount));
+  }
+  return [...cents.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, sum]) => ({ currency, net: fromCents(sum) }));
 }
 
 /**

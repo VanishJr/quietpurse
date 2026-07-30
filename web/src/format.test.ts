@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtDate, fmtMoney, fmtMonth, fmtShort, isoDay } from './format';
+import { fmtDate, fmtDay, fmtMoney, fmtMonth, fmtShort, isoDay } from './format';
 
 describe('fmtMoney', () => {
   it('groups thousands and drops a zero fraction', () => {
@@ -47,6 +47,15 @@ describe('dates', () => {
     // before. The suite pins TZ=UTC (vitest.config.ts) so this stays stable -
     // the shift itself is real and lives on until dates are parsed as local.
     expect(fmtDate('2026-07-05')).toBe('05.07.2026');
+  });
+
+  it('fmtDay never turns a calendar date into an instant', () => {
+    // The statement summary's date range. fmtDate is wrong for these in any negative
+    // offset - `new Date('2026-02-01')` is UTC midnight, so it prints the 31st - and
+    // unlike the fmtDate case above, that is not a shift this suite's TZ=UTC hides:
+    // fmtDay splits the string, so there is no zone for it to be wrong in.
+    expect(fmtDay('2026-02-01')).toBe('01.02.2026');
+    expect(fmtDay('2026-12-31')).toBe('31.12.2026');
   });
 
   it('isoDay is local and round-trips a local Date', () => {

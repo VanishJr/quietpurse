@@ -180,6 +180,14 @@ export const imports = pgTable(
     fileHash: text('file_hash').notNull(),
     sourceType: text('source_type', { enum: ['csv', 'xlsx'] }).notNull(),
     originalFilename: text('original_filename'),
+    // What the upload asked for: the account name as the user typed it, and the
+    // currency for rows whose file carries none. Recorded because Confirm is a
+    // later request that does not carry the form fields, and the account id is
+    // derived from the name (see uploadAccountId) rather than stored, so the two
+    // cannot come to disagree. NULL on every import that never reached the parse,
+    // and on every one from before the confirmation step.
+    accountName: text('account_name'),
+    accountCurrency: text('account_currency'),
     // user.id at upload time, deliberately NOT a foreign key: a backup restores
     // onto another server, where that user does not exist
     uploadedBy: text('uploaded_by'),
@@ -188,19 +196,29 @@ export const imports = pgTable(
     parserVersion: integer('parser_version').notNull(),
     /**
      * pending = written, outcome unknown (the process died mid-import, same
-     * convention as sync_log.ok = NULL); committed = its rows are in the
-     * database; failed = the import did not complete. Usually that means the
-     * parse threw before anything was written, but the failure is caught around
+     * convention as sync_log.ok = NULL); awaiting_confirmation = parsed, its rows
+     * staged in staged_transactions, waiting for the user to accept the summary;
+     * committed = its rows are in the database; discarded = the user looked at the
+     * numbers and said no; failed = the import did not complete. Usually that means
+     * the parse threw before anything was written, but the failure is caught around
      * the inserts too - so whatever rows a failed import did write stay attached
      * to it, and go with it when it is deleted.
      *
-     * ROADMAP 4.4 expects this column to also carry *parsed but unconfirmed*, so
-     * that roadmap item 7 needs no staging table. This lifecycle does not deliver
-     * that: rows exist only for committed imports. Item 7 has to add either an
-     * insert at `pending` plus a status filter on every read path, or the staging
-     * table this was meant to avoid.
+     * awaiting_confirmation is its own value rather than an overload of `pending`
+     * because `pending` is a corpse: presenting one as "confirm these numbers"
+     * would offer a half-written import for acceptance.
+     *
+     * `discarded` keeps its row instead of deleting it, and that is the point: the
+     * row is what references the stored source document (4.5), which is exactly the
+     * artefact a user who rejected the numbers will be asked for. It owns no
+     * transactions, so nothing is deleted to reach it, and only `committed` claims
+     * a file hash, so the file stays re-uploadable. On a `discarded` row
+     * error_detail separates the two ways it can be reached: NULL means the user
+     * declined it, a sentence means the server did (see restoreBackup).
      */
-    status: text('status', { enum: ['pending', 'committed', 'failed'] }).notNull(),
+    status: text('status', {
+      enum: ['pending', 'awaiting_confirmation', 'committed', 'failed', 'discarded'],
+    }).notNull(),
     // rows the parser turned into transactions, and rows it could not use. How many
     // of the accepted ones were genuinely new is a COUNT over transactions.import_id
     rowsAccepted: integer('rows_accepted').notNull().default(0),
@@ -302,6 +320,48 @@ export const transactions = pgTable(
     index('idx_tx_date').on(t.workspaceId, t.date),
     // PG does not index a foreign key for you, and the cascade delete scans on this
     index('idx_tx_import').on(t.workspaceId, t.importId),
+  ],
+);
+
+/**
+ * The rows of an import that is awaiting confirmation (ROADMAP 5.3). A separate
+ * table rather than a status column on `transactions`: an unconfirmed row is never
+ * read as data because it is not in the table every read path names, and that needs
+ * no filter - so there is none to forget.
+ *
+ * It carries NO dedup_key, deliberately. The key is computed and arbitrated by the
+ * database at confirm time, exactly as it is at import time today, so a staged row
+ * claims no slot in transactions_dedup_unique: an import uploaded while this one is
+ * outstanding still inserts every row it should, and discarding this one cannot
+ * take away a row that other import was told already existed.
+ */
+export const stagedTransactions = pgTable(
+  'staged_transactions',
+  {
+    workspaceId: workspaceId(),
+    importId: text('import_id').notNull(),
+    // the row's position in the file: the confirm reads by it, so the ordinals land
+    // on the same rows a single-stage import would have given them
+    rowNo: integer('row_no').notNull(),
+    accountId: text('account_id').notNull(),
+    provider: text('provider').notNull(),
+    amountCents: integer('amount_cents').notNull(),
+    currency: text('currency').notNull(),
+    date: text('date').notNull(),
+    description: text('description').notNull().default(''),
+    mcc: integer('mcc'),
+    category: text('category').notNull().default('other'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.importId, t.rowNo] }),
+    // composite like transactions.import_id: a single-column key would let a
+    // restored or crafted import id reach another workspace's staged rows. The
+    // cascade is what makes deleteImport and restoreBackup's DELETE FROM imports
+    // take these with them, with no new delete written anywhere.
+    foreignKey({
+      columns: [t.workspaceId, t.importId],
+      foreignColumns: [imports.workspaceId, imports.id],
+    }).onDelete('cascade'),
   ],
 );
 
