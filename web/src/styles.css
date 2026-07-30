@@ -715,18 +715,6 @@ textarea {
   height: 32px;
 }
 
-/* ---------- onboarding ---------- */
-
-.onboarding {
-  padding-bottom: 48px;
-}
-
-.step {
-  font-size: 17px;
-  font-weight: 700;
-  margin: 24px 0 6px;
-}
-
 .csv-input {
   min-height: 96px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

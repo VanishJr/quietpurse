@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, auth, onUnauthorized, SessionUser } from './api';
+import { auth, onUnauthorized, SessionUser } from './api';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { IndependenceScreen } from './screens/IndependenceScreen';
-import { OnboardingScreen } from './screens/OnboardingScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ThemeProvider } from './theme';
-import { OnboardingStatus } from './types';
 
 const TABS = [
   { key: 'overview', title: 'Overview' },
@@ -22,16 +20,6 @@ type TabKey = (typeof TABS)[number]['key'];
 function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
   const [tab, setTab] = useState<TabKey>('overview');
 
-  // first-run wizard: shown while the workspace has no accounts. "Go to the app"
-  // (dismissed) closes it even without accounts — in case someone wants to look around.
-  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null);
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    // backend unreachable — just skip the wizard, the screens will show the error
-    api.onboardingStatus().then(setOnboarding).catch(() => {});
-  }, []);
-
   const signOut = async () => {
     try {
       await auth.logout();
@@ -41,14 +29,6 @@ function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =>
       onSignedOut();
     }
   };
-
-  if (onboarding?.needed && !dismissed) {
-    return (
-      <div className="app">
-        <OnboardingScreen status={onboarding} onDone={() => setDismissed(true)} />
-      </div>
-    );
-  }
 
   return (
     <div className="app">

@@ -107,9 +107,10 @@ database. The web client still runs separately (step 2).
 ### 3. First run
 
 The app opens on a register/login screen — the first account you create becomes the
-server's first workspace. After that, with an empty database it opens a short wizard:
-base currency, the name your bank writes in statements, and the statement itself.
-Nothing here asks for API access to a bank — a file you exported is all it takes.
+server's first workspace. After that it opens on Overview, empty, with a button that
+takes you straight to the import; the base currency and the name your bank writes in
+statements sit on the same screen, and stay there. Nothing here asks for API access to
+a bank — a file you exported is all it takes.
 
 The Goal screen starts empty too: add the line items of your own bare minimum (rent,
 food, transport…) right on the screen — nobody else's guesses would fit anyway.
@@ -134,7 +135,7 @@ session obtained from the login screen.
 Everything else — base currency, account owner names — is edited in the app itself and
 stored in the database, per workspace. `OWNER_NAMES` and `FAMILY_NAMES` in `.env` seed
 the server's first workspace only; every later workspace starts empty and fills those
-in on the settings screen.
+in on the Overview screen.
 
 ### Accounts and workspaces
 

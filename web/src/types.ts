@@ -127,13 +127,6 @@ export interface AppSettings {
   ownerNames: string[];
 }
 
-export interface OnboardingStatus {
-  /** true = no accounts — show the first-run wizard */
-  needed: boolean;
-  accounts: number;
-  settings: AppSettings;
-}
-
 /**
  * What an uploaded statement was read as, for the user to accept or reject. None of
  * it is in the database yet — the rows are staged on the backend and become data

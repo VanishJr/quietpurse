@@ -1,13 +1,13 @@
 import { SessionUser } from '../api';
 import {
   Account,
+  AppSettings,
   BudgetsResponse,
   CsvImportResult,
   ImportConfirmed,
   ImportSummary,
   Independence,
   IncomeSourceDef,
-  OnboardingStatus,
   RecurringSummary,
   Summary,
   Transaction,
@@ -22,11 +22,7 @@ import {
 
 export const USER: SessionUser = { id: 'u1', email: 'owner@example.com', name: 'Owner' };
 
-export const ONBOARDING_DONE: OnboardingStatus = {
-  needed: false,
-  accounts: 2,
-  settings: { baseCurrency: 'EUR', ownerNames: ['Owner'] },
-};
+export const APP_SETTINGS: AppSettings = { baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko'] };
 
 export const ACCOUNTS: Account[] = [
   {

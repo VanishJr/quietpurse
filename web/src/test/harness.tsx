@@ -3,10 +3,10 @@ import React from 'react';
 import { ThemeProvider } from '../theme';
 import {
   ACCOUNTS,
+  APP_SETTINGS,
   BUDGETS,
   INCOME_SOURCES,
   INDEPENDENCE,
-  ONBOARDING_DONE,
   RECURRING,
   SUMMARY,
   TRANSACTIONS,
@@ -122,8 +122,8 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),
-  'GET /api/onboarding/status': () => ok(ONBOARDING_DONE),
   'GET /api/accounts': () => ok(ACCOUNTS),
+  'GET /api/app-settings': () => ok(APP_SETTINGS),
   'GET /api/recurring': () => ok(RECURRING),
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
