@@ -13,6 +13,7 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
 import { ERROR_DETAIL_MAX, getAccount, listAccounts, listImports, listTransactions } from '../src/db';
 import { logImport } from '../src/logger';
+import { importAndConfirm } from './helpers';
 import { importStatement } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import { XLSX_PARSER_VERSION } from '../src/providers/xlsx';
@@ -26,7 +27,7 @@ async function xlsx(build: (wb: ExcelJS.Workbook) => void): Promise<Buffer> {
 }
 
 const importFile = (accountName: string, bytes: Buffer) =>
-  importStatement({ accountName, currency: 'EUR', bytes });
+  importAndConfirm({ accountName, currency: 'EUR', bytes });
 
 /** date, amount and description of an account's rows, oldest first. */
 async function rowsOf(accountId: string): Promise<unknown[][]> {
@@ -269,7 +270,7 @@ describe('xlsx: finding the statement', () => {
     expect(await getAccount('csv:odd-columns-bank')).toBeUndefined();
 
     // a failed import does not claim the file - only a committed one does
-    const retried = await importStatement({
+    const retried = await importAndConfirm({
       accountName: 'Odd Columns Bank',
       currency: 'EUR',
       bytes: book,

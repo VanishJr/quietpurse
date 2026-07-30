@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { CsvImportResult } from '../types';
+import { fmtDate, fmtDay, fmtMoney } from '../format';
+import { CsvImportResult, ImportConfirmed, ImportSummary } from '../types';
 import { Chips } from './Chips';
 
 /** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
@@ -34,7 +35,10 @@ const looksLikeText = (head: Uint8Array): boolean =>
 interface Props {
   /** Shown as a panel with a back link; omitted — inline (the first-run wizard). */
   onBack?: () => void;
-  /** Called after a successful import, so the caller can refresh its data. */
+  /**
+   * Called once rows have actually landed, so the caller can refresh its data —
+   * which is after Confirm, not after the upload: an upload writes nothing.
+   */
   onImported?: () => void;
 }
 
@@ -59,6 +63,9 @@ export function CsvImport({ onBack, onImported }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CsvImportResult | null>(null);
+  /** what landed once the summary was accepted — the backend's counts, not the preview's */
+  const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
+  const [discarded, setDiscarded] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   /** which input a pending read belongs to — a slow one must not label a newer one */
   const pickSeq = useRef(0);
@@ -77,6 +84,8 @@ export function CsvImport({ onBack, onImported }: Props) {
     setFileRows(null);
     setError(null);
     setResult(null);
+    setConfirmed(null);
+    setDiscarded(false);
     return ++pickSeq.current;
   };
 
@@ -107,14 +116,29 @@ export function CsvImport({ onBack, onImported }: Props) {
     setBusy(true);
     try {
       setError(null);
+      setConfirmed(null);
+      setDiscarded(false);
       const form = new FormData();
       form.append('accountName', accountName.trim());
       form.append('currency', currency.trim());
       form.append('preset', preset);
       // the paste fallback goes through the same endpoint: it is a file too
       form.append('file', file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' }));
-      const r = await api.importStatement(form);
-      setResult(r);
+      // this reads the file and answers with what it found — it imports nothing, so
+      // onImported() stays out of here and fires when Confirm comes back
+      setResult(await api.importStatement(form));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runConfirm = async (summary: ImportSummary) => {
+    setBusy(true);
+    try {
+      setError(null);
+      setConfirmed(await api.confirmImport(summary.importId));
       onImported?.();
     } catch (e) {
       setError((e as Error).message);
@@ -122,6 +146,37 @@ export function CsvImport({ onBack, onImported }: Props) {
       setBusy(false);
     }
   };
+
+  const runDiscard = async (summary: ImportSummary) => {
+    setBusy(true);
+    try {
+      setError(null);
+      await api.discardImport(summary.importId);
+      setResult(null);
+      setDiscarded(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const summary = result?.outcome === 'awaiting_confirmation' ? result.summary : null;
+  const duplicate = result?.outcome === 'duplicate' ? result : null;
+  /**
+   * Rows the summary called new that somebody else's import wrote while this one was
+   * waiting. Two numbers that disagree with no explanation read as "the rows I
+   * approved were not written", which is the opposite of what happened.
+   */
+  const shortfall = summary && confirmed ? summary.newRows - confirmed.inserted : 0;
+  /**
+   * Rows that were genuinely already there when the file was read. Deliberately not
+   * `total − skipped − inserted`: that arithmetic absorbs the shortfall too, so the
+   * same rows would be counted in both paragraphs and this one would call them rows
+   * the user imported before, when they were written after this file was read.
+   * With this, the two paragraphs partition the accepted rows exactly.
+   */
+  const alreadyPresent = summary && confirmed ? summary.alreadyPresent : 0;
 
   return (
     <section>
@@ -266,38 +321,105 @@ export function CsvImport({ onBack, onImported }: Props) {
         disabled={busy || !accountName.trim() || (!file && !csvText.trim())}
         onClick={runImport}
       >
-        {busy ? 'Importing…' : 'Import'}
+        {busy && !summary ? 'Reading…' : 'Import'}
       </button>
 
-      {result && (
+      {discarded && (
+        <p className="hint" style={{ marginTop: 12 }}>
+          Discarded — nothing was imported. The file is untouched, so you can fix the
+          column layout or the account name above and upload it again.
+        </p>
+      )}
+
+      {duplicate && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="switch-label">You've already imported this file</div>
+          <p className="hint" style={{ marginTop: 6 }}>
+            Its {duplicate.total} rows came in on {fmtDate(duplicate.uploadedAt)} and are
+            already in your data. It wasn't read again, and nothing was duplicated.
+          </p>
+        </div>
+      )}
+
+      {summary && !confirmed && (
         <div className="card" style={{ marginTop: 12 }}>
           <div className="switch-label">
-            Imported {result.inserted} of {result.total} rows
+            Read {summary.accepted} of {summary.total} rows — nothing imported yet
           </div>
+          <p className="hint" style={{ marginTop: 6 }}>
+            {fmtDay(summary.from)} to {fmtDay(summary.to)}, {summary.totals
+              .map((t) => fmtMoney(t.net, t.currency))
+              .join(' · ')}{' '}
+            in total. They'll join{' '}
+            {summary.accountExists
+              ? `your existing "${summary.accountName}"`
+              : `a new account "${summary.accountName}"`}
+            .
+          </p>
           {/*
             The backend counts `skipped` for rows it couldn't read. Rows it read fine but
-            had already stored aren't counted anywhere — they're dropped by id on insert —
-            so duplicates are whatever is left over. Without spelling that out, a second
-            import of an overlapping export just reads as "0 imported" and looks broken.
+            has already stored aren't counted anywhere — they're dropped by their contents
+            on insert — so duplicates are whatever is left over. Without spelling that out,
+            an overlapping export just reads as "0 new" and looks broken.
           */}
-          {result.total - result.skipped - result.inserted > 0 && (
+          {summary.alreadyPresent > 0 && (
             <p className="hint" style={{ marginTop: 6 }}>
-              {result.total - result.skipped - result.inserted} were already in the
-              database — this export overlaps one you imported before. Nothing was
+              {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
+              database — this export overlaps one you imported before. Nothing will be
               duplicated.
             </p>
           )}
-          {result.skipped > 0 && (
+          {summary.skipped > 0 && (
             <p className="hint" style={{ marginTop: 6 }}>
-              {result.skipped} rows couldn't be read. If it's the whole file, the column
-              layout is probably wrong — try your bank's preset above.
+              {summary.skipped} rows couldn't be read. If it's the whole file, the column
+              layout is probably wrong — discard this and try your bank's preset above.
             </p>
           )}
-          {result.problems.slice(0, 3).map((p) => (
+          {summary.supersededImportId && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              An earlier upload of this same file was still waiting to be confirmed. It has
+              been dropped in favour of this one — it had imported nothing.
+            </p>
+          )}
+          {summary.problems.slice(0, 3).map((p) => (
             <p key={p} className="hint" style={{ marginTop: 6 }}>
               {p}
             </p>
           ))}
+          <div className="btn-row">
+            <button className="btn-ghost" disabled={busy} onClick={() => runDiscard(summary)}>
+              Discard
+            </button>
+            <button className="btn" disabled={busy} onClick={() => runConfirm(summary)}>
+              {busy ? 'Importing…' : 'Confirm'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmed && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <div className="switch-label">
+            Imported {confirmed.inserted} of {confirmed.total} rows
+          </div>
+          {alreadyPresent > 0 && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              {alreadyPresent} were already in the database — this export overlaps one you
+              imported before. Nothing was duplicated.
+            </p>
+          )}
+          {shortfall > 0 && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              {shortfall} of the rows this summary called new were written by another import
+              while it waited here. They're in your data — under that import, not this one.
+            </p>
+          )}
+          {confirmed.skipped > 0 && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              {confirmed.skipped} rows couldn't be read. If it's the whole file, the column
+              layout is probably wrong — try your bank's preset above.
+            </p>
+          )}
         </div>
       )}
     </section>

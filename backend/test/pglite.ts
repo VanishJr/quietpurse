@@ -28,6 +28,9 @@ const TABLES = [
   'accounts',
   'imports',
   'transactions',
+  // CASCADE would reach it through the foreign key on imports; listed so the next
+  // reader does not have to work that out
+  'staged_transactions',
   'fx_rates',
   'category_rules',
   'transfer_rules',

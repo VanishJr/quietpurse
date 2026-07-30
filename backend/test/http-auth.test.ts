@@ -62,7 +62,10 @@ beforeAll(async () => {
         'statement.csv',
       );
     expect(res.status, `import failed: ${JSON.stringify(res.body)}`).toBe(200);
-    expect(res.body.inserted).toBe(2);
+    // an upload only stages: nothing is this workspace's data until it is confirmed
+    const confirmed = await agent.post(`/api/imports/${res.body.summary.importId}/confirm`);
+    expect(confirmed.status, `confirm failed: ${JSON.stringify(confirmed.body)}`).toBe(200);
+    expect(confirmed.body.inserted).toBe(2);
   }
 });
 

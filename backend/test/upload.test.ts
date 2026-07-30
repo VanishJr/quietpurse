@@ -13,6 +13,7 @@
  */
 import http from 'http';
 import { AddressInfo } from 'net';
+import { sql } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -42,6 +43,9 @@ let sessionCookie: string;
 const imports = async (): Promise<{ sourceType: string; originalFilename: string | null }[]> =>
   (await agent.get('/api/imports')).body.imports;
 
+/** An upload only stages - this is what makes its rows the workspace's data. */
+const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
+
 beforeAll(async () => {
   initAuth(dbInstance());
   setWorkspaceFallback(undefined);
@@ -62,7 +66,7 @@ afterAll(() => {
 });
 
 describe('POST /api/imports', () => {
-  it('takes a CSV as multipart and answers with the import result', async () => {
+  it('takes a CSV as multipart and answers with a summary to confirm', async () => {
     const res = await agent
       .post('/api/imports')
       .field('accountName', 'Http Bank')
@@ -71,18 +75,32 @@ describe('POST /api/imports', () => {
       .attach('file', csvFile('HTTP groceries'), 'statement.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({
+    expect(res.body.outcome).toBe('awaiting_confirmation');
+    expect(res.body.summary).toMatchObject({
+      accountId: 'csv:http-bank',
+      accountName: 'Http Bank',
+      accountExists: false,
+      total: 1,
+      accepted: 1,
+      skipped: 0,
+      newRows: 1,
+      alreadyPresent: 0,
+      problems: [],
+    });
+    expect(res.body.summary.importId).toEqual(expect.any(String));
+
+    const [latest] = await imports();
+    expect(latest).toMatchObject({ sourceType: 'csv', originalFilename: 'statement.csv' });
+
+    const confirmed = await confirm(res.body.summary.importId);
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(confirmed.body).toMatchObject({
       accountId: 'csv:http-bank',
       accountIds: ['csv:http-bank'],
       inserted: 1,
       skipped: 0,
       total: 1,
-      problems: [],
     });
-    expect(res.body.importId).toEqual(expect.any(String));
-
-    const [latest] = await imports();
-    expect(latest).toMatchObject({ sourceType: 'csv', originalFilename: 'statement.csv' });
   });
 
   /**
@@ -98,7 +116,12 @@ describe('POST /api/imports', () => {
       .attach('file', await xlsxFile('HTTP workbook'), 'statement.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ accountId: 'csv:workbook-bank', inserted: 1, total: 1 });
+    expect(res.body.summary).toMatchObject({
+      accountId: 'csv:workbook-bank',
+      accepted: 1,
+      total: 1,
+    });
+    expect((await confirm(res.body.summary.importId)).body.inserted).toBe(1);
 
     const [latest] = await imports();
     expect(latest.sourceType).toBe('xlsx');
@@ -118,18 +141,25 @@ describe('POST /api/imports', () => {
       .attach('file', await xlsxFile('behind the cover', true), 'statement.xlsx');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual([
+    expect(Object.keys(res.body).sort()).toEqual(['outcome', 'summary']);
+    expect(Object.keys(res.body.summary).sort()).toEqual([
+      'accepted',
+      'accountExists',
       'accountId',
-      'accountIds',
+      'accountName',
+      'alreadyPresent',
+      'from',
       'importId',
-      'inserted',
+      'newRows',
       'problems',
       'skipped',
+      'to',
       'total',
+      'totals',
     ]);
     // without this the key set would also pass in the world where the notice stopped
     // reaching the client at all
-    expect(res.body.problems[0]).toMatch(
+    expect(res.body.summary.problems[0]).toMatch(
       /^sheet "Cover" \(600000 rows\) was too large to read and was skipped/,
     );
   });
@@ -143,10 +173,15 @@ describe('POST /api/imports', () => {
         .attach('file', csvFile('sent twice'), 'twice.csv');
 
     const first = await upload();
-    expect(first.body.inserted).toBe(1);
+    // only a committed import claims the hash, so the confirm is what makes the
+    // second upload a duplicate rather than a second staged copy
+    expect((await confirm(first.body.summary.importId)).body.inserted).toBe(1);
     const second = await upload();
     expect(second.status).toBe(200);
-    expect(second.body).toMatchObject({ duplicate: true, inserted: 0, importId: first.body.importId });
+    expect(second.body).toMatchObject({
+      outcome: 'duplicate',
+      importId: first.body.summary.importId,
+    });
     expect(second.body.uploadedAt).toEqual(expect.any(String));
   });
 
@@ -313,6 +348,101 @@ describe('POST /api/imports', () => {
   });
 });
 
+describe('POST /api/imports/:id/confirm and /discard', () => {
+  const stage = async (accountName: string, label: string) => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', accountName)
+      .field('currency', 'EUR')
+      .attach('file', csvFile(label), `${label}.csv`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return res.body.summary as { importId: string };
+  };
+
+  const transactions = async (): Promise<{ description: string }[]> =>
+    (await agent.get('/api/transactions?limit=500')).body;
+
+  /**
+   * The export is a read path like any other, and the one a person reaches for when
+   * they want "everything I have". A staged row must not be in it.
+   */
+  it('a staged import is in neither the transaction list nor the CSV export', async () => {
+    const { importId } = await stage('Export Bank', 'not yet exported');
+
+    expect((await transactions()).filter((t) => /not yet exported/.test(t.description))).toEqual(
+      [],
+    );
+    const before = await agent.get('/api/export.csv');
+    expect(before.status).toBe(200);
+    expect(before.text).not.toMatch(/not yet exported/);
+
+    expect((await confirm(importId)).status).toBe(200);
+    const after = await agent.get('/api/export.csv');
+    expect(after.text).toMatch(/not yet exported/);
+  });
+
+  it('a second confirm is 409 and names the state', async () => {
+    const { importId } = await stage('Second Confirm Bank', 'confirmed once');
+    expect((await confirm(importId)).status).toBe(200);
+
+    const again = await confirm(importId);
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already been confirmed/);
+    expect((await transactions()).filter((t) => /confirmed once/.test(t.description))).toHaveLength(
+      1,
+    );
+  });
+
+  it('discard is 200 twice, and 409 on an import that is already data', async () => {
+    const { importId } = await stage('Http Discard Bank', 'discarded over http');
+    const first = await agent.post(`/api/imports/${importId}/discard`);
+    expect(first.status).toBe(200);
+    expect(first.body).toEqual({ discarded: true, importId });
+    expect((await agent.post(`/api/imports/${importId}/discard`)).status).toBe(200);
+
+    const live = await stage('Http Committed Bank', 'committed over http');
+    expect((await confirm(live.importId)).status).toBe(200);
+    const refused = await agent.post(`/api/imports/${live.importId}/discard`);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/delete it instead of discarding it/);
+  });
+
+  /**
+   * The confirm's guards refuse a broken invariant, which is nothing the user did -
+   * so the status stays 5xx, or the operator's alerting would read a failure the
+   * server caused as one the file caused (ROADMAP 6.4). What must not stay is the
+   * body: `internal error` on the one screen whose job is saying whether the data
+   * landed reads as transient, so the person presses Confirm again forever.
+   */
+  it('a guard inside the confirm answers with the way out, not "internal error"', async () => {
+    const { importId } = await stage('Broken Invariant Bank', 'staged then broken');
+    // by import id alone: these rows belong to the signed-up session's own
+    // organization, not to TEST_WORKSPACE_ID
+    await dbInstance().execute(
+      sql`DELETE FROM staged_transactions WHERE import_id = ${importId}`,
+    );
+
+    const res = await confirm(importId);
+    expect(res.status).toBe(500);
+    expect(res.body.error).not.toMatch(/internal error/);
+    expect(res.body.error).toMatch(/Discard it and upload the file again/);
+    // still discardable, so the way out the sentence names actually works
+    expect((await agent.post(`/api/imports/${importId}/discard`)).status).toBe(200);
+  });
+
+  it('an unknown import id is 404 on both routes', async () => {
+    expect((await confirm('no-such-import')).status).toBe(404);
+    expect((await agent.post('/api/imports/no-such-import/discard')).status).toBe(404);
+  });
+
+  it('confirming without a session is refused', async () => {
+    const { importId } = await stage('Stranger Confirm Bank', 'not yours');
+    const res = await request(app).post(`/api/imports/${importId}/confirm`);
+    expect(res.status).toBe(401);
+    expect((await confirm(importId)).status).toBe(200);
+  });
+});
+
 describe('the routes around it', () => {
   it('GET /api/imports/presets lists generic plus the bank presets', async () => {
     const res = await agent.get('/api/imports/presets');
@@ -447,7 +577,9 @@ describe('a body that spans socket reads keeps its workspace', () => {
     );
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ accountId: 'csv:chunked-bank', inserted: 1, total: 1 });
+    const summary = res.body.summary as { importId: string; accountId: string; total: number };
+    expect(summary).toMatchObject({ accountId: 'csv:chunked-bank', total: 1 });
+    expect((await confirm(summary.importId)).body.inserted).toBe(1);
     // the answer alone is not enough - the row has to be in this workspace
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
     expect(rows.filter((t) => /chunked groceries/.test(t.description))).toHaveLength(1);
@@ -476,7 +608,8 @@ describe('a body that spans socket reads keeps its workspace', () => {
       .attach('file', padded, 'big.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ accountId: 'csv:big-body-bank', inserted: 1, total: 1 });
+    expect(res.body.summary).toMatchObject({ accountId: 'csv:big-body-bank', total: 1 });
+    expect((await confirm(res.body.summary.importId)).body.inserted).toBe(1);
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
     expect(rows.filter((t) => /padded statement/.test(t.description))).toHaveLength(1);
   });

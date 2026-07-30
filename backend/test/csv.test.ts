@@ -8,6 +8,7 @@ import {
   parseCsv,
   parseCsvDate,
 } from '../src/providers/csv';
+import { importAndConfirm } from './helpers';
 import { importStatement } from '../src/providers/statement';
 
 describe('parseCsv', () => {
@@ -76,7 +77,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   ].join('\n');
 
   it('sparkasse preset: parses, categorizes, and does not duplicate files', async () => {
-    const r1 = await importStatement({
+    const r1 = await importAndConfirm({
       accountName: 'Sparkasse Giro',
       currency: 'EUR',
       preset: 'sparkasse',
@@ -95,7 +96,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
     // re-uploading the same file is caught by its hash before any parsing
     // happens at all (ROADMAP 4.3); see imports.test.ts for that layer
-    const r2 = await importStatement({
+    const r2 = await importAndConfirm({
       accountName: 'Sparkasse Giro',
       currency: 'EUR',
       preset: 'sparkasse',
@@ -115,7 +116,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
       'CARD_PAYMENT,Current,2026-02-01 10:00:00,2026-02-02 10:00:00,Uber Trip,-12.50,0,EUR,COMPLETED,100',
       'CARD_PAYMENT,Current,2026-02-03 10:00:00,,Pending Stuff,-5.00,0,EUR,PENDING,95',
     ].join('\n');
-    const r = await importStatement({
+    const r = await importAndConfirm({
       accountName: 'Revolut',
       currency: 'EUR',
       preset: 'revolut',
@@ -144,7 +145,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     const file = (...keys: (keyof typeof rows)[]) =>
       ['date,amount,description', ...keys.map((k) => rows[k])].join('\n');
 
-    const first = await importStatement({
+    const first = await importAndConfirm({
       accountName: 'Overlap Bank',
       currency: 'EUR',
       bytes: Buffer.from(file('mar05', 'mar20', 'mar28'), 'utf8'),
@@ -152,7 +153,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     expect(first.inserted).toBe(3);
 
     // Mar 15 - Apr 15: repeats Mar 20 and Mar 28, adds two April rows
-    const second = await importStatement({
+    const second = await importAndConfirm({
       accountName: 'Overlap Bank',
       currency: 'EUR',
       bytes: Buffer.from(file('mar20', 'mar28', 'apr02', 'apr10'), 'utf8'),
@@ -167,7 +168,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     const statement = (description: string) =>
       ['date,amount,description', `2026-05-04,-23.45,${description}`].join('\n');
 
-    const first = await importStatement({
+    const first = await importAndConfirm({
       accountName: 'Reparse Bank',
       currency: 'EUR',
       bytes: Buffer.from(statement('REWE SAGT DANKE'), 'utf8'),
@@ -175,7 +176,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     expect(first.inserted).toBe(1);
 
     // the same statement through an improved parser: one more field extracted
-    const second = await importStatement({
+    const second = await importAndConfirm({
       accountName: 'Reparse Bank',
       currency: 'EUR',
       bytes: Buffer.from(statement('REWE SAGT DANKE 12345'), 'utf8'),
@@ -189,7 +190,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
   it('generic: column auto-detection; an unreadable file gives a clear error', async () => {
     const generic = ['Date,Amount,Description', '2026-03-01,-10,Something'].join('\n');
-    const r = await importStatement({
+    const r = await importAndConfirm({
       accountName: 'Bank X',
       currency: 'USD',
       bytes: Buffer.from(generic, 'utf8'),
@@ -250,12 +251,12 @@ describe('decodeCsv', () => {
    */
   it('a UTF-16LE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-01,-12.00,Utf16 bakery'].join('\n');
-    const wide = await importStatement({
+    const wide = await importAndConfirm({
       accountName: 'Utf16 Bank',
       currency: 'EUR',
       bytes: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
     });
-    const narrow = await importStatement({
+    const narrow = await importAndConfirm({
       accountName: 'Utf8 Bank',
       currency: 'EUR',
       bytes: Buffer.from(text, 'utf8'),
@@ -275,12 +276,12 @@ describe('decodeCsv', () => {
    */
   it('a UTF-16BE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-02,-13.00,Utf16be bakery'].join('\n');
-    const wide = await importStatement({
+    const wide = await importAndConfirm({
       accountName: 'Utf16be Bank',
       currency: 'EUR',
       bytes: Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]),
     });
-    const narrow = await importStatement({
+    const narrow = await importAndConfirm({
       accountName: 'Utf8 Big Endian Twin',
       currency: 'EUR',
       bytes: Buffer.from(text, 'utf8'),

@@ -5,6 +5,7 @@ import {
   BudgetsResponse,
   CategoryRule,
   CsvImportResult,
+  ImportConfirmed,
   Independence,
   IncomeSource,
   IncomeSourceDef,
@@ -338,9 +339,25 @@ export const api = {
    * Statement import: any bank without an API. One endpoint for every format —
    * the file field carries the bytes and the backend works out what they are. No
    * Content-Type here on purpose: the browser sets it, with the multipart boundary.
+   *
+   * It imports nothing. The rows are staged behind a summary, and confirmImport
+   * below is what makes them part of the user's data.
    */
   importStatement: (form: FormData) =>
     request<CsvImportResult>('/api/imports', { method: 'POST', body: form }),
+
+  /** Accepts a summary: the rows land and the backend answers with what actually did. */
+  confirmImport: (importId: string) =>
+    request<ImportConfirmed>(`/api/imports/${encodeURIComponent(importId)}/confirm`, {
+      method: 'POST',
+    }),
+
+  /** Rejects it: the staged rows go, and the same file can be uploaded again. */
+  discardImport: (importId: string) =>
+    request<{ discarded: boolean; importId: string }>(
+      `/api/imports/${encodeURIComponent(importId)}/discard`,
+      { method: 'POST' },
+    ),
 
   importPresets: () =>
     request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),

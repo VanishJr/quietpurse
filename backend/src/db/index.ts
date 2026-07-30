@@ -22,12 +22,13 @@
  */
 import crypto from 'crypto';
 import path from 'path';
-import { and, asc, eq, getTableColumns, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { Pool } from 'pg';
 import { z } from 'zod';
+import { uploadAccountId } from '../accountid';
 import { recurringKey } from '../categorizer';
 import { config } from '../config';
 import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
@@ -254,7 +255,16 @@ export async function setMeta(key: string, value: string): Promise<void> {
 // ---------- accounts ----------
 
 export async function upsertAccount(a: Account): Promise<void> {
-  await getDb()
+  await upsertAccountOn(getDb(), a);
+}
+
+/**
+ * The body, on a caller-supplied executor. The confirm step needs the account to
+ * appear in the same transaction as the rows that join it (see confirmImport), and
+ * a nested getDb().transaction() would take a second pooled connection.
+ */
+export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
+  await d
     .insert(s.accounts)
     .values({
       workspaceId: currentWorkspaceId(),
@@ -298,7 +308,14 @@ export async function updateAccountBalance(id: string, balance: number): Promise
  * no balance, so this is the best approximation (exact with full history).
  */
 export async function recalcAccountBalanceFromTransactions(accountId: string): Promise<void> {
-  await getDb().execute(sql`
+  await recalcAccountBalanceFromTransactionsOn(getDb(), accountId);
+}
+
+export async function recalcAccountBalanceFromTransactionsOn(
+  d: Executor,
+  accountId: string,
+): Promise<void> {
+  await d.execute(sql`
     UPDATE accounts SET balance_cents = (
       SELECT COALESCE(SUM(amount_cents), 0) FROM transactions
       WHERE account_id = ${accountId} AND ${WS()}
@@ -412,13 +429,31 @@ export async function insertTransactions(
   importId?: string,
 ): Promise<number> {
   if (txs.length === 0) return 0;
-  const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
+  let inserted = 0;
+  await getDb().transaction(async (tx) => {
+    inserted = await insertTransactionsOn(tx, txs, baseCurrency, importId);
+  });
+  return inserted;
+}
+
+/**
+ * The rows of a batch that will actually be offered to the database, each with the
+ * key it claims. **The only place computed keys are numbered** - the confirmation
+ * preview asks the same question of the same list (see countNewKeys), and a second
+ * copy of this loop would let the number the user reads before pressing Confirm
+ * drift from the number the confirm inserts, with nothing failing until it does.
+ *
+ * A key repeated inside one batch is taken once: a provider handing us the same
+ * native reference twice would be resolved by PG anyway, but the returned count is
+ * easier to trust if it never happens.
+ */
+function claimedKeys(
+  txs: NewTransaction[],
+): { tx: NewTransaction; amountCents: number; dedupKey: string }[] {
   const ordinals = new Map<string, number>();
-  // a provider handing us the same native reference twice in one batch: PG would
-  // resolve it, but the returned count is easier to trust if it never happens
   const batchKeys = new Set<string>();
-  const values: (typeof s.transactions.$inferInsert)[] = [];
+  const out: { tx: NewTransaction; amountCents: number; dedupKey: string }[] = [];
   for (const t of txs) {
     const amountCents = toCents(t.amount);
     let dedupKey = t.dedupKey;
@@ -431,39 +466,59 @@ export async function insertTransactions(
     }
     if (batchKeys.has(`${t.accountId}|${dedupKey}`)) continue;
     batchKeys.add(`${t.accountId}|${dedupKey}`);
-    // transactions already in the base currency need no conversion - fill it now;
-    // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
-    const isBase = t.currency === baseCurrency;
-    values.push({
-      workspaceId: w,
-      id: crypto.randomUUID(),
-      accountId: t.accountId,
-      dedupKey,
-      provider: t.provider,
-      amountCents,
-      currency: t.currency,
-      date: t.date,
-      description: t.description,
-      mcc: t.mcc ?? null,
-      category: t.category,
-      baseAmountCents: isBase ? amountCents : null,
-      fxRate: isBase ? 1 : null,
-      importId: importId ?? null,
-    });
+    out.push({ tx: t, amountCents, dedupKey });
   }
+  return out;
+}
+
+/**
+ * The body, on a caller-supplied executor and with the base currency already read.
+ * Both are what makes the confirm step atomic: it opens one transaction and every
+ * statement inside it runs on that handle, so no call under it can reach for a
+ * second pooled connection (see confirmImport).
+ */
+export async function insertTransactionsOn(
+  d: Db,
+  txs: NewTransaction[],
+  baseCurrency: string,
+  importId?: string,
+): Promise<number> {
+  if (txs.length === 0) return 0;
+  const w = currentWorkspaceId();
+  const values: (typeof s.transactions.$inferInsert)[] = claimedKeys(txs).map(
+    ({ tx: t, amountCents, dedupKey }) => {
+      // transactions already in the base currency need no conversion - fill it now;
+      // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
+      const isBase = t.currency === baseCurrency;
+      return {
+        workspaceId: w,
+        id: crypto.randomUUID(),
+        accountId: t.accountId,
+        dedupKey,
+        provider: t.provider,
+        amountCents,
+        currency: t.currency,
+        date: t.date,
+        description: t.description,
+        mcc: t.mcc ?? null,
+        category: t.category,
+        baseAmountCents: isBase ? amountCents : null,
+        fxRate: isBase ? 1 : null,
+        importId: importId ?? null,
+      };
+    },
+  );
   let inserted = 0;
-  await getDb().transaction(async (tx) => {
-    for (const chunk of chunked(values, 1000)) {
-      const res = await tx
-        .insert(s.transactions)
-        .values(chunk)
-        .onConflictDoNothing({
-          target: [s.transactions.workspaceId, s.transactions.accountId, s.transactions.dedupKey],
-        })
-        .returning({ id: s.transactions.id });
-      inserted += res.length;
-    }
-  });
+  for (const chunk of chunked(values, 1000)) {
+    const res = await d
+      .insert(s.transactions)
+      .values(chunk)
+      .onConflictDoNothing({
+        target: [s.transactions.workspaceId, s.transactions.accountId, s.transactions.dedupKey],
+      })
+      .returning({ id: s.transactions.id });
+    inserted += res.length;
+  }
   return inserted;
 }
 
@@ -780,23 +835,10 @@ export async function createImport(input: {
   return rowToImport(rows[0]);
 }
 
-/** The parse worked and the rows are in: this is what makes the file a duplicate. */
-export async function commitImport(
-  id: string,
-  rowsAccepted: number,
-  rowsRejected: number,
-): Promise<void> {
-  await getDb()
-    .update(s.imports)
-    .set({ status: 'committed', rowsAccepted, rowsRejected })
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
-}
-
 /**
  * The bytes are on disk: the row may now claim them. A separate write rather than
- * a field on createImport/commitImport/failImport, because the put happens between
- * the first and the other two - and a FAILED import keeps its document, which is
- * the case ROADMAP 4.5 wants it for.
+ * a field on createImport/failImport, because the put happens between the two - and
+ * a FAILED import keeps its document, which is the case ROADMAP 4.5 wants it for.
  *
  * Never called before the put: a row claiming a document that is not there is the
  * state every read would have to distrust.
@@ -827,12 +869,26 @@ export async function getImportDocumentRef(id: string): Promise<DocumentRef | un
 /**
  * The import did not complete - the parse threw, or an insert after it did. The
  * message only, truncated: it ends up in the JSON backup.
+ *
+ * The staged rows go with it, and here rather than in the caller's catch so that no
+ * future caller has to remember. A throw *after* the stage committed - the supersede,
+ * a read, anything - would otherwise leave a `failed` import holding rows that
+ * nothing can reach: `failed` is neither confirmable nor discardable, so they would
+ * sit until deleteImport, which has no button until roadmap item 10. A no-op for
+ * every import that never staged anything, and the document is kept either way -
+ * that is the artefact a failed import is retained for (ROADMAP 4.5).
  */
 export async function failImport(id: string, message: string): Promise<void> {
-  await getDb()
-    .update(s.imports)
-    .set({ status: 'failed', errorDetail: message.slice(0, ERROR_DETAIL_MAX) })
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+  const w = currentWorkspaceId();
+  await getDb().transaction(async (tx) => {
+    await tx
+      .update(s.imports)
+      .set({ status: 'failed', errorDetail: message.slice(0, ERROR_DETAIL_MAX) })
+      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+    await tx
+      .delete(s.stagedTransactions)
+      .where(and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)));
+  });
 }
 
 /**
@@ -876,6 +932,425 @@ export async function listImportAccountIds(importId: string): Promise<string[]> 
       ),
     );
   return rows.map((r) => r.accountId).sort();
+}
+
+// ---------- the confirmation step (ROADMAP 5.3) ----------
+
+type StagedRow = typeof s.stagedTransactions.$inferSelect;
+
+/**
+ * A staged row on its way into the pipeline. The return type is what holds the
+ * second row shape to the first: a required field added to NewTransaction is a
+ * compile error here, and here is the only place it can be.
+ */
+const stagedToNew = (r: StagedRow): NewTransaction => ({
+  accountId: r.accountId,
+  provider: r.provider as NewTransaction['provider'],
+  amount: fromCents(r.amountCents),
+  currency: r.currency,
+  date: r.date,
+  description: r.description,
+  mcc: r.mcc ?? undefined,
+  category: r.category,
+});
+
+/** What the upload asked for, carried on the import row to the confirm request. */
+export interface StagedAccount {
+  name: string;
+  currency: string;
+}
+
+/**
+ * Stages a parsed file and flips the import to `awaiting_confirmation` - in ONE
+ * transaction, rows first. That status has to mean "the complete staged set is
+ * present", and a crash anywhere inside here leaves `pending`, which nothing can
+ * confirm.
+ */
+export async function stageImport(
+  id: string,
+  txs: NewTransaction[],
+  rowsRejected: number,
+  account: StagedAccount,
+): Promise<void> {
+  const w = currentWorkspaceId();
+  const values = txs.map((t, i) => ({
+    workspaceId: w,
+    importId: id,
+    rowNo: i,
+    accountId: t.accountId,
+    provider: t.provider,
+    amountCents: toCents(t.amount),
+    currency: t.currency,
+    date: t.date,
+    description: t.description,
+    mcc: t.mcc ?? null,
+    category: t.category,
+  }));
+  await getDb().transaction(async (tx) => {
+    for (const chunk of chunked(values, 1000)) {
+      await tx.insert(s.stagedTransactions).values(chunk);
+    }
+    await tx
+      .update(s.imports)
+      .set({
+        status: 'awaiting_confirmation',
+        rowsAccepted: txs.length,
+        rowsRejected,
+        accountName: account.name,
+        accountCurrency: account.currency,
+      })
+      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+  });
+}
+
+/** Candidate (account, key) pairs joined in as VALUES for the preview count. */
+const keyPairs = (pairs: { accountId: string; dedupKey: string }[]): SQL =>
+  sql.join(
+    pairs.map((p) => sql`(${p.accountId}::text, ${p.dedupKey}::text)`),
+    sql`, `,
+  );
+
+/**
+ * How many of a parsed batch are not already in the database - the one number the
+ * user reads before pressing Confirm, so it is asked of the same key list the
+ * confirm will offer (claimedKeys) rather than recomputed alongside it.
+ *
+ * A snapshot, not a promise: another import committing in between can take one of
+ * these slots. The confirm answers with what actually landed.
+ */
+export async function countNewKeys(txs: NewTransaction[]): Promise<number> {
+  const pairs = claimedKeys(txs).map((c) => ({
+    accountId: c.tx.accountId,
+    dedupKey: c.dedupKey,
+  }));
+  let taken = 0;
+  for (const chunk of chunked(pairs, 1000)) {
+    const rows = await rowsOf<{ n: string }>(sql`
+      SELECT COUNT(*) AS n FROM transactions t
+      JOIN (VALUES ${keyPairs(chunk)}) AS k(account_id, dedup_key)
+        ON t.account_id = k.account_id AND t.dedup_key = k.dedup_key
+      WHERE t.${WS()}`);
+    taken += Number(rows[0].n);
+  }
+  return pairs.length - taken;
+}
+
+/**
+ * Why a superseded import is `discarded`. The third producer of that status, and
+ * without a sentence here the second one would be indistinguishable from the first:
+ * on a `discarded` row NULL means the user declined it, so a superseded row left
+ * empty would have item 10's screen telling someone they rejected an import they
+ * never saw. It is also the only place a copy the user displaced can be told apart
+ * from one they refused, which the retention purge will want.
+ */
+const SUPERSEDED_BY_REUPLOAD =
+  'superseded: the same file was uploaded again while this import was still awaiting confirmation, so it was dropped in favour of the newer one';
+
+/**
+ * Clears the way for a re-upload of the same bytes: an *older* import of this hash
+ * still awaiting confirmation is discarded, and its ids come back so the summary can
+ * say so. There is no imports-history screen until roadmap item 10, which makes
+ * re-uploading the file the only way back to an import whose tab was closed.
+ *
+ * Nothing is deleted to do this - a staged import owns no transactions - and the
+ * document is kept, referenced by the row that stays behind at `discarded`.
+ *
+ * **Older, not merely other, and that is the whole concurrency story.** An
+ * `id <> exceptId` predicate is symmetric: two uploads of one file that overlap in
+ * time both reach `awaiting_confirmation`, then each supersede matches the other and
+ * both end up `discarded` - zero confirmable imports and a file that needs a third
+ * upload. The tuple excludes self on its own, and the `id` tiebreak decides two
+ * uploads landing in the same millisecond, which comparing `uploaded_at` alone would
+ * leave superseding neither. `uploaded_at` is read here rather than passed in so that
+ * `exceptId` alone determines the comparison; a caller handing over someone else's
+ * timestamp would discard the wrong set with nothing failing.
+ */
+export async function supersedeStagedImports(
+  fileHash: string,
+  exceptId: string,
+): Promise<string[]> {
+  const w = currentWorkspaceId();
+  const rows = await getDb().transaction(async (tx) => {
+    const mine = await tx
+      .select({ uploadedAt: s.imports.uploadedAt })
+      .from(s.imports)
+      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, exceptId)));
+    if (!mine[0]) throw new Error(`import ${exceptId} is not in this workspace`);
+    const claimed = await tx
+      .update(s.imports)
+      .set({ status: 'discarded', errorDetail: SUPERSEDED_BY_REUPLOAD.slice(0, ERROR_DETAIL_MAX) })
+      .where(
+        and(
+          eq(s.imports.workspaceId, w),
+          eq(s.imports.fileHash, fileHash),
+          eq(s.imports.status, 'awaiting_confirmation'),
+          sql`(uploaded_at, id) < (${mine[0].uploadedAt}::text, ${exceptId}::text)`,
+        ),
+      )
+      .returning({ id: s.imports.id, uploadedAt: s.imports.uploadedAt });
+    for (const chunk of chunked(claimed, 100)) {
+      await tx.delete(s.stagedTransactions).where(
+        and(
+          eq(s.stagedTransactions.workspaceId, w),
+          inArray(
+            s.stagedTransactions.importId,
+            chunk.map((c) => c.id),
+          ),
+        ),
+      );
+    }
+    return claimed;
+  });
+  // newest first: the summary carries one id, and the one the user was looking at
+  // when they re-uploaded is the last one they staged
+  return rows
+    .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt) || b.id.localeCompare(a.id))
+    .map((r) => r.id);
+}
+
+/** The status and hash of an import in this workspace, for the refusals below. */
+async function importStateOf(
+  id: string,
+): Promise<{ status: ImportStatus; fileHash: string } | undefined> {
+  const rows = await getDb()
+    .select({ status: s.imports.status, fileHash: s.imports.fileHash })
+    .from(s.imports)
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+  return rows[0];
+}
+
+/** Rolls the confirm back when its conditional update matched nothing. */
+class NotAwaitingConfirmation extends Error {}
+
+/**
+ * A guard inside the confirm refused it: the staged set is not what the import says
+ * it is, the account it was staged for is not recorded, or the rows and that record
+ * disagree. None of these is anything the user did, so the route keeps a 5xx for it -
+ * a refusal caused by the server must stay distinguishable from one caused by the
+ * file (ROADMAP 6.4). What the type is for is the body: `internal error` on the one
+ * screen whose job is telling a person whether their data landed reads as transient,
+ * so they press Confirm again and get it again. Named, the route can log the real
+ * message for the operator and answer with the way out.
+ */
+export class ImportNotConfirmable extends Error {}
+
+const UNIQUE_VIOLATION = '23505';
+
+/**
+ * Whether a throw is that unique index. The constraint name is checked as well as
+ * the code, because the whole point is to answer 409 for one collision and let
+ * every other one surface as itself - and the name reaches us either as a field
+ * (node-postgres) or only inside the message (PGlite), through however many layers
+ * of `cause` the driver wrapped it in.
+ */
+function isUniqueViolation(e: unknown, constraint: string): boolean {
+  for (let cur: unknown = e, depth = 0; cur && depth < 10; depth++) {
+    const err = cur as { code?: string; constraint?: string; message?: string; cause?: unknown };
+    if (
+      err.code === UNIQUE_VIOLATION &&
+      (err.constraint === constraint || err.message?.includes(constraint))
+    ) {
+      return true;
+    }
+    cur = err.cause;
+  }
+  return false;
+}
+
+export type ConfirmOutcome =
+  | {
+      confirmed: true;
+      accountId: string;
+      accountIds: string[];
+      inserted: number;
+      rowsAccepted: number;
+      rowsRejected: number;
+    }
+  /** not awaiting confirmation (already confirmed, discarded, a corpse) */
+  | { confirmed: false; reason: 'status'; status: ImportStatus }
+  /** another import of the same bytes won the race to `committed` */
+  | { confirmed: false; reason: 'file-committed'; heldBy: string };
+
+/**
+ * Makes a staged import real: its rows go into `transactions` through the same
+ * insert every provider uses, and the import becomes `committed`. Answers what
+ * actually landed - `inserted` is the database's own count, not an echo of the
+ * preview - or why nothing did. undefined = no such import in this workspace.
+ *
+ * The conditional UPDATE is the first statement and it is the whole concurrency
+ * story: two confirms serialise on the row lock it takes, and the second
+ * re-evaluates its WHERE under READ COMMITTED, matches nothing and never reaches
+ * the insert. A row count, not a read-then-write.
+ *
+ * **Inside the transaction there is no getDb().** Every statement runs on `tx`, and
+ * the base currency is read before it opens: a data-layer call that reached for the
+ * pool under an open transaction would hold one connection while waiting for a
+ * second, and with pg's default pool (10, no connection timeout) ten concurrent
+ * confirms would wait on each other with nothing logged. deleteImport is the
+ * precedent - it reads outside and hands `tx` down.
+ */
+export async function confirmImport(id: string): Promise<ConfirmOutcome | undefined> {
+  const w = currentWorkspaceId();
+  const baseCurrency = await currentBaseCurrency();
+  let accountId = '';
+  let inserted = 0;
+  let rowsAccepted = 0;
+  let rowsRejected = 0;
+  try {
+    await getDb().transaction(async (tx) => {
+      const claimed = await tx
+        .update(s.imports)
+        .set({ status: 'committed' })
+        .where(
+          and(
+            eq(s.imports.workspaceId, w),
+            eq(s.imports.id, id),
+            eq(s.imports.status, 'awaiting_confirmation'),
+          ),
+        )
+        .returning({
+          accountName: s.imports.accountName,
+          accountCurrency: s.imports.accountCurrency,
+          rowsAccepted: s.imports.rowsAccepted,
+          rowsRejected: s.imports.rowsRejected,
+        });
+      const row = claimed[0];
+      if (!row) throw new NotAwaitingConfirmation();
+      // the columns are nullable because every import from before the confirmation
+      // step is. A `?? ''` here slugifies to an account called `csv:account` that
+      // the user never named, and reports it as a success
+      if (row.accountName === null || row.accountCurrency === null) {
+        throw new ImportNotConfirmable(
+          `import ${id} is awaiting confirmation but records no account name or currency`,
+        );
+      }
+      const staged = await tx
+        .select()
+        .from(s.stagedTransactions)
+        .where(
+          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+        )
+        // the ORDER BY is not what makes the counts right - ordinals are numbered
+        // within a group, so the count is order-independent. What it decides is
+        // which of a group's identical rows gets which ordinal, and therefore which
+        // description ends up on the row that survives deduplication
+        .orderBy(asc(s.stagedTransactions.rowNo));
+      // without this the invariant would rest on stageImport never being reordered
+      // by a later change, and its failure would read as "Imported 300 rows" under a
+      // summary that promised 500
+      if (staged.length !== row.rowsAccepted) {
+        throw new ImportNotConfirmable(
+          `import ${id} was staged with ${row.rowsAccepted} rows and ${staged.length} are present - refusing to confirm a partial import`,
+        );
+      }
+      accountId = uploadAccountId(row.accountName);
+      // stageImport takes the rows and the account name as independent arguments and
+      // there is no foreign key from transactions.account_id to accounts.id, so a
+      // caller whose rows were built for a different account than the one recorded
+      // here would get: an account nobody's rows join, rows against an account with
+      // no row, and the balance of the empty one recomputed - all reported as
+      // confirmed. Today's single caller passes uploadAccountId(name) for both; item
+      // 6's PDF path is the one that would not.
+      const stray = staged.find((r) => r.accountId !== accountId);
+      if (stray) {
+        throw new ImportNotConfirmable(
+          `import ${id} is recorded against account ${accountId} but staged a row for ${stray.accountId}`,
+        );
+      }
+      await upsertAccountOn(tx, {
+        id: accountId,
+        provider: 'upload',
+        name: row.accountName,
+        currency: row.accountCurrency,
+        balance: 0,
+      });
+      inserted = await insertTransactionsOn(tx, staged.map(stagedToNew), baseCurrency, id);
+      await tx
+        .delete(s.stagedTransactions)
+        .where(
+          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+        );
+      // inside the transaction, unlike the old import path: that window used to end
+      // in a `pending` import, which every reader distrusts, and now ends in a
+      // committed one. Nothing else ever recomputes an account's balance, so a crash
+      // between the inserts and this would leave Overview showing 0 for an account
+      // full of rows, indefinitely, with every status saying the import succeeded
+      await recalcAccountBalanceFromTransactionsOn(tx, accountId);
+      rowsAccepted = row.rowsAccepted;
+      rowsRejected = row.rowsRejected;
+    });
+  } catch (e) {
+    if (e instanceof NotAwaitingConfirmation) {
+      const state = await importStateOf(id);
+      return state && { confirmed: false, reason: 'status', status: state.status };
+    }
+    // two uploads of one file overlapping in time both reach awaiting_confirmation
+    // (the partial index only blocks `committed`, ROADMAP 4.3), so the second
+    // confirm meets the index rather than the status check. Its rows are identical
+    // to the ones that landed, so nothing is lost - what must not happen is a 500 on
+    // the one screen whose job is telling the user whether their data arrived
+    if (isUniqueViolation(e, 'imports_file_hash_unique')) {
+      const state = await importStateOf(id);
+      const held = state && (await findCommittedImportByHash(state.fileHash));
+      if (held) return { confirmed: false, reason: 'file-committed', heldBy: held.id };
+    }
+    throw e;
+  }
+  return {
+    confirmed: true,
+    accountId,
+    accountIds: await listImportAccountIds(id),
+    inserted,
+    rowsAccepted,
+    rowsRejected,
+  };
+}
+
+export type DiscardOutcome =
+  | { discarded: true }
+  /** a committed import is not discardable: deleteImport is that path (ROADMAP 4.4) */
+  | { discarded: false; status: ImportStatus };
+
+/**
+ * The user looked at the numbers and said no. Nothing is removed from
+ * `transactions` - a staged import never wrote any - so this is not a second
+ * destructive path; the row stays at `discarded`, keeping the stored statement
+ * referenced and the bytes re-uploadable.
+ *
+ * Idempotent on an import that is already `discarded`: the requested state holds,
+ * and answering with an error about a goal already achieved is not refusing loudly,
+ * it is misreporting the result. `committed` is the opposite case and answers 409 -
+ * its transactions are in the database and on every screen, and reporting
+ * "discarded" for that would be a destructive-sounding request reported as done
+ * with nothing done.
+ */
+export async function discardImport(id: string): Promise<DiscardOutcome | undefined> {
+  const w = currentWorkspaceId();
+  const claimed = await getDb().transaction(async (tx) => {
+    const rows = await tx
+      .update(s.imports)
+      .set({ status: 'discarded' })
+      .where(
+        and(
+          eq(s.imports.workspaceId, w),
+          eq(s.imports.id, id),
+          eq(s.imports.status, 'awaiting_confirmation'),
+        ),
+      )
+      .returning({ id: s.imports.id });
+    if (rows.length > 0) {
+      await tx
+        .delete(s.stagedTransactions)
+        .where(
+          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+        );
+    }
+    return rows.length;
+  });
+  if (claimed > 0) return { discarded: true };
+  const state = await importStateOf(id);
+  if (!state) return undefined;
+  return state.status === 'discarded' ? { discarded: true } : { discarded: false, status: state.status };
 }
 
 /** Anything that can run a raw statement: the pool, or an open transaction. */
@@ -1781,6 +2256,37 @@ const NEVER_RESTORED = new Set<string>([
 ]);
 
 /**
+ * Statuses a restored import may not keep. `awaiting_confirmation` is a claim about
+ * staged rows, and the backup carries none (staged_transactions is not a backup
+ * table) - it would arrive as an import whose Confirm inserts nothing and reports
+ * success. Typed against ImportStatus, like NEVER_RESTORED: renaming an enum value
+ * is then a compile error rather than a set that quietly stops matching.
+ */
+const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
+
+/**
+ * Why a restored import is `discarded`. On that status error_detail is what
+ * separates the two ways it can be reached - a user discard leaves it NULL - so a
+ * screen listing imports can say "the server did this" instead of accusing someone
+ * of rejecting an import they never saw.
+ */
+const RESTORED_UNCONFIRMABLE =
+  'restored from a backup: this import was still awaiting confirmation when the backup was taken, and a backup carries no staged rows, so it can never be confirmed here';
+
+/**
+ * The one value a restore rewrites rather than copies. It cannot live in
+ * sanitizeRow, which strips columns and rejects types and never edits a value.
+ */
+function coerceRestoredImport(row: Record<string, unknown>): Record<string, unknown> {
+  if (!NOT_RESTORABLE_STATUS.has(row.status as ImportStatus)) return row;
+  return {
+    ...row,
+    status: 'discarded' satisfies ImportStatus,
+    errorDetail: RESTORED_UNCONFIRMABLE.slice(0, ERROR_DETAIL_MAX),
+  };
+}
+
+/**
  * Keeps only real columns of the target table, and only values whose type the
  * column accepts. Without this a restore file is a direct write path into the
  * database with whatever types the uploader felt like: a string where an integer
@@ -1848,7 +2354,8 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
       await tx.execute(sql`DELETE FROM ${sql.raw(name)} WHERE workspace_id = ${w}`);
       const dropId = IDENTITY_TABLES.has(name);
       const values = incoming.map((row) => {
-        const { id, ...rest } = sanitizeRow(table, row, name);
+        const clean = sanitizeRow(table, row, name);
+        const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
         return dropId ? { ...rest, workspaceId: w } : { ...rest, id, workspaceId: w };
       });
       for (const chunk of chunked(values, 500)) {

@@ -14,9 +14,13 @@ import { CATEGORIES } from './categorizer';
 import { reclassifyAll } from './classify';
 import { config } from './config';
 import {
+  ImportNotConfirmable,
+  ImportStatus,
   addCategoryRule,
   addTransferRule,
   clearManualForRule,
+  confirmImport,
+  discardImport,
   countCategoryRuleMatches,
   countRuleMatches,
   currentBaseCurrency,
@@ -906,11 +910,12 @@ app.get('/api/imports/presets', (_req, res) => {
 
 /**
  * A statement from any bank, in whatever format it was downloaded: the file type
- * is sniffed from its bytes, not from its name. The rows go through the common
- * pipeline: insert -> reclassify -> convert to the base currency. A file already
- * imported into this workspace answers 200 with duplicate: true and is not parsed
- * again; rows that survive that and are already in the database are dropped by the
- * dedup key.
+ * is sniffed from its bytes, not from its name.
+ *
+ * **This does not import anything** (ROADMAP 5.3). It parses the file, stages the
+ * rows, and answers with a summary to accept - nothing on any screen moves until
+ * POST /api/imports/:id/confirm. A file this workspace already committed answers
+ * outcome: 'duplicate' instead and is not parsed again.
  */
 app.post('/api/imports', uploadFile, async (req, res) => {
   const body = req.body as Record<string, unknown>;
@@ -948,20 +953,110 @@ app.post('/api/imports', uploadFile, async (req, res) => {
       originalFilename: req.file.originalname || undefined,
       uploadedBy: res.locals.userId as string | undefined,
     });
-    if (result.duplicate) {
+    if (result.outcome === 'duplicate') {
       const where = result.accountIds.join(', ') || 'no account (its rows were already there)';
       logImport.info(`already imported as ${result.importId}, rows in ${where}`);
       res.json(result);
       return;
     }
+    const { summary } = result;
     logImport.info(
-      `import into ${result.accountId}: new ${result.inserted}, skipped ${result.skipped} of ${result.total}`,
+      `import ${summary.importId} staged for ${summary.accountId}: ${summary.accepted} rows read, ${summary.newRows} new, skipped ${summary.skipped} of ${summary.total}`,
     );
-    await reclassifyAll(); // categories, transfers, sources, base_amount
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
+});
+
+/** Why an import cannot be confirmed, in the words of the screen that shows it. */
+const confirmRefusal = (status: ImportStatus): string => {
+  switch (status) {
+    case 'committed':
+      return 'this import has already been confirmed - its rows are in your data';
+    case 'discarded':
+      return 'this import was discarded - upload the file again to import it';
+    default:
+      return `this import is ${status}, not awaiting confirmation`;
+  }
+};
+
+/**
+ * Accepts a staged import: the rows become data and the pipeline runs over them.
+ * The answer is what actually landed - `inserted` is the database's own count -
+ * which can be less than the summary promised if another import wrote some of these
+ * rows in between.
+ */
+app.post('/api/imports/:id/confirm', async (req, res) => {
+  let result: Awaited<ReturnType<typeof confirmImport>>;
+  try {
+    result = await confirmImport(req.params.id);
+  } catch (e) {
+    if (!(e instanceof ImportNotConfirmable)) throw e;
+    // A broken invariant, not a bad request, so the status stays 5xx: the operator's
+    // alerting must not read a refusal the server caused as one the user's file did
+    // (ROADMAP 6.4). What changes is the body - the global handler's `internal error`
+    // reads as transient on the one screen whose job is saying whether the data
+    // landed, so the person presses Confirm again and gets it again. The real message
+    // names the import and goes to the log; the sentence names the way out.
+    logImport.error(`import ${req.params.id} cannot be confirmed: ${(e as Error).message}`);
+    res.status(500).json({
+      error:
+        'this import cannot be confirmed - confirming it again will fail the same way. Discard it and upload the file again',
+    });
+    return;
+  }
+  if (!result) {
+    res.status(404).json({ error: 'import not found' });
+    return;
+  }
+  if (!result.confirmed) {
+    res.status(409).json({
+      error:
+        result.reason === 'status'
+          ? confirmRefusal(result.status)
+          : `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`,
+    });
+    return;
+  }
+  logImport.info(
+    `import ${req.params.id} confirmed into ${result.accountId}: new ${result.inserted} of ${result.rowsAccepted}`,
+  );
+  await reclassifyAll(); // categories, transfers, sources, base_amount
+  res.json({
+    importId: req.params.id,
+    accountId: result.accountId,
+    accountIds: result.accountIds,
+    inserted: result.inserted,
+    skipped: result.rowsRejected,
+    total: result.rowsAccepted + result.rowsRejected,
+  });
+});
+
+/**
+ * The user rejected the summary. The staged rows go, the import row stays at
+ * `discarded` holding on to the stored statement, and the same file can be uploaded
+ * again. Idempotent - a second discard reports the state that already holds - but a
+ * `committed` import is refused: its rows are real data, and DELETE /api/imports/:id
+ * is the path that removes those (ROADMAP 4.4).
+ */
+app.post('/api/imports/:id/discard', async (req, res) => {
+  const result = await discardImport(req.params.id);
+  if (!result) {
+    res.status(404).json({ error: 'import not found' });
+    return;
+  }
+  if (!result.discarded) {
+    res.status(409).json({
+      error:
+        result.status === 'committed'
+          ? 'this import is already part of your data - delete it instead of discarding it'
+          : `this import is ${result.status}, not awaiting confirmation`,
+    });
+    return;
+  }
+  logImport.info(`import ${req.params.id} discarded`);
+  res.json({ discarded: true, importId: req.params.id });
 });
 
 app.get('/api/imports', async (_req, res) => {

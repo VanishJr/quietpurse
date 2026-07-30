@@ -23,6 +23,7 @@ import {
   runWithWorkspace,
 } from '../src/db';
 import { DOCUMENT_STORE_REFUSED, getDocument } from '../src/documents';
+import { importAndConfirm } from './helpers';
 import { importStatement } from '../src/providers/statement';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
@@ -37,7 +38,7 @@ const repeated = (n: number, row: string): string =>
   csvFile(...Array.from({ length: n }, () => row));
 
 const importFile = (accountName: string, csv: string) =>
-  importStatement({ accountName, currency: 'EUR', bytes: Buffer.from(csv, 'utf8') });
+  importAndConfirm({ accountName, currency: 'EUR', bytes: Buffer.from(csv, 'utf8') });
 
 const countFor = async (accountId: string): Promise<number> =>
   (await listTransactions({ accountId, limit: 500 })).length;
@@ -122,7 +123,7 @@ describe('imports: the file layer', () => {
     expect(await getAccount('csv:retry-bank')).toBeUndefined();
 
     // a failed import does not claim the file - only a committed one does
-    const retried = await importStatement({
+    const retried = await importAndConfirm({
       accountName: 'Retry Bank',
       currency: 'EUR',
       bytes: Buffer.from(csv, 'utf8'),
