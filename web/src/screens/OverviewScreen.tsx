@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, apiLabel, backupUrl, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
 import { CsvImport } from '../components/CsvImport';
 import { fmtDate, fmtMoney } from '../format';
 import { providerLabel } from '../providers';
 import { ThemeMode, useTheme } from '../theme';
-import { Account, RecurringSummary, SyncJournalRun, SyncStatus } from '../types';
+import { Account, RecurringSummary } from '../types';
 
 /** How many recurring payments to show in the Overview block. */
 const RECURRING_LIMIT = 8;
@@ -22,9 +22,6 @@ const MODE_LABEL: Record<ThemeMode, string> = {
   dark: '☾ Dark',
 };
 
-const hhmm = (iso: string) =>
-  new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
 export function OverviewScreen({
   user,
   onSignOut,
@@ -38,25 +35,18 @@ export function OverviewScreen({
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sync, setSync] = useState<SyncStatus | null>(null);
-  /** sync journal — expands on click */
-  const [journal, setJournal] = useState<SyncJournalRun[]>([]);
-  const [journalOpen, setJournalOpen] = useState(false);
   /** edit mode: show hidden accounts and the "remove" / "restore" buttons */
   const [editing, setEditing] = useState(false);
   /** statement import takes over the screen — it's a form, not a dialog */
   const [importing, setImporting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
       // in edit mode we need the hidden ones too — otherwise there's no way to restore them
       setAccounts(await api.accounts(true));
-      // Overview background: errors from these requests must not break the accounts list
+      // Overview background: an error here must not break the accounts list
       api.recurring().then(setRecurring).catch(() => {});
-      api.syncStatus().then(setSync).catch(() => {});
-      api.syncJournal(5).then((r) => setJournal(r.runs)).catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -84,47 +74,9 @@ export function OverviewScreen({
     }
   };
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
-
-  const pollUntilDone = useCallback(() => {
-    stopPolling();
-    pollRef.current = setInterval(async () => {
-      try {
-        const st = await api.syncStatus();
-        setSync(st);
-        if (!st.running) {
-          stopPolling();
-          load();
-        }
-      } catch {
-        // the backend may have been unreachable for a couple of seconds — keep polling
-      }
-    }, 2000);
-  }, [load, stopPolling]);
-
   useEffect(() => {
     load();
-    return stopPolling;
-  }, [load, stopPolling]);
-
-  const onSync = async () => {
-    try {
-      setError(null);
-      const res = await api.startSync();
-      setSync(res.status);
-      pollUntilDone();
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  const running = sync?.running ?? false;
-  const lastLog = sync?.log.length ? sync.log[sync.log.length - 1] : null;
+  }, [load]);
 
   // outside edit mode, hidden accounts aren't shown at all
   const visible = editing ? accounts : accounts.filter((a) => !a.hidden);
@@ -171,8 +123,8 @@ export function OverviewScreen({
 
       {editing && (
         <p className="edit-hint">
-          A removed account isn't shown, doesn't count in analytics, and isn't synced. Its
-          transactions stay in the database — you can restore it any time.
+          A removed account isn't shown and doesn't count in analytics. Its transactions
+          stay in the database — you can restore it any time.
         </p>
       )}
       {!editing && hiddenCount > 0 && (
@@ -207,9 +159,8 @@ export function OverviewScreen({
 
       {visible.length === 0 && !loading && (
         <p className="empty">
-          No accounts yet. Click "Import" to load a statement — the fastest way to see
-          real data — or "Refresh" to sync a bank (needs a MONOBANK_TOKEN or a bank
-          connected via Enable Banking).
+          No accounts yet. Click "Import" and load a bank statement — CSV, XLSX, or a
+          spreadsheet you exported yourself.
         </p>
       )}
 
@@ -273,58 +224,17 @@ export function OverviewScreen({
       )}
 
       {error && <p className="error">Error: {error}</p>}
-      {lastLog && <p className="sync-log">{lastLog}</p>}
-      {sync?.error && <p className="error">Sync: {sync.error}</p>}
 
-      {/* data status: when it last synced and what needs attention */}
-      {sync?.freshAsOf && !running && (
-        <p className="sync-log">
-          Data current as of {fmtDate(sync.freshAsOf)} {hhmm(sync.freshAsOf)}
-        </p>
-      )}
-      {(sync?.problems ?? []).map((p) => (
-        <p key={p} className="error">
-          ⚠ {p}
-        </p>
-      ))}
-
-      {/* sync journal: recent runs from sync_log */}
-      {journal.length > 0 && (
-        <div>
-          <button className="btn-link" onClick={() => setJournalOpen((v) => !v)}>
-            {journalOpen ? 'Hide sync journal' : 'Sync journal…'}
-          </button>
-          {journalOpen &&
-            journal.map((r) => (
-              <div key={r.id} className="journal-row">
-                <div className="journal-text">
-                  {r.ok === null ? '⏳' : r.ok ? '✓' : '✗'} {fmtDate(r.startedAt)}{' '}
-                  {hhmm(r.startedAt)} · new: {r.inserted}
-                  {r.errors.length > 0 ? ` · errors: ${r.errors.length}` : ''}
-                </div>
-                {r.errors.slice(0, 2).map((e) => (
-                  <div key={e} className="journal-error">
-                    {e}
-                  </div>
-                ))}
-              </div>
-            ))}
-          {journalOpen && (
-            <a className="btn-link" href={backupUrl()} download>
-              ⬇ Download backup (.json)
-            </a>
-          )}
-        </div>
-      )}
-
-      <button
-        className="btn"
-        style={{ display: 'block', width: '100%', margin: '8px 0' }}
-        onClick={onSync}
-        disabled={running}
+      {/* the only user-reachable data export: unconditional on purpose - it used to
+          sit inside the sync journal, which a workspace that never synced never had */}
+      <a
+        className="btn-link"
+        style={{ display: 'block', margin: '8px 0' }}
+        href={backupUrl()}
+        download
       >
-        {running ? 'Syncing…' : 'Refresh'}
-      </button>
+        ⬇ Download backup (.json)
+      </a>
 
       <p className="api-hint">
         {user.email} ·{' '}

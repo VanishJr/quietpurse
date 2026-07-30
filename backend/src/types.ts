@@ -1,4 +1,11 @@
-/** Where the data came from. 'upload' is a statement the user brought in, in any format. */
+/**
+ * Where the data came from. 'upload' is a statement the user brought in, in any
+ * format, and it is the only value anything writes: the direct bank integrations
+ * were deleted (ROADMAP 5.4). 'monobank' and 'enablebanking' stay in the union
+ * because rows carrying them exist — in databases that ran those integrations and
+ * in every backup taken since — and narrowing it would make the compiler assert
+ * something false about them.
+ */
 export type Provider = 'monobank' | 'enablebanking' | 'upload';
 
 export interface Account {
@@ -8,15 +15,10 @@ export interface Account {
   currency: string;
   balance: number;
   iban?: string;
-  /** enablebanking only: the session the account is connected through */
-  ebSessionId?: string;
-  lastSyncedAt?: string;
-  /** ISO date of the earliest transaction whose history has already been fetched */
-  historyFrom?: string;
   /**
-   * Account removed by the user: not shown, its transactions stay out of analytics,
-   * sync skips it. The transactions remain in the database — the classifier still
-   * needs them as the other leg of a transfer to a visible account.
+   * Account removed by the user: not shown, its transactions stay out of analytics.
+   * The transactions remain in the database — the classifier still needs them as
+   * the other leg of a transfer to a visible account.
    */
   hidden?: boolean;
 }
@@ -94,10 +96,10 @@ export interface Transaction {
  * a surrogate assigned by insertTransactions, and nothing outside the data layer
  * constructs one.
  *
- * dedupKey is the provider's own stable reference to the operation (Monobank's
- * operation id, Enable Banking's entry_reference). Providers that have no such
- * reference — an uploaded statement in any format, and the banks that omit
- * entry_reference — leave it unset and insertTransactions computes one.
+ * dedupKey is a source's own stable reference to the operation. No parser supplies
+ * one today — an uploaded statement carries no such reference, so every key is
+ * computed by insertTransactions — and the field is where a format that does carry
+ * one plugs in (ROADMAP 5.2 names CAMT.053 and MT940).
  */
 export type NewTransaction = Omit<Transaction, 'id'> & { dedupKey?: string };
 

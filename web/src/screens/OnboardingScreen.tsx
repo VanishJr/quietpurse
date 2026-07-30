@@ -1,16 +1,13 @@
 /**
  * First-run wizard: shown while the database has no accounts at all
- * (GET /api/onboarding/status). Three steps on one scroll:
+ * (GET /api/onboarding/status). Two steps on one scroll:
  *   1) base currency and owner name (needed by the transfer classifier);
- *   2) connecting a bank: Monobank (token in .env), Enable Banking (a browser
- *      on the machine running the backend), a statement file (drop in whatever the
- *      bank exports, or paste the text);
- *   3) the first sync.
+ *   2) loading a statement (drop in whatever the bank exports).
  * All of this can be done later too — the wizard just gathers the knobs you need
  * in one place and disappears as soon as the first account shows up.
  */
 import { useState } from 'react';
-import { api, API_BASE, apiLabel } from '../api';
+import { api, apiLabel } from '../api';
 import { CsvImport } from '../components/CsvImport';
 import { OnboardingStatus } from '../types';
 
@@ -25,12 +22,8 @@ export function OnboardingScreen({
   const [ownerName, setOwnerName] = useState(status.settings.ownerNames.join(', '));
   const [savedSettings, setSavedSettings] = useState(false);
 
-  const [ebBank, setEbBank] = useState('');
-  const [ebCountry, setEbCountry] = useState('DE');
-
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [syncStarted, setSyncStarted] = useState(false);
 
   const saveSettings = async () => {
     setBusy(true);
@@ -51,25 +44,12 @@ export function OnboardingScreen({
     }
   };
 
-  const startSync = async () => {
-    setBusy(true);
-    try {
-      setError(null);
-      await api.startSync();
-      setSyncStarted(true);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="screen" style={{ position: 'static', flex: 1 }}>
       <div className="screen-inner onboarding">
         <h1 className="title">First run</h1>
         <p style={{ color: 'var(--ink-secondary)' }}>
-          No accounts yet. Three steps and the data shows up. You can change all of it in the app
+          No accounts yet. Two steps and the data shows up. You can change all of it in the app
           later.
         </p>
         {error && <p className="error">Error: {error}</p>}
@@ -101,80 +81,12 @@ export function OnboardingScreen({
           </button>
         </div>
 
-        {/* step 2: bank */}
-        <h2 className="step">2 · Connect a bank</h2>
-
-        <h3 className="provider">
-          Monobank {status.providers.monobank.configured ? '· configured ✓' : ''}
-        </h3>
-        {!status.providers.monobank.configured && (
-          <p className="hint">
-            Get a token at api.monobank.ua, add MONOBANK_TOKEN=… to backend/.env and restart the
-            backend.
-          </p>
-        )}
-
-        <h3 className="provider">
-          Enable Banking (Revolut, N26, any EU bank){' '}
-          {status.providers.enablebanking.sessions > 0 ? '· connected ✓' : ''}
-        </h3>
-        {status.providers.enablebanking.configured ? (
-          <>
-            <p className="hint">
-              Enter the bank and country — the bank's authorization page opens. For security
-              reasons the link works in a browser on the same machine that runs the backend.
-            </p>
-            <div className="inline-row">
-              <input
-                className="input"
-                value={ebBank}
-                onChange={(e) => setEbBank(e.target.value)}
-                placeholder="Revolut"
-                aria-label="Bank name"
-              />
-              <input
-                className="input input-code"
-                value={ebCountry}
-                onChange={(e) => setEbCountry(e.target.value)}
-                placeholder="LT"
-                aria-label="Country code"
-              />
-            </div>
-            <a
-              className="btn-ghost"
-              style={{ display: 'block', marginTop: 10, pointerEvents: ebBank.trim() ? 'auto' : 'none', opacity: ebBank.trim() ? 1 : 0.5 }}
-              href={`${API_BASE}/api/enablebanking/connect?bank=${encodeURIComponent(
-                ebBank.trim(),
-              )}&country=${encodeURIComponent(ebCountry.trim())}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open bank connection
-            </a>
-          </>
-        ) : (
-          <p className="hint">
-            Requires EB_APP_ID and EB_PRIVATE_KEY_PATH in backend/.env (free sign-up at
-            enablebanking.com).
-          </p>
-        )}
-
-        <h3 className="provider">Statement file (any bank)</h3>
+        {/* step 2: the statement */}
+        <h2 className="step">2 · Load a statement</h2>
         <CsvImport />
         <p className="hint">
           You can come back to this any time: Accounts → Import.
         </p>
-
-        {/* step 3: sync */}
-        <h2 className="step">3 · First sync</h2>
-        <button
-          className="btn"
-          style={{ display: 'block', width: '100%' }}
-          disabled={busy}
-          onClick={startSync}
-        >
-          {syncStarted ? 'Sync started ✓' : 'Sync now'}
-        </button>
 
         <button
           className="btn-link"

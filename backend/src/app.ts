@@ -24,10 +24,8 @@ import {
   countCategoryRuleMatches,
   countRuleMatches,
   currentBaseCurrency,
-  currentWorkspaceId,
   dbInstance,
   listUserWorkspaceIds,
-  listWorkspaceIds,
   runWithWorkspace,
   deleteCategoryRule,
   deleteImport,
@@ -45,13 +43,10 @@ import {
   listAccounts,
   baselineTotal,
   deleteBaselineItem,
-  lastSuccessfulSync,
   listBaselineItems,
   listBudgets,
   listCategoryRules,
-  listEbSessions,
   listRecurringGroups,
-  listSyncJournal,
   listTransactions,
   listTransferRules,
   setAccountHidden,
@@ -71,21 +66,10 @@ import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
 import { logHttp, logImport, logger } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
-import { completeAuth, ebConfigured, listAspsps, startAuth } from './providers/enablebanking';
 import { importStatement } from './providers/statement';
 import { getAppSettings, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
-import { getSyncStatus, scheduleAutoSync, startSync } from './sync';
 import { Summary } from './types';
-
-/** Escaping for HTML output (the Enable Banking callback - reflected XSS). */
-const escapeHtml = (s: string): string =>
-  s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 
 export const app = express();
 
@@ -547,18 +531,12 @@ app.get('/api/app-settings', async (_req, res) => {
 
 /**
  * Changing the currency resets base_amount and starts a background reconversion;
- * changing the owner names re-tags transfers immediately; the sync interval is
- * rearmed without a restart.
+ * changing the owner names re-tags transfers immediately.
  */
 app.patch('/api/app-settings', async (req, res) => {
   const { settings, baseCurrencyChanged, ownerNamesChanged } = await updateAppSettings(
     req.body as Record<string, unknown>,
   );
-  // auto-sync is a single server-wide timer serving the owner workspace (see
-  // sync.ts) - only that workspace's interval setting re-arms it
-  if (currentWorkspaceId() === (await listWorkspaceIds())[0]) {
-    scheduleAutoSync(settings.syncIntervalMin);
-  }
   if (baseCurrencyChanged) {
     const reset = await resetBaseAmounts();
     logger.info(`base currency -> ${settings.baseCurrency}: recomputing base_amount for ${reset} transactions`);
@@ -579,11 +557,6 @@ app.get('/api/onboarding/status', async (_req, res) => {
     needed: accounts.length === 0,
     accounts: accounts.length,
     settings: await getAppSettings(),
-    providers: {
-      monobank: { configured: Boolean(config.monobankToken) },
-      enablebanking: { configured: ebConfigured(), sessions: (await listEbSessions()).length },
-      csv: { configured: true },
-    },
   });
 });
 
@@ -1118,104 +1091,6 @@ app.post(
     }
   },
 );
-
-app.post('/api/sync', async (_req, res) => {
-  const started = startSync();
-  res.json({ started, status: await syncStatusPayload() });
-});
-
-/**
- * Problems the user should see on screen (rather than in stdout): expired Enable
- * Banking sessions + non-fatal errors from the last run (a dead Monobank token
- * shows up exactly there).
- */
-async function syncProblems(): Promise<string[]> {
-  const problems: string[] = [];
-  const now = Date.now();
-  for (const s of await listEbSessions()) {
-    if (Date.parse(s.validUntil) <= now) {
-      problems.push(
-        `${s.aspspName} session expired on ${s.validUntil.slice(0, 10)} - reconnect the bank`,
-      );
-    }
-  }
-  const last = (await listSyncJournal(1))[0];
-  if (last && last.ok !== null) problems.push(...last.errors);
-  return problems;
-}
-
-async function syncStatusPayload() {
-  const lastOk = await lastSuccessfulSync();
-  // "data current as of ...": the end of the last successful run; for older
-  // databases without a journal - the most recent account sync
-  const freshAsOf =
-    lastOk?.finishedAt ??
-    (await listAccounts())
-      .map((a) => a.lastSyncedAt)
-      .filter((v): v is string => Boolean(v))
-      .sort()
-      .pop() ??
-    null;
-  return { ...getSyncStatus(), freshAsOf, problems: await syncProblems() };
-}
-
-app.get('/api/sync/status', async (_req, res) => {
-  res.json(await syncStatusPayload());
-});
-
-app.get('/api/sync/journal', async (req, res) => {
-  const limit = q(req.query.limit) ? parseInt(q(req.query.limit)!, 10) : 20;
-  res.json({ runs: await listSyncJournal(Number.isFinite(limit) ? limit : 20) });
-});
-
-// ---------- Enable Banking: connecting a bank ----------
-
-// Open in a browser: /api/enablebanking/connect?bank=Revolut&country=LT
-app.get('/api/enablebanking/connect', async (req, res) => {
-  if (!ebConfigured()) {
-    res.status(400).json({ error: 'EB_APP_ID / EB_PRIVATE_KEY_PATH are not set in .env' });
-    return;
-  }
-  const bank = q(req.query.bank);
-  const country = q(req.query.country);
-  if (!bank || !country) {
-    res.status(400).json({ error: 'bank and country query parameters required, e.g. ?bank=Revolut&country=LT' });
-    return;
-  }
-  const url = await startAuth(bank, country.toUpperCase());
-  res.redirect(url);
-});
-
-app.get('/api/enablebanking/callback', async (req, res) => {
-  const code = q(req.query.code);
-  const state = q(req.query.state);
-  const error = q(req.query.error);
-  if (error || !code || !state) {
-    res
-      .status(400)
-      .send(
-        `<h3>Could not connect the bank</h3><pre>${escapeHtml(error || 'no code/state in the callback')}</pre>`,
-      );
-    return;
-  }
-  const result = await completeAuth(code, state);
-  startSync(); // pull the new bank's data straight away
-  res.send(
-    `<h3>${escapeHtml(result.bank)} connected</h3>
-     <p>Accounts: ${escapeHtml(result.accounts.join(', ') || '(none found)')}</p>
-     <p>Sync started - you can close this tab.</p>`,
-  );
-});
-
-// Helper: exact ASPSP names for startAuth (e.g. ?country=DE)
-app.get('/api/enablebanking/aspsps', async (req, res) => {
-  const country = q(req.query.country);
-  if (!country) {
-    res.status(400).json({ error: 'country query parameter required, e.g. ?country=LT' });
-    return;
-  }
-  res.json(await listAspsps(country.toUpperCase()));
-});
 
 // single error handler (Express 5 catches rejections from async routes itself).
 // The message goes to the log, not to the client: it tends to carry table names

@@ -15,7 +15,7 @@
  * "translated". Ukrainian banks emit statements in both Ukrainian and Russian.
  */
 
-export const RULES_VERSION = 7;
+export const RULES_VERSION = 8;
 
 export const CATEGORIES = [
   'housing',

@@ -14,7 +14,10 @@
  *    amounts are checked against the exchange rate.
  *
  * 2. The owner's name in the description ("Від: Yurii Kalvenko") — your own money
- *    moved from a bank that isn't connected to the app. Names come from OWNER_NAMES.
+ *    moved from an account the app does not hold. The names come from the
+ *    owner_names setting, and that is now the only source: the bank-supplied
+ *    account-holder name went with the deleted integrations (ROADMAP 5.4), so a
+ *    workspace that leaves it empty gets no rule 2 at all.
  *
  * 3. A "description + account" rule from the transfer_rules table — the user tagged
  *    a transaction and asked to apply that to all like it (see db.ts). Needed where
@@ -29,7 +32,7 @@
  * fully explained. The false match that guards against is spelled out at the
  * candidate filter in reclassifyAll below.
  *
- * The recompute runs at backend startup and after every sync.
+ * The recompute runs at backend startup and after every confirmed import.
  */
 import { getAppSettings } from './appsettings';
 import { RULES_VERSION, categorize, isRefund, recurringKey } from './categorizer';
@@ -49,7 +52,7 @@ import { Transaction } from './types';
 
 /**
  * Window for a same-currency pair: the amounts have to match to the cent, so there
- * is no need to hurry — Enable Banking only gives transactions a date, no time.
+ * is no need to hurry — an uploaded statement carries a calendar day, not a time.
  * 36 hours rather than 4 days: on round amounts (20/50/100 EUR) a wide window kept
  * gluing unrelated transactions together (a -20 EUR merchant payment and an
  * unrelated +77 EUR incoming transfer were the confirmed victims).
@@ -89,7 +92,7 @@ function normalizeName(s: string): string {
  * names are ignored — far too easy to hit a random merchant.
  */
 async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
-  const names = [...(await getAppSettings()).ownerNames, (await getMeta('monobank_client_name')) ?? '']
+  const names = (await getAppSettings()).ownerNames
     .map((n) => normalizeName(n).split(' ').filter((w) => w.length >= 3))
     .filter((words) => words.length >= 2);
 

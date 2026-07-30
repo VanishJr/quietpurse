@@ -1,5 +1,10 @@
 // Mirror of backend/src/types.ts
 
+/**
+ * 'upload' is the only value the backend writes — the direct bank integrations were
+ * deleted. The other two stay because rows carrying them still exist, and narrowing
+ * the union would make the compiler assert something false about them.
+ */
 export type Provider = 'monobank' | 'enablebanking' | 'upload';
 
 /** Income source — id from the income_sources table (salary/family/other + custom). */
@@ -27,10 +32,7 @@ export interface Account {
   currency: string;
   balance: number;
   iban?: string;
-  lastSyncedAt?: string;
-  /** how far back the account's history is already loaded (ISO) */
-  historyFrom?: string;
-  /** account removed: not shown, not counted in analytics, not synced */
+  /** account removed: not shown, not counted in analytics */
   hidden?: boolean;
 }
 
@@ -119,34 +121,10 @@ export interface MonthlySummary {
   months: MonthTotals[];
 }
 
-export interface SyncStatus {
-  running: boolean;
-  startedAt: string | null;
-  finishedAt: string | null;
-  error: string | null;
-  log: string[];
-  /** "data current as of …" — end of the last successful run */
-  freshAsOf: string | null;
-  /** expired bank sessions and errors from the last run — shown on screen */
-  problems: string[];
-}
-
-/** One sync run from the journal (sync_log table). */
-export interface SyncJournalRun {
-  id: number;
-  startedAt: string;
-  finishedAt: string | null;
-  ok: boolean | null;
-  inserted: number;
-  errors: string[];
-  log: string[];
-}
-
 /** App settings (the settings table). */
 export interface AppSettings {
   baseCurrency: string;
   ownerNames: string[];
-  syncIntervalMin: number;
 }
 
 export interface OnboardingStatus {
@@ -154,11 +132,6 @@ export interface OnboardingStatus {
   needed: boolean;
   accounts: number;
   settings: AppSettings;
-  providers: {
-    monobank: { configured: boolean };
-    enablebanking: { configured: boolean; sessions: number };
-    csv: { configured: boolean };
-  };
 }
 
 /**

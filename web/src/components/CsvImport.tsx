@@ -43,8 +43,7 @@ interface Props {
 }
 
 /**
- * Importing a bank statement. The only way to get data out of a bank with no API,
- * and the way to add a month that a sync can't reach.
+ * Importing a bank statement — the only way data enters the product.
  *
  * Available both in the first-run wizard and from the Overview screen: a statement is
  * not a one-off setup step — next month there will be another one.

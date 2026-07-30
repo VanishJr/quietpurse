@@ -21,8 +21,6 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      # Enable Banking private key (EB_PRIVATE_KEY_PATH=./secrets/enablebanking.pem).
-      - ./backend/secrets:/app/secrets:ro
       # The uploaded statements themselves (DOCUMENT_STORE_PATH, ROADMAP 4.5). A
       # named volume, not a bind mount: a host directory arrives root-owned and the
       # image runs as USER node. Without it every stored statement is erased by the

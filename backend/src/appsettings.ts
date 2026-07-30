@@ -6,7 +6,6 @@
  * Not to be confused with settings.ts - that holds the Goal screen's settings
  * (buffer, window, hourly rate), which live in meta as a single JSON string.
  */
-import { config } from './config';
 import { currentBaseCurrency, getSetting, setSetting } from './db';
 
 export interface AppSettings {
@@ -17,8 +16,6 @@ export interface AppSettings {
    * in its description is a transfer between your own accounts (see classify.ts).
    */
   ownerNames: string[];
-  /** auto-sync every N minutes; 0 = off */
-  syncIntervalMin: number;
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
@@ -35,11 +32,9 @@ export async function getAppSettings(): Promise<AppSettings> {
       // corrupted value - treat it as not set
     }
   }
-  const interval = parseInt((await getSetting('sync_interval_min')) ?? '', 10);
   return {
     baseCurrency: await currentBaseCurrency(),
     ownerNames,
-    syncIntervalMin: Number.isFinite(interval) ? interval : config.syncIntervalMin,
   };
 }
 
@@ -47,7 +42,6 @@ export async function getAppSettings(): Promise<AppSettings> {
 export async function updateAppSettings(patch: {
   baseCurrency?: unknown;
   ownerNames?: unknown;
-  syncIntervalMin?: unknown;
 }): Promise<{ settings: AppSettings; baseCurrencyChanged: boolean; ownerNamesChanged: boolean }> {
   const before = await getAppSettings();
 
@@ -67,11 +61,6 @@ export async function updateAppSettings(patch: {
       await setSetting('owner_names', JSON.stringify(next));
       ownerNamesChanged = true;
     }
-  }
-
-  if (typeof patch.syncIntervalMin === 'number' && Number.isFinite(patch.syncIntervalMin)) {
-    const next = Math.max(0, Math.min(24 * 60, Math.round(patch.syncIntervalMin)));
-    await setSetting('sync_interval_min', String(next));
   }
 
   return { settings: await getAppSettings(), baseCurrencyChanged, ownerNamesChanged };

@@ -40,9 +40,6 @@ const TABLES = [
   'income_sources',
   'settings',
   'meta',
-  'eb_sessions',
-  'eb_auth_state',
-  'sync_log',
   // auth/workspace tables
   'organization',
   'member',

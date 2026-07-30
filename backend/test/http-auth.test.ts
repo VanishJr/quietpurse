@@ -88,7 +88,9 @@ describe('API requires a session', () => {
       ['get', '/api/summary'],
       ['get', '/api/app-settings'],
       ['get', '/api/backup'],
-      ['post', '/api/sync'],
+      // the list must keep a write route: the gate is one app.use ahead of every
+      // route, and a read-only list would stop proving that a write is behind it
+      ['post', '/api/imports'],
     ] as const) {
       const res = await request(app)[method](path);
       expect(res.status, `${method.toUpperCase()} ${path}`).toBe(401);

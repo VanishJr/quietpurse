@@ -22,7 +22,7 @@ how much income am I short of living on my own.
 
 Exporting to a spreadsheet answers that exactly once — a month later the data is stale, and
 the category work and exchange rates are back to being done by hand. Finto is an attempt
-to make that calculation permanent: banks sync themselves, the categorization lives in
+to make that calculation permanent: the import is one button, the categorization lives in
 rules rather than in your head, and the headline number is recomputed every time you open
 the app.
 
@@ -35,8 +35,8 @@ Hence two things most trackers don't do:
 
 ## Features
 
-- **Accounts.** Monobank directly, Revolut / N26 / any EU bank via
-  [Enable Banking](https://enablebanking.com), plus CSV statement import for banks with no API.
+- **Accounts.** One upload button: a statement in whatever format the bank gives you — CSV,
+  XLSX — and the right parser is picked for you.
 - **Transactions.** Auto-categorization by MCC and description; "all transactions like this
   one go to this category" rules; detection of transfers between your own accounts, refunds
   and one-off purchases.
@@ -102,16 +102,14 @@ Hence the second line; an empty `.env` is enough only for `npm run dev`.
 
 This starts Postgres alongside the backend; the data stays in the `pgdata` volume, and
 port 5432 is published on localhost so a non-Docker `npm run dev` reaches the same
-database. `backend/secrets/` is mounted read-only for the Enable Banking key. The web
-client still runs separately (step 2).
+database. The web client still runs separately (step 2).
 
 ### 3. First run
 
 The app opens on a register/login screen — the first account you create becomes the
-server's first workspace. After that, with an empty database it opens a short wizard: base currency, the name your bank
-writes in statements, and a way to get data in — a Monobank token, a bank through Enable
-Banking, or a CSV statement you already have. A statement is the fastest way to see
-something real without handing out any API access.
+server's first workspace. After that, with an empty database it opens a short wizard:
+base currency, the name your bank writes in statements, and the statement itself.
+Nothing here asks for API access to a bank — a file you exported is all it takes.
 
 The Goal screen starts empty too: add the line items of your own bare minimum (rent,
 food, transport…) right on the screen — nobody else's guesses would fit anyway.
@@ -126,8 +124,6 @@ Secrets and process settings live in `backend/.env` (see `.env.example`):
 | `BETTER_AUTH_URL` | the backend's address as browsers see it, defaults to `http://localhost:PORT` |
 | `CORS_ORIGINS` | origins allowed to call the API with session cookies, comma-separated. Only needed when the web client is served from a different origin than the backend |
 | `SIGNUP_INVITE_CODE` | when set, registration requires this code. Empty (the default) means anyone who can reach the server can sign up |
-| `MONOBANK_TOKEN` | token from [api.monobank.ua](https://api.monobank.ua) |
-| `EB_APP_ID`, `EB_PRIVATE_KEY_PATH` | Enable Banking credentials |
 | `DATABASE_URL` | PostgreSQL connection string, defaults to the `postgres` service in `docker-compose.yml` |
 | `DOCUMENT_ENCRYPTION_KEY` | key the uploaded statements are sealed with on disk. **Set this on any real deployment** (`openssl rand -base64 32`); the backend refuses to start under `NODE_ENV=production` on the public dev fallback. Changing or losing it makes every document already stored unreadable |
 | `DOCUMENT_STORE_PATH` | where those documents are kept, defaults to `./data/documents` (relative to `backend/`), which is where `docker-compose.yml` mounts the `documents` volume |
@@ -135,8 +131,10 @@ Secrets and process settings live in `backend/.env` (see `.env.example`):
 There is no client-side secret: `web/` ships no credentials at all. Access is a cookie
 session obtained from the login screen.
 
-Everything else — base currency, account owner names, sync interval — is edited in the app
-itself and stored in the database, per workspace.
+Everything else — base currency, account owner names — is edited in the app itself and
+stored in the database, per workspace. `OWNER_NAMES` and `FAMILY_NAMES` in `.env` seed
+the server's first workspace only; every later workspace starts empty and fills those
+in on the settings screen.
 
 ### Accounts and workspaces
 
@@ -144,11 +142,6 @@ Each account gets its own **workspace** with its own accounts, transactions, set
 and budgets; users on the same server never see each other's data. Registration is open by
 default — set `SIGNUP_INVITE_CODE` to close it before exposing the server beyond your own
 machine.
-
-Bank credentials are server-wide (`MONOBANK_TOKEN`, Enable Banking keys) rather than per
-workspace. Monobank therefore syncs only into the **oldest workspace on the server** —
-whoever set it up — and auto-sync serves that workspace alone; other users would otherwise
-receive the owner's bank data.
 
 ## Development
 

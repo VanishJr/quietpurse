@@ -12,6 +12,7 @@ import {
   getImportDocumentRef,
   getTransaction,
   insertTransactions,
+  listAccounts,
   listImports,
   listTransactions,
   parseBackup,
@@ -170,6 +171,84 @@ describe('backup and restore (JSON)', () => {
     // and the victim still has their own document
     await runWithWorkspace(victim, async () => {
       expect(await getDocument((await getImportDocumentRef(victimImportId))!)).toEqual(statement);
+    });
+  });
+
+  /**
+   * The operator's own upgrade path (ROADMAP 5.4): a backup taken before the bank
+   * integrations were deleted is the file they restore from AFTER dropping and
+   * recreating the database, so it has to keep working with tables and columns this
+   * schema no longer has. The two halves are held differently and both are asserted
+   * here - restoreBackup iterates BACKUP_TABLES, so a removed table's key is
+   * structurally unreachable, while a removed COLUMN is dropped by sanitizeRow, which
+   * is ordinary application code a later change can delete.
+   *
+   * `tables: 1` is the pin on the first half: the three legacy keys contributed
+   * nothing and, more to the point, were never offered to a table that does not exist.
+   */
+  it('a backup taken before the bank integrations were removed still restores', async () => {
+    const legacy = {
+      format: 'finto-backup' as const,
+      version: 1 as const,
+      exportedAt: '2026-05-01T00:00:00.000Z',
+      tables: {
+        accounts: [
+          {
+            id: 'acc-legacy',
+            provider: 'monobank',
+            name: 'Legacy Mono UAH',
+            currency: 'UAH',
+            balanceCents: 123456,
+            iban: null,
+            hidden: false,
+            // the three columns this task dropped, exactly as an old export wrote them
+            ebSessionId: 'eb-session-abc',
+            lastSyncedAt: '2026-04-30T21:00:00.000Z',
+            historyFrom: '2025-05-01',
+          },
+        ],
+        // three tables this schema no longer knows
+        eb_sessions: [
+          {
+            sessionId: 'eb-session-abc',
+            aspspName: 'Revolut',
+            aspspCountry: 'LT',
+            validUntil: '2026-08-01T00:00:00.000Z',
+            createdAt: '2026-05-01T00:00:00.000Z',
+          },
+        ],
+        eb_auth_state: [
+          {
+            state: 'state-xyz',
+            aspspName: 'Revolut',
+            aspspCountry: 'LT',
+            createdAt: '2026-05-01T00:00:00.000Z',
+          },
+        ],
+        sync_log: [
+          {
+            id: 1,
+            startedAt: '2026-04-30T21:00:00.000Z',
+            finishedAt: '2026-04-30T21:04:00.000Z',
+            ok: true,
+            inserted: 7,
+            errors: '[]',
+            log: '["done"]',
+          },
+        ],
+      },
+    };
+
+    const { tables, rows } = await restoreBackup(parseBackup(legacy));
+    expect(tables).toBe(1);
+    expect(rows).toBe(1);
+
+    const account = (await listAccounts(true)).find((a) => a.id === 'acc-legacy');
+    expect(account).toMatchObject({
+      name: 'Legacy Mono UAH',
+      currency: 'UAH',
+      balance: 1234.56,
+      provider: 'monobank',
     });
   });
 
