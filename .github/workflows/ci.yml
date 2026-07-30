@@ -86,9 +86,10 @@ jobs:
       # `npm run build` type-checks too, but as its first half: a type error would
       # report as a build failure. Split so the checklist says which one broke.
       - run: npm run typecheck
-      # pure functions only - formatting, the slug dictionaries, how a refusal
-      # becomes a sentence. Components and screens have no harness; a green run
-      # here says nothing about what the browser does.
+      # two projects, one command: the pure functions in node, plus jsdom screen
+      # tests for the App shell, Overview and CsvImport. Still no browser - layout,
+      # styles.css, downloads and charts are outside jsdom and stay manual, and
+      # every other screen is mounted by the App test and asserted about by nothing.
       - run: npm test
         if: always()
       - run: npm run build
