@@ -1,20 +1,46 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Separate from vite.config.ts on purpose: these tests cover the pure functions
- * only - formatting, the slug dictionaries, and how a failed request is turned
- * into a sentence. No DOM, no React plugin, so the run costs nothing and there is
- * no jsdom to keep honest.
+ * Separate from vite.config.ts on purpose, and split into two projects whose
+ * environment is bound to the filename: `*.test.ts` is `unit` (node, no DOM - the
+ * pure functions: formatting, the slug dictionaries, how a refusal becomes a
+ * sentence), `*.test.tsx` is `dom` (jsdom, React Testing Library, src/test/setup.ts).
+ * A DOM test misnamed .test.ts therefore lands in `unit` and dies - at transform,
+ * since JSX is not valid .ts, or on `document is not defined` without it - rather
+ * than being silently not run.
  *
- * Components and screens are still unverified until a human clicks through them.
+ * jsdom is not a browser: no layout, nothing from styles.css, no real navigation or
+ * download, no chart rendering (recharts measures a 0x0 box). Those checks stay
+ * manual - see "Verification has a hole" in CLAUDE.md.
  */
 export default defineConfig({
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
-    // fmtDate reads a UTC instant with local getters, so its output depends on the
-    // machine's zone. Pinning the zone keeps the suite deterministic; it does not
-    // make the dependency go away - see the date-only case in src/format.test.ts.
-    env: { TZ: 'UTC' },
+    // TZ is set per project, not once at the top: a project does not inherit the
+    // root test block. fmtDate reads a UTC instant with local getters, so its
+    // output depends on the machine's zone - pinning it keeps the suite
+    // deterministic; it does not make the dependency go away (see the date-only
+    // case in src/format.test.ts).
+    projects: [
+      {
+        test: {
+          name: 'unit',
+          environment: 'node',
+          include: ['src/**/*.test.ts'],
+          env: { TZ: 'UTC' },
+        },
+      },
+      {
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          include: ['src/**/*.test.tsx'],
+          setupFiles: ['src/test/setup.ts'],
+          // VITE_API_URL is pinned empty: web/.env is developer-local, and one line
+          // in it turns backupUrl() absolute and the Overview href assertion
+          // machine-dependent. The route matcher keys on pathnames and is immune.
+          env: { TZ: 'UTC', VITE_API_URL: '' },
+        },
+      },
+    ],
   },
 });
