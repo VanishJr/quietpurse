@@ -1,14 +1,13 @@
 /**
  * The one ingestion surface (ROADMAP 5.1): POST /api/imports hands the raw bytes
  * here, this file decides what they are, picks a parser, and stages the rows behind
- * a summary the user has to accept. Confirm is what puts them through the same
- * pipeline as the bank APIs - insertTransactions -> reclassifyAll ->
- * backfillBaseAmounts - and it lives in the data layer (confirmImport, db/index.ts)
- * because it is one database transaction. The classifier doesn't care where a
- * transaction came from.
+ * a summary the user has to accept. Confirm is what runs the rest of the pipeline -
+ * insertTransactions -> reclassifyAll -> backfillBaseAmounts - and it lives in the
+ * data layer (confirmImport, db/index.ts) because it is one database transaction.
+ * The classifier doesn't care where a transaction came from.
  *
- * An uploaded statement is a provider too, but a push-model one: it has no sync,
- * so it is not in the SYNC_PROVIDERS registry - see providers/provider.ts.
+ * This is the only way data enters the product: an upload is a push, so nothing
+ * here polls or schedules (ROADMAP 5.4 deleted the direct bank integrations).
  *
  * Deduplication: a statement row carries no bank reference, so this parser supplies
  * no dedupKey and insertTransactions computes one from the row's stable fields. That

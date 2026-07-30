@@ -14,7 +14,6 @@ import path from 'path';
 process.env.BASE_CURRENCY = 'EUR';
 process.env.OWNER_NAMES = 'Yurii Kalvenko, Yuriy Kalvenko';
 process.env.FAMILY_NAMES = 'ANNA BECKER, Becker Anna';
-process.env.MONOBANK_TOKEN = '';
 // pino in tests: silent, and no pino-pretty worker spun up
 process.env.LOG_LEVEL = 'silent';
 process.env.LOG_PRETTY = '0';

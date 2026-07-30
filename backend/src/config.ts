@@ -1,16 +1,6 @@
 import 'dotenv/config';
-import fs from 'fs';
-import path from 'path';
-
-function monthsAgo(n: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - n);
-  return d.toISOString().slice(0, 10);
-}
 
 const port = parseInt(process.env.PORT || '4000', 10);
-
-const syncStart = process.env.SYNC_START || monthsAgo(12);
 
 /**
  * The signing key `npm run dev` falls back to. Named so assertProductionConfig()
@@ -74,21 +64,6 @@ export const config = {
   fxProvider: (['auto', 'ecb', 'nbu'].includes(process.env.FX_PROVIDER || 'auto')
     ? process.env.FX_PROVIDER || 'auto'
     : 'auto') as 'auto' | 'ecb' | 'nbu',
-  monobankToken: process.env.MONOBANK_TOKEN || '',
-  /**
-   * From which date (YYYY-MM-DD) to keep history; by default — a year ago.
-   * This isn't only the first sync's starting point: if the date moves back
-   * (or the value is changed in .env), the sync backfills the missing chunk of
-   * history — see the account's history_from.
-   */
-  syncStart,
-  /**
-   * A separate depth for Monobank: it returns at most 31 days per request and
-   * enforces a 1 request / 60 s limit, so history costs time (a year — ≈47 minutes
-   * to walk, half a year — half that). Enable Banking has no such limit, and there's
-   * no reason to trim history there — hence the different defaults.
-   */
-  monobankSyncStart: process.env.MONOBANK_SYNC_START || process.env.SYNC_START || monthsAgo(6),
   /**
    * Account owner names, comma-separated — every spelling banks use
    * ("Yurii Kalvenko, Yuriy Kalvenko").
@@ -111,10 +86,6 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  ebAppId: process.env.EB_APP_ID || '',
-  ebPrivateKeyPath: process.env.EB_PRIVATE_KEY_PATH || '',
-  redirectUrl:
-    process.env.REDIRECT_URL || `http://localhost:${port}/api/enablebanking/callback`,
   /**
    * PostgreSQL connection string. The default matches the postgres service in
    * docker-compose.yml. Tests don't use it - they inject a PGlite instance
@@ -123,16 +94,10 @@ export const config = {
   databaseUrl:
     process.env.DATABASE_URL || 'postgres://finto:finto@localhost:5432/finto',
   /**
-   * Auto-sync every N minutes (0 = off). SOURCE OF TRUTH —
-   * settings.sync_interval_min (editable from the app without a restart);
-   * env is the seed at the initial migration.
-   */
-  syncIntervalMin: parseInt(process.env.SYNC_INTERVAL_MIN || '360', 10) || 0,
-  /**
    * Where the uploaded statements themselves are kept (ROADMAP 4.5). A relative
-   * path is resolved from backend/, the same rule ebPrivateKey() uses below. The
-   * default is where docker-compose mounts the documents volume, so it is also the
-   * correct production value - which is why there is no production guard on it.
+   * path is resolved from backend/. The default is where docker-compose mounts the
+   * documents volume, so it is also the correct production value - which is why
+   * there is no production guard on it.
    */
   documentStorePath: process.env.DOCUMENT_STORE_PATH || './data/documents',
   /**
@@ -194,19 +159,4 @@ function dbPassword(url: string): string | undefined {
   } catch {
     return undefined; // not a URL we can parse - the driver will complain in its own words
   }
-}
-
-let cachedKey: string | null = null;
-
-/** Enable Banking private key (PEM). Read lazily so the backend starts even without it. */
-export function ebPrivateKey(): string {
-  if (cachedKey) return cachedKey;
-  if (!config.ebPrivateKeyPath) {
-    throw new Error('EB_PRIVATE_KEY_PATH is not set in .env');
-  }
-  const p = path.isAbsolute(config.ebPrivateKeyPath)
-    ? config.ebPrivateKeyPath
-    : path.join(__dirname, '..', config.ebPrivateKeyPath);
-  cachedKey = fs.readFileSync(p, 'utf8');
-  return cachedKey;
 }

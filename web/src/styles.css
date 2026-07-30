@@ -544,28 +544,6 @@ textarea {
   margin-bottom: 8px;
 }
 
-.journal-row {
-  padding: 4px 0;
-}
-
-.journal-text {
-  color: var(--ink-secondary);
-  font-size: 12px;
-}
-
-.journal-error {
-  color: var(--ink-bad);
-  font-size: 11px;
-  margin-left: 16px;
-  margin-top: 2px;
-}
-
-.sync-log {
-  color: var(--ink-muted);
-  font-size: 12px;
-  margin: 4px 0;
-}
-
 .api-hint {
   color: var(--ink-muted);
   font-size: 11px;
@@ -747,12 +725,6 @@ textarea {
   font-size: 17px;
   font-weight: 700;
   margin: 24px 0 6px;
-}
-
-.provider {
-  font-size: 15px;
-  font-weight: 600;
-  margin-top: 14px;
 }
 
 .csv-input {

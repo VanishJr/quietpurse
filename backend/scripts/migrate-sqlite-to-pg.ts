@@ -112,10 +112,10 @@ function missingKey(r: Row): never {
  * only the 0/1 flags change representation. workspace_id is added by the caller -
  * it is the same for every row, so the mappers stay free of it.
  *
- * Identity ids (category_rules, transfer_rules, baseline_items, sync_log) are
- * deliberately NOT carried over: those sequences are per table, not per
- * workspace, so a dump's ids can collide with rows another workspace already
- * owns. Nothing references them across tables, so renumbering costs nothing.
+ * Identity ids (category_rules, transfer_rules, baseline_items) are deliberately
+ * NOT carried over: those sequences are per table, not per workspace, so a dump's
+ * ids can collide with rows another workspace already owns. Nothing references
+ * them across tables, so renumbering costs nothing.
  *
  * Transaction ids are not carried over either, for a different reason: they used
  * to be content hashes and are now surrogates. See dedupKeysFor above.
@@ -132,9 +132,6 @@ const TABLES: [string, PgTable, (r: Row) => Row][] = [
       currency: r.currency,
       balanceCents: r.balance_cents,
       iban: r.iban,
-      ebSessionId: r.eb_session_id,
-      lastSyncedAt: r.last_synced_at,
-      historyFrom: r.history_from,
       hidden: asBool(r.hidden) ?? false,
     }),
   ],
@@ -204,39 +201,6 @@ const TABLES: [string, PgTable, (r: Row) => Row][] = [
   ],
   ['settings', s.settings, (r) => ({ key: r.key, value: r.value })],
   ['meta', s.meta, (r) => ({ key: r.key, value: r.value })],
-  [
-    'eb_sessions',
-    s.ebSessions,
-    (r) => ({
-      sessionId: r.session_id,
-      aspspName: r.aspsp_name,
-      aspspCountry: r.aspsp_country,
-      validUntil: r.valid_until,
-      createdAt: r.created_at,
-    }),
-  ],
-  [
-    'eb_auth_state',
-    s.ebAuthState,
-    (r) => ({
-      state: r.state,
-      aspspName: r.aspsp_name,
-      aspspCountry: r.aspsp_country,
-      createdAt: r.created_at,
-    }),
-  ],
-  [
-    'sync_log',
-    s.syncLog,
-    (r) => ({
-      startedAt: r.started_at,
-      finishedAt: r.finished_at,
-      ok: asBool(r.ok),
-      inserted: r.inserted,
-      errors: r.errors,
-      log: r.log,
-    }),
-  ],
 ];
 
 /** meta keys that only made sense to the old SQLite migration runner */

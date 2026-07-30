@@ -15,8 +15,6 @@ import {
   RecurringSummary,
   Settings,
   Summary,
-  SyncJournalRun,
-  SyncStatus,
   Transaction,
   TransferRule,
 } from './types';
@@ -306,14 +304,6 @@ export const api = {
       '/api/budgets',
       json('PUT', { category, monthly }),
     ),
-
-  startSync: () =>
-    request<{ started: boolean; status: SyncStatus }>('/api/sync', { method: 'POST' }),
-
-  syncStatus: () => request<SyncStatus>('/api/sync/status'),
-
-  syncJournal: (limit = 10) =>
-    request<{ runs: SyncJournalRun[] }>(`/api/sync/journal?limit=${limit}`),
 
   incomeSources: () => request<IncomeSourceDef[]>('/api/income-sources'),
 

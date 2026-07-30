@@ -154,12 +154,7 @@ export const accounts = pgTable(
     currency: text('currency').notNull(),
     balanceCents: integer('balance_cents').notNull().default(0),
     iban: text('iban'),
-    ebSessionId: text('eb_session_id'),
-    lastSyncedAt: text('last_synced_at'),
-    // from which date (ISO) the account's history is already loaded: if SYNC_START
-    // moves further back, sync backfills the gap [SYNC_START, history_from)
-    historyFrom: text('history_from'),
-    // account removed by the user: not shown, not counted, not synced
+    // account removed by the user: not shown, not counted
     hidden: boolean('hidden').notNull().default(false),
   },
   (t) => [primaryKey({ columns: [t.workspaceId, t.id] })],
@@ -195,11 +190,11 @@ export const imports = pgTable(
     // per parser, keyed by source_type: what makes re-parsing targetable later
     parserVersion: integer('parser_version').notNull(),
     /**
-     * pending = written, outcome unknown (the process died mid-import, same
-     * convention as sync_log.ok = NULL); awaiting_confirmation = parsed, its rows
-     * staged in staged_transactions, waiting for the user to accept the summary;
-     * committed = its rows are in the database; discarded = the user looked at the
-     * numbers and said no; failed = the import did not complete. Usually that means
+     * pending = written, outcome unknown: the process died mid-import;
+     * awaiting_confirmation = parsed, its rows staged in staged_transactions,
+     * waiting for the user to accept the summary; committed = its rows are in the
+     * database; discarded = the user looked at the numbers and said no; failed =
+     * the import did not complete. Usually that means
      * the parse threw before anything was written, but the failure is caught around
      * the inserts too - so whatever rows a failed import did write stay attached
      * to it, and go with it when it is deleted.
@@ -295,11 +290,13 @@ export const transactions = pgTable(
     // one-off large purchase: spread over 12 months in the goal calculation
     oneOff: boolean('one_off').notNull().default(false),
     /**
-     * The import that FIRST wrote this row, or NULL for a bank sync. First
-     * writer, not every attestation: a later import whose file contains the same
-     * row inserts nothing and is recorded nowhere, so deleting this import
-     * removes the row even though that later import still asserts it (ROADMAP
-     * 4.4).
+     * The import that FIRST wrote this row. First writer, not every attestation:
+     * a later import whose file contains the same row inserts nothing and is
+     * recorded nowhere, so deleting this import removes the row even though that
+     * later import still asserts it (ROADMAP 4.4).
+     *
+     * Nullable for the rows the deleted bank integrations wrote, and only those:
+     * every insert path left carries an import id.
      */
     importId: text('import_id'),
   },
@@ -307,7 +304,7 @@ export const transactions = pgTable(
     primaryKey({ columns: [t.workspaceId, t.id] }),
     // composite, so a row can never point at another workspace's import. MATCH
     // SIMPLE: with import_id NULL the constraint is not checked at all, which is
-    // what bank-sync rows need.
+    // what those legacy rows need.
     foreignKey({
       columns: [t.workspaceId, t.importId],
       foreignColumns: [imports.workspaceId, imports.id],
@@ -471,44 +468,4 @@ export const meta = pgTable(
     value: text('value').notNull(),
   },
   (t) => [primaryKey({ columns: [t.workspaceId, t.key] })],
-);
-
-// Enable Banking sessions and OAuth states (session_id/state are globally random,
-// but scoped anyway: a workspace must only ever see its own bank connections)
-export const ebSessions = pgTable('eb_sessions', {
-  sessionId: text('session_id').primaryKey(),
-  workspaceId: workspaceId(),
-  aspspName: text('aspsp_name').notNull(),
-  aspspCountry: text('aspsp_country').notNull(),
-  validUntil: text('valid_until').notNull(),
-  createdAt: text('created_at').notNull(),
-});
-
-export const ebAuthState = pgTable('eb_auth_state', {
-  state: text('state').primaryKey(),
-  workspaceId: workspaceId(),
-  aspspName: text('aspsp_name').notNull(),
-  aspspCountry: text('aspsp_country').notNull(),
-  createdAt: text('created_at').notNull(),
-});
-
-// sync journal
-export const syncLog = pgTable(
-  'sync_log',
-  {
-    id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
-    workspaceId: workspaceId(),
-    startedAt: text('started_at').notNull(),
-    finishedAt: text('finished_at'),
-    // true = finished without a fatal error, false = failed; NULL = still running
-    // (or the process was killed midway - such rows just stay in the journal)
-    ok: boolean('ok'),
-    // new transactions in the run (across all providers)
-    inserted: integer('inserted').notNull().default(0),
-    // JSON array of strings: per-account/provider errors (non-fatal)
-    errors: text('errors').notNull().default('[]'),
-    // the full text log of the run, a JSON array of strings
-    log: text('log').notNull().default('[]'),
-  },
-  (t) => [index('idx_sync_log_started').on(t.workspaceId, t.startedAt)],
 );

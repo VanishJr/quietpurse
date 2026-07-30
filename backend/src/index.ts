@@ -6,7 +6,6 @@
  */
 import os from 'os';
 import { app } from './app';
-import { getAppSettings } from './appsettings';
 import { initAuth } from './auth';
 import { reclassifyIfRulesChanged } from './classify';
 import { assertProductionConfig, config } from './config';
@@ -20,7 +19,6 @@ import {
 import { backfillBaseAmounts } from './fxrates';
 import { logClassify, logger } from './logger';
 import { assertStorageWritable } from './storage';
-import { scheduleAutoSync } from './sync';
 
 async function main(): Promise<void> {
   // refuse to boot a production server on dev secrets - before anything listens
@@ -56,14 +54,6 @@ async function main(): Promise<void> {
       });
     }
   })().catch((e: Error) => logClassify.error(`recompute failed: ${e.message}`));
-
-  // auto-sync serves the server owner's workspace (the first ever created - see
-  // sync.ts); the interval comes from that workspace's settings (0 = off)
-  if (workspaces[0]) {
-    await runWithWorkspace(workspaces[0], async () =>
-      scheduleAutoSync((await getAppSettings()).syncIntervalMin),
-    );
-  }
 
   app.listen(config.port, '0.0.0.0', () => {
     logger.info(`Finto backend: http://localhost:${config.port}`);

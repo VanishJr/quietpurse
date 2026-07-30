@@ -109,11 +109,11 @@ export async function connectDatabase(): Promise<void> {
  * and they are personal data: seeding them into every workspace would both
  * mis-tag a stranger's transactions and show them the operator's relatives in
  * the settings screen. So env personal data seeds ONLY the owner workspace (the
- * first one ever created, the same definition sync.ts uses for the global bank
- * token); everyone else starts empty and fills these in from the app.
+ * first one ever created); everyone else starts empty and fills these in from
+ * the app.
  *
- * base_currency and sync_interval_min are not personal - they are this
- * deployment's sensible starting values - so every workspace gets them.
+ * base_currency is not personal - it is this deployment's sensible starting
+ * value - so every workspace gets it.
  */
 export async function seedDefaults(): Promise<void> {
   const w = currentWorkspaceId();
@@ -142,7 +142,6 @@ export async function seedDefaults(): Promise<void> {
     .values([
       { workspaceId: w, key: 'base_currency', value: config.baseCurrency },
       { workspaceId: w, key: 'owner_names', value: JSON.stringify(ownerNames) },
-      { workspaceId: w, key: 'sync_interval_min', value: String(config.syncIntervalMin) },
     ])
     .onConflictDoNothing();
 }
@@ -274,7 +273,6 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
       currency: a.currency,
       balanceCents: toCents(a.balance),
       iban: a.iban ?? null,
-      ebSessionId: a.ebSessionId ?? null,
     })
     .onConflictDoUpdate({
       target: [s.accounts.workspaceId, s.accounts.id],
@@ -291,7 +289,6 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
         currency: sql`excluded.currency`,
         balanceCents: sql`excluded.balance_cents`,
         iban: sql`excluded.iban`,
-        ebSessionId: sql`COALESCE(excluded.eb_session_id, accounts.eb_session_id)`,
       },
     });
 }
@@ -322,20 +319,6 @@ export async function recalcAccountBalanceFromTransactionsOn(
     ) WHERE id = ${accountId} AND ${WS()}`);
 }
 
-export async function markAccountSynced(id: string, when: string): Promise<void> {
-  await getDb()
-    .update(s.accounts)
-    .set({ lastSyncedAt: when })
-    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
-}
-
-/** Remembers the earliest date for which the account's history has been fetched. */
-export async function markAccountHistoryFrom(id: string, fromIso: string): Promise<void> {
-  await getDb().execute(sql`
-    UPDATE accounts SET history_from = LEAST(COALESCE(history_from, ${fromIso}), ${fromIso})
-    WHERE id = ${id} AND ${WS()}`);
-}
-
 type AccountRow = typeof s.accounts.$inferSelect;
 
 function rowToAccount(r: AccountRow): Account {
@@ -346,17 +329,11 @@ function rowToAccount(r: AccountRow): Account {
     currency: r.currency,
     balance: fromCents(r.balanceCents),
     iban: r.iban ?? undefined,
-    ebSessionId: r.ebSessionId ?? undefined,
-    lastSyncedAt: r.lastSyncedAt ?? undefined,
-    historyFrom: r.historyFrom ?? undefined,
     hidden: r.hidden,
   };
 }
 
-/**
- * Visible accounts only by default: sync relies on this same list, so a hidden
- * account also stops being synced.
- */
+/** Visible accounts only by default. */
 export async function listAccounts(includeHidden = false): Promise<Account[]> {
   const ws = eq(s.accounts.workspaceId, currentWorkspaceId());
   const rows = await getDb()
@@ -399,9 +376,9 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  * `id` is a fresh UUID that never changes, and duplicates are caught by the
  * UNIQUE (workspace_id, account_id, dedup_key) index instead.
  *
- * Providers that have a stable reference of their own supply it as dedupKey; the
- * rest get one computed here (the format, and why the description is not part of
- * it, are in ./dedup.ts).
+ * A source with a stable reference of its own can supply it as dedupKey; none
+ * does today, so every key is computed here (the format, and why the
+ * description is not part of it, are in ./dedup.ts).
  *
  * Ordinals for computed keys are numbered from 1 within each group, over the
  * whole batch (before chunking - restarting per chunk would collide the second
@@ -413,8 +390,8 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  *
  * This is exact as long as a batch is complete for every group it touches - all
  * k rows of a day arrive in one call. Statement windows are whole days, so an
- * uploaded file is; providers that paginate must accumulate their pages before
- * calling (see enablebanking.ts).
+ * uploaded file is; a parser that hands over a file in pieces must accumulate
+ * them before calling.
  *
  * A duplicate is skipped, never merged: the existing row keeps its description,
  * its category and the user's manual marks. Correcting facts on a re-parse is
@@ -422,7 +399,8 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  *
  * importId is the provenance of the rows this call actually inserts, and only
  * those - a skipped duplicate keeps whatever import first wrote it (see
- * transactions.import_id in ./schema.ts). Bank syncs pass nothing.
+ * transactions.import_id in ./schema.ts). It is optional because the deleted
+ * bank integrations passed nothing; every production caller left supplies one.
  */
 export async function insertTransactions(
   txs: NewTransaction[],
@@ -2165,9 +2143,6 @@ const BACKUP_TABLES = {
   income_sources: s.incomeSources,
   settings: s.settings,
   meta: s.meta,
-  eb_sessions: s.ebSessions,
-  eb_auth_state: s.ebAuthState,
-  sync_log: s.syncLog,
 } as const;
 
 /**
@@ -2176,7 +2151,7 @@ const BACKUP_TABLES = {
  * here (identity sequences are per table, not per workspace). Nothing references
  * these ids across tables, so renumbering is free.
  */
-const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items', 'sync_log']);
+const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
 
 export async function exportBackup(): Promise<BackupData> {
   const w = currentWorkspaceId();
@@ -2366,178 +2341,4 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
     }
   });
   return { tables, rows };
-}
-
-// ---------- sync journal ----------
-
-export interface SyncLogEntry {
-  id: number;
-  startedAt: string;
-  finishedAt: string | null;
-  /** true = finished without a fatal error; null = running (or killed midway) */
-  ok: boolean | null;
-  /** new transactions in this run */
-  inserted: number;
-  /** non-fatal errors per account/provider */
-  errors: string[];
-  /** the full text log of the run */
-  log: string[];
-}
-
-export async function startSyncLogEntry(startedAt: string): Promise<number> {
-  const rows = await getDb()
-    .insert(s.syncLog)
-    .values({ workspaceId: currentWorkspaceId(), startedAt })
-    .returning({ id: s.syncLog.id });
-  return rows[0].id;
-}
-
-export async function finishSyncLogEntry(
-  id: number,
-  ok: boolean,
-  inserted: number,
-  errors: string[],
-  log: string[],
-): Promise<void> {
-  await getDb()
-    .update(s.syncLog)
-    .set({
-      finishedAt: new Date().toISOString(),
-      ok,
-      inserted,
-      errors: JSON.stringify(errors),
-      log: JSON.stringify(log),
-    })
-    .where(and(eq(s.syncLog.workspaceId, currentWorkspaceId()), eq(s.syncLog.id, id)));
-}
-
-const parseJsonArray = (raw: string): string[] => {
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? v.map(String) : [];
-  } catch {
-    return [];
-  }
-};
-
-type SyncLogRow = typeof s.syncLog.$inferSelect;
-
-function rowToSyncLog(r: SyncLogRow): SyncLogEntry {
-  return {
-    id: r.id,
-    startedAt: r.startedAt,
-    finishedAt: r.finishedAt,
-    ok: r.ok,
-    inserted: r.inserted,
-    errors: parseJsonArray(r.errors),
-    log: parseJsonArray(r.log),
-  };
-}
-
-/** The most recent sync runs, newest first. */
-export async function listSyncJournal(limit = 20): Promise<SyncLogEntry[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.syncLog)
-    .where(eq(s.syncLog.workspaceId, currentWorkspaceId()))
-    .orderBy(sql`${s.syncLog.id} DESC`)
-    .limit(limit > 0 ? limit : 20);
-  return rows.map(rowToSyncLog);
-}
-
-/** The last successful run - the basis for "data current as of ...". */
-export async function lastSuccessfulSync(): Promise<SyncLogEntry | undefined> {
-  const rows = await getDb()
-    .select()
-    .from(s.syncLog)
-    .where(and(eq(s.syncLog.workspaceId, currentWorkspaceId()), eq(s.syncLog.ok, true)))
-    .orderBy(sql`${s.syncLog.id} DESC`)
-    .limit(1);
-  return rows[0] ? rowToSyncLog(rows[0]) : undefined;
-}
-
-// ---------- enable banking: sessions / auth state ----------
-
-export interface EbSession {
-  sessionId: string;
-  aspspName: string;
-  aspspCountry: string;
-  validUntil: string;
-}
-
-export async function saveEbSession(session: EbSession): Promise<void> {
-  const w = currentWorkspaceId();
-  const d = getDb();
-  // one active session per bank: an older one for the same bank is deleted
-  await d
-    .delete(s.ebSessions)
-    .where(
-      and(
-        eq(s.ebSessions.workspaceId, w),
-        eq(s.ebSessions.aspspName, session.aspspName),
-        eq(s.ebSessions.aspspCountry, session.aspspCountry),
-      ),
-    );
-  await d.insert(s.ebSessions).values({
-    workspaceId: w,
-    sessionId: session.sessionId,
-    aspspName: session.aspspName,
-    aspspCountry: session.aspspCountry,
-    validUntil: session.validUntil,
-    createdAt: new Date().toISOString(),
-  });
-}
-
-export async function deleteEbSession(sessionId: string): Promise<void> {
-  await getDb()
-    .delete(s.ebSessions)
-    .where(
-      and(
-        eq(s.ebSessions.workspaceId, currentWorkspaceId()),
-        eq(s.ebSessions.sessionId, sessionId),
-      ),
-    );
-}
-
-export async function listEbSessions(): Promise<EbSession[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.ebSessions)
-    .where(eq(s.ebSessions.workspaceId, currentWorkspaceId()));
-  return rows.map((r) => ({
-    sessionId: r.sessionId,
-    aspspName: r.aspspName,
-    aspspCountry: r.aspspCountry,
-    validUntil: r.validUntil,
-  }));
-}
-
-export async function saveAuthState(
-  state: string,
-  aspspName: string,
-  aspspCountry: string,
-): Promise<void> {
-  await getDb().insert(s.ebAuthState).values({
-    workspaceId: currentWorkspaceId(),
-    state,
-    aspspName,
-    aspspCountry,
-    createdAt: new Date().toISOString(),
-  });
-}
-
-export async function takeAuthState(
-  state: string,
-): Promise<{ aspspName: string; aspspCountry: string } | undefined> {
-  const w = currentWorkspaceId();
-  const rows = await getDb()
-    .select()
-    .from(s.ebAuthState)
-    .where(and(eq(s.ebAuthState.workspaceId, w), eq(s.ebAuthState.state, state)));
-  const row = rows[0];
-  if (!row) return undefined;
-  await getDb()
-    .delete(s.ebAuthState)
-    .where(and(eq(s.ebAuthState.workspaceId, w), eq(s.ebAuthState.state, state)));
-  return { aspspName: row.aspspName, aspspCountry: row.aspspCountry };
 }

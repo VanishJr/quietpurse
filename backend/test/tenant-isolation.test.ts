@@ -6,8 +6,12 @@
  *
  * The tests below therefore sweep the data layer broadly rather than deeply -
  * one assertion per family of queries (rows, singletons, aggregates, rules,
- * catalogues, journal), because the risk is a missed WHERE clause somewhere, not
- * a subtle bug in any one of them.
+ * catalogues), because the risk is a missed WHERE clause somewhere, not a subtle
+ * bug in any one of them.
+ *
+ * The set of tables exercised here is kept equal to BACKUP_TABLES (src/db/index.ts):
+ * a lost WHERE in a table that reaches the backup puts one workspace's rows in
+ * another workspace's export file.
  */
 import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -23,7 +27,7 @@ import {
   deleteImport,
   exportBackup,
   findCommittedImportByHash,
-  finishSyncLogEntry,
+  getFxRate,
   getImportDocumentRef,
   listImports,
   getMeta,
@@ -36,18 +40,19 @@ import {
   listBudgets,
   listCategoryRules,
   listIncomeSources,
-  listSyncJournal,
+  listRecurringGroups,
   listTransactions,
   listTransferRules,
   recordImportDocument,
   runWithWorkspace,
+  saveFxRate,
   seedDefaults,
   setBudget,
   setMeta,
   setOneOff,
+  setRecurringIgnored,
   setSetting,
   setTransferOverride,
-  startSyncLogEntry,
   summaryByCategory,
   summaryTotals,
   upsertAccount,
@@ -93,6 +98,13 @@ async function forceSharedId(workspaceId: string, description: string): Promise<
 
 const JAN = '2026-01-01T00:00:00.000Z';
 const DEC = '2026-12-31T23:59:59.999Z';
+
+/** The one (date, currency) both workspaces store a rate for, at different values. */
+const FX_DAY = '2026-05-05';
+const FX_CURRENCY = 'CHF';
+
+/** The description both workspaces' recurring payment carries - one recurringKey. */
+const SHARED_RECURRING = 'Shared Subscription Ltd';
 
 /** Both workspaces import a file with the same hash - see the imports test below. */
 const SHARED_FILE_HASH = 'the-same-statement-pdf';
@@ -146,8 +158,7 @@ beforeAll(async () => {
     await addCategoryRule('shared-pattern', 'food');
     await addTransferRule('shared description', 'acc-shared-id');
     await upsertIncomeSource({ id: 'freelance', label: 'Mine freelance', kind: 'own' });
-    const run = await startSyncLogEntry('2026-03-01T00:00:00.000Z');
-    await finishSyncLogEntry(run, true, 2, [], ['mine']);
+    await saveFxRate(FX_DAY, FX_CURRENCY, 1.25);
     myImportId = await importOf('mine');
   });
 
@@ -171,8 +182,7 @@ beforeAll(async () => {
     await addCategoryRule('shared-pattern', 'transport');
     await addTransferRule('shared description', 'acc-shared-id');
     await upsertIncomeSource({ id: 'freelance', label: 'Theirs freelance', kind: 'external' });
-    const run = await startSyncLogEntry('2026-03-02T00:00:00.000Z');
-    await finishSyncLogEntry(run, true, 2, [], ['theirs']);
+    await saveFxRate(FX_DAY, FX_CURRENCY, 42);
     theirImportId = await importOf('theirs');
   });
 
@@ -303,17 +313,70 @@ describe('workspace isolation', () => {
     });
   });
 
-  it('the sync journal is per workspace', async () => {
+  /**
+   * A historical rate is universal, but the stored value is "base currency per
+   * unit" and each workspace picks its own base - so the same (date, currency)
+   * legally holds two different numbers. Both are asserted rather than one being
+   * checked absent: an undefined-only assertion also passes if the write went
+   * nowhere.
+   */
+  it('fx rates: the same date and currency hold each workspace own rate', async () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-      const runs = await listSyncJournal(10);
-      expect(runs).toHaveLength(1);
-      expect(runs[0].log).toEqual(['mine']);
+      expect(await getFxRate(FX_DAY, FX_CURRENCY)).toBe(1.25);
     });
     await runWithWorkspace(OTHER, async () => {
-      const runs = await listSyncJournal(10);
-      expect(runs).toHaveLength(1);
-      expect(runs[0].log).toEqual(['theirs']);
+      expect(await getFxRate(FX_DAY, FX_CURRENCY)).toBe(42);
     });
+  });
+
+  /**
+   * recurring_ignores is keyed on a description, so both workspaces' groups hash
+   * to the same key on purpose: the ignore lookup joins on that key alone and only
+   * the workspace clause keeps our "hide this" out of the neighbour's Overview.
+   * Both halves matter - a group that is merely absent from OTHER would also be
+   * absent if the fixture had produced no group at all.
+   */
+  it('recurring ignores: hiding a group leaves the neighbour identical group visible', async () => {
+    const recurring = (over: Partial<NewTransaction>): NewTransaction =>
+      tx({ description: SHARED_RECURRING, amount: -19.99, date: '2026-06-15T10:00:00.000Z', ...over });
+    try {
+      // each workspace's own base currency, so insertTransactions fills
+      // base_amount_cents - listRecurringGroups skips rows without it
+      await runWithWorkspace(TEST_WORKSPACE_ID, () =>
+        insertTransactions([recurring({ currency: 'EUR' })]),
+      );
+      await runWithWorkspace(OTHER, () => insertTransactions([recurring({ currency: 'USD' })]));
+      // insertTransactions does not set `recurring` - detection is the classifier's
+      await dbInstance().execute(
+        sql`UPDATE transactions SET recurring = true WHERE description = ${SHARED_RECURRING}`,
+      );
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, () =>
+        setRecurringIgnored(SHARED_RECURRING, true),
+      );
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        const ours = (await listRecurringGroups(JAN)).find(
+          (g) => g.description === SHARED_RECURRING,
+        );
+        expect(ours).toMatchObject({ ignored: true });
+      });
+      await runWithWorkspace(OTHER, async () => {
+        const theirs = (await listRecurringGroups(JAN)).find(
+          (g) => g.description === SHARED_RECURRING,
+        );
+        expect(theirs).toMatchObject({ ignored: false });
+      });
+    } finally {
+      await runWithWorkspace(TEST_WORKSPACE_ID, () =>
+        setRecurringIgnored(SHARED_RECURRING, false),
+      );
+      // later cases assert exact transaction counts and lists, so this fixture
+      // must not outlive the case that created it
+      await dbInstance().execute(
+        sql`DELETE FROM transactions WHERE description = ${SHARED_RECURRING}`,
+      );
+    }
   });
 
   /**
