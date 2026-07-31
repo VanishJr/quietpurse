@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
-import { fail, FIRST_PAINT_ROUTES, mockFetch, requests, SIGNED_OUT_ROUTES } from './test/harness';
+import { USER } from './test/fixtures';
+import { fail, FIRST_PAINT_ROUTES, mockFetch, ok, requests, SIGNED_OUT_ROUTES } from './test/harness';
 
 /**
  * The shell: the session gate, the four always-mounted screens, and the tab bar.
@@ -78,5 +79,70 @@ describe('signed in', () => {
     // the assertion below true for the trivial reason: pin the request that 401'd
     expect(requests()).toContain('GET /api/accounts');
     expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the server is unreachable', () => {
+  const dead = (): never => {
+    throw new TypeError('Failed to fetch');
+  };
+
+  // SIGNED_OUT_ROUTES is spread into both tables although /api/health is never
+  // requested while AuthScreen does not mount: a regression that renders it then
+  // fails on the password assertion below, not on the unstubbed-request guard.
+
+  it('says so, and offers no password field', async () => {
+    mockFetch({ ...SIGNED_OUT_ROUTES, 'GET /api/auth/get-session': dead });
+    render(<App />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    // without this the assertions above also pass against an app that never asked
+    expect(requests()).toContain('GET /api/auth/get-session');
+  });
+
+  it('reaches the app when Retry finds the server back', async () => {
+    let down = true;
+    mockFetch({
+      ...SIGNED_OUT_ROUTES,
+      ...FIRST_PAINT_ROUTES,
+      'GET /api/auth/get-session': () => {
+        if (!down) return ok({ user: USER });
+        down = false;
+        return dead();
+      },
+    });
+    render(<App />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('heading', { name: 'Accounts' })).toBeVisible();
+  });
+
+  it('keeps the screen and the Retry when the retry fails again', async () => {
+    mockFetch({ ...SIGNED_OUT_ROUTES, 'GET /api/auth/get-session': dead });
+    render(<App />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    // synchronous on purpose: the answer is still in flight here, and this is the
+    // only moment the screen can blank. Awaiting first passes against the version
+    // that blanks it, because by then the second failure has painted it back.
+    expect(screen.getByRole('heading', { name: 'Cannot reach the server' })).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(requests().filter((r) => r === 'GET /api/auth/get-session')).toHaveLength(2),
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
 });
