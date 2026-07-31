@@ -88,9 +88,12 @@ describe('API requires a session', () => {
       ['get', '/api/summary'],
       ['get', '/api/app-settings'],
       ['get', '/api/backup'],
+      ['get', '/api/imports/x/document'],
       // the list must keep a write route: the gate is one app.use ahead of every
       // route, and a read-only list would stop proving that a write is behind it
       ['post', '/api/imports'],
+      // and a destructive one, on the route that destroys a bank statement
+      ['delete', '/api/imports/x/document'],
     ] as const) {
       const res = await request(app)[method](path);
       expect(res.status, `${method.toUpperCase()} ${path}`).toBe(401);
@@ -133,6 +136,33 @@ describe('two users on one server', () => {
     // and the row really is untouched in bob's workspace
     const after = (await bob.get('/api/transactions?limit=100')).body as { id: string; transfer: boolean }[];
     expect(after.find((t) => t.id === theirs.id)!.transfer).toBe(false);
+  });
+
+  /**
+   * The document routes take an import id from the URL, and the primary key is
+   * (workspace_id, id) - a restored backup puts the same id in two workspaces. Both
+   * answer 404 for the neighbour's, and the delete refuses BEFORE it touches the
+   * disk: checking afterwards would remove the blob at <alice's workspace>/<bob's
+   * id> and then report that nothing was found.
+   */
+  it("one user can neither download nor delete the other's stored document", async () => {
+    interface Row {
+      id: string;
+      originalFilename: string | null;
+      documentAvailable: boolean;
+    }
+    const bobsImports = async (): Promise<Row[]> => (await bob.get('/api/imports')).body.imports;
+    const theirs = (await bobsImports()).find((i) => i.originalFilename === 'statement.csv')!;
+    expect(theirs.documentAvailable).toBe(true);
+
+    expect((await alice.get(`/api/imports/${theirs.id}/document`)).status).toBe(404);
+    expect((await alice.delete(`/api/imports/${theirs.id}/document`)).status).toBe(404);
+
+    // the neighbour's attempt neither read nor damaged it
+    const mine = await bob.get(`/api/imports/${theirs.id}/document`);
+    expect(mine.status).toBe(200);
+    expect(mine.body).toEqual(Buffer.from(csvFor('bob', '77.00'), 'utf8'));
+    expect((await bobsImports()).find((i) => i.id === theirs.id)!.documentAvailable).toBe(true);
   });
 
   it("a backup contains only the requesting user's data", async () => {

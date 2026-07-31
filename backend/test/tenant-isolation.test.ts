@@ -20,6 +20,7 @@ import {
   addCategoryRule,
   addTransferRule,
   baselineTotal,
+  clearImportDocument,
   confirmImport,
   createImport,
   discardImport,
@@ -540,5 +541,43 @@ describe('workspace isolation', () => {
     )) as unknown as { rows: { document_key_version: number | null }[] };
     expect(stored.rows).toHaveLength(1);
     expect(stored.rows[0].document_key_version).toBeNull();
+  });
+
+  /**
+   * The same shape one function later: clearImportDocument is the UPDATE the
+   * document delete route runs, and an unscoped one would make the neighbour's row
+   * stop claiming a document whose bytes are still on disk - the one state nothing
+   * revisits. It is asserted here rather than in the route's own suite because the
+   * damage lands on a workspace no request in that suite ever names.
+   */
+  it('clearImportDocument cannot touch a neighbour row carrying the same id', async () => {
+    const SHARED = 'shared-clear-import-id';
+    const force = async (ws: string, from: string) => {
+      await dbInstance().execute(
+        sql`UPDATE imports SET id = ${SHARED} WHERE workspace_id = ${ws} AND id = ${from}`,
+      );
+    };
+    const claimed = async (ws: string): Promise<number | null> => {
+      const rows = (await dbInstance().execute(
+        sql`SELECT document_key_version FROM imports WHERE workspace_id = ${ws} AND id = ${SHARED}`,
+      )) as unknown as { rows: { document_key_version: number | null }[] };
+      expect(rows.rows).toHaveLength(1);
+      return rows.rows[0].document_key_version;
+    };
+
+    for (const [ws, fileHash] of [
+      [OTHER, 'clear-collide-theirs'],
+      [TEST_WORKSPACE_ID, 'clear-collide-mine'],
+    ] as const) {
+      await runWithWorkspace(ws, async () => {
+        const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
+        await force(ws, record.id);
+        await recordImportDocument(SHARED, 1);
+      });
+    }
+
+    await runWithWorkspace(TEST_WORKSPACE_ID, () => clearImportDocument(SHARED));
+    expect(await claimed(TEST_WORKSPACE_ID)).toBeNull();
+    expect(await claimed(OTHER)).toBe(1);
   });
 });

@@ -220,6 +220,26 @@ export interface DocumentRef {
 export const DOCUMENT_STORE_REFUSED =
   "could not store the uploaded file, so the import was refused - nothing was written, and the same file can be uploaded again once the server's storage is working";
 
+/**
+ * The 404 on the download route. It says READ, never "kept": NULL in
+ * `document_key_version` records readability, and a row restored from a backup has
+ * its pointer stripped while its bytes are still on disk - so asserting that no
+ * document is held would be a claim this server cannot make.
+ */
+export const DOCUMENT_NOT_READABLE = 'this import has no document this server can read';
+
+/**
+ * The two operator-caused refusals, constants for DOCUMENT_STORE_REFUSED's reason.
+ * Neither names an action, because there is none for the user to take; what they do
+ * say is which way the state went, so nobody is told a statement is gone while it is
+ * still held.
+ */
+export const DOCUMENT_READ_REFUSED =
+  "the stored copy of this file could not be read, so nothing was sent - your imported data is unaffected, and the server's log names the reason";
+
+export const DOCUMENT_DELETE_REFUSED =
+  "the stored copy of this file could not be removed, so nothing was changed - it is still held, and the server's log names the reason";
+
 function keyFor(version: number, workspaceId: string, importId: string): string {
   const layout = DOCUMENT_KEY_LAYOUTS[version];
   if (!layout) {

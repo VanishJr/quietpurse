@@ -13,10 +13,12 @@ import type { Request, RequestHandler, Response } from 'express';
 import { describe, expect, it } from 'vitest';
 import { withWorkspace } from '../src/app';
 import {
+  clearImportDocument,
   confirmImport,
   currentWorkspaceId,
   dbInstance,
   discardImport,
+  getImportDocumentInfo,
   getSetting,
   listAccounts,
   listIncomeSources,
@@ -40,6 +42,11 @@ describe('workspace scoping', () => {
       await expect(recordImportDocument('scope-import', 1)).rejects.toThrow(
         /no workspace context/,
       );
+      // and the other half of that pointer: clearing it unscoped would land on
+      // whichever workspace's row happens to hold the id, and the document routes
+      // read the row before touching a byte of it
+      await expect(clearImportDocument('scope-import')).rejects.toThrow(/no workspace context/);
+      await expect(getImportDocumentInfo('scope-import')).rejects.toThrow(/no workspace context/);
       // the confirmation lifecycle, all three of them writes: staging rows, and two
       // conditional UPDATEs that would otherwise match whatever row holds that id
       await expect(
