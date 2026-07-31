@@ -42,9 +42,12 @@ import {
   CSV_PARSER_VERSION,
   CSV_PRESETS,
   CsvMapping,
+  CsvPresetMapping,
   decodeCsv,
   detectDelimiter,
+  fold,
   genericMapping,
+  matchColumn,
   parseCsv,
 } from './csv';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
@@ -63,6 +66,20 @@ const NUL_SCAN_BYTES = 8192;
 
 /** Notices and row problems share this budget - the client renders the first three. */
 const MAX_PROBLEMS = 5;
+
+/**
+ * What the status column's name may spend inside its quotes, and what the whole list
+ * of refused values may. Budgets, not facts about status columns: noRowsParsed's head
+ * costs 40 at MAX_DATA_ROWS skipped, the reason's fixed prose 55, and 40 + 55 + 24 +
+ * 72 = 191 against the 199 that xlsx.ts's NOTICE_MAX is derived from. Raising either
+ * for a longer status value pushes past that number without anything saying so, and
+ * the unused-sheet notice then starts falling off workbooks with no status column at
+ * all. The list's own last resort - a count of the values that did not fit - is inside
+ * the second bound, so a file whose status column is really a description costs the
+ * same as one with two values.
+ */
+const STATUS_QUOTE_MAX = 24;
+const STATUS_LIST_MAX = 72;
 
 export interface StatementImportRequest {
   /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
@@ -271,17 +288,17 @@ export async function importStatement(
   }
 }
 
-function presetMapping(preset: string | undefined): CsvMapping | null {
+function presetMapping(preset: string | undefined): CsvPresetMapping | null {
   if (!preset || preset === 'generic') return null;
   const known = CSV_PRESETS[preset];
   if (!known) throw new Error(`unknown preset: ${preset}`);
-  return { ...known.mapping };
+  return known.mapping;
 }
 
 async function readSheet(
   req: StatementImportRequest,
   sourceType: ImportSourceType,
-  preset: CsvMapping | null,
+  preset: CsvPresetMapping | null,
 ): Promise<Sheet> {
   if (sourceType === 'xlsx') {
     return readXlsx(req.bytes, (header) => resolveColumns(header, preset, req.mapping));
@@ -297,10 +314,56 @@ interface Columns {
   amountCol: number;
   descCols: number[];
   currencyCol: number;
-  onlyWhen: { col: number; equals: string } | null;
+  /** the accepted values folded once here, so the row loop compares and nothing else */
+  onlyWhen: { col: number; column: string; accepted: ReadonlySet<string> } | null;
 }
 
 type Resolved = { ok: true; columns: Columns } | { ok: false; error: string };
+
+/** A slot no name filled, and everything that was tried for it. */
+interface Unresolved {
+  slot: string;
+  tried: readonly string[];
+}
+
+/**
+ * A preset's candidate lists against one header. A slot the override supplies is not
+ * resolved at all: an override is how a user fixes a preset that does not quite fit
+ * their file, and reporting the slot it replaces as missing would refuse the very
+ * request that carried the fix.
+ */
+function resolvePreset(
+  preset: CsvPresetMapping,
+  header: string[],
+  override: Partial<CsvMapping> | undefined,
+): { mapping: Partial<CsvMapping>; unresolved: Unresolved[] } {
+  const unresolved: Unresolved[] = [];
+  const match = (slot: string, tried: readonly string[]): string | undefined => {
+    const found = matchColumn(header, tried);
+    if (found === undefined) unresolved.push({ slot, tried });
+    return found;
+  };
+
+  const mapping: Partial<CsvMapping> = {
+    dateFormat: preset.dateFormat,
+    decimal: preset.decimal,
+    delimiter: preset.delimiter,
+  };
+  if (override?.date === undefined) mapping.date = match('date', preset.date);
+  if (override?.amount === undefined) mapping.amount = match('amount', preset.amount);
+  if (override?.description === undefined) {
+    const cols = preset.description.map((names) => match('description', names));
+    if (cols.every((c): c is string => c !== undefined)) mapping.description = cols;
+  }
+  if (preset.currency && override?.currency === undefined) {
+    mapping.currency = match('currency', preset.currency);
+  }
+  if (preset.onlyWhen && override?.onlyWhen === undefined) {
+    const column = match('status', preset.onlyWhen.column);
+    if (column !== undefined) mapping.onlyWhen = { column, equals: [...preset.onlyWhen.equals] };
+  }
+  return { mapping, unresolved };
+}
 
 /**
  * Which column is which, for one header row. The XLSX header scan and the mapper
@@ -310,11 +373,16 @@ type Resolved = { ok: true; columns: Columns } | { ok: false; error: string };
  */
 function resolveColumns(
   header: string[],
-  preset: CsvMapping | null,
+  preset: CsvPresetMapping | null,
   override: Partial<CsvMapping> | undefined,
 ): Resolved {
-  let mapping = preset;
-  if (!mapping) {
+  const unresolved: Unresolved[] = [];
+  let mapping: Partial<CsvMapping> | null = null;
+  if (preset) {
+    const resolved = resolvePreset(preset, header, override);
+    mapping = resolved.mapping;
+    unresolved.push(...resolved.unresolved);
+  } else {
     mapping = genericMapping(header);
     if (!mapping && !override?.date) {
       return {
@@ -323,39 +391,74 @@ function resolveColumns(
       };
     }
   }
-  const effective: CsvMapping = { ...(mapping ?? ({} as CsvMapping)), ...override };
-  if (!effective.date || !effective.amount || !effective.description) {
+  // one spread at the top level, so an override's onlyWhen replaces the preset's
+  // whole rather than merging field by field: a request naming its own status column
+  // must not inherit accepted values that belong to the column it just replaced
+  const merged = { ...(mapping ?? {}), ...override };
+  // ahead of the malformed-mapping check below, so a preset that simply does not fit
+  // the file never reports itself as a mapping the user got wrong
+  if (unresolved.length) return { ok: false, error: noColumnMatched(unresolved, header) };
+
+  const { date, amount, description } = merged;
+  if (!date || !amount || !description) {
     return { ok: false, error: 'mapping must specify the date, amount and description columns' };
   }
+  const effective: CsvMapping = { ...merged, date, amount, description };
 
-  let missing: string | null = null;
-  const colIndex = (name: string): number => {
-    const i = header.findIndex((h) => h.toLowerCase() === name.trim().toLowerCase());
-    if (i < 0 && missing === null) {
-      missing = `column "${name}" is not in the header: ${header.join(', ')}`;
-    }
+  const colIndex = (slot: string, name: string): number => {
+    const i = header.findIndex((h) => fold(h) === fold(name));
+    if (i < 0) unresolved.push({ slot, tried: [name] });
     return i;
   };
   const columns: Columns = {
     mapping: effective,
-    dateCol: colIndex(effective.date),
-    amountCol: colIndex(effective.amount),
+    dateCol: colIndex('date', effective.date),
+    amountCol: colIndex('amount', effective.amount),
     descCols: (Array.isArray(effective.description)
       ? effective.description
       : [effective.description]
-    ).map(colIndex),
-    currencyCol: effective.currency ? colIndex(effective.currency) : -1,
+    ).map((name) => colIndex('description', name)),
+    currencyCol: effective.currency ? colIndex('currency', effective.currency) : -1,
     onlyWhen: effective.onlyWhen
-      ? { col: colIndex(effective.onlyWhen.column), equals: effective.onlyWhen.equals }
+      ? {
+          col: colIndex('status', effective.onlyWhen.column),
+          column: effective.onlyWhen.column,
+          accepted: acceptedValues(effective.onlyWhen.equals),
+        }
       : null,
   };
-  return missing === null ? { ok: true, columns } : { ok: false, error: missing };
+  return unresolved.length === 0
+    ? { ok: true, columns }
+    : { ok: false, error: noColumnMatched(unresolved, header) };
+}
+
+const acceptedValues = (equals: string | string[]): ReadonlySet<string> =>
+  new Set((Array.isArray(equals) ? equals : [equals]).map(fold));
+
+/**
+ * Why the columns could not be filled. Every unresolved slot, not the first: with a
+ * list of accepted names per column a header in a language nobody has listed misses
+ * four slots at once, and naming one invites the user to fix one name and upload
+ * into the same refusal - against a file they cannot edit.
+ *
+ * The slots and what was tried come first and the header dump last, because the dump
+ * is unbounded and error_detail's cap cuts the tail: what the user acts on is the
+ * names, not their own header read back to them. Appended whole or not at all - a
+ * truncated dump names columns the file has not got.
+ */
+function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
+  const slots = unresolved
+    .map((u) => `${u.slot} (tried ${u.tried.map((n) => `"${n}"`).join(', ')})`)
+    .join(', ');
+  const head = `no column matched for ${slots} - pick a different preset or set a mapping`;
+  const dump = `; the header reads: ${header.join(', ')}`;
+  return head.length + dump.length <= ERROR_DETAIL_MAX ? head + dump : head;
 }
 
 async function mapAndStore(
   req: StatementImportRequest,
   sheet: Sheet,
-  preset: CsvMapping | null,
+  preset: CsvPresetMapping | null,
   accountId: string,
   importId: string,
   fileHash: string,
@@ -381,13 +484,29 @@ async function mapAndStore(
   // an extra notice would silently make problems[0] the wrong kind of sentence
   const notices = sheet.notices ?? [];
   const rowProblems: string[] = [];
+  // what the status filter dropped, by the value the file wrote: a half-recognised
+  // vocabulary otherwise produces a partial import that reads as a complete one
+  const statusSkips = new Map<string, number>();
   let skipped = 0;
+  let statusSkipped = 0;
 
   for (let i = 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i];
-    if (onlyWhen && cellText(row[onlyWhen.col]).trim() !== onlyWhen.equals) {
-      skipped++;
-      continue;
+    // first in the loop and it must stay there: the rows this drops are the ones the
+    // bank has not finished, and their date cell is empty - filtered later, each of
+    // them spends a MAX_PROBLEMS slot on a date it was never going to have.
+    //
+    // A row is kept only if its folded value IS in the accepted set. Inverted - skip
+    // the known-pending ones - it would import every reverted, declined and pending
+    // row shipped in a language nobody has listed yet, as money that never moved.
+    if (onlyWhen) {
+      const value = cellText(row[onlyWhen.col]).trim();
+      if (!onlyWhen.accepted.has(fold(value))) {
+        skipped++;
+        statusSkipped++;
+        statusSkips.set(value, (statusSkips.get(value) ?? 0) + 1);
+        continue;
+      }
     }
     const date = cellDate(row[dateCol], mapping.dateFormat, sheet.date1904);
     const amount = cellAmount(row[amountCol], mapping.decimal);
@@ -419,8 +538,13 @@ async function mapAndStore(
     });
   }
 
+  const status: StatusSkips | null =
+    onlyWhen && statusSkips.size
+      ? { column: onlyWhen.column, counts: statusSkips, skipped: statusSkipped }
+      : null;
+
   if (txs.length === 0) {
-    throw new Error(noRowsParsed(skipped, rowProblems, notices));
+    throw new Error(noRowsParsed(skipped, rowProblems, notices, status));
   }
 
   // The account is deliberately NOT created here. One created now would stand on
@@ -458,7 +582,16 @@ async function mapAndStore(
       total,
       accepted: txs.length,
       skipped,
-      problems: [...notices, ...rowProblems],
+      // the aggregate sits ahead of the row problems and inside the three the client
+      // renders: a fifth per-row reason after four others refines a picture the user
+      // already has, where "some of your rows were dropped, and these are the values
+      // that did it" is the only line saying the import is partial at all. The cut
+      // cannot reach a notice - one is the most any sheet produces
+      problems: [
+        ...notices,
+        ...(status ? [`${rowCount(status.skipped)} skipped: ${statusReason('the', status)}`] : []),
+        ...rowProblems,
+      ].slice(0, MAX_PROBLEMS),
       newRows,
       alreadyPresent: txs.length - newRows,
       from: days[0],
@@ -486,6 +619,61 @@ function netByCurrency(txs: NewTransaction[]): { currency: string; net: number }
 }
 
 /**
+ * The distinct values the status filter refused, and how many rows each cost.
+ *
+ * Exported for the budget test, like noRowsParsed below and for the same reason -
+ * not API surface anyone asked for.
+ */
+export interface StatusSkips {
+  column: string;
+  counts: Map<string, number>;
+  skipped: number;
+}
+
+const rowCount = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
+
+/** Cut with a mark, so a value with more behind it does not read as the whole one. */
+const bounded = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+/**
+ * Why rows were filtered out, aggregated - one line however many rows. There is
+ * deliberately no second vocabulary of known-bad statuses behind this: it names the
+ * values that actually caused skips, so a language nobody has listed yet needs no
+ * maintenance to be reported. The values are quoted as the file spelled them, since
+ * folding is only for the accept test and two casings of one word are worth seeing.
+ */
+function statusReason(lead: string, status: StatusSkips): string {
+  const entries = [...status.counts.entries()]
+    .sort(([, a], [, b]) => b - a)
+    .map(([value, n]) => `"${bounded(value, STATUS_QUOTE_MAX)}" (${n})`);
+  return `${lead} "${bounded(status.column, STATUS_QUOTE_MAX)}" value is not one of the accepted ones - ${statusList(entries)}`;
+}
+
+/**
+ * As many values as STATUS_LIST_MAX buys, then a count of the rest - cut between
+ * whole entries and never inside one, because half a status value names a status the
+ * file has not got and sends the reader looking for it. The first entry is always
+ * kept: both bounds above are sized so that it and a count fit.
+ *
+ * At least one entry is a precondition, not a branch: statusReason is reached only
+ * when the filter refused something, so an empty list is a caller that has invented
+ * a StatusSkips - which only the budget test can do.
+ */
+function statusList(entries: string[]): string {
+  let out = entries[0];
+  for (let i = 1; i < entries.length; i++) {
+    const rest = entries.length - i - 1;
+    const next = `${out}, ${entries[i]}`;
+    if (next.length + (rest ? ` and ${rest} more`.length : 0) > STATUS_LIST_MAX) {
+      return `${out} and ${entries.length - i} more`;
+    }
+    out = next;
+  }
+  return out;
+}
+
+/**
  * Why nothing parsed, ordered by what yields rather than by what is read first: the
  * client renders the whole of what error_detail keeps (MAX_ERROR_CHARS in
  * web/src/api.ts), so the last clause is the one that gets dropped, not the one that
@@ -494,9 +682,25 @@ function netByCurrency(txs: NewTransaction[]): { currency: string; net: number }
  * from Februar" is not - so the sheet notice is what yields, and only whole. The
  * `problems` array is not reordered: there the notice stays at the head, which is
  * the window the client renders.
+ *
+ * The status filter owns the reason when it accounts for every skipped row, and only
+ * then: "no row could be parsed (72 skipped)" with nothing else said sends the user
+ * to the preset chips, and no chip fixes a status value nobody has listed. The two
+ * are exclusive - a row dropped for its date or its amount is not one the filter took
+ * - so the sentence never carries both and its ceiling stays one clause.
+ *
+ * Exported for the budget test: what this composes at its extreme is the number
+ * xlsx.ts's NOTICE_MAX is subtracted from, and a measurement made by hand is true
+ * only on the day it is taken.
  */
-function noRowsParsed(skipped: number, rowProblems: string[], notices: string[]): string {
-  const reason = rowProblems[0];
+export function noRowsParsed(
+  skipped: number,
+  rowProblems: string[],
+  notices: string[],
+  status: StatusSkips | null,
+): string {
+  const reason =
+    status && status.skipped === skipped ? statusReason("every row's", status) : rowProblems[0];
   const head = `no row could be parsed (${skipped} skipped)${reason ? ': ' + reason : ''}`;
   const notice = notices.length ? ` - ${notices.join(' - ')}` : '';
   return head.length + notice.length <= ERROR_DETAIL_MAX ? head + notice : head;

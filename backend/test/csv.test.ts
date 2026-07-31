@@ -1,15 +1,19 @@
+import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
-import { getAccount, listTransactions } from '../src/db';
+import { ERROR_DETAIL_MAX, getAccount, listTransactions } from '../src/db';
 import {
+  CSV_PRESETS,
   decodeCsv,
   detectDelimiter,
   genericMapping,
+  matchColumn,
   parseAmount,
   parseCsv,
   parseCsvDate,
 } from '../src/providers/csv';
+import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import { importAndConfirm } from './helpers';
-import { importStatement } from '../src/providers/statement';
+import { importStatement, noRowsParsed } from '../src/providers/statement';
 
 describe('parseCsv', () => {
   it('quotes, escaped quotes, CRLF, semicolon', () => {
@@ -63,6 +67,48 @@ describe('genericMapping', () => {
     expect(m.date).toBe('Date');
     expect(m.currency).toBe('Currency');
     expect(genericMapping(['foo', 'bar'])).toBeNull();
+  });
+
+  /**
+   * "Дата начала" is when the transaction started and "Дата выполнения" when it
+   * completed, and the completed one is the date this importer means - a date days
+   * off goes into the dedup key (ROADMAP 4.2), where it cannot be corrected by
+   * re-importing. Correctness, not the exactness holder: see the matchColumn case.
+   */
+  it('a header carrying both Revolut date columns resolves to the completed one', () => {
+    const ru = ['Тип', 'Дата начала', 'Дата выполнения', 'Описание', 'Сумма', 'Валюта'];
+    expect(genericMapping(ru)!.date).toBe('Дата выполнения');
+  });
+
+  /**
+   * Pins the ORDER of GENERIC_CANDIDATES.date, not the matcher: "дата выполнения"
+   * wins a header carrying a bare "Дата" only because it is tried first, and a name
+   * appended to that list for tidiness re-sorts it back. The header above cannot hold
+   * this - it has no bare "Дата", so it is green under either order.
+   */
+  it('a bare Дата beside Дата выполнения still resolves to the completed one', () => {
+    const both = ['Дата', 'Дата выполнения', 'Сумма', 'Описание'];
+    expect(genericMapping(both)!.date).toBe('Дата выполнения');
+  });
+});
+
+/**
+ * Where "matched exactly, or not at all" is held. Not at import level, on either
+ * path: through a preset neither accepted name is a prefix of "Дата начала", and
+ * through generic the candidate order puts "дата выполнения" first, so a startsWith
+ * matcher never reaches "дата" and returns the right column anyway. Both would be
+ * green against exactly the defect they were written to catch.
+ */
+describe('matchColumn', () => {
+  it('a candidate that is a prefix of a present column matches nothing', () => {
+    expect(matchColumn(['Дата начала', 'Дата выполнения'], ['дата'])).toBeUndefined();
+    expect(matchColumn(['Description', 'Description Extra'], ['descriptio'])).toBeUndefined();
+  });
+
+  it('the candidate list breaks a tie, not the header order', () => {
+    const header = ['Дата начала', 'Дата выполнения'];
+    expect(matchColumn(header, ['дата выполнения', 'дата начала'])).toBe('Дата выполнения');
+    expect(matchColumn(header, ['дата начала', 'дата выполнения'])).toBe('Дата начала');
   });
 });
 
@@ -226,6 +272,246 @@ describe('a CSV statement: pipeline and deduplication', () => {
     expect(thrown.message).toBe(
       'no row could be parsed (1 skipped): row 2: could not parse the date "not a date" or the amount "not a number"',
     );
+  });
+});
+
+/**
+ * One bank, one export, fifteen languages (ROADMAP 5.2). The header below is the
+ * Russian Revolut one, reproduced from a measured file - column names are the bank's,
+ * not personal data, and every row under it is fabricated here: no real statement
+ * enters this repository.
+ */
+describe('a bank export in a language the preset also accepts', () => {
+  const RU_HEADER =
+    'Тип,Продукт,Дата начала,Дата выполнения,Описание,Сумма,Комиссия,Валюта,State,Остаток средств';
+
+  const EN_HEADER =
+    'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
+
+  it('the Russian export imports under the same revolut preset', async () => {
+    const ru = [
+      RU_HEADER,
+      'CARD_PAYMENT,Current,2026-02-01 09:00:00,2026-02-02 10:00:00,Кофейня на углу,-4.20,0.00,EUR,ВЫПОЛНЕНО,95.80',
+      'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Пополнение счёта,100.00,0.50,EUR,ВЫПОЛНЕНО,195.80',
+      'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает подтверждения,-9.99,0.00,EUR,В ОБРАБОТКЕ,185.81',
+    ].join('\n');
+
+    const r = await importAndConfirm({
+      accountName: 'Revolut RU',
+      currency: 'USD',
+      preset: 'revolut',
+      bytes: Buffer.from(ru, 'utf8'),
+    });
+    expect(r.inserted).toBe(2);
+    expect(r.skipped).toBe(1);
+
+    const txs = await listTransactions({ accountId: r.accountId });
+    const coffee = txs.find((t) => t.description === 'Кофейня на углу')!;
+    // the completed date, not the started one two columns to its left
+    expect(coffee.date).toBe('2026-02-02T10:00:00.000Z');
+    expect(coffee.amount).toBe(-4.2);
+    // the file's own currency column, not the USD the request asked for
+    expect(coffee.currency).toBe('EUR');
+    // Сумма, never Комиссия - the fee on this row is 0.50 and is dropped in silence
+    expect(txs.find((t) => t.description === 'Пополнение счёта')!.amount).toBe(100);
+
+    expect(r.problems).toEqual([
+      '1 row skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (1)',
+    ]);
+  });
+
+  /**
+   * Deny by default. A status value in neither accepted list means "not completed"
+   * and the row is skipped - the alternative, skipping only the values listed as
+   * pending, imports every reverted and declined row shipped in a language nobody
+   * has listed yet as money that never moved.
+   */
+  it('a status in neither list is skipped, not imported, and says so', async () => {
+    const file = [
+      EN_HEADER,
+      'CARD_PAYMENT,Current,2026-03-01 10:00:00,2026-03-01 10:00:00,Kept One,-10.00,0,EUR,COMPLETED,100',
+      'CARD_PAYMENT,Current,2026-03-02 10:00:00,2026-03-02 10:00:00,Reverted One,-20.00,0,EUR,REVERTED,120',
+      'CARD_PAYMENT,Current,2026-03-03 10:00:00,2026-03-03 10:00:00,Reverted Two,-25.00,0,EUR,REVERTED,145',
+      'CARD_PAYMENT,Current,2026-03-04 10:00:00,2026-03-04 10:00:00,Declined One,-30.00,0,EUR,DECLINED,145',
+    ].join('\n');
+
+    const r = await importAndConfirm({
+      accountName: 'Revolut Reverted',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(file, 'utf8'),
+    });
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(3);
+    expect((await listTransactions({ accountId: r.accountId })).map((t) => t.description)).toEqual([
+      'Kept One',
+    ]);
+    // one line however many rows, the most frequent value first so the informative
+    // one survives the bound
+    expect(r.problems).toEqual([
+      '3 rows skipped: the "State" value is not one of the accepted ones - "REVERTED" (2), "DECLINED" (1)',
+    ]);
+  });
+
+  it('a file where every status is unrecognised is refused, naming the values', async () => {
+    const file = [
+      EN_HEADER,
+      'CARD_PAYMENT,Current,2026-04-01 10:00:00,2026-04-01 10:00:00,One,-10.00,0,EUR,ЗАВЕРШЕНО,100',
+      'CARD_PAYMENT,Current,2026-04-02 10:00:00,2026-04-02 10:00:00,Two,-20.00,0,EUR,ЗАВЕРШЕНО,120',
+    ].join('\n');
+
+    const thrown = await importStatement({
+      accountName: 'Revolut Unknown Status',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(file, 'utf8'),
+    }).catch((e) => e as Error);
+
+    // the value, because no preset chip fixes a status nobody has listed - which is
+    // exactly what the bare "(2 skipped)" sentence used to send the user off to try
+    expect(thrown.message).toBe(
+      'no row could be parsed (2 skipped): every row\'s "State" value is not one of the accepted ones - "ЗАВЕРШЕНО" (2)',
+    );
+  });
+
+  /**
+   * The aggregate outranks a fifth per-row reason: four row problems and the line
+   * saying the import is partial beat five row problems and silence.
+   */
+  it('the skipped-status line survives a file already full of row problems', async () => {
+    const bad = (n: number) =>
+      `CARD_PAYMENT,Current,2026-05-0${n} 10:00:00,not a date,Bad ${n},not a number,0,EUR,COMPLETED,100`;
+    const file = [
+      EN_HEADER,
+      ...[1, 2, 3, 4, 5].map(bad),
+      'CARD_PAYMENT,Current,2026-05-06 10:00:00,2026-05-06 10:00:00,Reverted,-9.00,0,EUR,REVERTED,100',
+      'CARD_PAYMENT,Current,2026-05-07 10:00:00,2026-05-07 10:00:00,Kept,-11.00,0,EUR,COMPLETED,89',
+    ].join('\n');
+
+    const r = await importAndConfirm({
+      accountName: 'Revolut Crowded Problems',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(file, 'utf8'),
+    });
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(6);
+    expect(r.problems).toHaveLength(5);
+    expect(r.problems[0]).toBe(
+      '1 row skipped: the "State" value is not one of the accepted ones - "REVERTED" (1)',
+    );
+    expect(r.problems.slice(1)).toHaveLength(4);
+    for (const p of r.problems.slice(1)) expect(p).toMatch(/^row \d+: /);
+  });
+
+  it('a header matching no accepted name names the slots and what was tried', async () => {
+    const file = ['Дата,Сумма операции,Назначение', '2026-06-01,-1.00,тест'].join('\n');
+
+    const thrown = await importStatement({
+      accountName: 'Revolut Unlisted Language',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(file, 'utf8'),
+    }).catch((e) => e as Error);
+
+    // every unresolved slot, the names tried, then the header - in that order,
+    // because the header dump is unbounded and the cap cuts the tail
+    expect(thrown.message).toBe(
+      'no column matched for date (tried "Completed Date", "Дата выполнения"), ' +
+        'amount (tried "Amount", "Сумма"), description (tried "Description", "Описание"), ' +
+        'currency (tried "Currency", "Валюта"), status (tried "State") ' +
+        '- pick a different preset or set a mapping; ' +
+        'the header reads: Дата, Сумма операции, Назначение',
+    );
+  });
+});
+
+/**
+ * The two sentences this row composes, at their extremes rather than on an example.
+ * Both are bounded by constants that a later "the values are longer than that"
+ * would raise without anything else noticing.
+ */
+describe('what the new refusals may spend', () => {
+  it('every preset composes a refusal error_detail keeps whole', async () => {
+    for (const key of Object.keys(CSV_PRESETS)) {
+      const thrown = await importStatement({
+        accountName: `Budget ${key}`,
+        currency: 'EUR',
+        preset: key,
+        bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
+      }).catch((e) => e as Error);
+
+      expect(thrown.message).toMatch(/^no column matched for /);
+      expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+      // the actionable half alone, since the header dump is what yields
+      expect(thrown.message.split('; the header reads:')[0].length).toBeLessThanOrEqual(
+        ERROR_DETAIL_MAX,
+      );
+    }
+  });
+
+  /**
+   * The other cap, and the one that binds first: on the XLSX path this refusal is
+   * carried inside closestClause, whose 300 characters are cut mid-token. Every cut
+   * lands in prose today, so nothing reaching a user names a column the file has not
+   * got - but that is held by a measurement rather than by margin, and each accepted
+   * name added to a slot ahead of the cut spends its own length plus 4 of it. An odd
+   * number of quotes in the delivered message is exactly a quoted name cut in half.
+   *
+   * Through a real workbook, because the cap lives in xlsx.ts and only a delivered
+   * message says what was cut. Both headers, because which preset composes the
+   * longest refusal depends on the header: revolut resolves amount and description
+   * out of an English one and is then the shortest of the three, and the longest
+   * against a header it matches nothing in.
+   */
+  it('no preset composes an xlsx refusal that is cut through a column name', async () => {
+    for (const header of [
+      ['date', 'amount', 'description'],
+      ['nothing', 'matches', 'here'],
+    ]) {
+      for (const key of Object.keys(CSV_PRESETS)) {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Statement');
+        ws.addRow(header);
+        ws.addRow([new Date('2026-09-01T00:00:00.000Z'), -5, 'one']);
+
+        const thrown = await importStatement({
+          accountName: `Cut ${key} ${header[0]}`,
+          currency: 'EUR',
+          preset: key,
+          bytes: Buffer.from(await wb.xlsx.writeBuffer()),
+        }).catch((e) => e as Error);
+
+        // the refusal is in there at all, so an even count cannot pass by vacancy
+        expect(thrown.message).toContain('no column matched for ');
+        const quotes = (thrown.message.match(/"/g) ?? []).length;
+        expect(quotes % 2, `${key} against ${header.join(',')}: ${thrown.message}`).toBe(0);
+      }
+    }
+  });
+
+  /**
+   * 199 is what xlsx.ts derives NOTICE_MAX from - "the longest reason the parser
+   * composes". Restated here rather than imported, because when it moves a human
+   * should be made to look at that arithmetic again. Swept rather than sampled: the
+   * value list's bound is spent differently by many short values than by one long
+   * one, and only one of the two arrangements is the maximum.
+   */
+  it('the skipped-status reason stays under the number NOTICE_MAX is derived from', () => {
+    let longest = 0;
+    for (let width = 1; width <= 40; width++) {
+      for (let distinct = 1; distinct <= 60; distinct++) {
+        const counts = new Map<string, number>();
+        for (let i = 0; i < distinct; i++) counts.set(`${'V'.repeat(width)}${i}`, MAX_DATA_ROWS - i);
+        const composed = noRowsParsed(MAX_DATA_ROWS, [], [], {
+          column: 'C'.repeat(200),
+          counts,
+          skipped: MAX_DATA_ROWS,
+        });
+        longest = Math.max(longest, composed.length);
+      }
+    }
+    expect(longest).toBeLessThanOrEqual(199);
   });
 });
 

@@ -12,7 +12,7 @@
  * reads it yet; it is recorded per import so that re-parsing can be targeted
  * later ("re-run everything below CSV parser v2").
  */
-export const CSV_PARSER_VERSION = 1;
+export const CSV_PARSER_VERSION = 2;
 
 // ---------- decoding ----------
 
@@ -118,22 +118,55 @@ export interface CsvMapping {
   decimal?: ',' | '.' | 'auto';
   /** column delimiter; auto - from the header */
   delimiter?: string;
-  /** keep only rows where a column equals a value (Revolut: State=COMPLETED) */
-  onlyWhen?: { column: string; equals: string };
+  /**
+   * keep only rows where a column holds one of these values (Revolut:
+   * State=COMPLETED). A list because one bank ships one export in several
+   * languages; the comparison is folded, so case is not part of it
+   */
+  onlyWhen?: { column: string; equals: string | string[] };
+}
+
+/** A list that cannot be empty: an accepted-name list with no names matches nothing. */
+type NonEmpty<T> = readonly [T, ...T[]];
+
+/**
+ * What a preset is, now that it is not a CsvMapping (ROADMAP 5.2): a bank ships one
+ * export in every language its app offers, so each column is a list of accepted names
+ * and onlyWhen a set of accepted values, and the header decides which of them a given
+ * file uses. Candidate order breaks a tie, so a more specific name goes first.
+ *
+ * description is a list of lists, and the nesting is the point: the outer list is the
+ * join order (Sparkasse: payee, then purpose), the inner one the names accepted for
+ * that column. As one flat list the two meanings would sit a field apart in a type a
+ * Zod schema mirrors by hand, and a second accepted name added to a Sparkasse column
+ * would silently start joining three columns instead of two.
+ *
+ * delimiter, dateFormat and decimal stay scalar: readSheet reads the delimiter before
+ * any header exists, so there would be nothing to resolve it against.
+ */
+export interface CsvPresetMapping {
+  readonly date: NonEmpty<string>;
+  readonly amount: NonEmpty<string>;
+  readonly description: NonEmpty<NonEmpty<string>>;
+  readonly currency?: NonEmpty<string>;
+  readonly dateFormat?: CsvMapping['dateFormat'];
+  readonly decimal?: CsvMapping['decimal'];
+  readonly delimiter?: string;
+  readonly onlyWhen?: { readonly column: NonEmpty<string>; readonly equals: NonEmpty<string> };
 }
 
 /**
  * Presets for specific banks. generic picks up the usual column names
  * (date/amount/description and their German/Ukrainian variants) - see below.
  */
-export const CSV_PRESETS: Record<string, { title: string; mapping: CsvMapping }> = {
+export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapping }> = {
   sparkasse: {
     title: 'Sparkasse (CAMT CSV)',
     mapping: {
-      date: 'Buchungstag',
-      amount: 'Betrag',
-      description: ['Beguenstigter/Zahlungspflichtiger', 'Verwendungszweck'],
-      currency: 'Waehrung',
+      date: ['Buchungstag'],
+      amount: ['Betrag'],
+      description: [['Beguenstigter/Zahlungspflichtiger'], ['Verwendungszweck']],
+      currency: ['Waehrung'],
       dateFormat: 'dmy',
       decimal: ',',
       delimiter: ';',
@@ -142,9 +175,9 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvMapping }>
   dkb: {
     title: 'DKB (Girokonto CSV)',
     mapping: {
-      date: 'Buchungsdatum',
-      amount: 'Betrag (€)',
-      description: ['Zahlungsempfänger*in', 'Verwendungszweck'],
+      date: ['Buchungsdatum'],
+      amount: ['Betrag (€)'],
+      description: [['Zahlungsempfänger*in'], ['Verwendungszweck']],
       dateFormat: 'dmy',
       decimal: ',',
       delimiter: ';',
@@ -152,22 +185,66 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvMapping }>
   },
   revolut: {
     title: 'Revolut (Statement CSV)',
+    // Every name below comes from a header someone has actually had in front of
+    // them - the English export and the Russian one. A guessed translation that is
+    // wrong costs nothing, but one that is exactly right for a *different* column is
+    // a silent mis-mapping, and a list that looks complete makes the next failure
+    // harder to read. Coverage grows one line at a time, from real files.
     mapping: {
-      date: 'Completed Date',
-      amount: 'Amount',
-      description: 'Description',
-      currency: 'Currency',
+      date: ['Completed Date', 'Дата выполнения'],
+      amount: ['Amount', 'Сумма'],
+      description: [['Description', 'Описание']],
+      currency: ['Currency', 'Валюта'],
       dateFormat: 'iso',
       decimal: '.',
       delimiter: ',',
-      onlyWhen: { column: 'State', equals: 'COMPLETED' },
+      // the Russian export leaves this column named in English and translates its
+      // values, which is why the shape is a name list and a value list, not a preset
+      // per language
+      onlyWhen: { column: ['State'], equals: ['COMPLETED', 'ВЫПОЛНЕНО'] },
     },
   },
 };
 
+/**
+ * Case-folding for every column and status comparison in the importer, both sides of
+ * it. toLowerCase and never toLocaleLowerCase: the latter maps I to a dotless ı under
+ * a Turkish locale, and every English header would stop matching on a server whose
+ * locale someone changed.
+ */
+export const fold = (s: string): string => s.trim().toLowerCase();
+
+/**
+ * The first accepted name the header carries, answered in the file's own spelling.
+ *
+ * Whole-cell equality, never a prefix or a substring: "Дата начала" is when a Revolut
+ * transaction *started* and sits two columns from "Дата выполнения", so a matcher that
+ * settles for a prefix imports dates that can be days off - and the date is in the
+ * dedup key (ROADMAP 4.2), so re-importing after the mistake is found duplicates the
+ * statement rather than recognising it.
+ *
+ * The candidate list breaks a tie, not the header's order: the list's author knows
+ * which name is the true one, where column order is the bank's arbitrary choice.
+ */
+export function matchColumn(
+  header: readonly string[],
+  candidates: readonly string[],
+): string | undefined {
+  const folded = header.map(fold);
+  for (const name of candidates) {
+    const i = folded.indexOf(fold(name));
+    if (i >= 0) return header[i];
+  }
+  return undefined;
+}
+
 /** Candidate column names for the generic preset. */
 const GENERIC_CANDIDATES: Record<'date' | 'amount' | 'description' | 'currency', string[]> = {
-  date: ['date', 'datum', 'buchungstag', 'дата', 'booking date'],
+  // 'дата выполнения' sits before 'дата' and the position is load-bearing: candidate
+  // order decides a tie, so the general name ahead of the specific one takes the
+  // *started* date out of a Revolut-shaped header. Appending a name here for tidiness
+  // is how that silently comes back.
+  date: ['date', 'datum', 'buchungstag', 'дата выполнения', 'дата', 'booking date'],
   amount: ['amount', 'betrag', 'сумма', 'сума', 'value'],
   description: ['description', 'verwendungszweck', 'purpose', 'payee', 'описание', 'опис', 'text'],
   currency: ['currency', 'waehrung', 'währung', 'валюта'],
@@ -175,16 +252,11 @@ const GENERIC_CANDIDATES: Record<'date' | 'amount' | 'description' | 'currency',
 
 /** generic: look for the usual column names in the header. null = required ones not found. */
 export function genericMapping(header: string[]): CsvMapping | null {
-  const lower = header.map((h) => h.trim().toLowerCase());
-  const find = (candidates: string[]): string | undefined => {
-    const i = lower.findIndex((h) => candidates.includes(h));
-    return i >= 0 ? header[i] : undefined;
-  };
-  const date = find(GENERIC_CANDIDATES.date);
-  const amount = find(GENERIC_CANDIDATES.amount);
-  const description = find(GENERIC_CANDIDATES.description);
+  const date = matchColumn(header, GENERIC_CANDIDATES.date);
+  const amount = matchColumn(header, GENERIC_CANDIDATES.amount);
+  const description = matchColumn(header, GENERIC_CANDIDATES.description);
   if (!date || !amount || !description) return null;
-  return { date, amount, description, currency: find(GENERIC_CANDIDATES.currency) };
+  return { date, amount, description, currency: matchColumn(header, GENERIC_CANDIDATES.currency) };
 }
 
 // ---------- value parsing ----------

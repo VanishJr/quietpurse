@@ -329,6 +329,18 @@ describe('POST /api/imports', () => {
       'mapping.description must be a column name or a list of column names',
     );
 
+    // accept nothing filters every row away, and the answer would then be "no row
+    // could be parsed" - the caller's own input, zeroed and reported back as a fault
+    // in the file. tsc cannot see this bound: without .min(1) the suite stays green
+    const noAcceptedValues = await send(
+      'Empty Accept List Bank',
+      '{"date":"d","amount":"a","description":"x","onlyWhen":{"column":"State","equals":[]}}',
+    );
+    expect(noAcceptedValues.status).toBe(400);
+    expect(noAcceptedValues.body.error).toBe(
+      'mapping.onlyWhen.equals must be a status value or a list of status values',
+    );
+
     expect(await imports()).toHaveLength(before);
   });
 
