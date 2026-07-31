@@ -333,7 +333,7 @@ describe('xlsx: finding the statement', () => {
         preset: 'sparkasse',
         bytes: book,
       }),
-    ).rejects.toThrow(/column "Buchungstag" is not in the header: date, amount, description/);
+    ).rejects.toThrow(/no column matched for date \(tried "Buchungstag"\)/);
   });
 
   /**

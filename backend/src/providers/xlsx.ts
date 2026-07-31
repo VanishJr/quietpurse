@@ -22,7 +22,7 @@ import { Cell, MAX_DATA_ROWS, Sheet, cellText, hasContent } from './sheet';
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
  */
-export const XLSX_PARSER_VERSION = 1;
+export const XLSX_PARSER_VERSION = 2;
 
 /** How far down a sheet the header may hide behind a title or an account block. */
 const HEADER_SCAN_ROWS = 20;

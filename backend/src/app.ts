@@ -853,7 +853,24 @@ const mappingSchema: z.ZodType<Partial<CsvMapping>> = z.strictObject({
   onlyWhen: z
     .strictObject({
       column: column('onlyWhen.column'),
-      equals: z.string({ error: 'mapping.onlyWhen.equals must be a string' }),
+      equals: z
+        .union(
+          [
+            z.string(),
+            // the bound carries the sentence itself, as description's does: an
+            // accept list with nothing in it filters every row away, and the user
+            // is then told no row could be parsed - their own input, zeroed and
+            // reported back as a fault in the file
+            z
+              .array(z.string())
+              .min(1, {
+                error: 'mapping.onlyWhen.equals must be a status value or a list of status values',
+              }),
+          ],
+          {
+            error: 'mapping.onlyWhen.equals must be a status value or a list of status values',
+          },
+        ),
     })
     .optional(),
 } satisfies Record<keyof CsvMapping, z.ZodType>);
