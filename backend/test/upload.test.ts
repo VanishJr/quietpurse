@@ -104,6 +104,30 @@ describe('POST /api/imports', () => {
   });
 
   /**
+   * The filename is the one part of a multipart request that arrives as bytes with
+   * no charset of its own. multer read them as latin1, so this name was stored as
+   * "Ð²Ñ‹Ð¿Ð¸ÑÐºÐ°.xlsx" - 19 characters, one per byte - and nothing failed. The
+   * assertion reads the column back out of the database rather than a header the
+   * route composed from this test's own string, which would agree with itself.
+   */
+  it('stores a non-ASCII filename as the browser sent it', async () => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', 'Cyrillic Name Bank')
+      .field('currency', 'EUR')
+      .attach('file', await xlsxFile('выписка'), 'выписка.xlsx');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const stored = (await dbInstance().execute(
+      sql`SELECT original_filename FROM imports WHERE id = ${res.body.summary.importId}`,
+    )) as unknown as { rows: { original_filename: string }[] };
+
+    expect(stored.rows[0].original_filename).toBe('выписка.xlsx');
+    expect(stored.rows[0].original_filename).toHaveLength(12);
+  });
+
+  /**
    * The file type comes from the bytes, never from the name: this workbook is
    * uploaded as "statement.csv" and still goes to the XLSX parser. A bank that
    * names its Excel export .csv is not a hypothetical.

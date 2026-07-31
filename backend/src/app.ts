@@ -756,7 +756,14 @@ const UPLOAD_LIMITS = {
  * below the session check - a global multipart parser would let anyone who can
  * reach the port make the server buffer 25 MB per request (see the note there).
  */
-const upload = multer({ storage: multer.memoryStorage(), limits: UPLOAD_LIMITS });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: UPLOAD_LIMITS,
+  // multer defaults this to latin1 while browsers write filename= as raw UTF-8 bytes:
+  // the two disagree without failing, so the name simply arrives wrong. Field VALUES
+  // already decode as utf8 (busboy's own defCharset), which is why only this was.
+  defParamCharset: 'utf8',
+});
 
 /**
  * multer's own errors, answered by this endpoint instead of as a 500 by the global
