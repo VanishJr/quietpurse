@@ -141,6 +141,17 @@ export interface SessionUser {
 }
 
 /**
+ * "You are signed out" is a claim only the server can make: it answers a signed-out
+ * visitor 200 with no user. Everything else — a status, an unreadable body, a fetch
+ * that never landed — is "we could not ask", and flattening the two onto null is
+ * what handed a dead server's visitor a password form.
+ */
+export type SessionResult =
+  | { state: 'signed-in'; user: SessionUser }
+  | { state: 'signed-out' }
+  | { state: 'unreachable'; reason: string };
+
+/**
  * Auth calls go through their own request function: a 401 here means "wrong
  * password", not "your session expired", and must not kick the app back to the
  * login screen it is already on. better-auth reports failures as
@@ -171,15 +182,33 @@ async function authRequest<T>(
   return (text ? JSON.parse(text) : null) as T;
 }
 
+/** Bounded here rather than at each return, so a later outcome cannot skip the cut. */
+const unreachable = (reason: string): SessionResult => ({
+  state: 'unreachable',
+  reason: bounded(reason, MAX_RAW_BODY_CHARS),
+});
+
 export const auth = {
-  /** The signed-in user, or null. Called once at startup to decide login vs app. */
-  session: async (): Promise<SessionUser | null> => {
-    const res = await fetch(`${API_BASE}/api/auth/get-session`, { credentials: 'include' });
-    if (!res.ok) return null;
-    const text = await res.text();
-    if (!text) return null;
-    const data = JSON.parse(text) as { user?: SessionUser } | null;
-    return data?.user ?? null;
+  /**
+   * Signed in, signed out, or "we could not ask" — never a bare null. Called at
+   * startup to decide login vs app, and again by the Retry on the unreachable
+   * screen. It does not go through refuse(): a 401 here would fire the
+   * onUnauthorized listeners and mean "signed out" again, by a longer road.
+   */
+  session: async (): Promise<SessionResult> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/get-session`, { credentials: 'include' });
+      if (!res.ok) return unreachable(`HTTP ${res.status}`);
+      // inside the try on purpose: a captive portal answering HTML with a 200 is
+      // not the server saying the visitor is signed out
+      const text = await res.text();
+      const data = text ? (JSON.parse(text) as { user?: SessionUser } | null) : null;
+      return data?.user ? { state: 'signed-in', user: data.user } : { state: 'signed-out' };
+    } catch (e) {
+      // a rejection that is not an Error must not throw out of here: nothing calling
+      // session() has a .catch, and the app would sit on the blank checking screen
+      return unreachable(e instanceof Error ? e.message : String(e));
+    }
   },
 
   /**
