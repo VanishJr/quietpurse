@@ -736,6 +736,8 @@ export interface ImportRecord {
   fileHash: string;
   sourceType: ImportSourceType;
   originalFilename: string | null;
+  /** what the upload asked for - NULL before the parse and on every older row */
+  accountName: string | null;
   uploadedBy: string | null;
   uploadedAt: string;
   parserVersion: number;
@@ -746,6 +748,14 @@ export interface ImportRecord {
   errorDetail: string | null;
   /** transactions this import still owns - see transactions.import_id (first writer) */
   transactions: number;
+  /**
+   * Whether a document can be READ for this row, which is not whether bytes exist
+   * (see imports.document_key_version): a restored row has its pointer stripped
+   * while its statement is still on disk. The version itself never leaves the
+   * server - it is a storage-layout detail, and a client that can read it is a
+   * client that can be tempted to build a key.
+   */
+  documentAvailable: boolean;
 }
 
 /** Long enough for any message the parsers produce; the rest is noise in a backup. */
@@ -756,6 +766,7 @@ const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => 
   fileHash: r.fileHash,
   sourceType: r.sourceType,
   originalFilename: r.originalFilename,
+  accountName: r.accountName,
   uploadedBy: r.uploadedBy,
   uploadedAt: r.uploadedAt,
   parserVersion: r.parserVersion,
@@ -764,6 +775,7 @@ const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => 
   rowsRejected: r.rowsRejected,
   errorDetail: r.errorDetail,
   transactions: r.transactions ?? 0,
+  documentAvailable: r.documentKeyVersion !== null,
 });
 
 /**
@@ -826,6 +838,44 @@ export async function recordImportDocument(id: string, keyVersion: number): Prom
     .update(s.imports)
     .set({ documentKeyVersion: keyVersion })
     .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+}
+
+/**
+ * The row no longer claims a readable document. Called only AFTER the bytes are
+ * gone: between the two, a crash leaves a row whose document throws on read, which
+ * is loud and self-healing - the other order leaves a statement on disk that the
+ * user has been told is deleted, and nothing revisits it.
+ */
+export async function clearImportDocument(id: string): Promise<void> {
+  await getDb()
+    .update(s.imports)
+    .set({ documentKeyVersion: null })
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+}
+
+/**
+ * What the document routes need beside the ref: whether this workspace holds the
+ * import at all, the name to offer the browser, and what the row claims about its
+ * document. The existence answer deliberately does not come from the pointer - a
+ * row whose pointer is NULL may still have bytes, and those are exactly the rows
+ * a retention policy has to be able to act on.
+ */
+export interface ImportDocumentInfo {
+  keyVersion: number | null;
+  originalFilename: string | null;
+  sourceType: ImportSourceType;
+}
+
+export async function getImportDocumentInfo(id: string): Promise<ImportDocumentInfo | undefined> {
+  const rows = await getDb()
+    .select({
+      keyVersion: s.imports.documentKeyVersion,
+      originalFilename: s.imports.originalFilename,
+      sourceType: s.imports.sourceType,
+    })
+    .from(s.imports)
+    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+  return rows[0];
 }
 
 /**

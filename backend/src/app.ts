@@ -18,6 +18,7 @@ import {
   ImportStatus,
   addCategoryRule,
   addTransferRule,
+  clearImportDocument,
   clearManualForRule,
   confirmImport,
   discardImport,
@@ -35,8 +36,11 @@ import {
   restoreBackup,
   deleteIncomeSource,
   deleteTransferRule,
+  getImportDocumentInfo,
+  getImportDocumentRef,
   getIncomeSource,
   getTransaction,
+  type ImportDocumentInfo,
   listIncomeSources,
   resetBaseAmounts,
   upsertIncomeSource,
@@ -62,9 +66,17 @@ import {
   summaryTotals,
   upsertBaselineItem,
 } from './db';
+import {
+  DOCUMENT_DELETE_REFUSED,
+  DOCUMENT_NOT_READABLE,
+  DOCUMENT_READ_REFUSED,
+  deleteDocument,
+  getDocument,
+  knowsKeyVersion,
+} from './documents';
 import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
-import { logHttp, logImport, logger } from './logger';
+import { causeChain, logHttp, logImport, logger } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
@@ -89,6 +101,10 @@ app.use((req, res, next) => {
     // x-invite-code: without it a cross-origin sign-up fails the preflight
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-invite-code');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    // Content-Disposition is not CORS-safelisted, so cross-origin JS cannot read the
+    // filename of a download it fetched without this. Invisible under the same-origin
+    // dev proxy and absent only in the deployed image, which is the worst place to find it
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
     res.setHeader('Access-Control-Max-Age', '86400');
   }
   if (req.method === 'OPTIONS') {
@@ -1037,6 +1053,150 @@ app.delete('/api/imports/:id', async (req, res) => {
   logger.info(`import ${req.params.id} deleted: ${result.removed} transactions removed`);
   await reclassifyAll(); // transfer pairing changes when the other leg disappears
   res.json({ deleted: true, transactions: result.removed });
+});
+
+// ---------- the stored statement itself (ROADMAP 4.5) ----------
+
+/**
+ * Everything a filename may still be after this: letters, digits, dot, underscore,
+ * hyphen. A whitelist and not a known-bad list, so a character nobody thought of is
+ * replaced rather than passed through.
+ */
+const asciiName = (name: string): string => name.replace(/[^A-Za-z0-9._-]/g, '_');
+
+/** encodeURIComponent, plus the four characters it leaves that are not attr-chars. */
+const rfc5987 = (name: string): string =>
+  encodeURIComponent(name).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+
+/**
+ * Runs BEFORE both encodings, so neither half can carry a path: percent-encoding
+ * stops header injection but not a client that saves what it decodes.
+ *
+ * By code point rather than by UTF-16 unit, and unpaired surrogates go: the RFC 5987
+ * half's encodeURIComponent THROWS on a lone one, which the global handler would
+ * answer as a 500 on a download that worked. A cap splitting an emoji makes one, and
+ * a restored row's name is a foreign JSON's string, where a lone surrogate is legal.
+ */
+const cleanName = (name: string): string =>
+  Array.from(name.replace(/[\u0000-\u001f\u007f\\/]/g, ''))
+    .filter((c) => c.length > 1 || c < '\ud800' || c > '\udfff')
+    .slice(0, 100)
+    .join('')
+    .replace(/^[.\s]+/, '')
+    .trim();
+
+/**
+ * The Content-Disposition for a name the USER chose. storage.ts's KEY comment is on
+ * the record that original_filename must never be passed through a guard believed to
+ * be a sanitiser, so this builds the whole value in one place instead: a CRLF in it
+ * splits the response, a `"` ends the quoted string early, and anything above U+00FF
+ * makes setHeader throw on a route that otherwise worked.
+ *
+ * `info` is optional because the row can go between the two reads on the download
+ * route; the id-derived fallback is still the honest name. That fallback goes through
+ * the same two encodings as the user's string, because the id is not always this
+ * server's UUID - a restored backup reproduces ids from a foreign JSON.
+ */
+export function attachmentDisposition(importId: string, info?: ImportDocumentInfo): string {
+  const derived = info ? `import-${importId}.${info.sourceType}` : `import-${importId}`;
+  const wanted = cleanName(info?.originalFilename ?? '') || cleanName(derived) || 'statement';
+  return `attachment; filename="${asciiName(wanted)}"; filename*=UTF-8''${rfc5987(wanted)}`;
+}
+
+/**
+ * The uploaded statement, decrypted, as a download - whatever the import's status:
+ * a failed or a discarded import's document is exactly the artefact ROADMAP 4.5
+ * retains it for.
+ */
+app.get('/api/imports/:id/document', async (req, res) => {
+  const ref = await getImportDocumentRef(req.params.id);
+  if (!ref) {
+    // absent, another workspace's, and "no readable document" are one answer, because
+    // the select is workspace-scoped and they are one code path. A sentence per case
+    // would make this route an existence oracle. It says READ and never "kept": a
+    // restored row has its pointer stripped while its bytes are still on disk
+    res.status(404).json({ error: DOCUMENT_NOT_READABLE });
+    return;
+  }
+  let bytes: Buffer;
+  try {
+    bytes = await getDocument(ref);
+  } catch (e) {
+    // 500 and not 400 - the user's file is not at fault (ROADMAP 6.4), and the whole
+    // chain goes to the log or a rotated DOCUMENT_ENCRYPTION_KEY reaches the operator
+    // as an integrity failure. The client gets no path, no errno and no filename
+    logImport.error(
+      { err: e },
+      `import ${req.params.id} document could not be read: ${causeChain(e)}`,
+    );
+    res.status(500).json({ error: DOCUMENT_READ_REFUSED });
+    return;
+  }
+  const info = await getImportDocumentInfo(req.params.id);
+  // attachment + nosniff + octet-stream, all three: these are user-uploaded bytes
+  // served back from the origin that holds the session cookie
+  res.setHeader('Content-Type', 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // res.send(Buffer) sets an ETag and no Cache-Control, which permits heuristic
+  // caching of a decrypted bank statement
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Disposition', attachmentDisposition(req.params.id, info));
+  logImport.info(
+    `import ${req.params.id} document sent to ${res.locals.userId as string} (${bytes.length} bytes)`,
+  );
+  res.send(bytes);
+});
+
+/**
+ * Removes the stored statement and keeps everything else - the import row, its
+ * transactions and its provenance (ROADMAP 4.5's retention, 6.1's Article 17).
+ */
+app.delete('/api/imports/:id/document', async (req, res) => {
+  // on the ROW, never on the pointer: a row whose pointer is NULL may still have
+  // bytes, and those are exactly the rows a retention policy has to reach. And it
+  // runs before any disk access - checking afterwards would delete the blob at
+  // <this workspace>/<id> for an id with no row here, then answer "not found"
+  const info = await getImportDocumentInfo(req.params.id);
+  if (!info) {
+    res.status(404).json({ error: 'import not found' });
+    return;
+  }
+  let bytesRemoved: boolean;
+  try {
+    bytesRemoved = await deleteDocument(req.params.id);
+  } catch (e) {
+    // the pointer stays: it still describes what is on disk
+    logImport.error(
+      { err: e },
+      `import ${req.params.id} document could not be removed: ${causeChain(e)}`,
+    );
+    res.status(500).json({ error: DOCUMENT_DELETE_REFUSED });
+    return;
+  }
+  // Bytes first, pointer second, and the two crash windows are not equivalent: this
+  // one leaves a row claiming a readable document whose bytes are gone, which every
+  // read reports loudly and a second Delete converges on. The other order leaves an
+  // unreferenced bank statement on disk while the user has been told it is deleted,
+  // and no purge exists to revisit it.
+  //
+  // `false` is not a failure - most rows never had a document - and the pointer is
+  // cleared either way, or the row goes on claiming a readable one.
+  await clearImportDocument(req.params.id);
+  if (info.keyVersion !== null && !knowsKeyVersion(info.keyVersion)) {
+    // deleteDocument tried every layout this server knows, and this row's is not one
+    // of them, so its bytes are still there - and the pointer that named the layout
+    // has just been cleared. Mirrors deleteImport's line, for the same recovery
+    logImport.error(
+      `import ${req.params.id} document was written under key layout ${info.keyVersion}, which this server cannot address - remove it by hand`,
+    );
+  }
+  logImport.info(
+    `import ${req.params.id} document deleted by ${res.locals.userId as string} (bytes removed: ${bytesRemoved})`,
+  );
+  res.json({ deleted: true, importId: req.params.id, bytesRemoved });
 });
 
 // ---------- backup / restore ----------
