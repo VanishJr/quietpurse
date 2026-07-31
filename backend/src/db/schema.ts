@@ -173,7 +173,7 @@ export const imports = pgTable(
     // sha256 of the raw uploaded bytes - the file on the user's disk, hashed
     // before any decoding, sniffing or parsing (see providers/statement.ts)
     fileHash: text('file_hash').notNull(),
-    sourceType: text('source_type', { enum: ['csv', 'xlsx'] }).notNull(),
+    sourceType: text('source_type', { enum: ['csv', 'xlsx', 'pdf'] }).notNull(),
     originalFilename: text('original_filename'),
     // What the upload asked for: the account name as the user typed it, and the
     // currency for rows whose file carries none. Recorded because Confirm is a

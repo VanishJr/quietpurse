@@ -61,7 +61,9 @@ import {
   upsertIncomeSource,
 } from '../src/db';
 import { getDocument, putDocument } from '../src/documents';
+import { importStatement } from '../src/providers/statement';
 import { markImportCommitted } from './helpers';
+import { buildPdf } from './pdffixture';
 import { TEST_WORKSPACE_ID } from './pglite';
 import { NewTransaction } from '../src/types';
 
@@ -579,5 +581,69 @@ describe('workspace isolation', () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, () => clearImportDocument(SHARED));
     expect(await claimed(TEST_WORKSPACE_ID)).toBeNull();
     expect(await claimed(OTHER)).toBe(1);
+  });
+
+  /**
+   * The PDF parser is the third async window between a request entering a workspace
+   * context and its rows being written, and a WRONG context is this project's worst
+   * defect class: the rows land in someone else's workspace and nothing throws (a
+   * lost context throws, which is the safe failure).
+   *
+   * The argument that it cannot happen is structural rather than empirical: pdfjs
+   * disables its worker under Node outright (`if (isNodeJS) this.#isWorkerDisabled
+   * = true`, pdf.mjs in pdfjs-dist@6.2.108), so no callback is ever registered in
+   * one request's context and invoked on behalf of another - which is the shape
+   * item 4's multer defect had. What is shared is a lazily-created promise, and a
+   * continuation after `await` resumes in the AWAITER's store, not the creator's.
+   *
+   * **What this test is worth, exactly:** it exercises context PROPAGATION across
+   * the parse, in sequence. PGlite is single-connection and the suite is
+   * sequential, so nothing here exercises concurrency and it would not catch a
+   * race. The structural argument above is what covers the case it cannot reach.
+   */
+  it('two workspaces importing PDFs in sequence keep their rows to themselves', async () => {
+    const pdf = (label: string, day: string, amount: string): Buffer =>
+      buildPdf([
+        [
+          { x: 39.7, y: 27.1, text: '© 2026 Revolut Bank UAB, Zweigniederlassung Deutschland' },
+          { x: 42.7, y: 700, text: 'Дата' },
+          { x: 124.8, y: 700, text: 'Описание' },
+          { x: 335.1, y: 700, text: 'Списания' },
+          { x: 417.1, y: 700, text: 'Пополнения' },
+          { x: 42.7, y: 680, text: day },
+          { x: 124.8, y: 680, text: label },
+          { x: 335.1, y: 680, text: amount },
+        ],
+      ]);
+
+    const importPdf = async (workspace: string, bytes: Buffer): Promise<string> =>
+      runWithWorkspace(workspace, async () => {
+        const staged = await importStatement({
+          accountName: 'Pdf Isolation',
+          currency: 'EUR',
+          bytes,
+        });
+        if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+        const confirmed = await confirmImport(staged.summary.importId);
+        expect(confirmed?.confirmed).toBe(true);
+        return staged.summary.accountId;
+      });
+
+    const mine = await importPdf(TEST_WORKSPACE_ID, pdf('Mine only', '4 июл. 2026г.', '11,11€'));
+    const theirs = await importPdf(OTHER, pdf('Theirs only', '5 июл. 2026г.', '22,22€'));
+    // the same account id in both, so a query that forgot the workspace would see
+    // four rows rather than two
+    expect(theirs).toBe(mine);
+
+    for (const [workspace, own, other] of [
+      [TEST_WORKSPACE_ID, 'Mine only', 'Theirs only'],
+      [OTHER, 'Theirs only', 'Mine only'],
+    ] as const) {
+      await runWithWorkspace(workspace, async () => {
+        const rows = await listTransactions({ accountId: mine, limit: 50 });
+        expect(rows.map((t) => t.description)).toEqual([own]);
+        expect(rows.every((t) => t.description !== other)).toBe(true);
+      });
+    }
   });
 });
