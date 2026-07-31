@@ -6,6 +6,7 @@ import {
   CategoryRule,
   CsvImportResult,
   ImportConfirmed,
+  ImportRecord,
   Independence,
   IncomeSource,
   IncomeSourceDef,
@@ -71,6 +72,30 @@ const MAX_RAW_BODY_CHARS = 200;
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
+/**
+ * What a non-2xx becomes. Shared by both callers below rather than written twice:
+ * a download that skipped it would build an object URL from a body nobody read and
+ * write the refusal to disk under the name of a statement (item 10's D23).
+ */
+async function refuse(res: Response): Promise<never> {
+  if (res.status === 401) {
+    for (const fn of unauthorizedListeners) fn();
+    throw new UnauthorizedError();
+  }
+  // the API reports a failure as { error } and the sentence in it is written for
+  // the user ("export the statement as CSV or Excel…"); showing the raw body
+  // buries it in JSON on every screen
+  const body = await res.text();
+  let message = bounded(`${res.status}: ${body}`, MAX_RAW_BODY_CHARS);
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    if (typeof parsed.error === 'string') message = bounded(parsed.error, MAX_ERROR_CHARS);
+  } catch {
+    // not JSON — the status and the body are all there is
+  }
+  throw new Error(message);
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -79,25 +104,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     credentials: 'include',
     headers: { ...(init?.headers || {}) },
   });
-  if (res.status === 401) {
-    for (const fn of unauthorizedListeners) fn();
-    throw new UnauthorizedError();
-  }
-  if (!res.ok) {
-    // the API reports a failure as { error } and the sentence in it is written for
-    // the user ("export the statement as CSV or Excel…"); showing the raw body
-    // buries it in JSON on every screen
-    const body = await res.text();
-    let message = bounded(`${res.status}: ${body}`, MAX_RAW_BODY_CHARS);
-    try {
-      const parsed = JSON.parse(body) as { error?: unknown };
-      if (typeof parsed.error === 'string') message = bounded(parsed.error, MAX_ERROR_CHARS);
-    } catch {
-      // not JSON — the status and the body are all there is
-    }
-    throw new Error(message);
-  }
+  if (!res.ok) await refuse(res);
   return (await res.json()) as T;
+}
+
+/**
+ * Bytes or a throw — never a Response and never a URL. A route answering a file is
+ * a route that can answer 401 or 500, and `<a href download>` saves both.
+ */
+async function download(path: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
+  if (!res.ok) await refuse(res);
+  return await res.blob();
 }
 
 export interface TxQuery {
@@ -348,11 +366,39 @@ export const api = {
 
   importPresets: () =>
     request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),
-};
 
-/**
- * URL for a full backup of the current workspace — opened as a normal link.
- * The session cookie rides along with the navigation by itself, so unlike the
- * shared-secret era this needs no credentials in the query string.
- */
-export const backupUrl = (): string => `${API_BASE}/api/backup`;
+  /**
+   * The import history. The backend caps the list and sends neither a total nor a
+   * cursor, so this is the most recent imports and the client cannot know how many
+   * are behind them.
+   */
+  imports: () => request<{ imports: ImportRecord[] }>('/api/imports'),
+
+  /**
+   * Removes the import and the transactions it FIRST wrote — a row an earlier
+   * import already owned stays with that one, so the count in the answer is what
+   * actually left.
+   */
+  deleteImport: (id: string) =>
+    request<{ deleted: boolean; transactions: number }>(
+      `/api/imports/${encodeURIComponent(id)}`,
+      json('DELETE'),
+    ),
+
+  /** The stored statement itself. */
+  importDocument: (id: string) => download(`/api/imports/${encodeURIComponent(id)}/document`),
+
+  /** bytesRemoved false is not a failure: most rows never had a document (010 D5). */
+  deleteImportDocument: (id: string) =>
+    request<{ deleted: boolean; importId: string; bytesRemoved: boolean }>(
+      `/api/imports/${encodeURIComponent(id)}/document`,
+      json('DELETE'),
+    ),
+
+  /**
+   * Every transaction, account and setting as readable JSON. Not a disaster-recovery
+   * backup: it is unencrypted, and the uploaded statements are not in it — those are
+   * downloaded one at a time from the import history.
+   */
+  backup: () => download('/api/backup'),
+};

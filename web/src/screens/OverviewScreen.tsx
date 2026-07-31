@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, apiLabel, backupUrl, SessionUser } from '../api';
+import { api, apiLabel, SessionUser } from '../api';
 import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { CsvImport } from '../components/CsvImport';
+import { ImportHistory } from '../components/ImportHistory';
+import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { providerLabel } from '../providers';
 import { ThemeMode, useTheme } from '../theme';
@@ -41,8 +43,25 @@ export function OverviewScreen({
   const [error, setError] = useState<string | null>(null);
   /** edit mode: show hidden accounts and the "remove" / "restore" buttons */
   const [editing, setEditing] = useState(false);
-  /** statement import takes over the screen — it's a form, not a dialog */
-  const [importing, setImporting] = useState(false);
+  /**
+   * Which panel has taken over the screen — they are forms, not dialogs. One state
+   * and not a boolean each: "both open" would then be representable, and render
+   * order would decide what the user sees. `editing` stays separate on purpose —
+   * it is an in-place mode, and it survives a trip into a panel and back.
+   */
+  const [panel, setPanel] = useState<'import' | 'history' | null>(null);
+  /**
+   * The export's own refusal. The account and recurring handlers clear the screen
+   * error on success, which would wipe it, and this control is at the bottom of a
+   * screen whose error line is at the top.
+   */
+  const [exportError, setExportError] = useState<string | null>(null);
+  /**
+   * In flight, and nothing else: /api/backup serialises every table, so on a real
+   * workspace the screen sits unchanged long enough for a second click. Its own
+   * state because exportError and panel both outlive the request.
+   */
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -76,6 +95,25 @@ export function OverviewScreen({
     }
   };
 
+  /**
+   * A fetch and not a link: /api/backup answers 500 like anything else, and a
+   * session that expired in an open tab answers 401 — `<a download>` writes both to
+   * disk as finto-backup-<date>.json, and the user believes they hold their data.
+   */
+  const runExport = async () => {
+    setExporting(true);
+    try {
+      setExportError(null);
+      const blob = await api.backup();
+      // the name the backend's own Content-Disposition would have carried
+      saveBlob(blob, `finto-backup-${new Date().toISOString().slice(0, 10)}.json`);
+    } catch (e) {
+      setExportError((e as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     load();
   }, [load]);
@@ -91,10 +129,18 @@ export function OverviewScreen({
   const ignored = recurring?.groups.filter((g) => g.ignored) ?? [];
   const shownRecurring = editing ? [...active, ...ignored] : active.slice(0, RECURRING_LIMIT);
 
-  if (importing) {
+  if (panel === 'import') {
     return (
       <div className="screen-inner">
-        <CsvImport onBack={() => setImporting(false)} onImported={load} />
+        <CsvImport onBack={() => setPanel(null)} onImported={load} />
+      </div>
+    );
+  }
+
+  if (panel === 'history') {
+    return (
+      <div className="screen-inner">
+        <ImportHistory onBack={() => setPanel(null)} onChanged={load} />
       </div>
     );
   }
@@ -118,7 +164,7 @@ export function OverviewScreen({
           >
             {MODE_LABEL[mode]}
           </button>
-          <button className="pill" onClick={() => setImporting(true)}>
+          <button className="pill" onClick={() => setPanel('import')}>
             ⭳ Import
           </button>
         </div>
@@ -173,7 +219,7 @@ export function OverviewScreen({
             No accounts yet. Load a bank statement — a .csv or .xlsx export — and the
             accounts, balances and categories all come out of the file.
           </p>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => setImporting(true)}>
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => setPanel('import')}>
             ⭳ Import a statement
           </button>
         </div>
@@ -242,14 +288,31 @@ export function OverviewScreen({
 
       {/* the only user-reachable data export: unconditional on purpose - it used to
           sit inside the sync journal, which a workspace that never synced never had */}
-      <a
-        className="btn-link"
-        style={{ display: 'block', margin: '8px 0' }}
-        href={backupUrl()}
-        download
-      >
-        ⬇ Download backup (.json)
-      </a>
+      <div style={{ margin: '8px 0' }}>
+        <button
+          className="btn-link"
+          type="button"
+          style={{ display: 'block' }}
+          disabled={exporting}
+          onClick={runExport}
+        >
+          ⬇ Export my data (.json)
+        </button>
+        {exportError && <p className="error">Error: {exportError}</p>}
+        <p className="hint">
+          Every transaction, account and setting, as readable JSON — not encrypted, so
+          anyone who opens the file can read it. The statement files you uploaded are not
+          in it; download those from Import history.
+        </p>
+        <button
+          className="btn-link"
+          type="button"
+          style={{ display: 'block' }}
+          onClick={() => setPanel('history')}
+        >
+          ⧉ Import history
+        </button>
+      </div>
 
       <p className="api-hint">
         {user.email} ·{' '}

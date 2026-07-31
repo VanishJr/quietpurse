@@ -5,6 +5,7 @@ import {
   BudgetsResponse,
   CsvImportResult,
   ImportConfirmed,
+  ImportRecord,
   ImportSummary,
   Independence,
   IncomeSourceDef,
@@ -128,6 +129,30 @@ export const CONFIRMED: ImportConfirmed = {
   skipped: 0,
   total: 12,
 };
+
+/**
+ * A row of GET /api/imports: a plain committed import whose file is still stored.
+ * Patched a field at a time, so each test says which one it is about.
+ */
+export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord => ({
+  id: IMPORT_ID,
+  fileHash: 'f1e2d3c4',
+  sourceType: 'csv',
+  originalFilename: 'statement.csv',
+  accountName: 'Sparkasse Giro',
+  uploadedBy: USER.id,
+  uploadedAt: '2026-06-15T10:00:00.000Z',
+  parserVersion: 1,
+  status: 'committed',
+  rowsAccepted: 12,
+  rowsRejected: 0,
+  errorDetail: null,
+  transactions: 12,
+  documentAvailable: true,
+  ...patch,
+});
+
+export const IMPORTS = { imports: [importRecord()] };
 
 export const DUPLICATE: CsvImportResult = {
   outcome: 'duplicate',
