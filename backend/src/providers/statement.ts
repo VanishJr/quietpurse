@@ -50,16 +50,58 @@ import {
   matchColumn,
   parseCsv,
 } from './csv';
+import { PDF_PARSER_VERSION, readPdf } from './pdf';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
 import { XLSX_PARSER_VERSION, readXlsx } from './xlsx';
 
 const PARSER_VERSION: Record<ImportSourceType, number> = {
   csv: CSV_PARSER_VERSION,
   xlsx: XLSX_PARSER_VERSION,
+  pdf: PDF_PARSER_VERSION,
 };
 
-/** exceljs reads a workbook whole, so the zip and everything it expands to is held at once. */
-const MAX_XLSX_BYTES = 10 * 1024 * 1024;
+const MB = 1024 * 1024;
+
+/**
+ * What a format may weigh, and what it is told when it does not fit. Total over
+ * ImportSourceType rather than a chain of ifs: a loader that holds the whole file
+ * in memory and is added beside one that does gets no cap and nothing says so. A
+ * format with no cap of its own has to say that here.
+ *
+ * The sentence travels with the number so the limit enforced and the limit printed
+ * cannot come apart.
+ */
+interface SizeCap {
+  max: number;
+  tooLarge: (mb: number) => string;
+}
+
+const SIZE_CAP: Record<ImportSourceType, SizeCap | null> = {
+  // decodeCsv holds the text and nothing expands: MAX_UPLOAD_BYTES is the only cap
+  csv: null,
+  /** exceljs reads a workbook whole, so the zip and everything it expands to is held at once. */
+  xlsx: {
+    max: 10 * MB,
+    tooLarge: (mb) =>
+      `the workbook is larger than ${mb} MB - export a narrower date range, or save it as CSV`,
+  },
+  /** pdfjs holds the document whole, exactly as exceljs holds the workbook. */
+  pdf: {
+    max: 10 * MB,
+    tooLarge: (mb) =>
+      `the PDF is larger than ${mb} MB - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`,
+  },
+};
+
+/**
+ * And a page cap as well, because the byte cap does not bound the page count even
+ * loosely: 500 pages of dense transactions is 3.6 MB before compression, and
+ * compressed streams are the point of the format. A yearly retail statement runs
+ * 40-80 pages, so this is 2-3x the plausible maximum for one document; above it the
+ * file is almost certainly not one statement. Enforced inside readPdf and not here,
+ * because numPages needs the document open - see the band comment below.
+ */
+const MAX_PDF_PAGES = 200;
 
 /** How many bytes of a text file are searched for the NUL that says it is not one. */
 const NUL_SCAN_BYTES = 8192;
@@ -173,11 +215,7 @@ export function sniff(bytes: Buffer): ImportSourceType {
 
   if (bytes.length === 0) throw new Error('the uploaded file is empty');
   if (starts(0x50, 0x4b, 0x03, 0x04)) return 'xlsx';
-  if (starts(0x25, 0x50, 0x44, 0x46)) {
-    throw new Error(
-      'PDF statements are not supported yet - export the statement as CSV or Excel (.xlsx) from your online banking',
-    );
-  }
+  if (starts(0x25, 0x50, 0x44, 0x46)) return 'pdf';
   if (starts(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) {
     throw new Error(
       'this is the older Excel format (.xls) - open it and save as .xlsx, or export the statement as CSV',
@@ -242,18 +280,17 @@ export async function importStatement(
   }
 
   // What leaves no `imports` row at all is everything decidable without opening the
-  // file: a type the sniffer recognises and refuses, a workbook past the size cap,
-  // a preset that does not exist. Nothing was parsed and nothing could have been
+  // file: a type the sniffer recognises and refuses, a file past the size cap, a
+  // preset that does not exist. Nothing was parsed and nothing could have been
   // written, and `failed` means "an import did not complete", not "the user picked
   // the wrong file". What does leave a failed row is everything the loader has to
   // open the file to discover - a zip that turns out not to be a workbook, a sheet
-  // with no header - because the bytes alone cannot tell.
+  // with no header, a PDF that is password-protected or past MAX_PDF_PAGES -
+  // because the bytes alone cannot tell. It is the opening that decides the band and
+  // not how much was parsed: an encrypted PDF parses nothing either.
   const sourceType = sniff(req.bytes);
-  if (sourceType === 'xlsx' && req.bytes.length > MAX_XLSX_BYTES) {
-    throw new Error(
-      `the workbook is larger than ${MAX_XLSX_BYTES / 1024 / 1024} MB - export a narrower date range, or save it as CSV`,
-    );
-  }
+  const cap = SIZE_CAP[sourceType];
+  if (cap && req.bytes.length > cap.max) throw new Error(cap.tooLarge(cap.max / MB));
   const preset = presetMapping(req.preset);
 
   const record = await createImport({
@@ -276,12 +313,19 @@ export async function importStatement(
     // throw lands in the catch below - a `failed` row with no transactions, and
     // bytes that stay re-uploadable because only `committed` blocks (ROADMAP 4.3).
     await recordImportDocument(record.id, await putDocument(record.id, req.bytes));
-    const sheet = await readSheet(req, sourceType, preset);
+    const parsed = await readSheet(req, sourceType, preset);
     // logged here rather than in the route because the route only sees the
     // successful path: `problems` is never sent on a failure and nothing about a
     // skipped sheet is stored, so this is the only trace when the import throws
-    for (const notice of sheet.notices ?? []) logImport.warn(`import ${record.id}: ${notice}`);
-    return await mapAndStore(req, sheet, preset, accountId, record.id, fileHash);
+    for (const notice of parsed.sheet.notices ?? []) {
+      logImport.warn(`import ${record.id}: ${notice}`);
+    }
+    // which layout read it is genuinely useful to someone about to confirm, and it
+    // still does not go in `problems`: the client renders those under "N rows
+    // couldn't be read", so "read as a Revolut statement" would land under a
+    // sentence saying it could not be (Ruling 4). It reaches the screen in 6b.
+    if (parsed.template) logImport.info(`import ${record.id}: read as ${parsed.template}`);
+    return await mapAndStore(req, parsed, accountId, record.id, fileHash);
   } catch (e) {
     await failImport(record.id, (e as Error).message);
     throw e;
@@ -295,17 +339,64 @@ function presetMapping(preset: string | undefined): CsvPresetMapping | null {
   return known.mapping;
 }
 
-async function readSheet(
+/**
+ * What a frontend answered with, and what the mapper is to read it against. The
+ * preset and the mapping travel with the sheet rather than being read off the
+ * request a second time, because for one format they are not the request's to
+ * decide - see the pdf arm below.
+ */
+interface ParsedFile {
+  sheet: Sheet;
+  preset: CsvPresetMapping | null;
+  mapping: Partial<CsvMapping> | undefined;
+  /** which template read it, for the log - only the PDF path has one */
+  template?: string;
+}
+
+/**
+ * Exported for the test, like noRowsParsed below and for the same reason - the
+ * `never` default is worth nothing unless something has watched it throw, and
+ * nothing else can reach it. Not API surface anyone asked for.
+ */
+export async function readSheet(
   req: StatementImportRequest,
   sourceType: ImportSourceType,
   preset: CsvPresetMapping | null,
-): Promise<Sheet> {
-  if (sourceType === 'xlsx') {
-    return readXlsx(req.bytes, (header) => resolveColumns(header, preset, req.mapping));
+): Promise<ParsedFile> {
+  switch (sourceType) {
+    case 'xlsx':
+      return {
+        sheet: await readXlsx(req.bytes, (header) => resolveColumns(header, preset, req.mapping)),
+        preset,
+        mapping: req.mapping,
+      };
+    case 'csv': {
+      const text = decodeCsv(req.bytes);
+      const delimiter = req.mapping?.delimiter ?? preset?.delimiter ?? detectDelimiter(text);
+      return {
+        sheet: { rows: parseCsv(text, delimiter), rowLabel: (i) => i + 1 },
+        preset,
+        mapping: req.mapping,
+      };
+    }
+    case 'pdf': {
+      const parsed = await readPdf(req.bytes, MAX_PDF_PAGES);
+      // A PDF's columns come from the template that matched, and from nothing the
+      // request said. `preset` names header text and `mapping` names columns, and a
+      // PDF has neither for them to name - so a chip the user may not remember
+      // picking must not decide whether their statement imports (Ruling 3).
+      return {
+        sheet: parsed.sheet,
+        preset: null,
+        mapping: parsed.columns,
+        template: parsed.template,
+      };
+    }
+    default: {
+      const unreachable: never = sourceType;
+      throw new Error(`unhandled source type: ${String(unreachable)}`);
+    }
   }
-  const text = decodeCsv(req.bytes);
-  const delimiter = req.mapping?.delimiter ?? preset?.delimiter ?? detectDelimiter(text);
-  return { rows: parseCsv(text, delimiter), rowLabel: (i) => i + 1 };
 }
 
 interface Columns {
@@ -457,16 +548,16 @@ function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
 
 async function mapAndStore(
   req: StatementImportRequest,
-  sheet: Sheet,
-  preset: CsvPresetMapping | null,
+  parsed: ParsedFile,
   accountId: string,
   importId: string,
   fileHash: string,
 ): Promise<StatementImportResult> {
+  const { sheet, preset } = parsed;
   if (sheet.rows.length < 2) throw new Error('the file has no data rows (header only, or empty)');
 
   const header = sheet.rows[0].map((c) => cellText(c).trim());
-  const resolved = resolveColumns(header, preset, req.mapping);
+  const resolved = resolveColumns(header, preset, parsed.mapping);
   if (!resolved.ok) throw new Error(resolved.error);
   const { mapping, dateCol, amountCol, descCols, currencyCol, onlyWhen } = resolved.columns;
 

@@ -196,8 +196,8 @@ export type ImportStatus =
   | 'failed'
   | 'discarded';
 
-/** 'pdf' arrives with the PDF parser; the backend writes only these two today. */
-export type ImportSourceType = 'csv' | 'xlsx';
+/** Mirror of ImportSourceType in backend/src/db/index.ts. */
+export type ImportSourceType = 'csv' | 'xlsx' | 'pdf';
 
 /** One row of GET /api/imports — mirror of ImportRecord in backend/src/db/index.ts. */
 export interface ImportRecord {

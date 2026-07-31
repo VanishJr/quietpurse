@@ -938,9 +938,11 @@ describe('xlsx: the sheets that were not used', () => {
 });
 
 /**
- * The size cap is decidable from the bytes, so it is refused in the same band as a
- * PDF: no `imports` row at all. A user who picks a 12 MB workbook made the same
- * kind of mistake as one who picks a PDF, and neither is an import that failed.
+ * The size cap is decidable from the bytes, so it is refused before an `imports`
+ * row exists at all: nothing was parsed and nothing could have been written, and
+ * `failed` means "an import did not complete", not "the user picked the wrong
+ * file". The PDF byte cap is the same band, and the PDF PAGE cap deliberately is
+ * not - see the band comment in statement.ts.
  */
 describe('the workbook size cap', () => {
   it('a workbook past the cap is refused before an import row exists', async () => {

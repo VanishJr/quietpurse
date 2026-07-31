@@ -40,8 +40,14 @@ let agent: request.Agent;
 let sessionCookie: string;
 
 /** The workspace's imports, newest first. */
-const imports = async (): Promise<{ sourceType: string; originalFilename: string | null }[]> =>
-  (await agent.get('/api/imports')).body.imports;
+const imports = async (): Promise<
+  {
+    sourceType: string;
+    originalFilename: string | null;
+    status: string;
+    documentAvailable: boolean;
+  }[]
+> => (await agent.get('/api/imports')).body.imports;
 
 /** An upload only stages - this is what makes its rows the workspace's data. */
 const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
@@ -209,7 +215,15 @@ describe('POST /api/imports', () => {
     expect(second.body.uploadedAt).toEqual(expect.any(String));
   });
 
-  it('a PDF is refused with a message that says what to do, and creates no import', async () => {
+  /**
+   * The PDF path opens the file now (ROADMAP 6a), so this moved bands: the same
+   * bytes that used to be refused by the sniffer with no `imports` row are a
+   * `pdf` import that failed, and the row and its stored document are what make
+   * the miss diagnosable. What stays pinned is that the message says what to do -
+   * the byte cap, which is still decidable without opening anything, holds the
+   * no-row half of the rule from the other side (pdf.test.ts).
+   */
+  it('a file that says %PDF and is not one fails as a pdf import, not as a CSV', async () => {
     const before = (await imports()).length;
     const res = await agent
       .post('/api/imports')
@@ -218,8 +232,15 @@ describe('POST /api/imports', () => {
       .attach('file', Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'), 'statement.pdf');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/PDF statements are not supported yet - export the statement/);
-    expect(await imports()).toHaveLength(before);
+    expect(res.body.error).toMatch(/starts with %PDF but could not be opened as one/);
+    const after = await imports();
+    expect(after).toHaveLength(before + 1);
+    expect(after[0]).toMatchObject({
+      sourceType: 'pdf',
+      originalFilename: 'statement.pdf',
+      status: 'failed',
+      documentAvailable: true,
+    });
   });
 
   it('a legacy .xls is refused with the message for that format', async () => {
