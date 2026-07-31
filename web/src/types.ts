@@ -188,6 +188,43 @@ export interface ImportConfirmed {
   total: number;
 }
 
+/** See the status comment in backend/src/db/schema.ts: each value promises something different. */
+export type ImportStatus =
+  | 'pending'
+  | 'awaiting_confirmation'
+  | 'committed'
+  | 'failed'
+  | 'discarded';
+
+/** 'pdf' arrives with the PDF parser; the backend writes only these two today. */
+export type ImportSourceType = 'csv' | 'xlsx';
+
+/** One row of GET /api/imports — mirror of ImportRecord in backend/src/db/index.ts. */
+export interface ImportRecord {
+  id: string;
+  fileHash: string;
+  sourceType: ImportSourceType;
+  originalFilename: string | null;
+  /** what the upload asked for — NULL before the parse and on every older row */
+  accountName: string | null;
+  uploadedBy: string | null;
+  uploadedAt: string;
+  parserVersion: number;
+  status: ImportStatus;
+  /** rows the parser accepted / could not use */
+  rowsAccepted: number;
+  rowsRejected: number;
+  errorDetail: string | null;
+  /** transactions this import still owns, which is not rowsAccepted: a row an
+      earlier import already wrote belongs to that one */
+  transactions: number;
+  /**
+   * Whether a document can be READ for this row, which is not whether bytes exist:
+   * a restored row has its pointer stripped while its statement is still on disk.
+   */
+  documentAvailable: boolean;
+}
+
 // ---------- recurring payments ----------
 
 export interface RecurringGroup {

@@ -1,12 +1,13 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, APP_SETTINGS, PRESETS, RECURRING, USER } from '../test/fixtures';
-import { fail, mockFetch, ok, renderThemed, Routes } from '../test/harness';
+import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { OverviewScreen } from './OverviewScreen';
 
 /**
- * Item 13's manual checks 1 and 2, minus what jsdom cannot see: whether the backup
- * link lands a file on disk is a browser question and stays manual.
+ * Item 13's manual checks 1 and 2, minus what jsdom cannot see: whether the export
+ * lands a file on disk is a browser question and stays manual — what is asserted
+ * here is that the bytes were checked before anything was saved.
  */
 
 const OVERVIEW_ROUTES: Routes = {
@@ -226,15 +227,89 @@ describe('the app settings block', () => {
   });
 });
 
-describe('backup link', () => {
-  it('points at /api/backup and asks the browser to download it', async () => {
-    mockFetch(OVERVIEW_ROUTES);
+describe('the data export', () => {
+  const exportControl = () => screen.getByRole('button', { name: /Export my data/ });
+
+  it('fetches the backup and saves what came back', async () => {
+    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/backup': () => ok({ transactions: [] }) });
     mount();
     expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
 
-    const link = screen.getByRole('link', { name: /Download backup/ });
-    expect(link).toHaveAttribute('href', '/api/backup');
-    expect(link).toHaveAttribute('download');
+    fireEvent.click(exportControl());
+
+    // the object URL is the subject: it exists only once a checked 200 came back
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+  });
+
+  it('shows the refusal beside the control and writes no file', async () => {
+    // as a link this landed in Downloads as finto-backup-<date>.json, and the user
+    // believed they held every transaction they own
+    mockFetch({
+      ...OVERVIEW_ROUTES,
+      'GET /api/backup': () => fail(500, { error: 'the export could not be assembled' }),
+    });
+    mount();
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(exportControl());
+
+    expect(await screen.findByText(/the export could not be assembled/)).toBeInTheDocument();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('starts one backup per click, not one per impatient click', async () => {
+    let release: (res: Response) => void = () => {};
+    mockFetch({
+      ...OVERVIEW_ROUTES,
+      // held open on purpose: /api/backup serialises every table, and nothing on the
+      // screen moves while it does
+      'GET /api/backup': () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+    mount();
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(exportControl());
+    expect(exportControl()).toBeDisabled();
+    fireEvent.click(exportControl());
+    release(ok({ transactions: [] }));
+
+    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
+    expect(requests().filter((r) => r === 'GET /api/backup')).toHaveLength(1);
+    expect(exportControl()).toBeEnabled();
+  });
+});
+
+describe('the import history entry point', () => {
+  it('opens the panel and comes back to the accounts', async () => {
+    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok({ imports: [] }) });
+    mount();
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Import history/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
+    // one panel state, so opening this one cannot leave the import form underneath
+    expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+  });
+
+  it('leaves edit mode as it was after a trip into the panel', async () => {
+    // the state a union that had swallowed `editing` would have deleted silently
+    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok({ imports: [] }) });
+    mount();
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit accounts' }));
+    expect(await screen.findByText('Old DKB')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Import history/ }));
+    expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
+
+    expect(await screen.findByText('Old DKB')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Exit account edit mode' })).toBeInTheDocument();
   });
 });
 
