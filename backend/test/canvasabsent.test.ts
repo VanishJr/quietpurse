@@ -33,7 +33,13 @@ describe('the PDF parser where @napi-rs/canvas cannot be resolved', () => {
     const here = await parseWithoutCanvas();
     // the fixture is worth comparing against only if it parsed something
     expect(here.rows).toHaveLength(3);
-    expect(here.balances).toEqual({ openingCents: 100000, closingCents: 108766, currency: 'EUR' });
+    expect(here.balances).toEqual({
+      openingCents: 100000,
+      closingCents: 108766,
+      currency: 'EUR',
+      // the Total line prints two cells, so the template declares no gross pair
+      gross: { kind: 'not-printed' },
+    });
     expect(here.scan).toMatch(/scan/);
     expect(here.encrypted).toMatch(/password-protected/);
     expect(here.unrecognised).toMatch(/not one this importer recognises/);
