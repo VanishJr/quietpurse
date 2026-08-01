@@ -25,21 +25,32 @@ import { Cell, Sheet, cellText } from './sheet';
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
  */
-export const PDF_PARSER_VERSION = 4;
+export const PDF_PARSER_VERSION = 5;
 
 /**
  * What the document says it started and ended with, for the whole statement rather
- * than for one of the products inside it.
+ * than for one of the products inside it, and what it says each side came to.
  *
  * Minor units, because the gate that compares these to the rows compares integers.
  * The real statement's 70 amounts summed as decimals come to 123.45000000000002,
  * which against a closing balance of 579.85 is a refused import and a wrong one
  * (ROADMAP 4.6). A field named `openingCents` cannot be compared with a decimal sum
  * by accident.
+ *
+ * `gross` mirrors the shape of the template's own declaration, which does NOT stop a
+ * `not-printed` template returning a printed pair - one branch of readBalances is
+ * what stops that, and a type can force a value's provenance and not what a branch
+ * does (row 6b, D12). What it does hold is downstream: the absent case is
+ * unrepresentable, so `reconcile` cannot read two cents fields that were never
+ * printed.
  */
 export interface StatementBalances {
   openingCents: number;
   closingCents: number;
+  /** what each side came to, on the rows' own convention: outgoing negative */
+  gross:
+    | { kind: 'printed'; outgoingCents: number; incomingCents: number }
+    | { kind: 'not-printed' };
   /** the ISO code the box's own cells carry, through the template's amount map */
   currency: string;
 }
@@ -103,7 +114,7 @@ const CELL_QUOTE_MAX = 24;
  * number in a test that goes red rather than in a comment that stops being true
  * (rows 6a D14, 6b D2 and D10, and this one).
  *
- * Not every way an import of a PDF can refuse: the reconciliation gate's two
+ * Not every way an import of a PDF can refuse: the reconciliation gate's three
  * sentences live beside `reconcile` in statement.ts, because they name counts of
  * MAPPED rows - how many lines became transactions, how many were skipped - which
  * this module never sees. Keeping them here would mean exporting message builders to
@@ -153,25 +164,41 @@ const noTransactionLines = (title: string): string =>
 const noBalanceBox = (title: string, label: string, found: number): string =>
   `this looks like a ${title} statement but this importer could not read its balance summary: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
+/**
+ * Which cell of the box a refusal is about, as the whole noun phrase rather than a
+ * bare direction: a gross total is not a balance, so "the outgoing balance cell"
+ * would be a sentence naming a thing the document has not got - and a branch inside
+ * a message builder to pick the noun is worse than the phrase being the parameter
+ * (row 035, D5).
+ */
+type BalanceRole = 'opening balance' | 'closing balance' | 'outgoing total' | 'incoming total';
+
+const ROLES: readonly BalanceRole[] = [
+  'opening balance',
+  'closing balance',
+  'outgoing total',
+  'incoming total',
+];
+
 const unreadableBalance = (
   title: string,
-  which: 'opening' | 'closing',
+  which: BalanceRole,
   label: string,
   cell: string,
   example: string,
 ): string =>
-  `this looks like a ${title} statement but the ${which} balance cell of its "${label}" line reads ${quote(cell)}, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this looks like a ${title} statement but the ${which} cell of its "${label}" line reads ${quote(cell)}, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
- * Each balance is named by the line it was read off, because a layout may state the
- * two under two labels on two lines and one that does has no single label to name.
+ * Each cell is named by the line it was read off, because a layout may state them
+ * under a label each on a line each and one that does has no single label to name.
  */
 const mixedBalanceCurrencies = (
   title: string,
-  opening: { label: string; currency: string },
-  closing: { label: string; currency: string },
+  a: { role: BalanceRole; label: string; currency: string },
+  b: { role: BalanceRole; label: string; currency: string },
 ): string =>
-  `this looks like a ${title} statement but its opening balance (${quote(opening.label)}) is stated in ${opening.currency} and its closing balance (${quote(closing.label)}) in ${closing.currency} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this looks like a ${title} statement but its ${a.role} (${quote(a.label)}) is stated in ${a.currency} and its ${b.role} (${quote(b.label)}) in ${b.currency} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /** Cut with a mark, so a value with more behind it does not read as the whole one. */
 const bounded = (text: string, max: number): string =>
@@ -296,20 +323,68 @@ type RowExtent =
   | { kind: 'labelled-continuations'; keep: readonly string[] };
 
 /**
- * Where the layout states the statement's own opening and closing balance, for the
- * whole document rather than for one of its products.
+ * Which way round a summary cell carries its sign, and there is no deriving it: the
+ * two layouts measured disagree. Revolut prints "1 742,18€" unsigned in a column
+ * whose identity IS the sign; N26 prints "-2.948,37€" with the sign in the cell.
  *
- * Required and total, the same way a table's header is total over its columns. A
- * variant meaning "this layout states no balances" is what would let a template
- * author who could not find the box write it away, and the weakest parser in the
- * product would then ship with its only check switched off by a data literal - on
- * exactly the layouts whose author was least sure of what they were reading. A
- * document that does not state its balances is not importable today (ROADMAP 5.3,
- * row 3 of the table) and is refused by simply not being a template.
+ * Declared rather than inferred from `amounts`, which correlates on both documents
+ * measured and is not a fact about layouts - a debit-credit table whose summary line
+ * prints "-1 742,18€", or a signed table whose summary prints an unsigned magnitude
+ * under a directional label, are both ordinary documents that the inference makes
+ * inexpressible. What holds a template that declares it backwards is arithmetic: the
+ * printed figure and the rows' own sum then differ by twice the figure, so every
+ * import from that layout is refused (row 035, D6).
+ */
+type GrossSigns = 'signed' | 'magnitudes';
+
+/**
+ * The escape, and the honest statement of what holds it: NOTHING STRUCTURAL DOES.
+ * `tsc` can force the declaration to exist and force its shape; it cannot tell a
+ * template author who read the summary block and found no per-side totals from one
+ * who did not look. What stands in its place is a case in test/pdf.test.ts pinning
+ * the set of template ids that reach for this to a literal list, empty today - so an
+ * author who takes it gets a red suite and has to write their own id into that list.
+ *
+ * It exists at all because the two claims differ in a way `BalanceBox` itself does
+ * not have to express: a document stating no balances is not importable AT ALL
+ * (ROADMAP 5.3, row 3), so there is nothing for the balance locator to escape to,
+ * where a document stating balances and no per-side totals is importable with half
+ * the check - a real layout, refused by nothing else.
+ */
+type NoGrossTotals = { kind: 'not-printed' };
+
+type GrossSpans =
+  | { kind: 'printed'; signs: GrossSigns; outgoing: Span; incoming: Span }
+  | NoGrossTotals;
+
+type GrossLabels =
+  | { kind: 'printed'; signs: GrossSigns; outgoing: string; incoming: string }
+  | NoGrossTotals;
+
+/**
+ * Where the layout states the statement's own opening and closing balance, and what
+ * each side came to, for the whole document rather than for one of its products.
+ *
+ * Required and total, the same way a table's header is total over its columns. The
+ * two balances have no variant meaning "this layout states none": that is what would
+ * let a template author who could not find the box write it away, and the weakest
+ * parser in the product would then ship with its only check switched off by a data
+ * literal - on exactly the layouts whose author was least sure of what they were
+ * reading. A document that does not state its balances is not importable today
+ * (ROADMAP 5.3, row 3 of the table) and is refused by simply not being a template.
+ *
+ * `gross` is the one place that argument does not reach, and it is required and
+ * total too: a layout may genuinely print no per-side totals, so it has a named arm
+ * saying so, and what keeps that arm from being the same escape one level down is
+ * written above NoGrossTotals rather than claimed here.
  *
  * Two kinds, because the second layout measured put its two balances on two lines 79
- * user units apart under two different labels, which the one-line shape cannot say at
- * all. Both variants are populated: neither is a way to write "none".
+ * user units apart under two different labels, which the one-line shape cannot say
+ * at all - and the locator's shape decides how its gross cells are found too, which
+ * is why `gross` is nested here and not a sibling field on PdfTemplate. Spans against
+ * a two-lines box would be x-intervals with no line to read them off: a cross-field
+ * inconsistency `tsc` cannot see. Nested, it cannot be written. Neither kind is a way
+ * to write "no balances".
  */
 type BalanceBox =
   | {
@@ -320,6 +395,8 @@ type BalanceBox =
       label: Span;
       opening: Span;
       closing: Span;
+      /** two more x-intervals on the line the label already found */
+      gross: GrossSpans;
     }
   | {
       /** a line each, under a label each, and the value in one column */
@@ -329,6 +406,8 @@ type BalanceBox =
       /** the literal the opening balance's line carries in `label` */
       opening: string;
       closing: string;
+      /** two more labels, read at the `value` span this box already has */
+      gross: GrossLabels;
     };
 
 /** Exported for the tests that hand readPdf and selectTemplate a list of their own. */
@@ -836,16 +915,17 @@ function readRows(
   return { rows, notes };
 }
 
-/** One balance, and the label of the line it was read off. */
+/** One cell of the box, what it is, and the label of the line it was read off. */
 interface Balance {
   value: number;
   currency: string;
   label: string;
+  role: BalanceRole;
 }
 
 /**
- * What the document says it started and ended with, off the line - or the two lines -
- * that state it for the whole statement.
+ * What the document says it started and ended with, and what it says each side came
+ * to, off the line - or the lines - that state it for the whole statement.
  *
  * Exactly one line per label is required, not the first of several. A layout that
  * repeats a label is a layout nobody has measured, and taking the first is the guess
@@ -857,8 +937,10 @@ interface Balance {
  * baselines either side of the header row, so the assertion could only ever be
  * partial - and a table named in half its columns is a table whose shape is not
  * known. What stands in its place is stronger: the gate makes the locator
- * self-checking. Any misread of the box - a column inserted, the two values swapped,
- * the wrong line matched - changes the arithmetic and refuses the import.
+ * self-checking, and since row 035 it does so per side as well as end to end. Any
+ * misread of the box - a column inserted, two values swapped, the wrong line matched -
+ * changes the arithmetic and refuses the import; and a pair of rows the parser never
+ * saw that cancel into a clean net now changes it too.
  */
 function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalances {
   const { balances } = template;
@@ -876,54 +958,107 @@ function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalanc
   // sign, N26's requires one because the document writes one in every cell, and a
   // balance in a shape neither reads is refused loudly with its cell quoted back
   // rather than given an invented sign (row 6b, D5).
-  const read = (
-    line: TextLine,
-    span: Span,
-    label: string,
-    which: 'opening' | 'closing',
-  ): Balance => {
+  const read = (line: TextLine, span: Span, label: string, role: BalanceRole): Balance => {
     const raw = cellAt(line, span);
     const m = template.amount.pattern.exec(raw);
     const currency = m ? template.amount.currency[m[2]] : undefined;
     const value = m ? parseAmount(m[1], template.amount.decimal) : null;
     if (currency === undefined || value === null) {
-      throw new Error(
-        unreadableBalance(template.title, which, label, raw, template.amount.example),
-      );
+      throw new Error(unreadableBalance(template.title, role, label, raw, template.amount.example));
     }
-    return { value, currency, label };
+    return { value, currency, label, role };
   };
 
+  // The currency check is over every cell of the box and not just the two balances:
+  // a gross total in a second currency is the same hazard as a closing balance in
+  // one, and an unreachable arm left unbuilt beside an unreachable arm built
+  // deliberately is two arms nobody can tell apart later (row 035, D4).
+  //
   // Unreachable through either template in this file - both declare a single currency
-  // symbol, so both cells are read through the one map and can only agree - and it is
-  // here rather than absent because the alternative is taking one cell's currency for
-  // both, which is a check against a number that is not the one printed. What makes it
-  // reachable at all is readPdf's `templates` parameter, which the test hands a
-  // two-symbol template (ROADMAP row 6c: it owes this arm a test, not a document).
-  const both = (opening: Balance, closing: Balance): StatementBalances => {
-    if (opening.currency !== closing.currency) {
-      throw new Error(mixedBalanceCurrencies(template.title, opening, closing));
+  // symbol, so every cell is read through the one map and they can only agree - and it
+  // is here rather than absent because the alternative is taking one cell's currency
+  // for all of them, which is a check against a number that is not the one printed.
+  // What makes it reachable at all is readPdf's `templates` parameter, which the test
+  // hands a two-symbol template (ROADMAP row 6c: it owes this arm a test, not a
+  // document).
+  const box = (
+    opening: Balance,
+    closing: Balance,
+    gross: { signs: GrossSigns; outgoing: Balance; incoming: Balance } | null,
+  ): StatementBalances => {
+    const rest = gross ? [closing, gross.outgoing, gross.incoming] : [closing];
+    for (const cell of rest) {
+      if (cell.currency !== opening.currency) {
+        throw new Error(mixedBalanceCurrencies(template.title, opening, cell));
+      }
     }
     return {
       openingCents: toCents(opening.value),
       closingCents: toCents(closing.value),
+      // onto the rows' own convention, so the gate compares two numbers in one
+      // convention rather than normalising until they agree. A plain negation and
+      // never Math.abs: a signed cell under a `magnitudes` declaration comes out
+      // positive and refuses, where Math.abs would have accepted it (row 035, R6)
+      gross: gross
+        ? {
+            kind: 'printed',
+            outgoingCents:
+              gross.signs === 'magnitudes'
+                ? -toCents(gross.outgoing.value)
+                : toCents(gross.outgoing.value),
+            incomingCents: toCents(gross.incoming.value),
+          }
+        : { kind: 'not-printed' },
       currency: opening.currency,
     };
   };
 
+  // opening, closing, then the two gross cells, so a box broken in more than one
+  // place goes on refusing with the sentence it refused with before this row
   switch (balances.kind) {
     case 'one-line': {
       const line = only(balances.total);
-      return both(
-        read(line, balances.opening, balances.total, 'opening'),
-        read(line, balances.closing, balances.total, 'closing'),
+      const opening = read(line, balances.opening, balances.total, 'opening balance');
+      const closing = read(line, balances.closing, balances.total, 'closing balance');
+      const { gross } = balances;
+      return box(
+        opening,
+        closing,
+        gross.kind === 'printed'
+          ? {
+              signs: gross.signs,
+              outgoing: read(line, gross.outgoing, balances.total, 'outgoing total'),
+              incoming: read(line, gross.incoming, balances.total, 'incoming total'),
+            }
+          : null,
       );
     }
-    case 'two-lines':
-      return both(
-        read(only(balances.opening), balances.value, balances.opening, 'opening'),
-        read(only(balances.closing), balances.value, balances.closing, 'closing'),
+    case 'two-lines': {
+      const opening = read(
+        only(balances.opening),
+        balances.value,
+        balances.opening,
+        'opening balance',
       );
+      const closing = read(
+        only(balances.closing),
+        balances.value,
+        balances.closing,
+        'closing balance',
+      );
+      const { gross } = balances;
+      return box(
+        opening,
+        closing,
+        gross.kind === 'printed'
+          ? {
+              signs: gross.signs,
+              outgoing: read(only(gross.outgoing), balances.value, gross.outgoing, 'outgoing total'),
+              incoming: read(only(gross.incoming), balances.value, gross.incoming, 'incoming total'),
+            }
+          : null,
+      );
+    }
   }
 }
 
@@ -1070,6 +1205,10 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // wallets' come in through the one `collect: true` header above, so a transfer
     // into a wallet is two of the rows summed, and checked against the account's
     // pair alone the statement would be out by exactly those transfers.
+    //
+    // The same line states the two gross totals, which is what the document's own
+    // "Списания" and "Пополнения" columns come to: -1742.18 and +1953.40 on the
+    // statement measured, each to the cent against the parsed rows' own halves.
     balances: {
       kind: 'one-line',
       total: 'Итого',
@@ -1085,6 +1224,22 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // is safe only because the line is found by its label first and never by
       // scanning here. 596 is the page width
       closing: [500, 596],
+      gross: {
+        kind: 'printed',
+        // the columns ARE the sign here: the cells read "1 742,18€" and "1 953,40€",
+        // unsigned, under headings that say which way the money went
+        signs: 'magnitudes',
+        // Two independent measurements that happen to equal `columns.debit` and
+        // `columns.credit` today, and they must NOT be turned into a reference to
+        // them. This box is a row of the five-column balance summary table
+        // (42.7 / 253.0 / 335.1 / 417.1 / 526.2); the transaction table has four
+        // columns and two of the four spans here correspond to no column of it at
+        // all - `opening` sits inside its description span and `closing` past its
+        // last column. A redesign that moved one table alone would break a
+        // reference while both literals were still individually correct.
+        outgoing: [330, 410],
+        incoming: [410, 500],
+      },
     },
   },
   {
@@ -1169,7 +1324,10 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     rows: { kind: 'continuations', drop: ['IBAN:'] },
     // Two lines 79 units apart under two different labels, on the summary page, with
     // two other lines between them - which is why BalanceBox has a second kind at
-    // all. Each label occurs exactly once in the whole document.
+    // all, and those two lines are this layout's gross totals. Each of the four
+    // labels occurs exactly once in the whole document, and each value sits 0.82-0.83
+    // ABOVE its label's baseline: 41% of TOLERANCE spent here, on top of the 1.95 the
+    // dated rows spend.
     balances: {
       kind: 'two-lines',
       // the description column, because that is where this layout writes its labels.
@@ -1180,6 +1338,18 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       value: [460, 596],
       opening: 'Dein alter Kontostand',
       closing: 'Dein neuer Kontostand',
+      gross: {
+        kind: 'printed',
+        // "-2.948,37€" and "+2.774,09€" on the statement measured: the sign is in
+        // the cell, which is the same thing this layout's amount column does. The
+        // cost taken knowingly: the pattern requires that sign, so a month printing
+        // an unsigned "0,00€" incoming total refuses where it imports today, and one
+        // printing no such line at all refuses through noBalanceBox.
+        signs: 'signed',
+        // no new span - the two lines state their values in the `value` column above
+        outgoing: 'Ausgehende Transaktionen',
+        incoming: 'Einkommende Transaktionen',
+      },
     },
   },
 ];
@@ -1216,20 +1386,33 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
     tooManyPages(found, found),
     ambiguousLayout(templates.map((t) => t.title)),
   ];
+  // the widest label and the widest role word, taken independently: this is a bound
+  // and not a specimen, and a real pair would be narrower than either extreme
+  const role = longest([...ROLES]) as BalanceRole;
+
   for (const t of templates) {
     const label = longest(
       t.balances.kind === 'one-line'
         ? [t.balances.total]
-        : [t.balances.opening, t.balances.closing],
+        : [
+            t.balances.opening,
+            t.balances.closing,
+            ...(t.balances.gross.kind === 'printed'
+              ? [t.balances.gross.outgoing, t.balances.gross.incoming]
+              : []),
+          ],
     );
     const code = longest(Object.values(t.amount.currency));
     all.push(
       unreadableTable(t.title, quote(cell)),
       noTransactionLines(t.title),
       noBalanceBox(t.title, label, found),
-      unreadableBalance(t.title, 'opening', label, cell, t.amount.example),
-      unreadableBalance(t.title, 'closing', label, cell, t.amount.example),
-      mixedBalanceCurrencies(t.title, { label, currency: code }, { label, currency: code }),
+      ...ROLES.map((r) => unreadableBalance(t.title, r, label, cell, t.amount.example)),
+      mixedBalanceCurrencies(
+        t.title,
+        { role, label, currency: code },
+        { role, label, currency: code },
+      ),
     );
   }
   return all;

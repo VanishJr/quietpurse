@@ -43,9 +43,14 @@ import { importAndConfirm } from './helpers';
 import { PlacedText, buildImagePdf, buildPdf } from './pdffixture';
 
 // the x-intervals the revolut-ru template declares, one literal each so a test that
-// places a cell outside its column has to say so. The last three are the balance
+// places a cell outside its column has to say so. The last five are the balance
 // box's, and `total` shares the date column's interval on purpose - that is where
 // the real document writes the label.
+//
+// `grossOut` and `grossIn` are their own literals and not `debit`/`credit`, for the
+// reason the template's own comment gives: the balance summary is a five-column
+// table of its own and the equality with the transaction table's middle two columns
+// is arithmetic rather than structure.
 const X = {
   date: 42.7,
   description: 124.8,
@@ -53,6 +58,8 @@ const X = {
   credit: 417.1,
   total: 42.7,
   opening: 253.0,
+  grossOut: 335.1,
+  grossIn: 417.1,
   closing: 526.2,
 } as const;
 
@@ -69,11 +76,36 @@ const header = (y: number, date = 'Дата'): PlacedText[] => [
  * one of them adds up, because a template with no balance locator is not a template
  * (row 6b, R1): making the fixtures optional-friendly is exactly the hole that rules
  * out.
+ *
+ * Positional, in the order the document prints the line, and every gross pair below
+ * is arithmetic done on the fixture's OWN literal amounts - never read off the
+ * parser. A box computed from what the reader produced agrees with the reader by
+ * construction and tests nothing, which is the defect one level down from the one
+ * this row exists to fix (row 035, trap 2).
+ *
+ * `BOX_SIZE` is a budget and a fixture artefact, the same one FOOTER's comment
+ * measures: this fixture's font advances one point per character per point of size
+ * where the real document's advances far less, and the four cells sit 82, 82 and 109
+ * points apart. At size 4 the widest of them - nine characters - advances 36 points
+ * from 253 and stops 46 short of the next cell; at the default 9 it stops 1.1 short,
+ * pdfjs joins the two runs into ONE item at the opening column's x, and the opening
+ * cell reads "1 200,00€ 1". 8 is the largest size that still comes apart, so this
+ * has half the budget spare.
  */
-const box = (y: number, opening: string, closing: string): PlacedText[] => [
+const BOX_SIZE = 4;
+
+const box = (
+  y: number,
+  opening: string,
+  outgoing: string,
+  incoming: string,
+  closing: string,
+): PlacedText[] => [
   { x: X.total, y, text: 'Итого' },
-  { x: X.opening, y, text: opening },
-  { x: X.closing, y, text: closing },
+  { x: X.opening, y, text: opening, size: BOX_SIZE },
+  { x: X.grossOut, y, text: outgoing, size: BOX_SIZE },
+  { x: X.grossIn, y, text: incoming, size: BOX_SIZE },
+  { x: X.closing, y, text: closing, size: BOX_SIZE },
 ];
 
 const row = (
@@ -108,8 +140,8 @@ const statement = (tag: string, closing = '59,76€'): PlacedText[][] => [
     ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
     ...row(660, '3 июл. 2026г.', 'Платеж от JANE DOE', { credit: '100,00€' }),
     ...row(640, '30 июл. 2026г.', 'Wizz Air', { debit: '1 234,56€' }),
-    // the three rows net -1 140,24
-    ...box(620, '1 200,00€', closing),
+    // the three rows net -1 140,24: 5,68 + 1 234,56 out and 100,00 in
+    ...box(620, '1 200,00€', '1 240,24€', '100,00€', closing),
   ],
 ];
 
@@ -224,8 +256,9 @@ const detailed = (tag: string): PlacedText[][] => {
     y -= 20;
   }
   // -5,68 + 100,00 - 1 234,56 + 9,99: the four rows net -1 130,25, which is what
-  // takes the 1 200,00€ opening to the 69,75€ the gate reads below
-  drawn.push(...box(y, '1 200,00€', '69,75€'));
+  // takes the 1 200,00€ opening to the 69,75€ the gate reads below, and their two
+  // halves are 1 240,24 out and 109,99 in
+  drawn.push(...box(y, '1 200,00€', '1 240,24€', '109,99€', '69,75€'));
   return [drawn];
 };
 
@@ -306,8 +339,8 @@ describe('pdf: bytes to rows', () => {
       drawn.push({ x: X.date, y, text: date });
       drawn.push({ x: X.description, y, text: description });
     }
-    // -16,90 over the three
-    drawn.push(...box(620, '100,00€', '83,10€'));
+    // -16,90 over the three, all of it out and nothing in
+    drawn.push(...box(620, '100,00€', '16,90€', '0,00€', '83,10€'));
 
     const r = await importAndConfirm({
       accountName: 'Revolut Drawing Order',
@@ -342,8 +375,9 @@ describe('pdf: bytes to rows', () => {
         ...row(580, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
         // and the gate now says the same thing arithmetically: 100,00 - 5,68 is
         // 94,32, where taking the pending line too would compute 88,36 and refuse.
-        // Flipping `collect: false` on that table fails this case
-        ...box(540, '100,00€', '94,32€'),
+        // Flipping `collect: false` on that table fails this case twice over - the
+        // net misses by 5,96 and so does the outgoing half
+        ...box(540, '100,00€', '5,68€', '0,00€', '94,32€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -399,7 +433,7 @@ describe('pdf: bytes to rows', () => {
         // card carries "the rows add up" above "4 rows couldn't be read": both are
         // true, since the gate checks what was read and a skipped row carrying
         // money would have broken the sum
-        ...box(540, '100,00€', '104,31€'),
+        ...box(540, '100,00€', '5,68€', '9,99€', '104,31€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -528,6 +562,11 @@ describe('pdf: bytes to rows', () => {
  * of the first case: one cent of slack hides a systematically dropped fee on a small
  * statement and lets a template that has drifted import plausible numbers, which
  * ROADMAP 5.2 calls the one outcome worse than a refusal.
+ *
+ * Row 035 added the second check and the compensating-pair case below is what it
+ * exists for. The gate cannot be made structural - a type can force the call and the
+ * provenance of a value, not what a branch does (row 6b, D12) - so that case is what
+ * holds it, and it has been watched fail.
  */
 describe('pdf: the reconciliation gate', () => {
   it('a statement one cent out is refused, with the difference named', async () => {
@@ -543,6 +582,45 @@ describe('pdf: the reconciliation gate', () => {
     expect(failed.status).toBe('failed');
     // the bytes are what a template fix needs, and they stay re-uploadable because
     // only a committed import claims the hash
+    expect(failed.documentAvailable).toBe(true);
+    expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * Row 035's deliverable, and the shape no gate in this product could see before
+   * it: a payment out and a payment in of the same size that the parser never read.
+   * The net is right to the cent, both ends agree, and the statement is missing two
+   * transactions.
+   *
+   * The printed pair is the fixture's own arithmetic and not the reader's - the
+   * three lines carry 1 240,24 out and 100,00 in, and the box states 100,00 more of
+   * each, which is exactly the pair that cancels.
+   */
+  it('a statement whose two halves are short by the same amount is refused', async () => {
+    const before = await idsNow();
+    await expect(
+      importPdf('Revolut Compensating Pair', [
+        [
+          ISSUER,
+          ...header(700),
+          ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
+          ...row(660, '3 июл. 2026г.', 'Платеж от JANE DOE', { credit: '100,00€' }),
+          ...row(640, '30 июл. 2026г.', 'Wizz Air', { debit: '1 234,56€' }),
+          // 200,00 - 1 340,24 is the same -1 140,24 the three lines net, so the
+          // opening balance still reaches the closing one exactly
+          ...box(620, '1 200,00€', '1 340,24€', '200,00€', '59,76€'),
+        ],
+      ]),
+    ).rejects.toThrow(
+      "this Revolut statement's opening and closing balance agree, but its two halves do not:" +
+        ' it states -1340.24 EUR out and 200.00 EUR in, where the 3 transaction lines read come' +
+        ' to -1240.24 EUR out and 100.00 EUR in, so an operation out and an operation in of the' +
+        ' same size are probably both missing - export the same statement as CSV or Excel' +
+        ' (.xlsx) from your online banking and upload that',
+    );
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
     expect(failed.documentAvailable).toBe(true);
     expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
   });
@@ -564,7 +642,9 @@ describe('pdf: the reconciliation gate', () => {
           ...row(640, '4 июл. 2026г.', 'Both', { debit: '1,00€', credit: '2,00€' }),
           ...row(620, '5 июл. 2026г.', 'Unreadable', { debit: '5,68 EUR' }),
           ...row(600, '32 июл. 2026г.', 'Impossible date', { debit: '3,00€' }),
-          ...box(560, '100,00€', '90,00€'),
+          // the halves agree with the one line that parsed; it is the ends that do
+          // not, which is what puts the R5 sentence and not the row-035 one here
+          ...box(560, '100,00€', '5,68€', '0,00€', '90,00€'),
         ],
       ]),
     ).rejects.toThrow(
@@ -590,7 +670,7 @@ describe('pdf: the reconciliation gate', () => {
     expect(first.inserted).toBe(3);
 
     // the same three lines and one more, with the statement's own balances moved to
-    // match: 1 200,00 - 1 140,24 - 12,99 = 46,77
+    // match: 1 200,00 - 1 140,24 - 12,99 = 46,77, and 1 253,23 out against 100,00 in
     const staged = await importPdf(name, [
       [
         ISSUER,
@@ -600,7 +680,7 @@ describe('pdf: the reconciliation gate', () => {
         ...row(660, '3 июл. 2026г.', 'Платеж от JANE DOE', { credit: '100,00€' }),
         ...row(640, '30 июл. 2026г.', 'Wizz Air', { debit: '1 234,56€' }),
         ...row(620, '31 июл. 2026г.', 'Netflix', { debit: '12,99€' }),
-        ...box(600, '1 200,00€', '46,77€'),
+        ...box(600, '1 200,00€', '1 253,23€', '100,00€', '46,77€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -623,7 +703,7 @@ describe('pdf: the reconciliation gate', () => {
         ...header(700),
         ...row(680, '2 июл. 2026г.', 'Cashback', { credit: '0,10€' }),
         ...row(660, '3 июл. 2026г.', 'Interest', { credit: '0,20€' }),
-        ...box(640, '0,00€', '0,30€'),
+        ...box(640, '0,00€', '0,00€', '0,30€', '0,30€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -644,19 +724,40 @@ describe('pdf: the reconciliation gate', () => {
     ],
     [
       'two of them',
-      [...box(640, '1 200,00€', '59,76€'), ...box(600, '1 200,00€', '59,76€')],
+      [
+        ...box(640, '1 200,00€', '5,68€', '0,00€', '59,76€'),
+        ...box(600, '1 200,00€', '5,68€', '0,00€', '59,76€'),
+      ],
       /it expects exactly one "Итого" line and found 2/,
     ],
     [
       // the group separator gone is the smallest drift a redesign can produce, and
       // it must not be read as 1 200,00 by a laxer pattern
       'an opening balance this template cannot read',
-      box(640, '1200,00€', '59,76€'),
+      box(640, '1200,00€', '5,68€', '0,00€', '59,76€'),
       /the opening balance cell of its "Итого" line reads "1200,00€", where this template reads an amount like "1 234,56€"/,
     ],
     [
       'a closing balance that is not there',
-      box(640, '1 200,00€', ''),
+      box(640, '1 200,00€', '5,68€', '0,00€', ''),
+      /the closing balance cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+    ],
+    [
+      // and the two cells this row added, which refuse the same way and after the
+      // two balances - a box broken in more than one place goes on refusing with
+      // the sentence it refused with before
+      'an outgoing total that is not there',
+      box(640, '1 200,00€', '', '0,00€', '94,32€'),
+      /the outgoing total cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+    ],
+    [
+      // and the ordering itself, which every case above leaves free: each breaks
+      // exactly one cell, so a reader taking the gross pair first would pass all of
+      // them. Two broken at once, and the sentence naming the balance has to win -
+      // a refusal blaming a subtotal where the balance is what drifted sends the
+      // reader to the wrong column
+      'a closing balance and an outgoing total both gone',
+      box(640, '1 200,00€', '', '0,00€', ''),
       /the closing balance cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
     ],
   ];
@@ -707,7 +808,12 @@ describe('pdf: the reconciliation gate', () => {
       mapping: {},
       template: 'revolut-ru',
       title: 'Revolut',
-      balances: { openingCents: 0, closingCents: 3000, currency },
+      balances: {
+        openingCents: 0,
+        closingCents: 3000,
+        gross: { kind: 'printed', outgoingCents: 0, incomingCents: 3000 },
+        currency,
+      },
     });
 
     it('refuses rather than checking against whichever currency came first', () => {
@@ -893,8 +999,35 @@ const twin = (id: string, title: string): PdfTemplate => ({
     value: [460, 596],
     opening: 'Anfang',
     closing: 'Ende',
+    gross: { kind: 'printed', signs: 'signed', outgoing: 'Raus', incoming: 'Rein' },
   },
 });
+
+/**
+ * One transaction and a four-cell box, in the layout `twin` declares. The four values
+ * are the parameters because they are what every case below varies - the rest of the
+ * page is what makes the template claim the document at all.
+ */
+const twinDoc = (opening: string, closing: string, outgoing: string, incoming: string): Buffer =>
+  buildPdf([
+    [
+      { x: 40, y: 760, text: 'Two Layouts Bank' },
+      { x: 40, y: 700, text: 'Beschreibung' },
+      { x: 340, y: 700, text: 'Datum' },
+      { x: 500, y: 700, text: 'Betrag' },
+      { x: 40, y: 680, text: 'Kauf' },
+      { x: 340, y: 680, text: '01.07.2026' },
+      { x: 500, y: 680, text: '-1,00€' },
+      { x: 40, y: 640, text: 'Anfang' },
+      { x: 500, y: 640, text: opening },
+      { x: 40, y: 620, text: 'Ende' },
+      { x: 500, y: 620, text: closing },
+      { x: 40, y: 600, text: 'Raus' },
+      { x: 500, y: 600, text: outgoing },
+      { x: 40, y: 580, text: 'Rein' },
+      { x: 500, y: 580, text: incoming },
+    ],
+  ]);
 
 const twinLines: TextLine[] = [
   { page: 1, y: 760, items: [{ x: 40, text: 'Two Layouts Bank' }] },
@@ -1131,26 +1264,91 @@ describe('pdf: the second layout', () => {
         example: '-1,00€',
       },
     };
-    const bytes = buildPdf([
-      [
-        { x: 40, y: 760, text: 'Two Layouts Bank' },
-        { x: 40, y: 700, text: 'Beschreibung' },
-        { x: 340, y: 700, text: 'Datum' },
-        { x: 500, y: 700, text: 'Betrag' },
-        { x: 40, y: 680, text: 'Kauf' },
-        { x: 340, y: 680, text: '01.07.2026' },
-        { x: 500, y: 680, text: '-1,00€' },
-        { x: 40, y: 640, text: 'Anfang' },
-        { x: 500, y: 640, text: '+10,00€' },
-        { x: 40, y: 620, text: 'Ende' },
-        { x: 500, y: 620, text: '+9,00£' },
-      ],
-    ]);
-    await expect(readPdf(bytes, 200, [twoSymbols])).rejects.toThrow(
+    await expect(readPdf(twinDoc('+10,00€', '+9,00£', '-1,00€', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
       'this looks like a Two Symbols statement but its opening balance ("Anfang") is stated in' +
         ' EUR and its closing balance ("Ende") in GBP - this importer cannot check a statement' +
         ' that mixes currencies',
     );
+
+    // and the check is over every cell of the box, not the two balances alone
+    // (row 035, D4): a gross total in a second currency is the same hazard, and
+    // the sentence names it by what it is rather than calling it a balance
+    await expect(readPdf(twinDoc('+10,00€', '+9,00€', '-1,00£', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
+      'this looks like a Two Symbols statement but its opening balance ("Anfang") is stated in' +
+        ' EUR and its outgoing total ("Raus") in GBP',
+    );
+  });
+});
+
+/**
+ * Row 035's escape arm, and the whole of what holds it.
+ *
+ * NOTHING STRUCTURAL DOES. `tsc` forces every template to declare what it does about
+ * its gross totals and forces the shape of that declaration; it cannot tell an author
+ * who read the summary block and found no per-side totals from one who did not look.
+ * So the list below is the mechanism: taking the escape turns this case red, and the
+ * only way out of it is to write the id in and say in the report which document was
+ * read and what its summary block carried instead.
+ */
+describe('pdf: what a template says about its gross totals', () => {
+  it('no template in the tree has switched half the gate off', () => {
+    const escaped = TEMPLATES.filter((t) => t.balances.gross.kind === 'not-printed').map(
+      (t) => t.id,
+    );
+    expect(escaped).toEqual([]);
+  });
+
+  /**
+   * And what the arm costs when it is reached, stated rather than left to be
+   * discovered: half the gate is off, and the compensating pair the case in "the
+   * reconciliation gate" refuses goes straight through. Unreachable through either
+   * template in the tree - which is exactly why it is exercised here through
+   * readPdf's `templates` parameter, the way the mixed-currency arm is.
+   */
+  it('a layout that prints none is read and imports with only its ends checked', async () => {
+    const noGross: PdfTemplate = {
+      ...twin('no-gross', 'No Gross'),
+      balances: {
+        kind: 'two-lines',
+        label: [0, 330],
+        value: [460, 596],
+        opening: 'Anfang',
+        closing: 'Ende',
+        gross: { kind: 'not-printed' },
+      },
+    };
+    // the same page the cases above use, "Raus" and "Rein" included: a template
+    // that declares none does not read them, and a document that prints them is
+    // not what the arm is about
+    const st = await readPdf(twinDoc('+10,00€', '+9,00€', '-1,00€', '+0,00€'), 200, [noGross]);
+    expect(st.balances.gross).toEqual({ kind: 'not-printed' });
+
+    const parsed: ParsedFile = {
+      kind: 'pdf',
+      sheet: st.sheet,
+      preset: null,
+      mapping: st.columns,
+      template: st.template,
+      title: st.title,
+      balances: st.balances,
+    };
+    const tx = (amount: number): NewTransaction => ({
+      accountId: 'csv:no-gross',
+      provider: 'upload',
+      amount,
+      currency: 'EUR',
+      date: '2026-07-01T00:00:00.000Z',
+      description: 'x',
+      category: 'other',
+    });
+    // -51,00 and +50,00 against a document showing one line of -1,00: the ends
+    // still meet, and there is nothing printed for either half to be checked
+    // against, so it imports
+    expect(reconcile(parsed, [tx(-51), tx(50)], 0).balances).toEqual({
+      opening: 10,
+      closing: 9,
+      currency: 'EUR',
+    });
   });
 });
 
@@ -1345,7 +1543,7 @@ describe('the diagnostic budget', () => {
           ),
           // readPdf reads the box but never checks it - the gate is mapAndStore's,
           // and this case is about what a note costs, not what a statement sums to
-          ...box(640, '1,00€', '1,00€'),
+          ...box(640, '1,00€', '1,00€', '1,00€', '1,00€'),
         ],
       ]),
       200,
@@ -1375,15 +1573,22 @@ describe('the diagnostic budget', () => {
    * that: the two balances are non-negative because the template's amount pattern
    * has no sign, but a statement whose rows net downwards past its opening balance
    * is ordinary, so the widest of the four amounts is 25 characters and the extreme
-   * is composed with it. Both refusals are composed here rather than measured, so
-   * raising any of those goes red instead of silently off the end of what
+   * is composed with it. All three refusals are composed here rather than measured,
+   * so raising any of those goes red instead of silently off the end of what
    * error_detail keeps.
+   *
+   * The title comes from TEMPLATES too, and not from the literal 'Revolut' this case
+   * carried before row 035: the sentence names the layout once, so the longest title
+   * in the tree is what the remaining headroom is spent by, and a template added with
+   * a longer one has to turn this case red rather than cut a refusal's tail off (6b
+   * D16(b), landed here).
    */
   it("the gate's longest refusals fit what error_detail keeps", () => {
     // built FROM the bound rather than beside it: written as a literal wide enough
     // today, it stops reaching the bound the moment the bound is raised, and these
     // assertions go on passing over a sentence that has grown past 500
     const CCY = 'A'.repeat(CURRENCY_CODE_MAX + 2);
+    const TITLE = TEMPLATES.map((t) => t.title).reduce((a, b) => (a.length >= b.length ? a : b));
     const tx = (currency: string, amount: number): NewTransaction => ({
       accountId: 'csv:budget',
       provider: 'upload',
@@ -1393,16 +1598,19 @@ describe('the diagnostic budget', () => {
       description: 'x',
       category: 'other',
     });
-    const parsed = (currency: string): ParsedFile => ({
+    const parsed = (
+      currency: string,
+      gross = { kind: 'printed', outgoingCents: 0, incomingCents: 0 } as const,
+    ): ParsedFile => ({
       kind: 'pdf',
       sheet: { rows: [], rowLabel: (i) => i },
       preset: null,
       mapping: {},
       template: 'revolut-ru',
-      title: 'Revolut',
+      title: TITLE,
       // opening 1e20 and closing 1e20, so the case below - whose rows net -2e20 -
       // puts the running sum at -1e20 and the difference at 2e20
-      balances: { openingCents: 1e22, closingCents: 1e22, currency },
+      balances: { openingCents: 1e22, closingCents: 1e22, gross, currency },
     });
     const refusalOf = (run: () => unknown): string => {
       try {
@@ -1428,6 +1636,26 @@ describe('the diagnostic budget', () => {
     expect(longest).toContain('-100000000000000000000.00');
     expect(longest.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
 
+    // and row 035's, at its own extreme: the ends have to agree for it to fire at
+    // all, so the rows net to zero and each half is as wide as one can be. Three of
+    // the four figures carry a sign - the READ incoming side is a sum of
+    // non-negatives and cannot, where the PRINTED one can, because a layout that
+    // writes the sign in the cell can write a negative there and a drifted span
+    // reading the outgoing cell into this slot is exactly how one arrives. The
+    // skipped clause is the longer of the two causes
+    const sides = refusalOf(() =>
+      reconcile(
+        parsed(CCY, { kind: 'printed', outgoingCents: -1e22, incomingCents: -1e22 }),
+        Array.from({ length: MAX_DATA_ROWS }, (_, i) =>
+          tx(CCY, i === 0 ? -2e20 : i === 1 ? 2e20 : 0),
+        ),
+        MAX_DATA_ROWS,
+      ),
+    );
+    expect(sides).toContain('opening and closing balance agree, but its two halves do not');
+    expect(sides).toContain('are probably where they went');
+    expect(sides.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+
     // and the other one, at its own extreme: three codes named and the rest counted,
     // each as wide as the bound lets one be
     const mixed = refusalOf(() =>
@@ -1447,11 +1675,18 @@ describe('the diagnostic budget', () => {
    * currency codes and example. A template added with a longer label moves the number
    * below, which is the point - the same measurement written into a comment in pdf.ts
    * would simply stop being true (row 6c, D5, and rows 6a D14 / 6b D2 / 6b D10).
+   *
+   * 310 before row 035 and 316 after it, and what moved it is the label pool: a
+   * two-lines box now declares four labels rather than two, so n26-de's longest is
+   * "Einkommende Transaktionen" where it was "Dein alter Kontostand" - 24 characters
+   * after `quote`'s own bound cuts it, against 21, twice over. The longest sentence
+   * is still mixedBalanceCurrencies for N26, and the two role words it carries are
+   * unchanged at 15 each.
    */
   it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
     const all = refusals();
     for (const sentence of all) expect(sentence.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
-    expect(Math.max(...all.map((s) => s.length))).toBe(310);
+    expect(Math.max(...all.map((s) => s.length))).toBe(316);
     // and no two of them read alike, which is what the set exists for
     expect(new Set(all).size).toBe(all.length);
   });
