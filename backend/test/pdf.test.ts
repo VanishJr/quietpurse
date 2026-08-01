@@ -14,24 +14,57 @@ import { describe, expect, it } from 'vitest';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
+  confirmImport,
   getAccount,
   listImports,
   listTransactions,
 } from '../src/db';
 import { NOTE_MAX, PDF_PARSER_VERSION, readPdf } from '../src/providers/pdf';
-import { importStatement, readSheet, sniff } from '../src/providers/statement';
+import { MAX_DATA_ROWS } from '../src/providers/sheet';
+import {
+  CURRENCY_CODE_MAX,
+  ParsedFile,
+  importStatement,
+  readSheet,
+  reconcile,
+  sniff,
+} from '../src/providers/statement';
+import { NewTransaction } from '../src/types';
 import { importAndConfirm } from './helpers';
 import { PlacedText, buildImagePdf, buildPdf } from './pdffixture';
 
 // the x-intervals the revolut-ru template declares, one literal each so a test that
-// places a cell outside its column has to say so
-const X = { date: 42.7, description: 124.8, debit: 335.1, credit: 417.1 } as const;
+// places a cell outside its column has to say so. The last three are the balance
+// box's, and `total` shares the date column's interval on purpose - that is where
+// the real document writes the label.
+const X = {
+  date: 42.7,
+  description: 124.8,
+  debit: 335.1,
+  credit: 417.1,
+  total: 42.7,
+  opening: 253.0,
+  closing: 526.2,
+} as const;
 
 const header = (y: number, date = 'Дата'): PlacedText[] => [
   { x: X.date, y, text: date },
   { x: X.description, y, text: 'Описание' },
   { x: X.debit, y, text: 'Списания' },
   { x: X.credit, y, text: 'Пополнения' },
+];
+
+/**
+ * The statement's own balance summary - the one line the reconciliation gate checks
+ * the rows against. Every fixture that gets as far as the gate carries one and every
+ * one of them adds up, because a template with no balance locator is not a template
+ * (row 6b, R1): making the fixtures optional-friendly is exactly the hole that rules
+ * out.
+ */
+const box = (y: number, opening: string, closing: string): PlacedText[] => [
+  { x: X.total, y, text: 'Итого' },
+  { x: X.opening, y, text: opening },
+  { x: X.closing, y, text: closing },
 ];
 
 const row = (
@@ -58,7 +91,7 @@ const ISSUER: PlacedText = {
  * without being parsed at all, which would make a case pass having asserted nothing.
  * It sits below the footer, where it is neither a table header nor a transaction.
  */
-const statement = (tag: string): PlacedText[][] => [
+const statement = (tag: string, closing = '59,76€'): PlacedText[][] => [
   [
     ISSUER,
     { x: 39.7, y: 15, text: tag },
@@ -66,6 +99,8 @@ const statement = (tag: string): PlacedText[][] => [
     ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
     ...row(660, '3 июл. 2026г.', 'Платеж от JANE DOE', { credit: '100,00€' }),
     ...row(640, '30 июл. 2026г.', 'Wizz Air', { debit: '1 234,56€' }),
+    // the three rows net -1 140,24
+    ...box(620, '1 200,00€', closing),
   ],
 ];
 
@@ -100,6 +135,9 @@ describe('pdf: bytes to rows', () => {
       from: '2026-07-02',
       to: '2026-07-30',
       totals: [{ currency: 'EUR', net: -1140.24 }],
+      // what the statement itself says it started and ended with, and the rows run
+      // exactly between the two - 1200,00 - 1140,24 = 59,76
+      balances: { opening: 1200, closing: 59.76, currency: 'EUR' },
     });
     const imports = await listImports();
     const record = imports.find((i) => i.id === staged.summary.importId)!;
@@ -143,6 +181,8 @@ describe('pdf: bytes to rows', () => {
       drawn.push({ x: X.date, y, text: date });
       drawn.push({ x: X.description, y, text: description });
     }
+    // -16,90 over the three
+    drawn.push(...box(620, '100,00€', '83,10€'));
 
     const r = await importAndConfirm({
       accountName: 'Revolut Drawing Order',
@@ -175,6 +215,10 @@ describe('pdf: bytes to rows', () => {
         ...row(680, '31 июл. 2026г.', 'Rewe', { debit: '5,96€' }),
         ...header(600),
         ...row(580, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
+        // and the gate now says the same thing arithmetically: 100,00 - 5,68 is
+        // 94,32, where taking the pending line too would compute 88,36 and refuse.
+        // Flipping `collect: false` on that table fails this case
+        ...box(540, '100,00€', '94,32€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -225,6 +269,12 @@ describe('pdf: bytes to rows', () => {
         ...row(620, '5 июл. 2026г.', 'Unreadable', { debit: '5,68 EUR' }),
         ...row(600, '32 июл. 2026г.', 'Impossible date', { debit: '3,00€' }),
         ...row(580, '6 июл. 2026г.', 'Aldi', { credit: '9,99€' }),
+        // the two that parsed net +4,31, and the statement agrees - a skipped row
+        // does not have to be a discrepancy. This is also the shape whose confirm
+        // card carries "the rows add up" above "4 rows couldn't be read": both are
+        // true, since the gate checks what was read and a skipped row carrying
+        // money would have broken the sum
+        ...box(540, '100,00€', '104,31€'),
       ],
     ]);
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
@@ -281,6 +331,218 @@ describe('pdf: bytes to rows', () => {
     await expect(importPdf('Revolut Bad Preset', statement('bad preset'), 'not-a-bank')).rejects.toThrow(
       /unknown preset: not-a-bank/,
     );
+  });
+});
+
+/**
+ * ROADMAP 5.3's middle row: a statement whose rows do not run from its own opening
+ * balance to its own closing balance is refused and told what the discrepancy is.
+ *
+ * There is no tolerance constant anywhere in this row's diff, and that is the point
+ * of the first case: one cent of slack hides a systematically dropped fee on a small
+ * statement and lets a template that has drifted import plausible numbers, which
+ * ROADMAP 5.2 calls the one outcome worse than a refusal.
+ */
+describe('pdf: the reconciliation gate', () => {
+  it('a statement one cent out is refused, with the difference named', async () => {
+    const before = await idsNow();
+    await expect(importPdf('Revolut One Cent', statement('one cent', '59,77€'))).rejects.toThrow(
+      'this Revolut statement does not add up: its opening balance of 1200.00 EUR plus the ' +
+        "3 transaction lines read comes to 59.76 EUR, where the statement's own closing " +
+        'balance is 59.77 EUR - a difference of 0.01 EUR, so an operation is probably missing ' +
+        '- export the same statement as CSV or Excel (.xlsx) from your online banking and upload that',
+    );
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
+    // the bytes are what a template fix needs, and they stay re-uploadable because
+    // only a committed import claims the hash
+    expect(failed.documentAvailable).toBe(true);
+    expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * R5: rows the parser could not read ARE the likely cause of a short sum, so the
+   * sentence has to say so rather than report a mystery. A refusal that names a
+   * cause which is not the cause is ROADMAP rows 20 and 23, and this is the row
+   * whose whole subject is a check.
+   */
+  it('names the rows it could not read when they are the likely cause', async () => {
+    await expect(
+      importPdf('Revolut Short Balance', [
+        [
+          ISSUER,
+          ...header(700),
+          ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
+          ...row(660, '3 июл. 2026г.', 'Neither', {}),
+          ...row(640, '4 июл. 2026г.', 'Both', { debit: '1,00€', credit: '2,00€' }),
+          ...row(620, '5 июл. 2026г.', 'Unreadable', { debit: '5,68 EUR' }),
+          ...row(600, '32 июл. 2026г.', 'Impossible date', { debit: '3,00€' }),
+          ...box(560, '100,00€', '90,00€'),
+        ],
+      ]),
+    ).rejects.toThrow(
+      'its opening balance of 100.00 EUR plus the 1 transaction line read comes to 94.32 EUR, ' +
+        "where the statement's own closing balance is 90.00 EUR - a difference of 4.32 EUR, " +
+        'and the 4 transaction lines this importer could not read are probably where it went',
+    );
+  });
+
+  /**
+   * R3. Confirm inserts a subset - an overlapping statement's rows are already in
+   * the database and are skipped there - so a gate re-run at confirm would refuse
+   * every legitimate overlapping import, which is the common case ROADMAP 4.3's
+   * second layer exists for.
+   */
+  it('does not run again at confirm, where fewer rows are inserted than staged', async () => {
+    const name = 'Revolut Overlapping Months';
+    const first = await importAndConfirm({
+      accountName: name,
+      currency: 'EUR',
+      bytes: buildPdf(statement('overlap first')),
+    });
+    expect(first.inserted).toBe(3);
+
+    // the same three lines and one more, with the statement's own balances moved to
+    // match: 1 200,00 - 1 140,24 - 12,99 = 46,77
+    const staged = await importPdf(name, [
+      [
+        ISSUER,
+        { x: 39.7, y: 15, text: 'overlap second' },
+        ...header(700),
+        ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
+        ...row(660, '3 июл. 2026г.', 'Платеж от JANE DOE', { credit: '100,00€' }),
+        ...row(640, '30 июл. 2026г.', 'Wizz Air', { debit: '1 234,56€' }),
+        ...row(620, '31 июл. 2026г.', 'Netflix', { debit: '12,99€' }),
+        ...box(600, '1 200,00€', '46,77€'),
+      ],
+    ]);
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+    expect(staged.summary).toMatchObject({ accepted: 4, newRows: 1, alreadyPresent: 3 });
+
+    const confirmed = await confirmImport(staged.summary.importId);
+    expect(confirmed?.confirmed).toBe(true);
+    expect(confirmed?.inserted).toBe(1);
+  });
+
+  /**
+   * Trap 4, at the smallest scale it happens at: 0.1 + 0.2 is 0.30000000000000004,
+   * so a gate written in decimals refuses this statement. The real document is the
+   * same fact at scale - its 70 amounts sum to 123.45000000000002.
+   */
+  it('a statement whose amounts are not exact in binary floating point reconciles', async () => {
+    const staged = await importPdf('Revolut Exact Cents', [
+      [
+        ISSUER,
+        ...header(700),
+        ...row(680, '2 июл. 2026г.', 'Cashback', { credit: '0,10€' }),
+        ...row(660, '3 июл. 2026г.', 'Interest', { credit: '0,20€' }),
+        ...box(640, '0,00€', '0,30€'),
+      ],
+    ]);
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+    expect(staged.summary.balances).toEqual({ opening: 0, closing: 0.3, currency: 'EUR' });
+  });
+
+  /**
+   * The locator's own refusals, which are the parser's and live in pdf.ts. Zero and
+   * two are one sentence on purpose (D6): a layout that repeats the label is a
+   * layout nobody has measured, and taking the first of several is the guess this
+   * parser exists not to make.
+   */
+  const boxCases: [string, PlacedText[], RegExp][] = [
+    [
+      'no balance summary at all',
+      [],
+      /could not read its balance summary: it expects exactly one "Итого" line and found 0/,
+    ],
+    [
+      'two of them',
+      [...box(640, '1 200,00€', '59,76€'), ...box(600, '1 200,00€', '59,76€')],
+      /it expects exactly one "Итого" line and found 2/,
+    ],
+    [
+      // the group separator gone is the smallest drift a redesign can produce, and
+      // it must not be read as 1 200,00 by a laxer pattern
+      'an opening balance this template cannot read',
+      box(640, '1200,00€', '59,76€'),
+      /the opening balance cell of its "Итого" line reads "1200,00€", where this template reads an amount like "1 234,56€"/,
+    ],
+    [
+      'a closing balance that is not there',
+      box(640, '1 200,00€', ''),
+      /the closing balance cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+    ],
+  ];
+
+  for (const [what, balances, message] of boxCases) {
+    it(`${what} refuses the statement and leaves the document behind`, async () => {
+      const before = await idsNow();
+      await expect(
+        importPdf(`Revolut Box ${what}`, [
+          [
+            ISSUER,
+            ...header(700),
+            ...row(680, '2 июл. 2026г.', 'REWE.de', { debit: '5,68€' }),
+            ...balances,
+          ],
+        ]),
+      ).rejects.toThrow(message);
+
+      const failed = await lastFailure(before);
+      expect(failed.status).toBe('failed');
+      expect(failed.documentAvailable).toBe(true);
+      expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+    });
+  }
+
+  /**
+   * Trap 5, and it is unreachable through any fixture in this repository: the one
+   * template declares a single currency symbol, and a cell carrying another is a
+   * skipped row rather than a second currency. So the arm is called directly, the
+   * way readSheet's `never` default is - it exists for 6c, and a comparison against
+   * whichever entry came first is what it refuses to become.
+   */
+  describe('a statement whose rows are not all in the balance currency', () => {
+    const tx = (currency: string, amount: number): NewTransaction => ({
+      accountId: 'csv:mixed',
+      provider: 'upload',
+      amount,
+      currency,
+      date: '2026-07-02T00:00:00.000Z',
+      description: 'x',
+      category: 'other',
+    });
+
+    const parsed = (currency: string): ParsedFile => ({
+      kind: 'pdf',
+      sheet: { rows: [], rowLabel: (i) => i },
+      preset: null,
+      mapping: {},
+      template: 'revolut-ru',
+      title: 'Revolut',
+      balances: { openingCents: 0, closingCents: 3000, currency },
+    });
+
+    it('refuses rather than checking against whichever currency came first', () => {
+      expect(() => reconcile(parsed('EUR'), [tx('EUR', 10), tx('PLN', 20)], 0)).toThrow(
+        'this Revolut statement states its balances in EUR, but the lines read are in EUR, PLN' +
+          ' - this importer cannot check a statement that mixes currencies',
+      );
+    });
+
+    it("refuses one currency that is not the balances' either", () => {
+      expect(() => reconcile(parsed('EUR'), [tx('PLN', 30)], 0)).toThrow(
+        'states its balances in EUR, but the lines read are in PLN',
+      );
+    });
+
+    it('names three and counts the rest', () => {
+      const many = ['AAA', 'BBB', 'CCC', 'DDD', 'EEE'].map((c) => tx(c, 1));
+      expect(() => reconcile(parsed('EUR'), many, 0)).toThrow(
+        'the lines read are in AAA, BBB, CCC and 2 more',
+      );
+    });
   });
 });
 
@@ -473,6 +735,9 @@ describe('the diagnostic budget', () => {
           ...row(680, `2 ${long}. 2026г.`, long, { debit: `${long},00€`, credit: '1,00€' }).map(
             tiny,
           ),
+          // readPdf reads the box but never checks it - the gate is mapAndStore's,
+          // and this case is about what a note costs, not what a statement sums to
+          ...box(640, '1,00€', '1,00€'),
         ],
       ]),
       200,
@@ -489,5 +754,82 @@ describe('the diagnostic budget', () => {
     // was derived from. Asserted against the constant, so raising it goes red here
     // rather than silently off the end of an unrelated workbook's notice
     expect(`row 50000: the amount cell ${'x'.repeat(NOTE_MAX)}`.length).toBeLessThanOrEqual(159);
+  });
+
+  /**
+   * And the gate's own longest sentence, composed rather than measured by hand:
+   * ROADMAP row 21 exists because a margin was held by arithmetic somebody did once.
+   *
+   * The extreme is the R5 form - the longer of the two - with MAX_DATA_ROWS lines
+   * read AND that many skipped, every amount at the longest toFixed(2) produces
+   * before it switches to exponential notation (24 characters), and the currency at
+   * the bound statement.ts puts on one. The running sum carries a sign on top of
+   * that: the two balances are non-negative because the template's amount pattern
+   * has no sign, but a statement whose rows net downwards past its opening balance
+   * is ordinary, so the widest of the four amounts is 25 characters and the extreme
+   * is composed with it. Both refusals are composed here rather than measured, so
+   * raising any of those goes red instead of silently off the end of what
+   * error_detail keeps.
+   */
+  it("the gate's longest refusals fit what error_detail keeps", () => {
+    // built FROM the bound rather than beside it: written as a literal wide enough
+    // today, it stops reaching the bound the moment the bound is raised, and these
+    // assertions go on passing over a sentence that has grown past 500
+    const CCY = 'A'.repeat(CURRENCY_CODE_MAX + 2);
+    const tx = (currency: string, amount: number): NewTransaction => ({
+      accountId: 'csv:budget',
+      provider: 'upload',
+      amount,
+      currency,
+      date: '2026-07-02T00:00:00.000Z',
+      description: 'x',
+      category: 'other',
+    });
+    const parsed = (currency: string): ParsedFile => ({
+      kind: 'pdf',
+      sheet: { rows: [], rowLabel: (i) => i },
+      preset: null,
+      mapping: {},
+      template: 'revolut-ru',
+      title: 'Revolut',
+      // opening 1e20 and closing 1e20, so the case below - whose rows net -2e20 -
+      // puts the running sum at -1e20 and the difference at 2e20
+      balances: { openingCents: 1e22, closingCents: 1e22, currency },
+    });
+    const refusalOf = (run: () => unknown): string => {
+      try {
+        run();
+      } catch (e) {
+        return (e as Error).message;
+      }
+      throw new Error('did not refuse');
+    };
+
+    const short = refusalOf(() => reconcile(parsed('EUR'), [tx('EUR', 1e20)], 0));
+    expect(short).toContain('100000000000000000000.00 EUR');
+    expect(short).toContain('so an operation is probably missing');
+
+    const longest = refusalOf(() =>
+      reconcile(
+        parsed(CCY),
+        Array.from({ length: MAX_DATA_ROWS }, (_, i) => tx(CCY, i === 0 ? -2e20 : 0)),
+        MAX_DATA_ROWS,
+      ),
+    );
+    expect(longest).toContain('are probably where it went');
+    expect(longest).toContain('-100000000000000000000.00');
+    expect(longest.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+
+    // and the other one, at its own extreme: three codes named and the rest counted,
+    // each as wide as the bound lets one be
+    const mixed = refusalOf(() =>
+      reconcile(
+        parsed(CCY),
+        ['A', 'B', 'C', 'D', 'E'].map((c) => tx(c.repeat(CURRENCY_CODE_MAX + 2), 1)),
+        0,
+      ),
+    );
+    expect(mixed).toContain('and 2 more');
+    expect(mixed.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
   });
 });

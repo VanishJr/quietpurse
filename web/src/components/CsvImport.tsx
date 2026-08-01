@@ -350,6 +350,19 @@ export function CsvImport({ onBack, onImported }: Props) {
             .
           </p>
           {/*
+            Only when the format states its own balances, which today means a PDF. A
+            "couldn't be reconciled" line on the CSV path would be a warning about
+            nothing on 100% of imports — those files carry no balances by construction.
+          */}
+          {summary.balances && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              Checked against the statement's own balances:{' '}
+              {fmtMoney(summary.balances.opening, summary.balances.currency)} at the start,{' '}
+              {fmtMoney(summary.balances.closing, summary.balances.currency)} at the end. The
+              rows add up.
+            </p>
+          )}
+          {/*
             The backend counts `skipped` for rows it couldn't read. Rows it read fine but
             has already stored aren't counted anywhere — they're dropped by their contents
             on insert — so duplicates are whatever is left over. Without spelling that out,

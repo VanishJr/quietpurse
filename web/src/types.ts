@@ -157,6 +157,13 @@ export interface ImportSummary {
   to: string;
   /** net movement per currency: a file with a currency column carries more than one */
   totals: { currency: string; net: number }[];
+  /**
+   * The statement's own opening and closing balance, which the backend checked these
+   * rows add up between. Absent means the format states none — CSV and Excel never
+   * do — and never means a check that failed: a statement that does not add up is
+   * refused, so no summary is sent for one.
+   */
+  balances?: { opening: number; closing: number; currency: string };
   /** an earlier upload of these same bytes was waiting, and has been discarded */
   supersededImportId?: string;
 }

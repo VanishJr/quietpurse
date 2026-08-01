@@ -50,7 +50,7 @@ import {
   matchColumn,
   parseCsv,
 } from './csv';
-import { PDF_PARSER_VERSION, readPdf } from './pdf';
+import { PDF_PARSER_VERSION, StatementBalances, readPdf } from './pdf';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
 import { XLSX_PARSER_VERSION, readXlsx } from './xlsx';
 
@@ -140,6 +140,35 @@ export interface StatementImportRequest {
   uploadedBy?: string;
 }
 
+declare const checked: unique symbol;
+
+/**
+ * The file's net movement per currency, and the balances it was checked against.
+ * Both are branded, and the brand is the point rather than decoration: neither type
+ * can be produced outside `reconcile` without writing the assertion that says so,
+ * and `reconcile` is also the only thing that throws on a statement whose rows do
+ * not add up. `ImportSummary.totals` is required, so deleting the reconcile call
+ * leaves nothing able to fill it and `tsc` says so - the gate cannot be dropped by
+ * an edit that still compiles, only by one that spells the cast out.
+ *
+ * That is why `totals` carries a brand despite not being about balances at all: it
+ * is the required field, so it is the one that holds the call. Phantom, so the wire
+ * shape does not move and web/src/types.ts mirrors plain objects.
+ */
+export type CheckedTotals = readonly { currency: string; net: number }[] & {
+  readonly [checked]: true;
+};
+
+export type CheckedBalances = {
+  opening: number;
+  closing: number;
+  currency: string;
+} & { readonly [checked]: true };
+
+/** The one place either brand is applied, and it is private to this module. */
+const check = <T>(value: T): T & { readonly [checked]: true } =>
+  value as T & { readonly [checked]: true };
+
 /**
  * What was read, for the user to accept or reject. Nothing here is in the database
  * yet: the rows are staged (ROADMAP 5.3) and become data only on Confirm.
@@ -170,7 +199,14 @@ export interface ImportSummary {
   from: string;
   to: string;
   /** net total per currency: a file with a currency column can carry more than one */
-  totals: { currency: string; net: number }[];
+  totals: CheckedTotals;
+  /**
+   * The statement's own opening and closing balance, which these rows were checked
+   * to add up between. Absent means the format states none - CSV and XLSX never do -
+   * and never means a check that failed: a mismatch throws, so no summary is built
+   * for one at all.
+   */
+  balances?: CheckedBalances;
   /**
    * An earlier upload of these same bytes was still awaiting confirmation and has
    * been discarded to make room for this one. A field rather than a sentence: the
@@ -323,8 +359,9 @@ export async function importStatement(
     // which layout read it is genuinely useful to someone about to confirm, and it
     // still does not go in `problems`: the client renders those under "N rows
     // couldn't be read", so "read as a Revolut statement" would land under a
-    // sentence saying it could not be (Ruling 4). It reaches the screen in 6b.
-    if (parsed.template) logImport.info(`import ${record.id}: read as ${parsed.template}`);
+    // sentence saying it could not be (Ruling 4). What the layout DID reach the
+    // screen with is its balances, as a field of the summary and not a sentence.
+    if (parsed.kind === 'pdf') logImport.info(`import ${record.id}: read as ${parsed.template}`);
     return await mapAndStore(req, parsed, accountId, record.id, fileHash);
   } catch (e) {
     await failImport(record.id, (e as Error).message);
@@ -344,14 +381,33 @@ function presetMapping(preset: string | undefined): CsvPresetMapping | null {
  * preset and the mapping travel with the sheet rather than being read off the
  * request a second time, because for one format they are not the request's to
  * decide - see the pdf arm below.
+ *
+ * A union and not one shape with optional fields: the balances are required on the
+ * arm that has them and absent from the arms that cannot, so `reconcile` switching
+ * on `kind` is total, and a csv sheet cannot acquire an optional balance field that
+ * spells "no balances" and "the template lost the closing balance" the same way
+ * (row 6a, Ruling 1).
+ *
+ * Exported for the test, like readSheet below and for the same reason.
  */
-interface ParsedFile {
-  sheet: Sheet;
-  preset: CsvPresetMapping | null;
-  mapping: Partial<CsvMapping> | undefined;
-  /** which template read it, for the log - only the PDF path has one */
-  template?: string;
-}
+export type ParsedFile =
+  | {
+      kind: 'sheet';
+      sheet: Sheet;
+      preset: CsvPresetMapping | null;
+      mapping: Partial<CsvMapping> | undefined;
+    }
+  | {
+      kind: 'pdf';
+      sheet: Sheet;
+      preset: null;
+      mapping: Partial<CsvMapping>;
+      /** which template read it, for the log */
+      template: string;
+      /** and how it names the layout in a sentence a person reads */
+      title: string;
+      balances: StatementBalances;
+    };
 
 /**
  * Exported for the test, like noRowsParsed below and for the same reason - the
@@ -366,6 +422,7 @@ export async function readSheet(
   switch (sourceType) {
     case 'xlsx':
       return {
+        kind: 'sheet',
         sheet: await readXlsx(req.bytes, (header) => resolveColumns(header, preset, req.mapping)),
         preset,
         mapping: req.mapping,
@@ -374,6 +431,7 @@ export async function readSheet(
       const text = decodeCsv(req.bytes);
       const delimiter = req.mapping?.delimiter ?? preset?.delimiter ?? detectDelimiter(text);
       return {
+        kind: 'sheet',
         sheet: { rows: parseCsv(text, delimiter), rowLabel: (i) => i + 1 },
         preset,
         mapping: req.mapping,
@@ -386,10 +444,13 @@ export async function readSheet(
       // PDF has neither for them to name - so a chip the user may not remember
       // picking must not decide whether their statement imports (Ruling 3).
       return {
+        kind: 'pdf',
         sheet: parsed.sheet,
         preset: null,
         mapping: parsed.columns,
         template: parsed.template,
+        title: parsed.title,
+        balances: parsed.balances,
       };
     }
     default: {
@@ -638,6 +699,13 @@ async function mapAndStore(
     throw new Error(noRowsParsed(skipped, rowProblems, notices, status));
   }
 
+  // Ahead of the staging, so a statement that will be refused stages nothing. And
+  // here rather than at confirm: confirm inserts a subset - an overlapping
+  // statement's rows are already present and are skipped - so a gate re-run there
+  // would refuse every legitimate overlapping import, which is the common case
+  // ROADMAP 4.3's second layer exists for.
+  const reconciled = reconcile(parsed, txs, skipped);
+
   // The account is deliberately NOT created here. One created now would stand on
   // Overview with a balance of 0 before the user confirmed anything, and would
   // outlive a discard permanently - there is no account delete yet. So the name and
@@ -687,26 +755,146 @@ async function mapAndStore(
       alreadyPresent: txs.length - newRows,
       from: days[0],
       to: days[days.length - 1],
-      totals: netByCurrency(txs),
+      totals: reconciled.totals,
+      ...(reconciled.balances ? { balances: reconciled.balances } : {}),
       ...(superseded[0] ? { supersededImportId: superseded[0] } : {}),
     },
   };
 }
 
 /**
- * The net movement of the file, per currency. Summed in minor units rather than in
- * decimals for the same reason the database stores them that way - a sum of floats
- * drifts (see money.ts). One line for the overwhelming case; a file with a currency
- * column carries more than one, and a single labelled number would be wrong for it.
+ * How many codes a refusal names before it counts the rest, and what one may spend.
+ * An ISO 4217 code is three characters, and neither bound is reached by anything in
+ * the tree - the upload route takes three letters, and a PDF's codes are literals in
+ * the template that read it. They exist because the sentence below carries four
+ * amounts and up to four codes, and it is asserted against ERROR_DETAIL_MAX: an
+ * assertion over a value nothing bounds is an assertion about the day it was
+ * written. At six, the longer of the two refusals below composes 484 of the 500 at
+ * its own extreme - MAX_DATA_ROWS lines read, as many skipped, every amount at the
+ * widest toFixed(2) produces, and the running sum negative, which is the only one
+ * of the four that can carry a sign.
+ *
+ * The code bound is exported for exactly that assertion, which builds its codes FROM
+ * it rather than beside it: a literal wide enough today stops reaching the bound the
+ * moment the bound is raised, and the assertion then goes on passing over a sentence
+ * that has grown past what error_detail keeps (row 6b, D10).
  */
-function netByCurrency(txs: NewTransaction[]): { currency: string; net: number }[] {
+const CURRENCY_LIST_MAX = 3;
+export const CURRENCY_CODE_MAX = 6;
+
+const currencyList = (codes: string[]): string => {
+  const shown = codes.slice(0, CURRENCY_LIST_MAX).map((c) => bounded(c, CURRENCY_CODE_MAX));
+  const rest = codes.length - shown.length;
+  return rest ? `${shown.join(', ')} and ${rest} more` : shown.join(', ');
+};
+
+const lineCount = (n: number): string => `${n} transaction line${n === 1 ? '' : 's'}`;
+
+/**
+ * How a statement's own amounts are written back to the person holding it. A dot and
+ * an ISO code, not the document's own separator: the layout's decimal convention is
+ * a fact about the template, which this module cannot see and the next template will
+ * spell differently.
+ */
+const money = (cents: number, currency: string): string =>
+  `${fromCents(cents).toFixed(2)} ${bounded(currency, CURRENCY_CODE_MAX)}`;
+
+/**
+ * The two ways the gate refuses. They live here rather than beside the parser's own
+ * refusals in pdf.ts because both name counts of MAPPED rows, which pdf.ts cannot
+ * see (row 6b, D2, and the amended comment above pdf.ts's refusal set).
+ *
+ * `skipped` decides which cause is named, and it is in the head clause rather than
+ * appended: rows the parser could not read ARE the likely cause of a short sum, and
+ * naming a mystery instead would be a refusal blaming something that is not to
+ * blame. With nothing skipped, "an operation is probably missing" is the honest
+ * wording - a line dropped before it was ever a candidate is counted nowhere, and
+ * this sum is the only thing that can notice it.
+ */
+const doesNotAddUp = (
+  title: string,
+  balances: StatementBalances,
+  net: number,
+  accepted: number,
+  skipped: number,
+): string => {
+  const { openingCents, closingCents, currency } = balances;
+  const cause = skipped
+    ? `, and the ${lineCount(skipped)} this importer could not read are probably where it went`
+    : ', so an operation is probably missing';
+  return `this ${title} statement does not add up: its opening balance of ${money(openingCents, currency)} plus the ${lineCount(accepted)} read comes to ${money(openingCents + net, currency)}, where the statement's own closing balance is ${money(closingCents, currency)} - a difference of ${money(Math.abs(openingCents + net - closingCents), currency)}${cause} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+};
+
+const mixedCurrencies = (title: string, currency: string, found: string[]): string =>
+  `this ${title} statement states its balances in ${bounded(currency, CURRENCY_CODE_MAX)}, but the lines read are in ${currencyList(found)} - this importer cannot check a statement that mixes currencies - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+/**
+ * The net movement of the file per currency, and - for a format that states its own
+ * balances - the check that the rows actually run from the opening one to the
+ * closing one.
+ *
+ * The two are one pass on purpose. The number a person reads before confirming and
+ * the number the gate checks have to come out of the same loop, or they drift with
+ * nothing failing until somebody reads a wrong one; it is the argument ROADMAP 5.3
+ * already makes about `newRows` coming from the key generator the confirm uses.
+ *
+ * Summed in minor units rather than decimals for the reason money.ts gives, and here
+ * it is not theoretical: the real statement's 70 amounts summed as decimals miss its
+ * closing balance by a ten-thousandth of a cent, and an exact comparison refuses
+ * that. Exactly, with no tolerance anywhere - one cent of slack hides a
+ * systematically dropped fee on a small statement and lets a drifted template import
+ * plausible numbers, which ROADMAP 5.2 says is the one outcome worse than refusing.
+ *
+ * Exported for the test, like readSheet and noRowsParsed and for the same reason:
+ * the mixed-currency arm is unreachable through today's one template, which declares
+ * a single currency symbol, so nothing else can watch it throw.
+ */
+export function reconcile(
+  parsed: ParsedFile,
+  txs: NewTransaction[],
+  skipped: number,
+): { totals: CheckedTotals; balances?: CheckedBalances } {
   const cents = new Map<string, number>();
   for (const t of txs) {
     cents.set(t.currency, (cents.get(t.currency) ?? 0) + toCents(t.amount));
   }
-  return [...cents.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([currency, sum]) => ({ currency, net: fromCents(sum) }));
+  // one line for the overwhelming case; a file with a currency column carries more
+  // than one, and a single labelled number would be wrong for it
+  const totals = check(
+    [...cents.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([currency, sum]) => ({ currency, net: fromCents(sum) })),
+  );
+
+  switch (parsed.kind) {
+    case 'sheet':
+      return { totals };
+    case 'pdf': {
+      const { balances, title } = parsed;
+      const net = cents.get(balances.currency);
+      // a balance is stated in one currency, so a file carrying two cannot be
+      // checked against it - and picking whichever entry came first would be a
+      // comparison against a number that is not the one printed
+      if (net === undefined || cents.size !== 1) {
+        throw new Error(mixedCurrencies(title, balances.currency, [...cents.keys()].sort()));
+      }
+      if (balances.openingCents + net !== balances.closingCents) {
+        throw new Error(doesNotAddUp(title, balances, net, txs.length, skipped));
+      }
+      return {
+        totals,
+        balances: check({
+          opening: fromCents(balances.openingCents),
+          closing: fromCents(balances.closingCents),
+          currency: balances.currency,
+        }),
+      };
+    }
+    default: {
+      const unreachable: never = parsed;
+      throw new Error(`unhandled parsed file: ${String(unreachable)}`);
+    }
+  }
 }
 
 /**

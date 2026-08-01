@@ -602,7 +602,7 @@ describe('workspace isolation', () => {
    * race. The structural argument above is what covers the case it cannot reach.
    */
   it('two workspaces importing PDFs in sequence keep their rows to themselves', async () => {
-    const pdf = (label: string, day: string, amount: string): Buffer =>
+    const pdf = (label: string, day: string, amount: string, closing: string): Buffer =>
       buildPdf([
         [
           { x: 39.7, y: 27.1, text: '© 2026 Revolut Bank UAB, Zweigniederlassung Deutschland' },
@@ -613,6 +613,11 @@ describe('workspace isolation', () => {
           { x: 42.7, y: 680, text: day },
           { x: 124.8, y: 680, text: label },
           { x: 335.1, y: 680, text: amount },
+          // the balance summary the reconciliation gate checks against (row 6b):
+          // 100,00 less the one debit
+          { x: 42.7, y: 640, text: 'Итого' },
+          { x: 253.0, y: 640, text: '100,00€' },
+          { x: 526.2, y: 640, text: closing },
         ],
       ]);
 
@@ -629,8 +634,14 @@ describe('workspace isolation', () => {
         return staged.summary.accountId;
       });
 
-    const mine = await importPdf(TEST_WORKSPACE_ID, pdf('Mine only', '4 июл. 2026г.', '11,11€'));
-    const theirs = await importPdf(OTHER, pdf('Theirs only', '5 июл. 2026г.', '22,22€'));
+    const mine = await importPdf(
+      TEST_WORKSPACE_ID,
+      pdf('Mine only', '4 июл. 2026г.', '11,11€', '88,89€'),
+    );
+    const theirs = await importPdf(
+      OTHER,
+      pdf('Theirs only', '5 июл. 2026г.', '22,22€', '77,78€'),
+    );
     // the same account id in both, so a query that forgot the workspace would see
     // four rows rather than two
     expect(theirs).toBe(mine);

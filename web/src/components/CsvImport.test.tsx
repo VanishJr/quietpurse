@@ -71,6 +71,36 @@ describe('the summary panel', () => {
     expect(screen.getByText(/rows couldn't be read/)).toBeInTheDocument();
     expect(screen.getByText(/An earlier upload of this same file/)).toBeInTheDocument();
   });
+
+  /**
+   * The reconciliation line, and the half that matters more: CSV and Excel state no
+   * balances at all, which is 100% of imports today. A "couldn't be reconciled"
+   * sentence on that path would be a warning about nothing on the common path — the
+   * summary fixture carries no `balances`, and the first case above is where its
+   * absence is asserted.
+   */
+  it('names the balances it was checked against, and only when there are any', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container, unmount } = mount();
+    await upload(container);
+    expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
+    expect(screen.queryByText(/Checked against the statement/)).not.toBeInTheDocument();
+    unmount();
+
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(summaryResult({ balances: { opening: 1200, closing: 59.76, currency: 'EUR' } })),
+    });
+    const second = mount();
+    await upload(second.container);
+    // the numbers, not the shape: the sentence names two of them and reads the same
+    // either way round, so an assertion over its wording alone passes on a card that
+    // tells the user their statement began at what it ended with
+    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+      /1,200 EUR at the start, 59\.76 EUR at the end\. The rows add up\./,
+    );
+  });
 });
 
 describe('confirm', () => {
