@@ -17,6 +17,7 @@
  * plausible numbers, which is the one outcome worse than a refusal (ROADMAP 5.2).
  */
 import { getDocument, PasswordException, VerbosityLevel } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { toCents } from '../money';
 import { CsvMapping, parseAmount } from './csv';
 import { Cell, Sheet } from './sheet';
 
@@ -24,22 +25,43 @@ import { Cell, Sheet } from './sheet';
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
  */
-export const PDF_PARSER_VERSION = 1;
+export const PDF_PARSER_VERSION = 2;
+
+/**
+ * What the document says it started and ended with, for the whole statement rather
+ * than for one of the products inside it.
+ *
+ * Minor units, because the gate that compares these to the rows compares integers.
+ * The real statement's 70 amounts summed as decimals come to 123.45000000000002,
+ * which against a closing balance of 579.85 is a refused import and a wrong one
+ * (ROADMAP 4.6). A field named `openingCents` cannot be compared with a decimal sum
+ * by accident.
+ */
+export interface StatementBalances {
+  openingCents: number;
+  closingCents: number;
+  /** the ISO code the box's own cells carry, through the template's amount map */
+  currency: string;
+}
 
 /**
  * What the PDF frontend answers with (ROADMAP row 6a, Ruling 1). A Sheet the shared
- * mapper reads, and the facts only this format carries. 6b's opening and closing
- * balance, the statement currency and the IBAN attach HERE rather than to Sheet:
- * required per template, so that "this format has no balances" and "the template
- * was supposed to find the closing balance and did not" cannot be spelled the same
- * way. Sheet is produced by three frontends and two of them can never carry one.
+ * mapper reads, and the facts only this format carries. The opening and closing
+ * balance and the statement currency attach HERE rather than to Sheet, and required
+ * rather than optional, so that "this format has no balances" and "the template was
+ * supposed to find the closing balance and did not" cannot be spelled the same way.
+ * Sheet is produced by three frontends and two of them can never carry one. The IBAN
+ * is the same argument and is not extracted yet: nothing stores it (row 6b).
  */
 export interface PdfStatement {
   sheet: Sheet;
   /** which template matched - a log line, never a row problem (Ruling 4) */
   template: string;
+  /** the same template's `title`: what a refusal composed downstream names it by */
+  title: string;
   /** the columns of `sheet`, named by this module and never by the request */
   columns: Partial<CsvMapping>;
+  balances: StatementBalances;
 }
 
 /**
@@ -70,12 +92,21 @@ export const NOTE_MAX = 132;
 const CELL_QUOTE_MAX = 24;
 
 /**
- * Every way this parser can refuse, in one place so that no two of them can come to
+ * Every way THIS PARSER can refuse, in one place so that no two of them can come to
  * read alike. All of them are composed inside ERROR_DETAIL_MAX; the longest, at the
- * extreme of the one number and the one quote any of them carries, is 206.
+ * extreme of the one number and the one quote any of them carries, is 273 - counting
+ * a template's own literals, its title and its currency codes, as the short things
+ * the templates in this file write.
+ *
+ * Not every way an import of a PDF can refuse: the reconciliation gate's two
+ * sentences live beside `reconcile` in statement.ts, because they name counts of
+ * MAPPED rows - how many lines became transactions, how many were skipped - which
+ * this module never sees. Keeping them here would mean exporting message builders to
+ * be called with numbers from the other side of the seam, which couples the two
+ * modules for the sake of one file (row 6b, D2).
  *
  * The first two are what the document turned out not to be, the next two what no
- * template could make of it, and the last two what a template found and could not
+ * template could make of it, and the rest what a template found and could not
  * finish. Each says what to do instead, and none of them is a dead end: CSV and
  * Excel from the same online banking import today, which for as long as the
  * template list is short is the common path rather than a rough edge (ROADMAP,
@@ -105,6 +136,26 @@ const unreadableTable = (title: string, cell: string): string =>
  */
 const noTransactionLines = (title: string): string =>
   `this looks like a ${title} statement but no transaction lines were found in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking`;
+
+const noBalanceBox = (title: string, label: string, found: number): string =>
+  `this looks like a ${title} statement but this importer could not read its balance summary: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+const unreadableBalance = (
+  title: string,
+  which: 'opening' | 'closing',
+  label: string,
+  cell: string,
+  example: string,
+): string =>
+  `this looks like a ${title} statement but the ${which} balance cell of its "${label}" line reads ${quote(cell)}, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+const mixedBalanceCurrencies = (
+  title: string,
+  label: string,
+  opening: string,
+  closing: string,
+): string =>
+  `this looks like a ${title} statement but its "${label}" line states an opening balance in ${opening} and a closing balance in ${closing} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /** Cut with a mark, so a value with more behind it does not read as the whole one. */
 const bounded = (text: string, max: number): string =>
@@ -151,6 +202,26 @@ interface AmountFormat {
   example: string;
 }
 
+/**
+ * Where the layout states the statement's own opening and closing balance, for the
+ * whole document rather than for one of its products.
+ *
+ * Required and total, the same way PdfTable's header is total over ColumnKey. A
+ * variant meaning "this layout states no balances" is what would let a template
+ * author who could not find the box write it away, and the weakest parser in the
+ * product would then ship with its only check switched off by a data literal - on
+ * exactly the layouts whose author was least sure of what they were reading. A
+ * document that does not state its balances is not importable today (ROADMAP 5.3,
+ * row 3 of the table) and is refused by simply not being a template.
+ */
+interface BalanceBox {
+  /** the literal the totals line carries in `label` */
+  total: string;
+  label: Span;
+  opening: Span;
+  closing: Span;
+}
+
 interface PdfTemplate {
   /** reaches logImport.info, never the user */
   id: string;
@@ -170,6 +241,7 @@ interface PdfTemplate {
   tables: readonly PdfTable[];
   dateFormat: DateFormat;
   amount: AmountFormat;
+  balances: BalanceBox;
 }
 
 // ---------- dates ----------
@@ -332,19 +404,18 @@ async function readLines(
   }
 }
 
-const cellsOf = (template: PdfTemplate, line: TextLine): Cells => {
-  const cell = (span: Span): string =>
-    line.items
-      .filter((i) => i.x >= span[0] && i.x < span[1])
-      .map((i) => i.text)
-      .join(' ');
-  return {
-    date: cell(template.columns.date),
-    description: cell(template.columns.description),
-    debit: cell(template.columns.debit),
-    credit: cell(template.columns.credit),
-  };
-};
+const cellAt = (line: TextLine, span: Span): string =>
+  line.items
+    .filter((i) => i.x >= span[0] && i.x < span[1])
+    .map((i) => i.text)
+    .join(' ');
+
+const cellsOf = (template: PdfTemplate, line: TextLine): Cells => ({
+  date: cellAt(line, template.columns.date),
+  description: cellAt(line, template.columns.description),
+  debit: cellAt(line, template.columns.debit),
+  credit: cellAt(line, template.columns.credit),
+});
 
 const tableOf = (template: PdfTemplate, cells: Cells): PdfTable | undefined =>
   template.tables.find((t) =>
@@ -481,6 +552,74 @@ function readRows(
 }
 
 /**
+ * What the document says it started and ended with, off the one line that states it
+ * for the whole statement.
+ *
+ * Exactly one such line is required - not the first of several. A layout that
+ * repeats the label is a layout nobody has measured, and taking the first is the
+ * guess this parser exists not to make.
+ *
+ * There is no header assertion fingerprinting this box the way `matches` fingerprints
+ * the transaction table, and the reason is measured rather than economic: in the one
+ * document this was written against, the closing column's heading wraps onto two
+ * baselines either side of the header row, so the assertion could only ever be
+ * partial - and a table named in half its columns is a table whose shape is not
+ * known. What stands in its place is stronger: the gate makes the locator
+ * self-checking. Any misread of the box - a column inserted, the two values swapped,
+ * the wrong line matched - changes the arithmetic and refuses the import.
+ */
+function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalances {
+  const { balances } = template;
+  const found = lines.filter((l) => cellAt(l, balances.label) === balances.total);
+  if (found.length !== 1) {
+    throw new Error(noBalanceBox(template.title, balances.total, found.length));
+  }
+
+  // the same pattern, decimal and currency map the transaction amounts are read
+  // with, so a balance in a shape this template does not read is refused exactly as
+  // an amount cell is. There is deliberately no sign in it: the transaction columns
+  // decide the sign, and what an overdrawn statement writes here is unmeasured, so
+  // one is refused loudly with its cell quoted back rather than guessed at.
+  const read = (span: Span, which: 'opening' | 'closing'): { value: number; currency: string } => {
+    const raw = cellAt(found[0], span);
+    const m = template.amount.pattern.exec(raw);
+    const currency = m ? template.amount.currency[m[2]] : undefined;
+    const value = m ? parseAmount(m[1], template.amount.decimal) : null;
+    if (currency === undefined || value === null) {
+      throw new Error(
+        unreadableBalance(template.title, which, balances.total, raw, template.amount.example),
+      );
+    }
+    return { value, currency };
+  };
+
+  const opening = read(balances.opening, 'opening');
+  const closing = read(balances.closing, 'closing');
+  // Unreachable with the one template here, and untested for that reason: TEMPLATES
+  // is module-private and revolut-ru declares a single currency symbol, so both cells
+  // are read through the one map and can only agree. Nobody should spend an hour
+  // building a case for it - the row that adds a second template is where it becomes
+  // reachable, and it owes it a test rather than a document (ROADMAP row 6c). It is
+  // here rather than absent because the alternative is taking one cell's currency for
+  // both, which is a check against a number that is not the one printed.
+  if (opening.currency !== closing.currency) {
+    throw new Error(
+      mixedBalanceCurrencies(
+        template.title,
+        balances.total,
+        opening.currency,
+        closing.currency,
+      ),
+    );
+  }
+  return {
+    openingCents: toCents(opening.value),
+    closingCents: toCents(closing.value),
+    currency: opening.currency,
+  };
+}
+
+/**
  * Bytes to rows. maxPages is passed in rather than declared here so that it is read
  * beside the byte cap it does not replace (see SIZE_CAP in statement.ts).
  *
@@ -496,6 +635,10 @@ export async function readPdf(bytes: Buffer, maxPages: number): Promise<PdfState
 
   const { rows, notes } = readRows(template, lines);
   if (rows.length === 0) throw new Error(noTransactionLines(template.title));
+  // last, because everything above is "this is not the document I know" and the box
+  // is the last thing read - so a document that refuses for one of those reasons goes
+  // on refusing for it
+  const balances = readBalances(template, lines);
 
   return {
     sheet: {
@@ -506,7 +649,9 @@ export async function readPdf(bytes: Buffer, maxPages: number): Promise<PdfState
       note: (row, col) => notes.get(`${row}:${col}`),
     },
     template: template.id,
+    title: template.title,
     columns: COLUMNS,
+    balances,
   };
 }
 
@@ -569,6 +714,26 @@ const TEMPLATES: readonly PdfTemplate[] = [
       decimal: ',',
       currency: { '€': 'EUR' },
       example: '1 234,56€',
+    },
+    // "Сведения о балансе" states a pair per product - the account, then the
+    // wallets - and an "Итого" line under them that is the sum of both. It is the
+    // Итого pair and never the account's: the account's own transactions and the
+    // wallets' come in through the one `collect: true` header above, so a transfer
+    // into a wallet is two of the rows summed, and checked against the account's
+    // pair alone the statement would be out by exactly those transfers.
+    balances: {
+      total: 'Итого',
+      // the date column's interval, and deliberately as narrow: the description
+      // column starts at 124.8, so a transaction whose description is the word
+      // "Итого" cannot reach the label cell
+      label: [35, 120],
+      // the box's values are left-aligned, so a wider number extends right and the
+      // left edge does not move
+      opening: [250, 330],
+      // over the running-balance column that every transaction line carries, which
+      // is safe only because the line is found by its label first and never by
+      // scanning here. 596 is the page width
+      closing: [500, 596],
     },
   },
 ];
