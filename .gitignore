@@ -25,6 +25,10 @@ backend/data/
 *.db-shm
 *.db-wal
 *.csv
+# a statement dropped anywhere but backend/data/ was committable until row 6c added
+# this. PDF fixtures are built in code (backend/test/pdffixture.ts), so nothing in
+# the tree needs the rule negated; a redacted one that ever does takes a !line.
+*.pdf
 
 *.log
 .DS_Store
