@@ -216,7 +216,7 @@ export function OverviewScreen({
       {accounts !== null && visible.length === 0 && hiddenCount === 0 && (
         <div className="empty">
           <p>
-            No accounts yet. Load a bank statement — a .csv or .xlsx export — and the
+            No accounts yet. Load a bank statement — a .csv, .xlsx or .pdf export — and the
             accounts, balances and categories all come out of the file.
           </p>
           <button className="btn" style={{ marginTop: 12 }} onClick={() => setPanel('import')}>
