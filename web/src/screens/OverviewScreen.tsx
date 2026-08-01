@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, apiLabel, SessionUser } from '../api';
+import { api, apiLabel } from '../api';
 import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { CsvImport } from '../components/CsvImport';
@@ -25,13 +25,7 @@ const MODE_LABEL: Record<ThemeMode, string> = {
   dark: '☾ Dark',
 };
 
-export function OverviewScreen({
-  user,
-  onSignOut,
-}: {
-  user: SessionUser;
-  onSignOut: () => void;
-}) {
+export function OverviewScreen() {
   const { mode, setMode } = useTheme();
 
   /**
@@ -314,14 +308,7 @@ export function OverviewScreen({
         </button>
       </div>
 
-      <p className="api-hint">
-        {user.email} ·{' '}
-        <button className="btn-link" type="button" onClick={onSignOut}>
-          Sign out
-        </button>
-        <br />
-        API: {apiLabel()}
-      </p>
+      <p className="api-hint">API: {apiLabel()}</p>
     </div>
   );
 }

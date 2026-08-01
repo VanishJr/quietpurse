@@ -183,3 +183,108 @@ describe('auth.session()', () => {
     );
   });
 });
+
+/**
+ * The one classification the row turns on. better-auth writes the new password and
+ * only then replaces the sessions, outside a transaction, so "the request failed"
+ * and "nothing changed" are two different claims and only one of them is ever safe
+ * to make. Every BAD_REQUEST in the handler is thrown above the write - that is why
+ * the branch is the status and not the message, which a 429 also carries.
+ */
+describe('auth.changePassword()', () => {
+  const change = () => auth.changePassword('old-password', 'new-password');
+
+  /** Not 'unknown', or every successful change reads as one. */
+  it('reads a 200 as changed', async () => {
+    respondWith(JSON.stringify({ token: 'session-token', user: USER }), 200);
+    expect(await change()).toEqual({ outcome: 'changed' });
+  });
+
+  it("reads better-auth's invalid-password 400 as a refusal that changed nothing", async () => {
+    respondWith(JSON.stringify({ message: 'Invalid password', code: 'INVALID_PASSWORD' }), 400);
+    expect(await change()).toEqual({
+      outcome: 'refused',
+      message: 'Invalid password',
+      wrongCurrent: true,
+    });
+  });
+
+  it('keeps a 400 about the new password out of that wording', async () => {
+    // "Invalid password" on a form with three password fields does not say which one,
+    // so the copy for the current-password case is ours - and only for that code
+    respondWith(JSON.stringify({ message: 'Password too long', code: 'PASSWORD_TOO_LONG' }), 400);
+    expect(await change()).toEqual({
+      outcome: 'refused',
+      message: 'Password too long',
+      wrongCurrent: false,
+    });
+  });
+
+  it('reads a 429 as an unknown outcome, not as a refusal', async () => {
+    // the rate limiter's body is a message and no code (rate-limiter/index.mjs:65).
+    // /change-password is 3 per 10s by better-auth's default, which two mistyped
+    // attempts and a retry reach, so this arrives in normal use - and anything keyed
+    // on "is there a message" would print it as "your current password is wrong".
+    respondWith(JSON.stringify({ message: 'Too many requests. Please try again later.' }), 429);
+    expect(await change()).toEqual({
+      outcome: 'unknown',
+      detail: 'Too many requests. Please try again later.',
+    });
+  });
+
+  it('reads a 500 as an unknown outcome', async () => {
+    // the window this type exists for: the password is already written when the
+    // session work below it fails, and this 500 is what the user is told about it
+    respondWith(
+      JSON.stringify({ message: 'Failed to get session', code: 'FAILED_TO_GET_SESSION' }),
+      500,
+    );
+    expect(await change()).toEqual({ outcome: 'unknown', detail: 'Failed to get session' });
+  });
+
+  it('reads a fetch that never landed as an unknown outcome', async () => {
+    // the connection dropping after the write looks exactly like this from here
+    rejectWith('Failed to fetch');
+    expect(await change()).toEqual({ outcome: 'unknown', detail: 'Failed to fetch' });
+  });
+
+  it('reads a 401 as signed out, and does not notify the 401 listeners', async () => {
+    // the session middleware refuses above the handler, so nothing was written and
+    // 'unknown' would manufacture doubt. Firing the listeners is request()'s job.
+    respondWith(JSON.stringify({ message: 'Unauthorized', code: 'UNAUTHORIZED' }), 401);
+    const seen = vi.fn();
+    const off = onUnauthorized(seen);
+    expect(await change()).toEqual({ outcome: 'signed-out' });
+    expect(seen).not.toHaveBeenCalled();
+    off();
+  });
+
+  it('cuts an unbounded failure at the raw-body budget', async () => {
+    rejectWith('w'.repeat(5000));
+    const result = await change();
+    if (result.outcome !== 'unknown') throw new Error(`expected unknown, got ${result.outcome}`);
+    expect(result.detail).toHaveLength(200);
+    expect(result.detail.endsWith('…')).toBe(true);
+  });
+
+  it('asks for the other sessions to be revoked, and sends the session cookie', async () => {
+    // without the flag a password changed because somebody else is signed in leaves
+    // them signed in, and the screen said it worked
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ token: 'session-token', user: USER })),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await change();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/auth/change-password');
+    expect(init).toMatchObject({ method: 'POST', credentials: 'include' });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      currentPassword: 'old-password',
+      newPassword: 'new-password',
+      revokeOtherSessions: true,
+    });
+  });
+});

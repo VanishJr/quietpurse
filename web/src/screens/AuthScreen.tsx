@@ -9,12 +9,9 @@
  * the session and renders.
  */
 import { FormEvent, useEffect, useState } from 'react';
-import { auth } from '../api';
+import { auth, MIN_PASSWORD } from '../api';
 
 type Mode = 'login' | 'register';
-
-/** Mirrors better-auth's minPasswordLength on the backend — caught before the round trip. */
-const MIN_PASSWORD = 8;
 
 export function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
   const [mode, setMode] = useState<Mode>('login');

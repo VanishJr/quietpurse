@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiLabel, auth, onUnauthorized, SessionResult, SessionUser } from './api';
+import { AccountScreen } from './screens/AccountScreen';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { IndependenceScreen } from './screens/IndependenceScreen';
@@ -12,6 +13,7 @@ const TABS = [
   { key: 'transactions', title: 'Transactions' },
   { key: 'analytics', title: 'Analytics' },
   { key: 'goal', title: 'Goal' },
+  { key: 'account', title: 'Account' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -38,7 +40,7 @@ function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =>
       */}
       <main className="screens">
         <div className="screen" hidden={tab !== 'overview'}>
-          <OverviewScreen user={user} onSignOut={signOut} />
+          <OverviewScreen />
         </div>
         <div className="screen" hidden={tab !== 'transactions'}>
           <TransactionsScreen />
@@ -48,6 +50,9 @@ function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () =>
         </div>
         <div className="screen" hidden={tab !== 'goal'}>
           <IndependenceScreen />
+        </div>
+        <div className="screen" hidden={tab !== 'account'}>
+          <AccountScreen user={user} onSignOut={signOut} />
         </div>
       </main>
 
