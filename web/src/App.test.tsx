@@ -5,7 +5,7 @@ import { USER } from './test/fixtures';
 import { fail, FIRST_PAINT_ROUTES, mockFetch, ok, requests, SIGNED_OUT_ROUTES } from './test/harness';
 
 /**
- * The shell: the session gate, the four always-mounted screens, and the tab bar.
+ * The shell: the session gate, the five always-mounted screens, and the tab bar.
  *
  * jsdom applies no stylesheet, so the `hidden` attribute is the only visibility fact
  * available here - nothing below may depend on styles.css.
@@ -28,7 +28,7 @@ describe('signed out', () => {
 });
 
 describe('signed in', () => {
-  it('shows Overview and keeps the other three mounted but hidden', async () => {
+  it('shows Overview and keeps the other four mounted but hidden', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
 
@@ -38,7 +38,9 @@ describe('signed in', () => {
     // `hidden: true` is required: getByRole excludes a [hidden] subtree from itself,
     // so without it these would throw - and queryByRole(...) === null would pass
     // just as well against a screen that was never mounted at all.
-    for (const title of ['Transactions', 'Analytics', 'Goal']) {
+    // 'Your account' is in the list because a screen mounted but named by nothing is
+    // asserted about by nothing, and the suite stays green while saying so
+    for (const title of ['Transactions', 'Analytics', 'Goal', 'Your account']) {
       expect(screen.getByRole('heading', { name: title, hidden: true })).not.toBeVisible();
     }
   });

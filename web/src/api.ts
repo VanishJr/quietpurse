@@ -141,6 +141,13 @@ export interface SessionUser {
 }
 
 /**
+ * Mirrors better-auth's minPasswordLength (backend/src/auth.ts). A courtesy that
+ * saves a round trip, never the holder: the endpoint refuses a short password
+ * itself whatever the client believes.
+ */
+export const MIN_PASSWORD = 8;
+
+/**
  * "You are signed out" is a claim only the server can make: it answers a signed-out
  * visitor 200 with no user. Everything else — a status, an unreadable body, a fetch
  * that never landed — is "we could not ask", and flattening the two onto null is
@@ -150,6 +157,26 @@ export type SessionResult =
   | { state: 'signed-in'; user: SessionUser }
   | { state: 'signed-out' }
   | { state: 'unreachable'; reason: string };
+
+/**
+ * What an auth call failed with, rather than only what to print. A caller reading
+ * .message alone is unaffected; changePassword below cannot be written without the
+ * status, and reconstructing it from the message is what makes a rate limit read as
+ * a wrong password.
+ *
+ * Not exported: a screen that could catch this could branch on the status itself,
+ * which is the classification PasswordChange exists to keep out of components.
+ */
+class AuthError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
 
 /**
  * Auth calls go through their own request function: a 401 here means "wrong
@@ -171,16 +198,39 @@ async function authRequest<T>(
   const text = await res.text();
   if (!res.ok) {
     let message = text.slice(0, 200);
+    let code: string | undefined;
     try {
-      const parsed = JSON.parse(text) as { message?: string };
+      const parsed = JSON.parse(text) as { message?: string; code?: string };
       if (parsed.message) message = parsed.message;
+      if (parsed.code) code = parsed.code;
     } catch {
       // not JSON - fall back to the raw body
     }
-    throw new Error(message);
+    throw new AuthError(message, res.status, code);
   }
   return (text ? JSON.parse(text) : null) as T;
 }
+
+/**
+ * Every outcome of a password change, because two of them are indistinguishable to
+ * a catch block. better-auth writes the new password and only then deletes the old
+ * sessions and mints a replacement, outside any transaction - so a failure after
+ * the write leaves the account on the NEW password with nothing on the wire saying
+ * so, and "could not change your password" would send the owner back to a password
+ * that no longer works.
+ *
+ * The branch is the HTTP status, which is the only rule the library's own ordering
+ * guarantees: every BAD_REQUEST in the handler is thrown above the write, and the
+ * session middleware's 401 above the handler.
+ */
+export type PasswordChange =
+  | { outcome: 'changed' }
+  /** Refused before the write, so the old password still stands. */
+  | { outcome: 'refused'; message: string; wrongCurrent: boolean }
+  /** No session to change a password for; nothing was written. */
+  | { outcome: 'signed-out' }
+  /** The password may or may not be the new one. Only signing in can tell. */
+  | { outcome: 'unknown'; detail: string };
 
 /** Bounded here rather than at each return, so a later outcome cannot skip the cut. */
 const unreachable = (reason: string): SessionResult => ({
@@ -241,6 +291,42 @@ export const auth = {
     authRequest<{ user: SessionUser }>('/sign-in/email', { email, password }),
 
   logout: () => authRequest<unknown>('/sign-out'),
+
+  /**
+   * revokeOtherSessions is asked for deliberately and is what opens the window the
+   * 'unknown' branch exists for: a person changes their password because they think
+   * somebody else is signed in, and a change that leaves those sessions alive does
+   * not serve that at all.
+   *
+   * It never rejects - every outcome is a member of PasswordChange, so no caller
+   * can flatten the two failures onto one sentence with a catch.
+   */
+  changePassword: async (currentPassword: string, newPassword: string): Promise<PasswordChange> => {
+    try {
+      await authRequest<{ token: string | null; user: SessionUser }>('/change-password', {
+        currentPassword,
+        newPassword,
+        revokeOtherSessions: true,
+      });
+      return { outcome: 'changed' };
+    } catch (e) {
+      if (e instanceof AuthError && e.status === 400) {
+        return {
+          outcome: 'refused',
+          message: e.message,
+          // "Invalid password" on a form with three password fields does not say which
+          wrongCurrent: e.code === 'INVALID_PASSWORD',
+        };
+      }
+      if (e instanceof AuthError && e.status === 401) return { outcome: 'signed-out' };
+      // a 429 carries a message and no code, so anything keyed on the message would
+      // render a rate limit as "your current password is wrong"
+      return {
+        outcome: 'unknown',
+        detail: bounded(e instanceof Error ? e.message : String(e), MAX_RAW_BODY_CHARS),
+      };
+    }
+  },
 };
 
 export const api = {

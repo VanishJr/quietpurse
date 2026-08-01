@@ -16,7 +16,7 @@ const OVERVIEW_ROUTES: Routes = {
   'GET /api/app-settings': () => ok(APP_SETTINGS),
 };
 
-const mount = () => renderThemed(<OverviewScreen user={USER} onSignOut={vi.fn()} />);
+const mount = () => renderThemed(<OverviewScreen />);
 
 describe('accounts list', () => {
   it('renders visible accounts and keeps hidden ones out of the list', async () => {
@@ -312,6 +312,21 @@ describe('the import history entry point', () => {
 
     expect(await screen.findByText('Old DKB')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Exit account edit mode' })).toBeInTheDocument();
+  });
+});
+
+describe('what moved to the Account screen', () => {
+  it('carries no identity line and no sign-out control', async () => {
+    mockFetch(OVERVIEW_ROUTES);
+    mount();
+    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+
+    // the props are gone, so the old line cannot render - but a second sign-out
+    // hardcoded here would type-check, and two of them is item 14's CsvImport again
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    expect(screen.queryByText(USER.email)).not.toBeInTheDocument();
+    // the reachability diagnostic is not account identity and stays
+    expect(screen.getByText(/^API:/)).toBeInTheDocument();
   });
 });
 
