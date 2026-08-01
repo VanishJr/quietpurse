@@ -16,9 +16,9 @@
  * than read against the nearest fit - a template that matches too eagerly reports
  * plausible numbers, which is the one outcome worse than a refusal (ROADMAP 5.2).
  */
-import { getDocument, PasswordException, VerbosityLevel } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { toCents } from '../money';
 import { CsvMapping, parseAmount } from './csv';
+import { loadPdfjs } from './pdfjsloader';
 import { Cell, Sheet, cellText } from './sheet';
 
 /**
@@ -496,6 +496,7 @@ async function readLines(
   bytes: Buffer,
   maxPages: number,
 ): Promise<{ lines: TextLine[]; pages: number; chars: number }> {
+  const { getDocument, PasswordException, VerbosityLevel } = await loadPdfjs();
   // A copy, not a view: getDocument detaches the array it is given, and a Node
   // Buffer under 8 KB is a window onto a shared pool that other allocations sit in.
   // It refuses a Buffer outright for the same reason.
