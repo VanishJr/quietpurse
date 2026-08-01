@@ -613,10 +613,13 @@ describe('workspace isolation', () => {
           { x: 42.7, y: 680, text: day },
           { x: 124.8, y: 680, text: label },
           { x: 335.1, y: 680, text: amount },
-          // the balance summary the reconciliation gate checks against (row 6b):
-          // 100,00 less the one debit
+          // the balance summary the reconciliation gate checks against (rows 6b and
+          // 035): 100,00 less the one debit, which is also the whole of the
+          // outgoing half with nothing on the incoming one
           { x: 42.7, y: 640, text: 'Итого' },
           { x: 253.0, y: 640, text: '100,00€' },
+          { x: 335.1, y: 640, text: amount },
+          { x: 417.1, y: 640, text: '0,00€' },
           { x: 526.2, y: 640, text: closing },
         ],
       ]);

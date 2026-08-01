@@ -800,9 +800,9 @@ const money = (cents: number, currency: string): string =>
   `${fromCents(cents).toFixed(2)} ${bounded(currency, CURRENCY_CODE_MAX)}`;
 
 /**
- * The two ways the gate refuses. They live here rather than beside the parser's own
- * refusals in pdf.ts because both name counts of MAPPED rows, which pdf.ts cannot
- * see (row 6b, D2, and the amended comment above pdf.ts's refusal set).
+ * The three ways the gate refuses. They live here rather than beside the parser's own
+ * refusals in pdf.ts because all of them name counts of MAPPED rows, which pdf.ts
+ * cannot see (row 6b, D2, and the amended comment above pdf.ts's refusal set).
  *
  * `skipped` decides which cause is named, and it is in the head clause rather than
  * appended: rows the parser could not read ARE the likely cause of a short sum, and
@@ -825,13 +825,41 @@ const doesNotAddUp = (
   return `this ${title} statement does not add up: its opening balance of ${money(openingCents, currency)} plus the ${lineCount(accepted)} read comes to ${money(openingCents + net, currency)}, where the statement's own closing balance is ${money(closingCents, currency)} - a difference of ${money(Math.abs(openingCents + net - closingCents), currency)}${cause} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 };
 
+/**
+ * It fires only when the ends match and the halves do not, and the wording leads with
+ * that: a single dropped row fails both checks, and the net one runs first because it
+ * names the missing amount where this one names a discrepancy in a subtotal (row 035,
+ * R1). So the only thing left for this sentence is the compensating pair - money out
+ * and money in that the parser never saw, cancelling into a clean net.
+ *
+ * All four figures, signed, rather than the two differences: which side to look at in
+ * the document is what the person holding it needs, and a magnitudes-only sentence
+ * under a backwards `signs` declaration would print the same number twice and read as
+ * a refusal naming two identical figures. "of the same size" is exact rather than a
+ * hedge - the net matched, so the two shortfalls are equal by arithmetic.
+ */
+const sidesDoNotAddUp = (
+  title: string,
+  printed: { outgoingCents: number; incomingCents: number },
+  outCents: number,
+  inCents: number,
+  currency: string,
+  accepted: number,
+  skipped: number,
+): string => {
+  const cause = skipped
+    ? `, and the ${lineCount(skipped)} this importer could not read are probably where they went`
+    : ', so an operation out and an operation in of the same size are probably both missing';
+  return `this ${title} statement's opening and closing balance agree, but its two halves do not: it states ${money(printed.outgoingCents, currency)} out and ${money(printed.incomingCents, currency)} in, where the ${lineCount(accepted)} read come to ${money(outCents, currency)} out and ${money(inCents, currency)} in${cause} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+};
+
 const mixedCurrencies = (title: string, currency: string, found: string[]): string =>
   `this ${title} statement states its balances in ${bounded(currency, CURRENCY_CODE_MAX)}, but the lines read are in ${currencyList(found)} - this importer cannot check a statement that mixes currencies - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * The net movement of the file per currency, and - for a format that states its own
  * balances - the check that the rows actually run from the opening one to the
- * closing one.
+ * closing one, and that each half of them comes to what the document printed for it.
  *
  * The two are one pass on purpose. The number a person reads before confirming and
  * the number the gate checks have to come out of the same loop, or they drift with
@@ -855,8 +883,21 @@ export function reconcile(
   skipped: number,
 ): { totals: CheckedTotals; balances?: CheckedBalances } {
   const cents = new Map<string, number>();
+  // the file's own two halves, out of the same loop as the net for the reason above.
+  // Currency-blind, which is safe only because the pdf arm below refuses unless there
+  // is exactly one currency and it is the balances' - said here rather than there
+  // because this is where the fact is relied on.
+  //
+  // Two branches and not three: a row whose amount is 0 is skipped before it ever
+  // becomes a transaction, and an amount that rounded to zero cents would land on the
+  // incoming side adding nothing to it. There is no case for a guard to catch.
+  let outCents = 0;
+  let inCents = 0;
   for (const t of txs) {
-    cents.set(t.currency, (cents.get(t.currency) ?? 0) + toCents(t.amount));
+    const c = toCents(t.amount);
+    cents.set(t.currency, (cents.get(t.currency) ?? 0) + c);
+    if (c < 0) outCents += c;
+    else inCents += c;
   }
   // one line for the overwhelming case; a file with a currency column carries more
   // than one, and a single labelled number would be wrong for it
@@ -880,6 +921,26 @@ export function reconcile(
       }
       if (balances.openingCents + net !== balances.closingCents) {
         throw new Error(doesNotAddUp(title, balances, net, txs.length, skipped));
+      }
+      // Second, and never first: a single dropped row fails both, and the sentence
+      // above names the missing amount where this one names a discrepancy in a
+      // subtotal. Reordering these hands the common case the weaker diagnostic
+      // (row 035, R1).
+      if (balances.gross.kind === 'printed') {
+        const { outgoingCents, incomingCents } = balances.gross;
+        if (outgoingCents !== outCents || incomingCents !== inCents) {
+          throw new Error(
+            sidesDoNotAddUp(
+              title,
+              balances.gross,
+              outCents,
+              inCents,
+              balances.currency,
+              txs.length,
+              skipped,
+            ),
+          );
+        }
       }
       return {
         totals,

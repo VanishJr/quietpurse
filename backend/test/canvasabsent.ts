@@ -14,7 +14,7 @@
  * which - the password refusal - only comes out right if the dynamic import handed
  * back pdfjs's real namespace rather than something shaped like it.
  */
-import { PdfTemplate, readPdf } from '../src/providers/pdf';
+import { PdfTemplate, StatementBalances, readPdf } from '../src/providers/pdf';
 import { Cell } from '../src/providers/sheet';
 import { PlacedText, buildImagePdf, buildPdf } from './pdffixture';
 
@@ -44,6 +44,9 @@ const TEMPLATE: PdfTemplate = {
     label: [30, 130],
     opening: [300, 420],
     closing: [420, 540],
+    // The Total line below prints two cells and not four, so this is what the
+    // fixture does rather than what its author could not find (row 035's Q1).
+    gross: { kind: 'not-printed' },
   },
 };
 
@@ -87,7 +90,13 @@ export interface CanvasAbsentParse {
   template: string;
   title: string;
   rows: Cell[][];
-  balances: { openingCents: number; closingCents: number; currency: string };
+  /**
+   * The reader's own type rather than a copy of its fields: `parsed.balances` is
+   * assigned here whole, so a hand-written shape beside it goes stale the moment the
+   * reader gains a field and `tsc` says nothing, because this is an assignment and not
+   * an object literal. Row 035 added `gross` and that is exactly what happened.
+   */
+  balances: StatementBalances;
   scan: string;
   encrypted: string;
   unrecognised: string;
