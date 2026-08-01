@@ -19,7 +19,15 @@ import {
   listImports,
   listTransactions,
 } from '../src/db';
-import { NOTE_MAX, PDF_PARSER_VERSION, readPdf } from '../src/providers/pdf';
+import {
+  NOTE_MAX,
+  PDF_PARSER_VERSION,
+  PdfTemplate,
+  TextLine,
+  readPdf,
+  refusals,
+  selectTemplate,
+} from '../src/providers/pdf';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import {
   CURRENCY_CODE_MAX,
@@ -546,6 +554,369 @@ describe('pdf: the reconciliation gate', () => {
   });
 });
 
+// ---------- the second layout (ROADMAP row 6c) ----------
+
+/**
+ * The x-intervals the n26-de template declares, one literal each so a case that
+ * places a cell outside its column has to say so.
+ *
+ * The amount column carries two, because the real document right-aligns it: its
+ * widest amount starts 16 points to the LEFT of its narrowest, and both have to land
+ * inside one span that assigns by the left edge. A span narrow enough for the short
+ * ones would drop the long ones, and the cases below place both.
+ */
+const N = {
+  heading: 44.5,
+  description: 43.8,
+  dateHeading: 341.7,
+  date: 390.9,
+  amountHeading: 515.1,
+  /** where "-1.140,57€" starts in the document measured */
+  amountWide: 499.5,
+  /** and where "-4,90€" does */
+  amountNarrow: 515.8,
+} as const;
+
+const n26Header = (y: number): PlacedText[] => [
+  { x: N.heading, y, text: 'Beschreibung' },
+  { x: N.dateHeading, y, text: 'Verbuchungsdatum' },
+  { x: N.amountHeading, y, text: 'Betrag' },
+];
+
+/**
+ * One transaction's dated line. The date and the amount sit 1.95 BELOW the
+ * description's baseline, as they do on every row of the document measured - so
+ * TOLERANCE has 2% of its 2 left over here, and narrowing it splits every row below
+ * into a description with no amount and an amount with no description (row 6c, D5).
+ */
+const n26Row = (
+  y: number,
+  date: string,
+  description: string,
+  amount: string,
+  x: number = N.amountNarrow,
+): PlacedText[] => [
+  { x: N.description, y, text: description },
+  { x: N.date, y: y - 1.95, text: date },
+  ...(amount ? [{ x, y: y - 1.95, text: amount }] : []),
+];
+
+/**
+ * A line under a transaction: the description column, both other cells empty.
+ *
+ * `size` is here for one reason and it is a fixture artefact, not a fact about the
+ * layout. pdfjs splits a placed run at every space and advances each fragment by the
+ * FONT's own metrics, and this fixture's font is not the bank's - it reports one
+ * point size per character where the real document's reports 0.66. So a line of the
+ * length N26 really writes would spill its last word past x=330 and into the date
+ * column at size 9, which no real statement's does. The same trick, for the same
+ * reason, is what the 'diagnostic budget' case above uses.
+ */
+const n26Detail = (y: number, text: string, size?: number): PlacedText[] => [
+  { x: N.description, y, text, size },
+];
+
+/** One line of the summary page's box: its label, and its value in the amount column. */
+const n26Balance = (y: number, label: string, value: string): PlacedText[] => [
+  { x: N.description, y, text: label },
+  { x: 491.2, y, text: value },
+];
+
+/**
+ * The page footer, which is what keeps the address block out of the descriptions:
+ * every one of its lines writes something in the amount column, so none of them is
+ * blank there and none of them is a continuation of the transaction above.
+ *
+ * The BIC is the bank's own and is a third of the fingerprint. No account number
+ * appears anywhere in this file - the IBANs below are zeroes.
+ */
+const n26Footer = (): PlacedText[] => [
+  { x: 42.75, y: 69.26, text: 'KONTOINHABER' },
+  { x: 505.24, y: 69.26, text: 'Erstellt am' },
+  { x: 42.75, y: 37.54, text: 'BIC: NTSBDEB1XXX' },
+  { x: 497.48, y: 37.54, text: 'Nr. 07/2026' },
+];
+
+/**
+ * Three transactions over two pages, then the summary page. `tag` is what makes one
+ * case's bytes differ from the next's, and it sits on the summary page rather than
+ * under the transactions: on a page with a transaction still open, a trailing line
+ * in the description column with nothing beside it IS a continuation, by the rule.
+ */
+const n26Statement = (tag: string, closing = '+1.270,43€'): PlacedText[][] => [
+  [
+    { x: N.description, y: 784.05, text: 'Kontoauszug Nr. 07/2026' },
+    { x: N.description, y: 750.49, text: '01.07.2026 bis 31.07.2026' },
+    ...n26Header(698.4),
+    ...n26Row(671.7, '01.07.2026', 'Kaffeeroesterei', '+0,13€'),
+    ...n26Detail(658.42, 'Gutschriften'),
+    ...n26Detail(642.45, 'IBAN: DE00000000000000000000 • BIC: XXXXDEXXXXX', 4),
+    ...n26Detail(626.47, 'Wertstellung 01.07.2026'),
+    ...n26Row(600.38, '01.07.2026', 'Ein sehr langer Name der', '-1.140,57€', N.amountWide),
+    ...n26Detail(586.58, 'umbricht'),
+    ...n26Detail(573.3, 'Lastschriften'),
+    ...n26Detail(557.33, 'IBAN: DE00000000000000000001 • BIC: YYYYDEYYYYY', 4),
+    ...n26Detail(541.35, 'KND 5530 LEV 07/2026'),
+    ...n26Detail(525.38, 'Wertstellung 01.07.2026'),
+    ...n26Footer(),
+  ],
+  [
+    // the title and the period again at the top of page 2, in the description column
+    // with both other cells empty - which is exactly the shape a continuation has,
+    // and the reason the rule is confined to the page its dated line was read on
+    { x: N.description, y: 790.05, text: 'Kontoauszug Nr. 07/2026' },
+    { x: N.description, y: 756.49, text: '01.07.2026 bis 31.07.2026' },
+    ...n26Header(704.4),
+    ...n26Row(677.7, '02.07.2026', 'Netto GmbH', '-4,90€'),
+    ...n26Detail(664.42, 'Belastungen'),
+    ...n26Detail(616.5, 'Wertstellung 02.07.2026'),
+    ...n26Footer(),
+  ],
+  [
+    { x: N.description, y: 790.05, text: 'Zusammenfassung Nr. 07/2026' },
+    // the summary page repeats "Beschreibung" alone: a table header line the
+    // template has to name, or the whole document is refused
+    { x: N.heading, y: 704.4, text: 'Beschreibung' },
+    ...n26Balance(676.31, 'Dein alter Kontostand', '+2.415,77€'),
+    ...n26Balance(650.14, 'Ausgehende Transaktionen', '-1.145,47€'),
+    ...n26Balance(623.96, 'Einkommende Transaktionen', '+0,13€'),
+    ...n26Balance(597.22, 'Dein neuer Kontostand', closing),
+    ...n26Footer(),
+    { x: N.description, y: 15, text: tag },
+  ],
+];
+
+/**
+ * A template pair for the selection rules, deliberately not either of the two in the
+ * tree: what R2 and the mixed-currency arm need is two templates that claim one
+ * document, and neither can be produced by a real statement.
+ */
+const twin = (id: string, title: string): PdfTemplate => ({
+  id,
+  title,
+  issuer: ['Two Layouts Bank'],
+  amounts: 'signed',
+  columns: { description: [0, 330], date: [330, 460], amount: [460, 596] },
+  marker: { column: 'description', text: 'Beschreibung' },
+  tables: [
+    { header: { description: 'Beschreibung', date: 'Datum', amount: 'Betrag' }, collect: true },
+  ],
+  dateFormat: 'de-numeric',
+  amount: {
+    pattern: /^([+-]\d+,\d{2})([^\s\d]+)$/u,
+    decimal: ',',
+    currency: { '€': 'EUR' },
+    example: '-1,00€',
+  },
+  rows: { kind: 'one-line' },
+  balances: {
+    kind: 'two-lines',
+    label: [0, 330],
+    value: [460, 596],
+    opening: 'Anfang',
+    closing: 'Ende',
+  },
+});
+
+const twinLines: TextLine[] = [
+  { page: 1, y: 760, items: [{ x: 40, text: 'Two Layouts Bank' }] },
+  {
+    page: 1,
+    y: 700,
+    items: [
+      { x: 40, text: 'Beschreibung' },
+      { x: 340, text: 'Datum' },
+      { x: 500, text: 'Betrag' },
+    ],
+  },
+];
+
+describe('pdf: the second layout', () => {
+  it('reads a statement whose amounts are one signed column', async () => {
+    const staged = await importPdf('N26 Happy', n26Statement('happy path'));
+    expect(staged.outcome).toBe('awaiting_confirmation');
+    if (staged.outcome !== 'awaiting_confirmation') return;
+
+    expect(staged.summary).toMatchObject({
+      total: 3,
+      accepted: 3,
+      skipped: 0,
+      problems: [],
+      from: '2026-07-01',
+      to: '2026-07-02',
+      // the sign came out of the cell and not out of which column it was in
+      totals: [{ currency: 'EUR', net: -1145.34 }],
+      balances: { opening: 2415.77, closing: 1270.43, currency: 'EUR' },
+    });
+  });
+
+  /**
+   * I8, and it is the one invariant of this row with nothing structural behind it:
+   * the gate sums amounts, so a statement with every description cut to its first
+   * line reconciles to the cent and imports with nothing on the screen saying so.
+   *
+   * Seen red against a reader that drops them - n26-de set to `rows: one-line` gives
+   * "Kaffeeroesterei", "Ein sehr langer Name der" and "Netto GmbH", the three names
+   * ten of the nineteen rows in the real document share.
+   */
+  it('a transaction is its dated line and the lines under it', async () => {
+    const r = await importAndConfirm({
+      accountName: 'N26 Descriptions',
+      currency: 'EUR',
+      bytes: buildPdf(n26Statement('descriptions')),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(rows.sort()).toEqual([
+      'Ein sehr langer Name der umbricht Lastschriften KND 5530 LEV 07/2026 Wertstellung 01.07.2026',
+      'Kaffeeroesterei Gutschriften Wertstellung 01.07.2026',
+      'Netto GmbH Belastungen Wertstellung 02.07.2026',
+    ]);
+    // the template's one dropped line: other people's identifiers do not belong in a
+    // column the categoriser, the transfer detector and the export all read
+    for (const description of rows) expect(description).not.toMatch(/IBAN|BIC/);
+    // and the page-2 title, which has a continuation's exact shape and is on the
+    // wrong page for it
+    for (const description of rows) expect(description).not.toMatch(/Kontoauszug|bis 31/);
+  });
+
+  /**
+   * Trap 5's instance for this layout. The summary page's four total lines are kept
+   * out by one empty heading telling its table from the transactions' - and flipping
+   * `collect` on it fails this case twice over: the line below becomes a fourth
+   * transaction, and the statement then misses its own closing balance by a cent.
+   *
+   * The document measured has no dated line on its summary page. This one does,
+   * because a flag nothing can observe is a flag nothing holds.
+   */
+  it('a dated line under the summary table is not a transaction', async () => {
+    const pages = n26Statement('summary collect');
+    pages[2].push(...n26Row(560, '31.07.2026', 'Zinsabschluss', '-0,01€'));
+    const staged = await importPdf('N26 Summary Table', pages);
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+    expect(staged.summary).toMatchObject({ total: 3, accepted: 3, skipped: 0 });
+  });
+
+  /**
+   * Trap 3: a layout with one amount column must not compose a refusal naming two
+   * columns it has not got, which is ROADMAP rows 20(a) and 23 a third time. The
+   * heading is read off the table the row was found under, and a signed layout has
+   * only ever got one to name.
+   */
+  it('an empty amount cell names the one column this layout has', async () => {
+    const pages = n26Statement('empty betrag');
+    pages[0].push(...n26Row(480, '03.07.2026', 'Ohne Betrag', ''));
+    const staged = await importPdf('N26 Empty Amount', pages);
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+
+    expect(staged.summary).toMatchObject({ total: 4, accepted: 3, skipped: 1 });
+    expect(staged.summary.problems).toEqual([
+      'row 3: the amount cell is empty in the "Betrag" column',
+    ]);
+    // the skipped row carried no money, so the statement still adds up
+    expect(staged.summary.totals).toEqual([{ currency: 'EUR', net: -1145.34 }]);
+  });
+
+  it('a balance line this layout cannot find refuses the statement', async () => {
+    const before = await idsNow();
+    const pages = n26Statement('no closing');
+    pages[2] = pages[2].filter(
+      (t) => t.text !== 'Dein neuer Kontostand' && t.text !== '+1.270,43€',
+    );
+    await expect(importPdf('N26 No Closing', pages)).rejects.toThrow(
+      /it expects exactly one "Dein neuer Kontostand" line and found 0/,
+    );
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
+    expect(failed.documentAvailable).toBe(true);
+    expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * What a label span the transactions can reach costs, which revolut-ru's cannot
+   * be: N26 writes its balance labels in the description column, so a transaction
+   * described exactly "Dein alter Kontostand" makes the count 2. A refusal, not a
+   * balance read off the wrong line - which is the trade the template names.
+   */
+  it('a transaction described like a balance label refuses rather than being read as one', async () => {
+    const pages = n26Statement('label collision');
+    pages[0].push(...n26Row(480, '03.07.2026', 'Dein alter Kontostand', '-1,00€'));
+    await expect(importPdf('N26 Label Collision', pages)).rejects.toThrow(
+      /it expects exactly one "Dein alter Kontostand" line and found 2/,
+    );
+  });
+
+  it('a balance cell this template cannot read is refused with the cell quoted back', async () => {
+    // the sign gone is the smallest drift this layout can produce, and the template
+    // requires one because the document writes one in every cell
+    const pages = n26Statement('unsigned balance').map((page) =>
+      page.map((t) => (t.text === '+2.415,77€' ? { ...t, text: '2.415,77€' } : t)),
+    );
+    await expect(importPdf('N26 Unsigned Balance', pages)).rejects.toThrow(
+      /the opening balance cell of its "Dein alter Kontostand" line reads "2\.415,77€", where this template reads an amount like "-1\.234,56€"/,
+    );
+  });
+
+  /**
+   * R2. With one template `TEMPLATES.find` was exact; with two it resolves ambiguity
+   * by literal order in a data array nobody reads as ordering, and the day a
+   * fingerprint is loosened for a near miss the first entry wins and a statement is
+   * read against another layout's columns - parsed, accepted, plausible and wrong.
+   *
+   * Seen red with the throw reverted to `return claimed[0]`: the first expectation
+   * fails with "promise resolved instead of rejecting".
+   */
+  it('two templates claiming one document is a refusal, not the first in the array', () => {
+    expect(() => selectTemplate([twin('a', 'Layout A'), twin('b', 'Layout B')], twinLines)).toThrow(
+      'this statement matches more than one of the layouts this importer knows ("Layout A" and "Layout B")',
+    );
+    // and the fixture really is claimed by each of them on its own, so the case
+    // above is not passing on a document neither one matches
+    expect(selectTemplate([twin('a', 'Layout A')], twinLines)?.id).toBe('a');
+    expect(selectTemplate([twin('b', 'Layout B')], twinLines)?.id).toBe('b');
+  });
+
+  /**
+   * D6, and the half of this row's ROADMAP cell that owes a test rather than a
+   * document: both templates in the tree declare a single currency symbol, so their
+   * two balance cells are read through one map and can only agree. `templates` is
+   * what makes the arm reachable at all.
+   */
+  it('a statement whose two balances are in different currencies is refused', async () => {
+    const twoSymbols: PdfTemplate = {
+      ...twin('two-symbols', 'Two Symbols'),
+      amount: {
+        pattern: /^([+-]\d+,\d{2})([^\s\d]+)$/u,
+        decimal: ',',
+        currency: { '€': 'EUR', '£': 'GBP' },
+        example: '-1,00€',
+      },
+    };
+    const bytes = buildPdf([
+      [
+        { x: 40, y: 760, text: 'Two Layouts Bank' },
+        { x: 40, y: 700, text: 'Beschreibung' },
+        { x: 340, y: 700, text: 'Datum' },
+        { x: 500, y: 700, text: 'Betrag' },
+        { x: 40, y: 680, text: 'Kauf' },
+        { x: 340, y: 680, text: '01.07.2026' },
+        { x: 500, y: 680, text: '-1,00€' },
+        { x: 40, y: 640, text: 'Anfang' },
+        { x: 500, y: 640, text: '+10,00€' },
+        { x: 40, y: 620, text: 'Ende' },
+        { x: 500, y: 620, text: '+9,00£' },
+      ],
+    ]);
+    await expect(readPdf(bytes, 200, [twoSymbols])).rejects.toThrow(
+      'this looks like a Two Symbols statement but its opening balance ("Anfang") is stated in' +
+        ' EUR and its closing balance ("Ende") in GBP - this importer cannot check a statement' +
+        ' that mixes currencies',
+    );
+  });
+});
+
 /**
  * Every refusal below needed the file opened, so every one leaves a `failed` import
  * with its document (statement.ts's band comment) - which is what makes the miss
@@ -831,5 +1202,20 @@ describe('the diagnostic budget', () => {
     );
     expect(mixed).toContain('and 2 more');
     expect(mixed.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * And the parser's own set, composed rather than measured: `refusals` builds every
+   * one of them at its extreme out of every template's own title, balance labels,
+   * currency codes and example. A template added with a longer label moves the number
+   * below, which is the point - the same measurement written into a comment in pdf.ts
+   * would simply stop being true (row 6c, D5, and rows 6a D14 / 6b D2 / 6b D10).
+   */
+  it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
+    const all = refusals();
+    for (const sentence of all) expect(sentence.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+    expect(Math.max(...all.map((s) => s.length))).toBe(310);
+    // and no two of them read alike, which is what the set exists for
+    expect(new Set(all).size).toBe(all.length);
   });
 });
