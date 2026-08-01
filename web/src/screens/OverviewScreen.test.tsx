@@ -52,7 +52,9 @@ describe('accounts list', () => {
     });
     mount();
 
-    expect(await screen.findByText(/No accounts yet/)).toBeInTheDocument();
+    // the tail as well as the opening: this is the first sentence a new user reads
+    // about what to upload, and it is where the stale two-format list lived
+    expect(await screen.findByText(/No accounts yet/)).toHaveTextContent(/\.pdf/);
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
 
     // the point of the control: the empty state does not send the user hunting for a pill

@@ -1,14 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney } from '../format';
-import { CsvImportResult, ImportConfirmed, ImportSummary } from '../types';
+import { CsvImportResult, ImportConfirmed, ImportSourceType, ImportSummary } from '../types';
 import { Chips } from './Chips';
 
 /** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
 const FALLBACK_PRESETS = [{ key: 'generic', title: 'Any statement' }];
 
-const ACCEPTED =
-  '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+/**
+ * What the file dialog offers, per format. Total over ImportSourceType for the reason
+ * SIZE_CAP is: a format the backend learns to read and this map does not name is
+ * reachable by drag-and-drop and by nothing else — which is where PDF was. The tuple
+ * stops a row being half-written: the dotted extension the dialog filters on first,
+ * the MIME type second, because `accept` matches a file on either.
+ */
+const ACCEPT_TOKENS: Record<ImportSourceType, readonly [`.${string}`, string, ...string[]]> = {
+  csv: ['.csv', 'text/csv'],
+  xlsx: ['.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  pdf: ['.pdf', 'application/pdf'],
+};
+
+const ACCEPTED = Object.values(ACCEPT_TOKENS).flat().join(',');
 
 /** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
@@ -182,11 +194,15 @@ export function CsvImport({ onBack, onImported }: Props) {
       </button>
       <h1 className="title">Import a statement</h1>
 
+      {/* the drop zone says what is accepted; this says what to go and fetch, and the two
+          stop being the same list the moment coverage is partial — one PDF layout is read
+          today, and every refusal pdf.ts composes ends by asking for CSV or Excel */}
       <p className="hint">
         Any bank that lets you download a statement works here, whether it has an API or
         not. Export it as CSV or Excel — in most banks that's "Export" or "Download" in the
-        transaction list — and drop the file below. Nothing is uploaded anywhere: the file
-        goes to your own backend and into your own database.
+        transaction list — and drop the file below, or drop the PDF statement itself.
+        Nothing is uploaded anywhere: the file goes to your own backend and into your own
+        database.
       </p>
       <p className="hint">
         Re-importing the same file, or one that overlaps a previous export, creates no
@@ -216,7 +232,7 @@ export function CsvImport({ onBack, onImported }: Props) {
         }}
         role="button"
         tabIndex={0}
-        aria-label="Choose a CSV or Excel statement file"
+        aria-label="Choose a CSV, Excel or PDF statement file"
       >
         <div className="dropzone-icon" aria-hidden="true">
           ⭳
@@ -235,7 +251,7 @@ export function CsvImport({ onBack, onImported }: Props) {
           </>
         ) : (
           <>
-            <div className="dropzone-title">Drop a .csv or .xlsx statement here</div>
+            <div className="dropzone-title">Drop a .csv, .xlsx or .pdf statement here</div>
             <div className="dropzone-sub">or click to choose a file</div>
           </>
         )}

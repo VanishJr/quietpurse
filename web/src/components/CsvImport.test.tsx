@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
 import { mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
@@ -32,6 +32,68 @@ async function upload(container: HTMLElement): Promise<void> {
 }
 
 const countOf = (key: string): number => requests().filter((r) => r === key).length;
+
+describe('the formats the screen offers', () => {
+  /** Lets the preset load, and any read takeFile started, finish inside act. */
+  const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+  const fileInput = (container: HTMLElement) =>
+    container.querySelector('input[type=file]') as HTMLInputElement;
+
+  it('puts every format the backend reads into the file dialog', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    await settle();
+
+    const tokens = (fileInput(container).getAttribute('accept') ?? '').split(',');
+    // literals, and split before matching: derived from ACCEPT_TOKENS this would
+    // assert nothing, and against the whole attribute a prefix would pass for a token
+    expect(tokens).toContain('.csv');
+    expect(tokens).toContain('text/csv');
+    expect(tokens).toContain('.xlsx');
+    expect(tokens).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(tokens).toContain('.pdf');
+    expect(tokens).toContain('application/pdf');
+  });
+
+  it('names the PDF on the drop zone and in its accessible name', async () => {
+    mockFetch(BASE);
+    mount();
+    await settle();
+
+    // the format name and not the sentence: stage 8 rewrites this prose, and a
+    // pinned sentence would then fail for a reason that is not this one
+    const dropzone = await screen.findByRole('button', { name: /pdf/i });
+    expect(dropzone).toHaveTextContent(/\.pdf/);
+  });
+
+  /**
+   * The preview counts lines only for a file it decided is text. That decision
+   * becomes routine with PDFs reachable by the button, and nothing pinned it: the
+   * CSV half is what proves the read ran at all, so the PDF half cannot pass on a
+   * read that never happened and left fileRows null.
+   */
+  it('shows a CSV its row count and a PDF its size, never a row count', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const preview = () => screen.getByText(/click to choose another/);
+
+    const csv = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
+    fireEvent.change(fileInput(container), { target: { files: [csv] } });
+    await settle();
+    expect(preview()).toHaveTextContent(/1 rows/);
+
+    // several lines on purpose: a build that ignored the %PDF signature would count
+    // them, so the assertion below has something to catch
+    const pdf = new File(['%PDF-1.7\nobj\nstream\nendobj'], 'statement.pdf', {
+      type: 'application/pdf',
+    });
+    fireEvent.change(fileInput(container), { target: { files: [pdf] } });
+    await settle();
+    expect(preview()).toHaveTextContent(/kB/);
+    expect(preview()).not.toHaveTextContent(/rows/);
+  });
+});
 
 describe('the summary panel', () => {
   it('reports the counts, says nothing is imported, and names the account', async () => {
