@@ -23,6 +23,7 @@ import {
   NOTE_MAX,
   PDF_PARSER_VERSION,
   PdfTemplate,
+  TEMPLATES,
   TextLine,
   readPdf,
   refusals,
@@ -111,6 +112,122 @@ const statement = (tag: string, closing = '59,76€'): PlacedText[][] => [
     ...box(620, '1 200,00€', closing),
   ],
 ];
+
+/** Two of them, so a rule that happens to match one literal is not enough. */
+const CARDS = ['Карта: 400000******0000', 'Карта: 555500******0001'] as const;
+
+/**
+ * One line of the deposit-insurance footer the real document prints at the bottom of
+ * every page: the description column, every other cell empty - a continuation's exact
+ * shape - on the page of the transaction it would attach to, so the page test cannot
+ * see it. It carries no label, which is what keeps it out.
+ *
+ * It is placed at `size: 3` and that is a budget rather than a preference. pdfjs
+ * splits a placed run at every space and this fixture's font advances one point per
+ * character per point of size, from x=124.8, so at size 3 a fragment may begin no
+ * later than character 68 and still land inside the description column's [120, 330).
+ * The last fragment here ("также") begins at character 50, so the line has eighteen
+ * characters of headroom; at size 4 it would have one. Spend the headroom and the
+ * line writes into the debit column, `blank()` stops calling it a continuation, and
+ * the case below passes having exercised nothing - which is the silent direction: a
+ * KEPT line that stops being a candidate turns its own case red, a dropped one does
+ * not.
+ */
+const FOOTER = 'Литвы и Европейского центрального банка. Компания также';
+const FOOTER_SIZE = 3;
+
+/**
+ * The lines the real document writes under a dated line, with what each one is for.
+ *
+ * `kept` is the case's own claim about what should reach the column, and both the
+ * fixture's text and its expected descriptions are composed from these literals: a
+ * reader that starts dropping a kept line cannot pass by having its expectation
+ * moved with it, because the expectation is the dated line plus exactly the entries
+ * marked here.
+ *
+ * Every kept label carries two distinct values, and so does the one dropped label.
+ */
+const DETAILED: readonly {
+  date: string;
+  description: string;
+  amount: { debit?: string; credit?: string };
+  /** `size` is 4 unless the line needs the headroom FOOTER's own comment measures */
+  under: readonly { text: string; kept: boolean; size?: number }[];
+}[] = [
+  {
+    date: '2 июл. 2026г.',
+    description: 'REWE.de',
+    amount: { debit: '5,68€' },
+    // the row this whole thing is about: seven characters on the dated line, and the
+    // merchant, its trading name and its town two lines under it
+    under: [
+      { text: 'Получатель: Rewe Markt Mueller, Hamburg', kept: true },
+      { text: CARDS[0], kept: false },
+    ],
+  },
+  {
+    // a dropped line BETWEEN two kept ones: it ends nothing, and the row is still
+    // open under it
+    date: '3 июл. 2026г.',
+    description: 'Платеж от JANE DOE',
+    amount: { credit: '100,00€' },
+    under: [
+      { text: 'Реквизиты: Sent from N26', kept: true },
+      { text: CARDS[1], kept: false },
+      // no account number enters this file: the digits are zeroes
+      { text: 'Отправитель: JANE DOE, DE00000000000000000000', kept: true },
+    ],
+  },
+  {
+    date: '12 июл. 2026г.',
+    description: 'Apple',
+    amount: { credit: '9,99€' },
+    under: [
+      { text: 'Отправитель: Apple.com/bill, Cork', kept: true },
+      { text: 'Реквизиты: Отправлено из Revolut', kept: true },
+    ],
+  },
+  {
+    date: '30 июл. 2026г.',
+    description: 'Wizz Air',
+    amount: { debit: '1 234,56€' },
+    under: [
+      { text: 'Получатель: Wizz Airline, Budapest', kept: true },
+      { text: FOOTER, kept: false, size: FOOTER_SIZE },
+    ],
+  },
+];
+
+const kept = (t: (typeof DETAILED)[number]): string =>
+  [t.description, ...t.under.filter((u) => u.kept).map((u) => u.text)].join(' ');
+
+/**
+ * The same statement with the detail lines under it, as a builder of its own rather
+ * than an addition to `statement()`: some twenty cases import that one and every one
+ * of their expected descriptions would move.
+ *
+ * `size` is a fixture artefact and not a fact about the layout, for the reason
+ * n26Detail states - this fixture's font advances one point per character where the
+ * real document's advances 0.66, so a detail line of the length Revolut really
+ * writes would spill its tail past x=330 and into the debit column, where `blank()`
+ * would refuse it and the case would pass having exercised nothing.
+ */
+const detailed = (tag: string): PlacedText[][] => {
+  const drawn: PlacedText[] = [ISSUER, { x: 39.7, y: 15, text: tag }, ...header(700)];
+  let y = 680;
+  for (const t of DETAILED) {
+    drawn.push(...row(y, t.date, t.description, t.amount));
+    for (const line of t.under) {
+      y -= 12;
+      drawn.push({ x: X.description, y, text: line.text, size: line.size ?? 4 });
+    }
+    y -= 20;
+  }
+  // -5,68 + 100,00 - 1 234,56 + 9,99: the four rows net -1 130,25, which is what
+  // takes the 1 200,00€ opening to the 69,75€ the gate reads below
+  drawn.push(...box(y, '1 200,00€', '69,75€'));
+  return [drawn];
+};
 
 const importPdf = (accountName: string, pages: PlacedText[][], preset?: string) =>
   importStatement({ accountName, currency: 'EUR', bytes: buildPdf(pages), preset });
@@ -339,6 +456,67 @@ describe('pdf: bytes to rows', () => {
     await expect(importPdf('Revolut Bad Preset', statement('bad preset'), 'not-a-bank')).rejects.toThrow(
       /unknown preset: not-a-bank/,
     );
+  });
+
+  /**
+   * ROADMAP row 34, and it is what that row is: the document prints "Получатель:
+   * Rewe Markt Mueller, Hamburg" two lines under a dated line whose description cell
+   * is "REWE.de", and seven characters is what reached the column the categoriser,
+   * the transfer detector, the export and every search this product grows all read.
+   *
+   * The truncation was invisible from anywhere downstream, which is why it needs a
+   * case rather than a screen: the reconciliation gate sums amounts, so a statement
+   * with every description cut to its first line reconciles to the cent and imports.
+   *
+   * Seen red against `rows: { kind: 'one-line' }` - every stored description is the
+   * dated line alone and every expectation below loses its tail.
+   */
+  it('a transaction is its dated line and the labelled lines under it', async () => {
+    const r = await importAndConfirm({
+      accountName: 'Revolut Descriptions',
+      currency: 'EUR',
+      bytes: buildPdf(detailed('descriptions')),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(rows).toHaveLength(DETAILED.length);
+    // found by the dated line's own text and asserted whole: a continuation is
+    // appended and never substituted, so that text stays the prefix. Category rules
+    // match by substring, and every one a user wrote against the short description
+    // has to keep matching a longer one
+    for (const t of DETAILED) {
+      expect(rows.find((d) => d.startsWith(t.description))).toBe(kept(t));
+    }
+  });
+
+  /**
+   * I3. "Карта: …" is a masked card number - one distinct value on all 49 of its
+   * occurrences in the document measured, so it cannot tell two transactions apart -
+   * and the CSV export of the same month carries no card number at all, so keeping
+   * it would make the PDF path store an identifier this product has never held. The
+   * footer carries no label, and a layout that names what it keeps excludes it
+   * without anyone reading what it says.
+   *
+   * Not vacuous: the same fixture's kept lines are placed at the same x and the same
+   * size, and the case above asserts they arrive. So a line missing here is missing
+   * because the template did not want it, not because it was never a continuation.
+   *
+   * Seen red with 'Карта:' added to the template's keep list.
+   */
+  it('the lines the template does not keep do not reach a description', async () => {
+    const r = await importAndConfirm({
+      accountName: 'Revolut Cards',
+      currency: 'EUR',
+      bytes: buildPdf(detailed('cards')),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(new Set(CARDS).size).toBe(CARDS.length);
+    for (const line of [...CARDS, FOOTER]) {
+      for (const description of rows) expect(description).not.toContain(line);
+    }
   });
 });
 
@@ -779,6 +957,65 @@ describe('pdf: the second layout', () => {
     // and the page-2 title, which has a continuation's exact shape and is on the
     // wrong page for it
     for (const description of rows) expect(description).not.toMatch(/Kontoauszug|bis 31/);
+  });
+
+  /**
+   * I4, and the ruling ROADMAP row 34 was assigned (row 6c, D17 finding 2). The rule
+   * this template shipped with was anchored on the VALUE's character class -
+   * /^IBAN: [A-Z0-9]+ • BIC: [A-Z0-9]+$/u - so a grouped IBAN, one with no BIC half
+   * and a truncated one all missed it and landed whole in the column, with nothing
+   * refusing and nothing noting it. The template names the label now and the value is
+   * not in the rule at all, so every variant below is one string built from that one
+   * literal rather than a hand-typed near miss of a pattern.
+   *
+   * `LABEL` is read off the template and not copied, so the misses cannot drift from
+   * the rule they are aimed at. That is why the SHAPE is asserted separately: a
+   * miss composed as `${LABEL} …` starts with `LABEL` whatever `LABEL` is, so
+   * narrowing the template's entry to 'IBAN: DE00' would narrow every miss with it
+   * and the case would pass while a real "IBAN: FR76… • BIC: AGRIFRPP" landed whole
+   * in the column. A test held to a value cannot notice the value moving; the
+   * label-and-nothing-else assertion is what bounds it, and it is over every entry
+   * rather than the first, because a second one added later is what nobody re-reads
+   * this case for.
+   *
+   * The control is what stops the case passing vacuously: it is placed the same way
+   * and it IS appended, so a variant that is absent is absent because the template
+   * dropped it and not because the line was never a continuation.
+   */
+  it('a near miss of the identifier the template names is dropped too', async () => {
+    const n26 = TEMPLATES.find((t) => t.id === 'n26-de')!;
+    const drop = n26.rows.kind === 'continuations' ? n26.rows.drop : [];
+    expect(drop.length).toBeGreaterThan(0);
+    // a label and nothing of the value: 'IBAN: DE00' fails on the space, 'IBAN' on
+    // the missing colon
+    for (const label of drop) expect(label).toMatch(/^\S+:$/u);
+    const LABEL = drop[0];
+
+    const misses = [
+      `${LABEL} DE00 0000 0000 0000 0000 00 • BIC: XXXXDEXXXXX`,
+      `${LABEL} DE00000000000000000002`,
+      `${LABEL} DE00`,
+    ];
+    const control = 'Verwendungszweck 5530';
+
+    const pages = n26Statement('near miss');
+    let y = 505;
+    for (const text of [...misses, control]) {
+      pages[0].push(...n26Detail(y, text, 4));
+      y -= 14;
+    }
+    const r = await importAndConfirm({
+      accountName: 'N26 Near Miss',
+      currency: 'EUR',
+      bytes: buildPdf(pages),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(rows.some((d) => d.endsWith(control))).toBe(true);
+    for (const description of rows) {
+      for (const miss of misses) expect(description).not.toContain(miss);
+    }
   });
 
   /**

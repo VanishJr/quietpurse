@@ -25,7 +25,7 @@ import { Cell, Sheet, cellText } from './sheet';
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
  */
-export const PDF_PARSER_VERSION = 3;
+export const PDF_PARSER_VERSION = 4;
 
 /**
  * What the document says it started and ended with, for the whole statement rather
@@ -265,18 +265,35 @@ interface AmountFormat {
 
 /**
  * What one transaction's extent is. Revolut and N26 both write several lines per
- * transaction; only one of them has a template that says so, and that is deliberate -
- * changing what the first layout reads is not this row's (row 6c, R5).
+ * transaction, and each names the lines it does not want by the LABEL the generator
+ * writes on them - never by a pattern over the value beside it. A label is what the
+ * generator holds constant; the value is what varies, so a rule anchored on the
+ * value's character class misses the grouped, the truncated and the half-written
+ * form of the same line and lands the whole of it in a queried column, with nothing
+ * refusing (row 6c, D17 finding 2). A prefix over the label cannot near-miss,
+ * because the value is not in the rule at all.
  *
- * `continuations` has to name its own dropped lines rather than defaulting to none:
- * every line the layout writes under a transaction is appended to its description
- * unless a pattern here names it, so what is thrown away is a measurement in the
- * template and not a rule in the reader. The list may be empty - that is a template
- * saying "keep everything", which is a different statement from not having decided.
+ * Two directions, because the two layouts measured cannot be expressed by one. A
+ * layout whose detail lines are ALL labelled takes `labelled-continuations` and
+ * names what it keeps; an unmeasured line is then dropped, which is a short
+ * description - visible and recoverable. A layout whose detail lines are largely
+ * unlabelled has no such list and takes `continuations`, which obliges its author to
+ * enumerate what the layout writes BELOW its transactions: Revolut prints ~800
+ * characters of deposit-insurance footer per page in the description column with
+ * every other cell empty, which is a continuation's exact shape and has no label to
+ * name it by. Nothing structural stops a labelled layout reaching for the permissive
+ * arm; the tree carries one template of each, side by side.
+ *
+ * A label naming a line that writes in an amount column can never take effect either
+ * way: `blank()` is tested first, and a line writing an amount is a row's own or
+ * nothing.
  */
 type RowExtent =
   | { kind: 'one-line' }
-  | { kind: 'continuations'; drop: readonly RegExp[] };
+  /** every continuation line, minus those whose description starts with a label here */
+  | { kind: 'continuations'; drop: readonly string[] }
+  /** only the continuation lines whose description starts with a label here */
+  | { kind: 'labelled-continuations'; keep: readonly string[] };
 
 /**
  * Where the layout states the statement's own opening and closing balance, for the
@@ -710,6 +727,16 @@ function amountCell(template: PdfTemplate, raw: string): ReadAmount {
   return value === null ? unreadable : { value, currency };
 }
 
+/** Whether the layout wants this continuation line, by the label it starts with. */
+function wanted(rows: Exclude<RowExtent, { kind: 'one-line' }>, description: string): boolean {
+  switch (rows.kind) {
+    case 'continuations':
+      return !rows.drop.some((label) => description.startsWith(label));
+    case 'labelled-continuations':
+      return rows.keep.some((label) => description.startsWith(label));
+  }
+}
+
 /**
  * The transaction lines, in document order.
  *
@@ -726,12 +753,12 @@ function amountCell(template: PdfTemplate, raw: string): ReadAmount {
  * correctly anyway. A section that reuses a header the template DOES name is read,
  * which is how Revolut's vault transactions come in beside the account's.
  *
- * On a `continuations` layout the furniture is not all furniture: the lines under a
+ * On a multi-line layout the furniture is not all furniture: the lines under a
  * dated line carry the counterparty and the reference, and dropping them is a
  * truncation nothing downstream can see - the reconciliation gate sums amounts, so a
  * statement with every description cut to its first line reconciles to the cent and
- * imports (row 6c, R4). So they are appended, and what is NOT appended is named by
- * the template rather than decided here.
+ * imports (row 6c, R4). So they are appended, and which of them are appended is
+ * named by the template rather than decided here.
  */
 function readRows(
   template: PdfTemplate,
@@ -766,14 +793,14 @@ function readRows(
       // lose its tail - and no transaction in the document measured is split. A
       // layout that does split one is a finding for a later row.
       if (
-        template.rows.kind === 'continuations' &&
+        template.rows.kind !== 'one-line' &&
         open !== null &&
         table !== null &&
         open.page === line.page &&
         cells.date === '' &&
         cells.description !== '' &&
         table.blank(line) &&
-        !template.rows.drop.some((p) => p.test(cells.description))
+        wanted(template.rows, cells.description)
       ) {
         open.row[DESCRIPTION] = `${cellText(open.row[DESCRIPTION])} ${cells.description}`;
       }
@@ -959,8 +986,13 @@ export async function readPdf(
  * One per LAYOUT and not per bank: the Revolut export in English is a third template
  * and not a flag on the first, and a layout nobody has seen is not written from
  * imagination (ROADMAP 5.2, row 6c).
+ *
+ * Exported for the near-miss case in test/pdf.test.ts, like readSheet in statement.ts
+ * and for the same reason: a case that bounds a drop label has to read the label off
+ * the template rather than copy it, or the copy drifts and the case goes on passing
+ * against a rule that is no longer there.
  */
-const TEMPLATES: readonly PdfTemplate[] = [
+export const TEMPLATES: readonly PdfTemplate[] = [
   {
     id: 'revolut-ru',
     title: 'Revolut',
@@ -1008,13 +1040,29 @@ const TEMPLATES: readonly PdfTemplate[] = [
       currency: { '€': 'EUR' },
       example: '1 234,56€',
     },
-    // The document writes several lines per transaction here too - "Получатель: …",
-    // "Карта: …" - and they are dropped, exactly as they were before this row.
-    // Changing what the first layout reads is not the row that added the second one
-    // (row 6c, R5); it is ROADMAP row 34, and it moves every Revolut PDF row's
-    // description, so it needs its own parser version and a plan for rows already
-    // imported.
-    rows: { kind: 'one-line' },
+    // A transaction is a dated line plus one to three detail lines, and every one of
+    // them carries one of exactly four labels: over the whole document measured,
+    // "Получатель:" 54, "Карта:" 49, "Реквизиты:" 17, "Отправитель:" 13, and no
+    // unlabelled detail line anywhere. So this layout names what it KEEPS. The 54
+    // unlabelled lines of that shape are all deposit-insurance footer, printed at the
+    // bottom of each page in the description column with every other cell empty - a
+    // continuation's exact shape, on the same page as the transaction it would attach
+    // to, so the page test above cannot see it. Under a drop list it added ~800
+    // characters to whichever transaction was open and took the longest description
+    // to 946; here it is excluded by having no label rather than by anybody reading
+    // what it says.
+    //
+    // "Карта:" is the one label named and not kept: a masked PAN, one distinct value
+    // on all 49 occurrences, so it cannot tell two transactions apart, and the CSV
+    // export of the same month carries no card number at all. The other three carry
+    // the merchant's trading name, the counterparty and the sender's reference, which
+    // is what the categoriser, the transfer detector and the export are for - the
+    // dated line alone says "REWE.de" where the document prints "Получатель: Rewe
+    // Markt Mueller, Hamburg" (ROADMAP row 34).
+    rows: {
+      kind: 'labelled-continuations',
+      keep: ['Получатель:', 'Реквизиты:', 'Отправитель:'],
+    },
     // "Сведения о балансе" states a pair per product - the account, then the
     // wallets - and an "Итого" line under them that is the sum of both. It is the
     // Итого pair and never the account's: the account's own transactions and the
@@ -1098,13 +1146,26 @@ const TEMPLATES: readonly PdfTemplate[] = [
     // their reference line, so dropping the detail would make them read identically -
     // and it is the reference, not the name, that a categoriser can use.
     //
-    // The one line dropped is the counterparty's IBAN and BIC. It is stated as a
-    // whole-cell shape rather than a substring so that it can only ever match the
-    // line it was measured against: other people's identifiers do not belong in a
-    // column the categoriser, the transfer detector and the export all read, and
-    // "the bytes are already stored" is a different fact - the stored document is
-    // encrypted and not queryable.
-    rows: { kind: 'continuations', drop: [/^IBAN: [A-Z0-9]+ • BIC: [A-Z0-9]+$/u] },
+    // Most of them carry no label at all - "Belastungen", "Wertstellung 01.07.2026",
+    // "LOHN / GEHALT 07/26" - so this layout cannot name what it keeps and names what
+    // it drops instead. It has to be read as an obligation to enumerate what the
+    // layout writes below its transactions; N26's own footer writes in the amount
+    // column, so `blank()` already refuses it, and that is a measurement rather than
+    // a promise.
+    //
+    // The one line dropped is the counterparty's IBAN and BIC. Other people's
+    // identifiers do not belong in a column the categoriser, the transfer detector
+    // and the export all read, and "the bytes are already stored" is a different fact
+    // - the stored document is encrypted and not queryable. The label alone is the
+    // rule: the shape this was written as before matched the value's character class,
+    // so a grouped IBAN or a line missing its BIC half landed whole in the column.
+    //
+    // What that costs: the unit is the LINE, so a reference printed after the
+    // identifier on the same line goes with it. None of the 17 lines on the document
+    // measured carries one, and a statement that starts writing "IBAN: DE…
+    // Verwendungszweck …" loses the reference with nothing refusing and nothing
+    // noting it.
+    rows: { kind: 'continuations', drop: ['IBAN:'] },
     // Two lines 79 units apart under two different labels, on the summary page, with
     // two other lines between them - which is why BalanceBox has a second kind at
     // all. Each label occurs exactly once in the whole document.
