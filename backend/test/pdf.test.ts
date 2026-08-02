@@ -32,6 +32,7 @@ import {
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import {
   CURRENCY_CODE_MAX,
+  NUL_SCAN_BYTES,
   ParsedFile,
   StatedBalances,
   importStatement,
@@ -41,7 +42,13 @@ import {
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
 import { importAndConfirm } from './helpers';
-import { PlacedText, buildImagePdf, buildPdf } from './pdffixture';
+import {
+  CONTAINER_HEADER_BYTES,
+  PlacedText,
+  buildImagePdf,
+  buildPdf,
+  buildSignedContainer,
+} from './pdffixture';
 
 /**
  * What the sheet mapper stated beside a PDF's rows, which is nothing: a PDF's
@@ -1381,7 +1388,7 @@ describe('pdf: the refusals', () => {
     [
       'a file that starts with %PDF and is not one',
       () => Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'),
-      /starts with %PDF but could not be opened as one/,
+      /looks like a PDF but could not be opened as one/,
     ],
     ['a scan', () => buildImagePdf(), /this looks like a scan - this importer reads the text layer/],
     [
@@ -1424,6 +1431,126 @@ describe('pdf: the refusals', () => {
   it('every one of them is a different sentence', () => {
     const sentences = cases.map(([, , message]) => message.source);
     expect(new Set(sentences).size).toBe(cases.length);
+  });
+});
+
+/**
+ * Row 33. A bank's own export can be the statement inside a CMS envelope, and the
+ * sniffer read offset 0 only: `%PDF-` at byte 71 made the file "neither a CSV nor an
+ * Excel workbook" to someone holding a document this importer opens perfectly well.
+ */
+describe('pdf: a statement inside a signed container', () => {
+  const REFUSED =
+    'this file is not a CSV, Excel (.xlsx) or PDF statement - export the statement in one of those from your online banking and upload that';
+
+  /**
+   * The precondition every case below stands on. A container the NUL scan would not
+   * have refused is classified the same whether the new branch sits above that scan
+   * or below it, so a case built that way cannot notice the branch moving - which is
+   * what `buildPdf` output, carrying no NUL at all, would have produced. Composed
+   * from NUL_SCAN_BYTES and never from 8192.
+   */
+  const binaryInsideTheScan = (bytes: Buffer, from = 0): Buffer => {
+    const at = bytes.indexOf(0, from);
+    const why = 'no NUL the sniffer would have scanned: this fixture pins nothing';
+    expect(at, why).toBeGreaterThanOrEqual(from);
+    expect(at, why).toBeLessThan(NUL_SCAN_BYTES);
+    return bytes;
+  };
+
+  /**
+   * The lead bytes as measured out of the two real documents - `30 83`, with `%PDF-`
+   * at 71 - written here rather than imported from the rule, so a rule narrowed to
+   * the one length byte those documents happen to carry goes red (034, D4).
+   */
+  const container = (lead: number, header = '%PDF-1.4'): Buffer =>
+    Buffer.concat([
+      Buffer.from([0x30, lead]),
+      Buffer.alloc(64),
+      Buffer.from(`signature ${header} certificates`),
+    ]);
+
+  it('classifies one as a PDF, whichever long-form length the signer wrote', () => {
+    // 0x80 is BER indefinite length, which a signer that streams emits; 0x84 is four
+    // length bytes. The real documents are 0x83 and the same bank's statement under
+    // 64 KiB would be 0x82
+    for (const lead of [0x80, 0x81, 0x82, 0x83, 0x84]) {
+      expect(sniff(binaryInsideTheScan(container(lead)))).toBe('pdf');
+    }
+  });
+
+  it('answers on the header being found, never on the lead-in', () => {
+    expect(() => sniff(binaryInsideTheScan(container(0x83, 'no header here')))).toThrow(REFUSED);
+    // and a lead-in that cannot hold a document is not one: short form says the whole
+    // value is at most 127 bytes, and 0x30 is ASCII `0` in the first place
+    for (const lead of [0x02, 0x7f, 0x85]) {
+      expect(() => sniff(binaryInsideTheScan(container(lead)))).toThrow(REFUSED);
+    }
+  });
+
+  it('finds a header at the last byte of the file', () => {
+    const bytes = Buffer.concat([
+      Buffer.from([0x30, 0x83]),
+      Buffer.alloc(64),
+      Buffer.from('%PDF-'),
+    ]);
+    expect(sniff(binaryInsideTheScan(bytes))).toBe('pdf');
+  });
+
+  /**
+   * There is no window, so there is no boundary: pdfjs re-bases on a header inside
+   * its own 1024-byte find() and reconstructs the xref when it misses, and a
+   * classifier stricter than the reader it feeds refuses a file this product reads.
+   */
+  it('takes a header past pdfjs own 1024-byte search, and the parser still reads it', async () => {
+    const bytes = buildSignedContainer(buildPdf(statement('past the find limit')), 2048);
+    expect(bytes.indexOf('%PDF-')).toBeGreaterThan(1024);
+    expect(sniff(binaryInsideTheScan(bytes, CONTAINER_HEADER_BYTES))).toBe('pdf');
+
+    const staged = await importStatement({
+      accountName: 'Wrapped Far Bank',
+      currency: 'EUR',
+      bytes,
+    });
+    expect(staged.outcome).toBe('awaiting_confirmation');
+    if (staged.outcome !== 'awaiting_confirmation') return;
+    expect(staged.summary.total).toBe(3);
+  });
+
+  /**
+   * Classify, store, parse, rows - the wrapped path whole rather than in halves. It
+   * is not evidence that the real containers import: those reach NOT_RECOGNISED and
+   * are stored as failed imports, which is what this row hands row 31.
+   */
+  it('imports a known layout inside a container, end to end', async () => {
+    const imported = await importAndConfirm({
+      accountName: 'Wrapped Revolut',
+      currency: 'EUR',
+      bytes: binaryInsideTheScan(
+        buildSignedContainer(buildPdf(statement('wrapped'))),
+        CONTAINER_HEADER_BYTES,
+      ),
+    });
+
+    expect(imported.inserted).toBe(3);
+    const record = (await listImports()).find((i) => i.id === imported.importId)!;
+    expect(record.sourceType).toBe('pdf');
+    expect(record.parserVersion).toBe(PDF_PARSER_VERSION);
+  });
+
+  /**
+   * The class NOT_A_PDF was reworded for. Every other case pinning that sentence
+   * feeds a file whose header is at byte 0, for which the old "starts with %PDF" was
+   * equally true - so the new wording was held only by inputs that could not have
+   * motivated it. Here the header is at an offset and there is no document behind it.
+   */
+  it('says a container whose document is broken looks like a PDF, not that it starts with one', async () => {
+    const bytes = binaryInsideTheScan(container(0x83));
+    expect(bytes.indexOf('%PDF-')).toBeGreaterThan(0);
+
+    await expect(readPdf(bytes, 200)).rejects.toThrow(
+      /looks like a PDF but could not be opened as one/,
+    );
   });
 });
 
