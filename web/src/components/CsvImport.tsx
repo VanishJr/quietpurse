@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney } from '../format';
-import { CsvImportResult, ImportConfirmed, ImportSourceType, ImportSummary } from '../types';
+import {
+  BalancesNotShown,
+  CsvImportResult,
+  ImportConfirmed,
+  ImportSourceType,
+  ImportSummary,
+} from '../types';
 import { Chips } from './Chips';
 
 /** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
@@ -21,6 +27,26 @@ const ACCEPT_TOKENS: Record<ImportSourceType, readonly [`.${string}`, string, ..
 };
 
 const ACCEPTED = Object.values(ACCEPT_TOKENS).flat().join(',');
+
+/**
+ * Why a statement that does print a running balance got no start-and-end pair out of
+ * it. Total over the slug union for ACCEPT_TOKENS' reason: a state the backend learns
+ * to send and this map does not name would render as a blank line, and a blank line
+ * where a reason belongs is the "no balances" spelling all over again. None of these
+ * is a rejected row, so none of them goes anywhere near `problems`.
+ */
+const BALANCES_NOT_SHOWN: Record<BalancesNotShown, string> = {
+  'rows-outside-the-balance':
+    "This file's running balance also covers rows that weren't imported, so it wasn't used to check the ones that were.",
+  'rows-without-a-balance':
+    "Some of the rows read state no running balance, so this file's own balance wasn't used to check them.",
+  // "a running balance" and not "this file's": a statement can state several, and one
+  // of them closing on itself is what suppresses the pair for all of them
+  'balance-closes-on-itself':
+    'A running balance in this file ends where it began, so there is no start and end to show for the statement.',
+  'more-than-one-currency':
+    'This file states a running balance per currency, so there is no single start and end to show.',
+};
 
 /** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
@@ -366,16 +392,36 @@ export function CsvImport({ onBack, onImported }: Props) {
             .
           </p>
           {/*
-            Only when the format states its own balances, which today means a PDF. A
-            "couldn't be reconciled" line on the CSV path would be a warning about
-            nothing on 100% of imports — those files carry no balances by construction.
+            Only when the format states its own balances at all. A PDF prints an
+            opening and a closing box; a CSV or Excel statement prints a running
+            balance per row, and the backend derives the pair from it — which is why
+            the numbers below can be a sum the user will find in no single cell, and
+            why the sentence says how many were added. A file that states neither
+            gets no line: a "couldn't be reconciled" warning about nothing.
           */}
           {summary.balances && (
             <p className="hint" style={{ marginTop: 6 }}>
-              Checked against the statement's own balances:{' '}
+              {(summary.balances.series ?? 1) > 1
+                ? `Checked against the ${summary.balances.series} running balances this statement states, added together: `
+                : "Checked against the statement's own balances: "}
               {fmtMoney(summary.balances.opening, summary.balances.currency)} at the start,{' '}
-              {fmtMoney(summary.balances.closing, summary.balances.currency)} at the end. The
-              rows add up.
+              {fmtMoney(summary.balances.closing, summary.balances.currency)} at the end.{' '}
+              {/*
+                Two different checks, so two different claims. A PDF states both ends
+                itself, and "the rows add up" is exactly what was verified. A running
+                balance states neither end — both are derived from these same rows, so
+                a row missing from either END of the statement moves an end instead of
+                breaking the run and is invisible here. The sentence may claim the run,
+                and may not claim the statement is complete.
+              */}
+              {summary.balances.series === undefined
+                ? 'The rows add up.'
+                : 'The rows read run unbroken from one to the other.'}
+            </p>
+          )}
+          {summary.balancesNotShown && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              {BALANCES_NOT_SHOWN[summary.balancesNotShown]}
             </p>
           )}
           {/*

@@ -516,10 +516,14 @@ describe('a failed import leaves no staged rows behind', () => {
  */
 describe('a stated fee survives staging', () => {
   it('reaches staged_transactions, and then the row the confirm writes', async () => {
+    // the Balance column chains through the movements rather than reading 0 on both
+    // rows: 100.00 - 63.62 - 10.00, which is what the bank prints and what row 54's
+    // gate now reads. Two rows are cheap, and they buy the assertion below that a
+    // derived pair survives to the summary the confirm path shows
     const file = [
       'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance',
-      'CARD_PAYMENT,Current,2026-10-01 09:00:00,2026-10-01 10:00:00,Staged With Fee,-63.18,0.44,EUR,COMPLETED,0',
-      'CARD_PAYMENT,Current,2026-10-02 09:00:00,2026-10-02 10:00:00,Staged No Fee,-10.00,0.00,EUR,COMPLETED,0',
+      'CARD_PAYMENT,Current,2026-10-01 09:00:00,2026-10-01 10:00:00,Staged With Fee,-63.18,0.44,EUR,COMPLETED,36.38',
+      'CARD_PAYMENT,Current,2026-10-02 09:00:00,2026-10-02 10:00:00,Staged No Fee,-10.00,0.00,EUR,COMPLETED,26.38',
     ].join('\n');
 
     const result = await importStatement({
@@ -535,6 +539,13 @@ describe('a stated fee survives staging', () => {
 
     // the number on the confirmation screen is already the movement, not the column
     expect(summary.totals).toEqual([{ currency: 'EUR', net: -73.62 }]);
+    // and the statement's own running balance says the same, off one series
+    expect(summary.balances).toEqual({
+      opening: 100,
+      closing: 26.38,
+      currency: 'EUR',
+      series: 1,
+    });
     expect(await stagedFeeCents(summary.importId)).toEqual([44, 0]);
 
     expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, inserted: 2 });
