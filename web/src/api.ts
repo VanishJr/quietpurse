@@ -65,8 +65,13 @@ export function onUnauthorized(fn: () => void): () => void {
  */
 const MAX_ERROR_CHARS = 500;
 
-/** A proxy's error page is unbounded and is not written for a person to read. */
-const MAX_RAW_BODY_CHARS = 200;
+/**
+ * A proxy's error page is unbounded and is not written for a person to read.
+ * Exported for the one test that has to know it: the auth classifier reads a
+ * message this bound has already cut, so a refusal longer than it is classified
+ * on a truncated string.
+ */
+export const MAX_RAW_BODY_CHARS = 200;
 
 /** Cut with a mark, so a message with more behind it does not read as a broken one. */
 const bounded = (text: string, max: number): string =>
@@ -181,8 +186,10 @@ class AuthError extends Error {
 /**
  * Auth calls go through their own request function: a 401 here means "wrong
  * password", not "your session expired", and must not kick the app back to the
- * login screen it is already on. better-auth reports failures as
- * { message, code } - the message is what the user should read.
+ * login screen it is already on. better-auth reports failures as { message, code }.
+ *
+ * The cut is MAX_RAW_BODY_CHARS and not MAX_ERROR_CHARS: 500 is the budget the
+ * backend composes import refusals to, and nothing on this path is written to it.
  */
 async function authRequest<T>(
   path: string,
@@ -197,14 +204,28 @@ async function authRequest<T>(
   });
   const text = await res.text();
   if (!res.ok) {
-    let message = text.slice(0, 200);
+    // the status the way refuse() keeps it, and the cut marked, so a proxy's error
+    // page does not arrive as 200 characters of markup reading like a finished sentence
+    let message = bounded(`${res.status}: ${text}`, MAX_RAW_BODY_CHARS);
     let code: string | undefined;
     try {
-      const parsed = JSON.parse(text) as { message?: string; code?: string };
-      if (parsed.message) message = parsed.message;
-      if (parsed.code) code = parsed.code;
+      const parsed = JSON.parse(text) as { message?: unknown; error?: unknown; code?: unknown };
+      // better-auth says { message }; the invite gate in backend/src/app.ts says
+      // { error }, which is refuse()'s contract - read both, or a wrong invite code
+      // reaches the screen as literal JSON
+      const said =
+        typeof parsed.message === 'string'
+          ? parsed.message
+          : typeof parsed.error === 'string'
+            ? parsed.error
+            : undefined;
+      // truthiness rather than `!== undefined`: an empty string is the server
+      // saying nothing, and quoting it renders "It said:" and then the end of the
+      // sentence, with the status thrown away as well
+      if (said) message = bounded(said, MAX_RAW_BODY_CHARS);
+      if (typeof parsed.code === 'string') code = parsed.code;
     } catch {
-      // not JSON - fall back to the raw body
+      // not JSON - the status and the body are all there is
     }
     throw new AuthError(message, res.status, code);
   }
@@ -231,6 +252,91 @@ export type PasswordChange =
   | { outcome: 'signed-out' }
   /** The password may or may not be the new one. Only signing in can tell. */
   | { outcome: 'unknown'; detail: string };
+
+/**
+ * Every outcome of a sign-in or a sign-up. One type for both because they fail in
+ * the same ways and one switch in AuthScreen reads them, and total because a catch
+ * block is how the server's own words - a Zod field path, a library's message -
+ * reached the one screen a person meets before they have an account.
+ *
+ * A named member carries no server text: the classification decides which failure
+ * it is, the screen decides what to say. 'unexpected' is the exception and has to
+ * be, see its own comment.
+ */
+export type AuthAttempt =
+  /** Carries no user: the caller re-asks the server, exactly as PasswordChange.changed does. */
+  | { outcome: 'signed-in' }
+  /** Not an address this server will accept - a missing ending, a typo. */
+  | { outcome: 'bad-email' }
+  /** Deliberately non-enumerating: the server will not say which of the two is wrong. */
+  | { outcome: 'wrong-credentials' }
+  | { outcome: 'email-taken' }
+  | { outcome: 'password-too-short' }
+  /** The bucket is shared, so waiting is the action and it may not have been this visitor. */
+  | { outcome: 'rate-limited' }
+  /** This client sent a body the schema refused. Carries no text: it is written for a developer. */
+  | { outcome: 'malformed-request' }
+  /** The request never landed, so nothing can be said about the account. */
+  | { outcome: 'unreachable'; reason: string }
+  /**
+   * The server refused and this client has no name for it. It carries the server's
+   * text and dropping it would be the defect: when email verification lands, sign-in
+   * gains a refusal this client will not know by name, and "something went wrong"
+   * would leave a solvable problem with no way to see it. Bounded and framed as the
+   * server's words, not replaced with ours.
+   */
+  | { outcome: 'unexpected'; detail: string };
+
+/**
+ * A VALIDATION_ERROR message is a '; '-joined list, one clause per failing field
+ * (better-call's validator). Matching the email clause alone would call
+ * "[body.email] …; [body.password] …" an email problem and drop the other half, so
+ * the condition is every clause and anything else degrades to malformed-request -
+ * never to a sentence telling someone to fix an address that was not the problem.
+ */
+const onlyAboutEmail = (message: string): boolean =>
+  message.split('; ').every((clause) => clause.startsWith('[body.email]'));
+
+/**
+ * Hand-maintained mirror of the codes better-auth answers on /sign-in/email and
+ * /sign-up/email (BASE_ERROR_CODES in @better-auth/core). Like ImportSourceType it
+ * is checked by nothing: a code the library adds arrives at 'unexpected' with no
+ * compile error anywhere, which is why 'unexpected' prints what the server said
+ * rather than a sentence of ours.
+ *
+ * The two tabs answer one typo two different ways - /sign-up/email declares
+ * email: z.email() and is refused by the schema above the handler, /sign-in/email
+ * declares email: z.string() and is refused inside it - so this cannot be a rule
+ * about VALIDATION_ERROR alone or the tab almost every visit uses is untouched.
+ */
+const classify = (e: unknown): AuthAttempt => {
+  // a fetch that never landed is not a refusal, and nothing below it can read one
+  if (!(e instanceof AuthError))
+    return {
+      outcome: 'unreachable',
+      reason: bounded(e instanceof Error ? e.message : String(e), MAX_RAW_BODY_CHARS),
+    };
+  // the rate limiter answers a message and no code, so the status is the only key
+  if (e.status === 429) return { outcome: 'rate-limited' };
+  // the one code whose message is known to be written for a developer, answered
+  // above the table so that it can never reach 'unexpected', which prints it
+  if (e.code === 'VALIDATION_ERROR')
+    return onlyAboutEmail(e.message) ? { outcome: 'bad-email' } : { outcome: 'malformed-request' };
+  switch (e.code) {
+    case 'INVALID_EMAIL':
+      return { outcome: 'bad-email' };
+    // not status 401: sign-in also answers 401 for FAILED_TO_CREATE_SESSION, and
+    // telling that person their password is wrong sends them to retype a correct one
+    case 'INVALID_EMAIL_OR_PASSWORD':
+      return { outcome: 'wrong-credentials' };
+    case 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL':
+      return { outcome: 'email-taken' };
+    case 'PASSWORD_TOO_SHORT':
+      return { outcome: 'password-too-short' };
+    default:
+      return { outcome: 'unexpected', detail: e.message };
+  }
+};
 
 /** Bounded here rather than at each return, so a later outcome cannot skip the cut. */
 const unreachable = (reason: string): SessionResult => ({
@@ -280,15 +386,32 @@ export const auth = {
    * side). The invite code, when the server asks for one, travels as a header:
    * it gates the request rather than being part of the account.
    */
-  register: (email: string, password: string, name: string, inviteCode?: string) =>
-    authRequest<{ user: SessionUser }>(
-      '/sign-up/email',
-      { email, password, name },
-      inviteCode ? { 'x-invite-code': inviteCode } : undefined,
-    ),
+  register: async (
+    email: string,
+    password: string,
+    name: string,
+    inviteCode?: string,
+  ): Promise<AuthAttempt> => {
+    try {
+      await authRequest<{ user: SessionUser }>(
+        '/sign-up/email',
+        { email, password, name },
+        inviteCode ? { 'x-invite-code': inviteCode } : undefined,
+      );
+      return { outcome: 'signed-in' };
+    } catch (e) {
+      return classify(e);
+    }
+  },
 
-  login: (email: string, password: string) =>
-    authRequest<{ user: SessionUser }>('/sign-in/email', { email, password }),
+  login: async (email: string, password: string): Promise<AuthAttempt> => {
+    try {
+      await authRequest<{ user: SessionUser }>('/sign-in/email', { email, password });
+      return { outcome: 'signed-in' };
+    } catch (e) {
+      return classify(e);
+    }
+  },
 
   logout: () => authRequest<unknown>('/sign-out'),
 
