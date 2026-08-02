@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, auth, onUnauthorized, SessionResult, UnauthorizedError } from './api';
+import {
+  api,
+  auth,
+  AuthAttempt,
+  MAX_RAW_BODY_CHARS,
+  onUnauthorized,
+  SessionResult,
+  UnauthorizedError,
+} from './api';
+import { AUTH_REFUSALS } from './test/auth-refusals';
 import { USER } from './test/fixtures';
 
 /**
@@ -285,6 +294,156 @@ describe('auth.changePassword()', () => {
       currentPassword: 'old-password',
       newPassword: 'new-password',
       revokeOtherSessions: true,
+    });
+  });
+});
+
+/**
+ * The classification behind the only screen a person meets before they have an
+ * account. Neither call rejects any more, so a failure cannot reach a catch block
+ * and be printed as whatever the server composed; what is pinned here is which
+ * member each measured refusal becomes, and AuthScreen.test.tsx pins the sentence.
+ */
+describe('auth.login() / auth.register()', () => {
+  const login = () => auth.login('ivan@example.com', 'a-password');
+  const register = () => auth.register('ivan@example.com', 'a-password', 'ivan');
+
+  /** The detail, or a failure of its own if the answer was not 'unexpected'. */
+  function unexpectedDetail(result: AuthAttempt): string {
+    if (result.outcome !== 'unexpected')
+      throw new Error(`expected unexpected, got ${result.outcome}`);
+    return result.detail;
+  }
+
+  it('reads a 200 as signed in, on both calls', async () => {
+    respondWith(JSON.stringify({ user: USER }), 200);
+    expect(await login()).toEqual({ outcome: 'signed-in' });
+    respondWith(JSON.stringify({ user: USER }), 200);
+    expect(await register()).toEqual({ outcome: 'signed-in' });
+  });
+
+  // one case per row of the mirror in api.ts, driven by the table the dom sweep
+  // also reads, so the two cannot disagree about what the server sends
+  it.each(AUTH_REFUSALS)('classifies $status $what as $outcome', async (refusal) => {
+    respondWith(JSON.stringify(refusal.body), refusal.status);
+    expect((await login()).outcome).toBe(refusal.outcome);
+  });
+
+  // the classifier reads the message authRequest has already bounded, so
+  // onlyAboutEmail splits a cut string: a validation failure longer than the budget
+  // loses its later clauses and passes as an email one. Nothing better-auth composes
+  // is that long - both sides are read live here, so the day either moves is the day
+  // this goes red rather than the day somebody reads the arithmetic wrong
+  it.each(AUTH_REFUSALS)('says all of $what inside the raw-body budget', (refusal) => {
+    const body = refusal.body as { message?: string; error?: string };
+    expect((body.message ?? body.error ?? '').length).toBeLessThanOrEqual(MAX_RAW_BODY_CHARS);
+  });
+
+  it('names the address for the code the sign-up schema answers, and carries no text', async () => {
+    // the measured literal, copied off the wire rather than composed from what
+    // onlyAboutEmail matches: a fixture built from the pattern cannot notice the
+    // pattern narrowing
+    respondWith(
+      JSON.stringify({ message: '[body.email] Invalid email address', code: 'VALIDATION_ERROR' }),
+      400,
+    );
+    expect(await register()).toEqual({ outcome: 'bad-email' });
+  });
+
+  it('keeps a validation failure that is not only about the address off that sentence', async () => {
+    // telling someone to fix their address when the failing field was another one
+    // is the defect this degrades away from
+    respondWith(
+      JSON.stringify({
+        message: '[body.email] Invalid email address; [body.password] Too small',
+        code: 'VALIDATION_ERROR',
+      }),
+      400,
+    );
+    expect(await register()).toEqual({ outcome: 'malformed-request' });
+  });
+
+  it('reads a 429 by its status, since it carries no code', async () => {
+    respondWith(JSON.stringify({ message: 'Too many requests. Please try again later.' }), 429);
+    expect(await login()).toEqual({ outcome: 'rate-limited' });
+  });
+
+  it('does not read a 401 that is not about credentials as a wrong password', async () => {
+    // sign-in answers 401 for FAILED_TO_CREATE_SESSION too: the password was right,
+    // and "email and password do not match" sends that person to retype it forever
+    respondWith(
+      JSON.stringify({ message: 'Failed to create session', code: 'FAILED_TO_CREATE_SESSION' }),
+      401,
+    );
+    expect(await login()).toEqual({ outcome: 'unexpected', detail: 'Failed to create session' });
+  });
+
+  it("carries the invite gate's sentence, which is not better-auth's body shape", async () => {
+    // { error } is refuse()'s contract; reading only { message } left the raw JSON
+    // on screen on the one path every invite-only deployment has switched on
+    respondWith(JSON.stringify({ error: 'registration on this server is invite-only' }), 403);
+    expect(await register()).toEqual({
+      outcome: 'unexpected',
+      detail: 'registration on this server is invite-only',
+    });
+  });
+
+  it('reads a fetch that never landed as unreachable, carrying the reason', async () => {
+    rejectWith('Failed to fetch');
+    expect(await login()).toEqual({ outcome: 'unreachable', reason: 'Failed to fetch' });
+  });
+
+  it('cuts an unbounded reason at the raw-body budget', async () => {
+    rejectWith('w'.repeat(5000));
+    const result = await login();
+    if (result.outcome !== 'unreachable')
+      throw new Error(`expected unreachable, got ${result.outcome}`);
+    expect(result.reason).toHaveLength(200);
+    expect(result.reason.endsWith('…')).toBe(true);
+  });
+
+  it('marks the cut when the server said more than the budget', async () => {
+    // the unmarked slice(0, 200) this replaced ended mid-token, so a message with
+    // more behind it read as a finished sentence
+    respondWith(JSON.stringify({ message: 'y'.repeat(500), code: 'SOMETHING_NEW' }), 400);
+    const detail = unexpectedDetail(await login());
+    expect(detail).toHaveLength(200);
+    expect(detail.endsWith('…')).toBe(true);
+  });
+
+  it('keeps the status when the server sends an empty message', async () => {
+    // '' is the server saying nothing, and quoting it renders "It said:" and then
+    // the end of the sentence - with the status gone too, so nothing on screen
+    // tells this refusal from any other
+    respondWith(JSON.stringify({ message: '', code: 'SOMETHING_NEW' }), 400);
+    expect(unexpectedDetail(await login()).startsWith('400: ')).toBe(true);
+  });
+
+  it('keeps the status when the body is not JSON at all', async () => {
+    // a proxy's error page carries no message and no code; dropping the status left
+    // nothing at all to tell one failure from another
+    respondWith('<html>' + 'z'.repeat(5000) + '</html>', 502, false);
+    const detail = unexpectedDetail(await login());
+    expect(detail.startsWith('502: ')).toBe(true);
+    expect(detail).toHaveLength(200);
+    expect(detail.endsWith('…')).toBe(true);
+  });
+
+  it('sends the invite code as a header, and the session cookie', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ user: USER })),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await auth.register('ivan@example.com', 'a-password', 'ivan', 'the-code');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/api/auth/sign-up/email');
+    expect(init).toMatchObject({
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'x-invite-code': 'the-code' },
     });
   });
 });
