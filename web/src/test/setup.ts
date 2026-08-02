@@ -18,8 +18,9 @@ window.matchMedia = (query: string): MediaQueryList =>
     removeListener: () => {},
   }) as unknown as MediaQueryList;
 
-// recharts constructs one in ResponsiveContainer; nothing in web/src does. No test
-// here mounts a chart, so this is insurance for the first one that does.
+// recharts constructs one in ResponsiveContainer; nothing in web/src does.
+// Insurance only: the whole dom project passes with this deleted, App test included —
+// recharts 3.9 feature-detects, and the box it measures is 0x0 either way.
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}

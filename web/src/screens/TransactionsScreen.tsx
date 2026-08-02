@@ -36,8 +36,8 @@ export function TransactionsScreen() {
   const [accountId, setAccountId] = useState('all');
   const [category, setCategory] = useState('all');
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [txs, setTxs] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  /** A failed request used to render as "No transactions in the selected period". */
+  const [txs, setTxs] = useState<Transaction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
@@ -67,7 +67,6 @@ export function TransactionsScreen() {
   const sourceById = (id?: IncomeSource) => sources.find((s) => s.id === id);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       setError(null);
       const { from, to } = periodBounds(period);
@@ -82,9 +81,11 @@ export function TransactionsScreen() {
         }),
       );
     } catch (e) {
+      // Overview's load takes no arguments, so its stale list still answers the same
+      // question. This one is filtered: rows kept from before a refused reload sit
+      // under a chip they were never an answer to.
+      setTxs(null);
       setError((e as Error).message);
-    } finally {
-      setLoading(false);
     }
   }, [period, accountId, category]);
 
@@ -116,7 +117,7 @@ export function TransactionsScreen() {
   const patternMatches = useMemo(() => {
     const p = catPattern.trim().toLowerCase();
     if (!p) return 0;
-    return txs.filter((t) => t.description.toLowerCase().includes(p)).length;
+    return (txs ?? []).filter((t) => t.description.toLowerCase().includes(p)).length;
   }, [catPattern, txs]);
 
   /** Transfer flag: null hands the decision back to the backend's auto-detection. */
@@ -125,7 +126,7 @@ export function TransactionsScreen() {
     try {
       setError(null);
       const updated = await api.setTransfer(tx.id, value);
-      setTxs((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+      setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
       setError((e as Error).message);
@@ -140,7 +141,7 @@ export function TransactionsScreen() {
     try {
       setError(null);
       const updated = await api.setIncomeSource(tx.id, source);
-      setTxs((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+      setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
       setError((e as Error).message);
@@ -155,7 +156,7 @@ export function TransactionsScreen() {
     try {
       setError(null);
       const updated = await api.setOneOff(tx.id, value);
-      setTxs((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+      setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
       setError((e as Error).message);
@@ -227,7 +228,7 @@ export function TransactionsScreen() {
 
       {error && <p className="error">Error: {error}</p>}
 
-      {txs.map((item) => (
+      {txs?.map((item) => (
         <button
           key={item.id}
           className="row"
@@ -269,7 +270,7 @@ export function TransactionsScreen() {
         </button>
       ))}
 
-      {txs.length === 0 && !loading && (
+      {txs !== null && txs.length === 0 && (
         <p className="empty">No transactions in the selected period.</p>
       )}
 
@@ -320,7 +321,7 @@ export function TransactionsScreen() {
                     />
                     <p className="hint" style={{ marginTop: 6 }}>
                       {catPattern.trim()
-                        ? `Matches ${patternMatches} of the ${txs.length} loaded transactions.`
+                        ? `Matches ${patternMatches} of the ${txs?.length ?? 0} loaded transactions.`
                         : 'Enter the part of the description that stays the same.'}
                       {' '}Banks often append a month or a contract number — trim it off and the
                       rule covers the whole group, this month and every one after.
