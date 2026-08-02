@@ -13,6 +13,7 @@
 import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   doublePrecision,
   foreignKey,
   index,
@@ -267,6 +268,14 @@ export const transactions = pgTable(
     dedupKey: text('dedup_key').notNull(),
     provider: text('provider').notNull(),
     amountCents: integer('amount_cents').notNull(),
+    // The fee the source stated for this operation, as it printed it (positive).
+    // amount_cents is the whole movement and is already net of this, so nothing
+    // reading an amount has to know the column exists.
+    //
+    // NULL is "the source stated none", and it is not the same fact as a stated
+    // zero: a Sparkasse export names no fee at all, where a Revolut row writing
+    // 0.00 asserts one. A default of 0 would make every statement claim the second.
+    feeCents: integer('fee_cents'),
     currency: text('currency').notNull(),
     date: text('date').notNull(),
     description: text('description').notNull().default(''),
@@ -317,6 +326,11 @@ export const transactions = pgTable(
     index('idx_tx_date').on(t.workspaceId, t.date),
     // PG does not index a foreign key for you, and the cascade delete scans on this
     index('idx_tx_import').on(t.workspaceId, t.importId),
+    // A fee is a magnitude and the mapper subtracts it, so a negative one would
+    // INCREASE the movement. Here rather than in the mapper because the mapper is
+    // not the last producer this column will have - the PDF path states its fees on
+    // a continuation line and reads none of them yet.
+    check('transactions_fee_cents_nonneg', sql`${t.feeCents} >= 0`),
   ],
 );
 
@@ -343,6 +357,9 @@ export const stagedTransactions = pgTable(
     accountId: text('account_id').notNull(),
     provider: text('provider').notNull(),
     amountCents: integer('amount_cents').notNull(),
+    // as on transactions: NULL = the source stated no fee, and amount_cents is
+    // already net of a stated one
+    feeCents: integer('fee_cents'),
     currency: text('currency').notNull(),
     date: text('date').notNull(),
     description: text('description').notNull().default(''),
@@ -359,6 +376,7 @@ export const stagedTransactions = pgTable(
       columns: [t.workspaceId, t.importId],
       foreignColumns: [imports.workspaceId, imports.id],
     }).onDelete('cascade'),
+    check('staged_transactions_fee_cents_nonneg', sql`${t.feeCents} >= 0`),
   ],
 );
 

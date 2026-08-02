@@ -35,6 +35,7 @@ const tx = (description: string, amount: number): NewTransaction => ({
   date: '2026-01-10T12:00:00.000Z',
   description,
   category: 'other',
+  fee: null,
 });
 
 describe('backup and restore (JSON)', () => {
@@ -61,6 +62,27 @@ describe('backup and restore (JSON)', () => {
     // keep the identity the annotations were attached to
     expect((await getTransaction(marked))!.oneOff).toBe(true);
     expect((await listTransactions({ accountId: 'acc1' })).length).toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * exportBackup selects whole rows and sanitizeRow looks columns up through
+   * getTableColumns, so a new column should ride along for free. Verified rather
+   * than assumed: a fee that exports and does not restore is silent loss at exactly
+   * the moment a user is relying on the file.
+   */
+  it('a stated fee survives export and restore, and so does a stated nothing', async () => {
+    await insertTransactions([
+      { ...tx('backup with fee', -63.62), fee: 0.44 },
+      tx('backup without fee', -21.03),
+    ]);
+
+    const data = parseBackup(JSON.parse(JSON.stringify(await exportBackup())));
+    await restoreBackup(data);
+
+    const txs = await listTransactions({ accountId: 'acc1' });
+    expect(txs.find((t) => t.description === 'backup with fee')!.fee).toBe(0.44);
+    // NULL, not 0 - the fact "the source stated none" is what round-trips
+    expect(txs.find((t) => t.description === 'backup without fee')!.fee).toBeUndefined();
   });
 
   /** imports restore before transactions, or import_id would have nothing to point at. */

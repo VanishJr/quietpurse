@@ -21,8 +21,12 @@ import { Cell, MAX_DATA_ROWS, Sheet, cellText, hasContent } from './sheet';
 /**
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
+ *
+ * "Here" is not only this file: a workbook's columns are resolved by the presets and
+ * resolveColumns that the CSV path uses, so a change to either parses a .xlsx export
+ * differently for exactly the same reason and moves this number too.
  */
-export const XLSX_PARSER_VERSION = 2;
+export const XLSX_PARSER_VERSION = 3;
 
 /** How far down a sheet the header may hide behind a title or an account block. */
 const HEADER_SCAN_ROWS = 20;

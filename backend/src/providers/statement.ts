@@ -123,6 +123,16 @@ const MAX_PROBLEMS = 5;
 const STATUS_QUOTE_MAX = 24;
 const STATUS_LIST_MAX = 72;
 
+/**
+ * And what an unreadable fee cell may spend inside its quotes. The same budget as
+ * above and derived the same way: feeRefused's fixed prose costs 127 at a row label
+ * of Excel's own ceiling, noRowsParsed's head 40 at MAX_DATA_ROWS skipped, and
+ * 127 + 40 + 24 = 191 against the 199 that xlsx.ts's NOTICE_MAX is subtracted from.
+ * A fee cell wide enough to need more than this is not a fee, and the mark bounded()
+ * leaves says the rest is there.
+ */
+const FEE_QUOTE_MAX = 24;
+
 export interface StatementImportRequest {
   /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
   accountName: string;
@@ -466,6 +476,8 @@ interface Columns {
   amountCol: number;
   descCols: number[];
   currencyCol: number;
+  /** -1 = the file states no fees, which is every format but a Revolut sheet */
+  feeCol: number;
   /** the accepted values folded once here, so the row loop compares and nothing else */
   onlyWhen: { col: number; column: string; accepted: ReadonlySet<string> } | null;
 }
@@ -515,6 +527,22 @@ function resolvePreset(
     if (column !== undefined) mapping.onlyWhen = { column, equals: [...preset.onlyWhen.equals] };
   }
   return { mapping, unresolved };
+}
+
+/**
+ * The fee column, or -1. Resolved from the preset here rather than in resolvePreset,
+ * and through neither match() nor colIndex: both record an Unresolved, and a single
+ * unresolved slot refuses the whole file - where a Revolut export whose header has no
+ * fee column has to import. resolveColumns is also the XLSX header scan's predicate,
+ * so a slot that can fail would move which row the scan settles on and every data row
+ * would then be read against the wrong columns. There is no header for which this
+ * changes the answer resolveColumns gives. currency's shape, one field further from
+ * the user: a fee is a preset fact and no request can name one.
+ */
+function feeColumn(header: string[], preset: CsvPresetMapping | null): number {
+  if (!preset?.fee) return -1;
+  const name = matchColumn(header, preset.fee);
+  return name === undefined ? -1 : header.findIndex((h) => fold(h) === fold(name));
 }
 
 /**
@@ -571,6 +599,7 @@ function resolveColumns(
       : [effective.description]
     ).map((name) => colIndex('description', name)),
     currencyCol: effective.currency ? colIndex('currency', effective.currency) : -1,
+    feeCol: feeColumn(header, preset),
     onlyWhen: effective.onlyWhen
       ? {
           col: colIndex('status', effective.onlyWhen.column),
@@ -607,6 +636,28 @@ function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
   return head.length + dump.length <= ERROR_DETAIL_MAX ? head + dump : head;
 }
 
+type FeeCell = { ok: true; fee: number | null } | { ok: false; text: string };
+
+/**
+ * What the file stated for one row's fee. null is "it stated nothing" - an empty
+ * cell - and never a zero this importer invented; the empty test is on the text and
+ * comes first, exactly as the currency column's does, because parseAmount('') answers
+ * null and so does a cell full of rubbish.
+ *
+ * A cell that is there and unreadable refuses the row rather than the file, and a
+ * negative one with it: subtracted, it would INCREASE the movement, and no source in
+ * this tree states such a thing. Refusing the file instead would leave the user one
+ * route - the generic preset, which resolves no fee column at all and would import
+ * every row of that statement pre-fee, silently. That is the defect this reader
+ * exists to remove, so the louder refusal is the one that costs more.
+ */
+function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
+  const text = cellText(c).trim();
+  if (!text) return { ok: true, fee: null };
+  const fee = cellAmount(c, decimal);
+  return fee === null || fee < 0 ? { ok: false, text } : { ok: true, fee };
+}
+
 async function mapAndStore(
   req: StatementImportRequest,
   parsed: ParsedFile,
@@ -620,7 +671,8 @@ async function mapAndStore(
   const header = sheet.rows[0].map((c) => cellText(c).trim());
   const resolved = resolveColumns(header, preset, parsed.mapping);
   if (!resolved.ok) throw new Error(resolved.error);
-  const { mapping, dateCol, amountCol, descCols, currencyCol, onlyWhen } = resolved.columns;
+  const { mapping, dateCol, amountCol, descCols, currencyCol, feeCol, onlyWhen } =
+    resolved.columns;
 
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
@@ -661,11 +713,45 @@ async function mapAndStore(
       }
     }
     const date = cellDate(row[dateCol], mapping.dateFormat, sheet.date1904);
-    const amount = cellAmount(row[amountCol], mapping.decimal);
+    const rawAmount = cellAmount(row[amountCol], mapping.decimal);
+    // read only for a row that would otherwise import: one already refused for its
+    // date or its amount keeps the sentence it has always had
+    const statedFee: FeeCell =
+      feeCol >= 0 && date !== null && rawAmount !== null
+        ? readFee(row[feeCol], mapping.decimal)
+        : { ok: true, fee: null };
+    if (!statedFee.ok) {
+      skipped++;
+      if (notices.length + rowProblems.length < MAX_PROBLEMS) {
+        rowProblems.push(feeRefused(sheet, i, statedFee.text));
+      }
+      continue;
+    }
+    // The amount is the movement of the account: what the statement's own running
+    // balance moves by, fees included. That is what it means for CSV, XLSX and PDF
+    // alike - the PDF path prints the fee-inclusive figure already, and this is where
+    // the sheet path agrees with it. A fee is the bank's, always taken and never
+    // given, so it subtracts whichever way the operation itself points.
+    //
+    // In decimals and rounded once, at toCents downstream: subtracting in cents would
+    // round twice and change what a sub-cent amount does, which reconcile's "an amount
+    // that rounded to zero cents would land on the incoming side" relies on.
+    const amount = rawAmount === null ? null : rawAmount - (statedFee.fee ?? 0);
+    // the movement, not the cell it came from: the €2.99 plan fee this dropped whole
+    // has an Amount of 0.00 and is a real charge.
+    //
+    // describeRow gets the cell, so every row that was refusable before this change
+    // carries the sentence it always carried. The subtraction invents one that was
+    // not - a credit its own fee eats, +5.00 against a fee of 5.00 - and that row
+    // reaches describeRow's fall-through with a date and an amount that both parsed,
+    // and is told neither could be. That is the same wrong sentence a literal 0.00
+    // amount already gets there, which is ROADMAP row 23's finding (a): a bespoke
+    // sentence composed here would cover the new shape and leave the old one lying,
+    // so both wait for row 23 and are fixed as one.
     if (date === null || amount === null || amount === 0) {
       skipped++;
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
-        rowProblems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount }));
+        rowProblems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount: rawAmount }));
       }
       continue;
     }
@@ -687,6 +773,7 @@ async function mapAndStore(
       date,
       description,
       category: categorize(undefined, description, amount),
+      fee: statedFee.fee,
     });
   }
 
@@ -1074,3 +1161,20 @@ function describeRow(
   }
   return `row ${label}: could not parse the date "${cellText(row[dateCol])}" or the amount "${cellText(row[amountCol])}"`;
 }
+
+/**
+ * Why a row with an unreadable fee was dropped. Its own sentence rather than
+ * describeRow's, because that one names the date and the amount cells - and here both
+ * parsed, which sends the reader to two columns that are fine.
+ *
+ * The cell is quoted bounded, never raw: this reason can reach error_detail as
+ * noRowsParsed's rowProblems[0], so an unbounded cell would open a second instance of
+ * the defect ROADMAP row 23 still carries in describeRow, where a CSV field is
+ * interpolated at whatever width the file wrote it.
+ *
+ * Exported for the budget test, like noRowsParsed and for the same reason: what this
+ * composes at its extreme is part of the number xlsx.ts's NOTICE_MAX is subtracted
+ * from, and no real file reaches a row label at Excel's ceiling.
+ */
+export const feeRefused = (sheet: Sheet, i: number, text: string): string =>
+  `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee - the row is skipped rather than imported without it`;

@@ -66,6 +66,16 @@ async function stagedCount(importId: string): Promise<number> {
   return Number(res.rows[0].n);
 }
 
+/** What the staged rows hold in fee_cents, in file order - raw, so nothing maps it back. */
+async function stagedFeeCents(importId: string): Promise<(number | null)[]> {
+  const res = (await dbInstance().execute(
+    sql`SELECT fee_cents FROM staged_transactions
+        WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${importId}
+        ORDER BY row_no`,
+  )) as unknown as { rows: { fee_cents: number | null }[] };
+  return res.rows.map((r) => r.fee_cents);
+}
+
 const importRow = async (id: string) => (await listImports(500)).find((i) => i.id === id);
 
 const blobExists = (importId: string): Promise<boolean> =>
@@ -306,6 +316,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
           date: '2026-05-09',
           description: 'Raced',
           category: 'other',
+          fee: null,
         },
       ],
       0,
@@ -495,6 +506,50 @@ describe('a failed import leaves no staged rows behind', () => {
   });
 });
 
+/**
+ * A fee the parser read must not be lost between the summary the user accepts and
+ * the row the database keeps (ROADMAP 37a, I3). The READ side of that is held by
+ * `tsc` - stagedToNew returns NewTransaction and fee is required on it - but the
+ * write side is not: omitting fee_cents from stageImport's values is legal
+ * TypeScript against a nullable column, and the confirmation screen would then show
+ * a net the database does not hold. This is what holds that half.
+ */
+describe('a stated fee survives staging', () => {
+  it('reaches staged_transactions, and then the row the confirm writes', async () => {
+    const file = [
+      'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance',
+      'CARD_PAYMENT,Current,2026-10-01 09:00:00,2026-10-01 10:00:00,Staged With Fee,-63.18,0.44,EUR,COMPLETED,0',
+      'CARD_PAYMENT,Current,2026-10-02 09:00:00,2026-10-02 10:00:00,Staged No Fee,-10.00,0.00,EUR,COMPLETED,0',
+    ].join('\n');
+
+    const result = await importStatement({
+      accountName: 'Fee Staging',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(file, 'utf8'),
+    });
+    if (result.outcome !== 'awaiting_confirmation') {
+      throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
+    }
+    const { summary } = result;
+
+    // the number on the confirmation screen is already the movement, not the column
+    expect(summary.totals).toEqual([{ currency: 'EUR', net: -73.62 }]);
+    expect(await stagedFeeCents(summary.importId)).toEqual([44, 0]);
+
+    expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, inserted: 2 });
+    const txs = await listTransactions({ accountId: summary.accountId });
+    expect(txs.find((t) => t.description === 'Staged With Fee')).toMatchObject({
+      amount: -63.62,
+      fee: 0.44,
+    });
+    expect(txs.find((t) => t.description === 'Staged No Fee')).toMatchObject({
+      amount: -10,
+      fee: 0,
+    });
+  });
+});
+
 describe('backup and restore', () => {
   /**
    * staged_transactions is not a backup table, so an `awaiting_confirmation` import
@@ -546,6 +601,7 @@ describe('backup and restore', () => {
           date: '2026-09-09',
           description: 'cascade',
           category: 'other',
+          fee: null,
         },
       ],
       0,

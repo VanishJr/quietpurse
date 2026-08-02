@@ -11,9 +11,9 @@ import {
   parseCsv,
   parseCsvDate,
 } from '../src/providers/csv';
-import { MAX_DATA_ROWS } from '../src/providers/sheet';
+import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
 import { importAndConfirm } from './helpers';
-import { importStatement, noRowsParsed } from '../src/providers/statement';
+import { feeRefused, importStatement, noRowsParsed } from '../src/providers/statement';
 
 describe('parseCsv', () => {
   it('quotes, escaped quotes, CRLF, semicolon', () => {
@@ -312,8 +312,15 @@ describe('a bank export in a language the preset also accepts', () => {
     expect(coffee.amount).toBe(-4.2);
     // the file's own currency column, not the USD the request asked for
     expect(coffee.currency).toBe('EUR');
-    // Сумма, never Комиссия - the fee on this row is 0.50 and is dropped in silence
-    expect(txs.find((t) => t.description === 'Пополнение счёта')!.amount).toBe(100);
+    // Сумма MINUS Комиссия. This assertion read 100 until row 037a: the fee is
+    // stated on top of the amount, so the account moved by 99.50 and the old
+    // arithmetic stored a number the statement's own balance never shows
+    const topup = txs.find((t) => t.description === 'Пополнение счёта')!;
+    expect(topup.amount).toBe(99.5);
+    expect(topup.fee).toBe(0.5);
+    // a stated zero is a fee the file stated, and is not the absent one a header
+    // without the column gives
+    expect(coffee.fee).toBe(0);
 
     expect(r.problems).toEqual([
       '1 row skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (1)',
@@ -427,6 +434,220 @@ describe('a bank export in a language the preset also accepts', () => {
 });
 
 /**
+ * A fee a statement states on top of the amount (ROADMAP 37a). Every shape below is
+ * one the measured Revolut export actually carries, reproduced with fabricated rows:
+ * the amount column alone is short by the fee on every charge that has one, and the
+ * plan-fee row - Amount 0.00, Fee 2.99 - is a real charge the importer used to drop
+ * whole at the `amount === 0` guard.
+ *
+ * There is no reconciliation gate on this path (reconcile's sheet arm returns totals
+ * and checks nothing), so these assertions are the only thing holding the arithmetic.
+ */
+describe('a fee the statement states beside the amount', () => {
+  const WITH_FEE =
+    'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
+  const WITHOUT_FEE =
+    'Type,Product,Started Date,Completed Date,Description,Amount,Currency,State,Balance';
+
+  const withFee = (description: string, amount: string, fee: string, day = '01'): string =>
+    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},${fee},EUR,COMPLETED,0`;
+
+  const withoutFee = (description: string, amount: string, day = '01'): string =>
+    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},EUR,COMPLETED,0`;
+
+  const importRevolut = (accountName: string, ...rows: string[]) =>
+    importAndConfirm({
+      accountName,
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(rows.join('\n'), 'utf8'),
+    });
+
+  it('the stored amount is the movement the account made, fee included', async () => {
+    const r = await importRevolut(
+      'Fee Movement',
+      WITH_FEE,
+      withFee('Wizz Air', '-63.18', '0.44', '20'),
+      withFee('No Fee Here', '-12.50', '0.00', '21'),
+    );
+    expect(r.inserted).toBe(2);
+    expect(r.skipped).toBe(0);
+
+    const txs = await listTransactions({ accountId: r.accountId });
+    const wizz = txs.find((t) => t.description === 'Wizz Air')!;
+    // the number the PDF of the same month prints for this operation, to the cent
+    expect(wizz.amount).toBe(-63.62);
+    expect(wizz.fee).toBe(0.44);
+    // and a stated zero changes nothing about the amount while still being stated
+    const plain = txs.find((t) => t.description === 'No Fee Here')!;
+    expect(plain.amount).toBe(-12.5);
+    expect(plain.fee).toBe(0);
+  });
+
+  it('a row whose amount is zero and whose fee is not is a charge, and imports', async () => {
+    const r = await importRevolut(
+      'Fee Only Charge',
+      WITH_FEE,
+      withFee('Premium plan fee', '0.00', '2.99', '26'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(0);
+    expect(r.problems).toEqual([]);
+
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.amount).toBe(-2.99);
+    expect(t.fee).toBe(2.99);
+  });
+
+  /**
+   * The guard did not lose its job, it changed which number it reads. A credit whose
+   * fee eats the whole of it moved nothing, and importing it as a zero would put a
+   * transaction in the history the statement does not show. Note the sign: the fee is
+   * always taken, so a -5.00 row with a 5.00 fee is a -10.00 movement, not a zero.
+   */
+  it('a row with no movement at all is still skipped', async () => {
+    const r = await importRevolut(
+      'Fee No Movement',
+      WITH_FEE,
+      withFee('Nothing Moved', '0.00', '0.00', '02'),
+      withFee('Given And Taken', '5.00', '5.00', '03'),
+      withFee('Kept', '-1.00', '0.00', '04'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(2);
+    expect((await listTransactions({ accountId: r.accountId })).map((t) => t.description)).toEqual([
+      'Kept',
+    ]);
+  });
+
+  /**
+   * Trap 1. The fee is resolved outside resolvePreset's match(), so it records no
+   * unresolved slot - and resolveColumns is the XLSX header scan's predicate as well
+   * as the mapper's, so a fee that could refuse a header would move which row the
+   * scan settles on.
+   */
+  it('a preset naming a fee column against a header without one imports every row', async () => {
+    const r = await importRevolut(
+      'Fee Column Absent',
+      WITHOUT_FEE,
+      withoutFee('First', '-10.00', '05'),
+      withoutFee('Second', '-20.00', '06'),
+    );
+    expect(r.inserted).toBe(2);
+    expect(r.skipped).toBe(0);
+
+    const txs = await listTransactions({ accountId: r.accountId });
+    expect(txs.map((t) => t.amount).sort((a, b) => a - b)).toEqual([-20, -10]);
+    // NULL, not 0: this file stated no fee, which is not the same fact as a zero
+    for (const t of txs) expect(t.fee).toBeUndefined();
+  });
+
+  /**
+   * Refusing the row and not the file, deliberately. There is no way to override a
+   * fee column, so a file-level refusal leaves one route open - the generic preset,
+   * which resolves no fee column and would import every row of that statement
+   * pre-fee, silently. That is the defect this row exists to remove.
+   */
+  it('a fee cell that cannot be read refuses its row and says which cell', async () => {
+    const r = await importRevolut(
+      'Fee Unreadable',
+      WITH_FEE,
+      withFee('Bad Fee', '-10.00', 'cucumber', '07'),
+      withFee('Good Fee', '-20.00', '0.10', '08'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 2: the fee cell reads "cucumber", which this parser cannot read as a fee' +
+        ' - the row is skipped rather than imported without it',
+    ]);
+
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.description).toBe('Good Fee');
+    expect(t.amount).toBe(-20.1);
+  });
+
+  /**
+   * A negative fee subtracted would INCREASE the movement, and no source in this
+   * tree states one. If a bank ever does, this refusal is how it is found - rather
+   * than by a user noticing their balance is off.
+   */
+  it('a negative fee refuses its row the same way', async () => {
+    const r = await importRevolut(
+      'Fee Negative',
+      WITH_FEE,
+      withFee('Negative Fee', '-10.00', '-0.44', '09'),
+      withFee('Fine', '-20.00', '0.00', '10'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 2: the fee cell reads "-0.44", which this parser cannot read as a fee' +
+        ' - the row is skipped rather than imported without it',
+    ]);
+  });
+
+  /**
+   * The other branch of the Cell seam, owed because XLSX_PARSER_VERSION moves with
+   * CSV_PARSER_VERSION: a workbook hands the mapper a float, never a string, and
+   * cellAmount passes it through without going near parseAmount.
+   */
+  it('a workbook states its fee as a number and it is read the same way', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Statement');
+    ws.addRow(WITH_FEE.split(','));
+    ws.addRow([
+      'CARD_PAYMENT',
+      'Current',
+      new Date('2026-08-20T09:00:00.000Z'),
+      new Date('2026-08-20T10:00:00.000Z'),
+      'Workbook Wizz',
+      -63.18,
+      0.44,
+      'EUR',
+      'COMPLETED',
+      0,
+    ]);
+
+    const r = await importAndConfirm({
+      accountName: 'Fee Workbook',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from(await wb.xlsx.writeBuffer()),
+    });
+    expect(r.inserted).toBe(1);
+
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.amount).toBe(-63.62);
+    expect(t.fee).toBe(0.44);
+  });
+
+  /**
+   * I2 in miniature, and it needs no real file: the same operation stated two ways -
+   * the fee beside the amount, and the fee already inside it - is ONE transaction.
+   * That holds only while `amount` means the same thing for every format, and it goes
+   * red the moment the fee stops being folded in or starts entering the dedup key.
+   */
+  it('the same operation stated with and without its fee is one row', async () => {
+    const first = await importRevolut(
+      'Fee Two Statements',
+      WITH_FEE,
+      withFee('One Payment', '-9.50', '0.50', '11'),
+    );
+    expect(first.inserted).toBe(1);
+
+    const second = await importAndConfirm({
+      accountName: 'Fee Two Statements',
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from([WITHOUT_FEE, withoutFee('One Payment', '-10.00', '11')].join('\n'), 'utf8'),
+    });
+    expect(second.inserted).toBe(0);
+    expect(await listTransactions({ accountId: first.accountId })).toHaveLength(1);
+  });
+});
+
+/**
  * The two sentences this row composes, at their extremes rather than on an example.
  * Both are bounded by constants that a later "the values are longer than that"
  * would raise without anything else noticing.
@@ -510,6 +731,28 @@ describe('what the new refusals may spend', () => {
         });
         longest = Math.max(longest, composed.length);
       }
+    }
+    expect(longest).toBeLessThanOrEqual(199);
+  });
+
+  /**
+   * The same 199, for the sentence an unreadable fee cell composes. Through
+   * feeRefused rather than through an import, because the extreme is a row label at
+   * Excel's own ceiling and no file this suite can build reaches one. Swept over the
+   * cell width, since what FEE_QUOTE_MAX buys is only spent by a cell wide enough to
+   * be cut.
+   */
+  it('the unreadable-fee reason stays under the number NOTICE_MAX is derived from', () => {
+    const sheet: Sheet = { rows: [], rowLabel: () => 1_048_576 };
+    let longest = 0;
+    for (let width = 1; width <= 200; width++) {
+      const composed = noRowsParsed(
+        MAX_DATA_ROWS,
+        [feeRefused(sheet, 1, 'Ф'.repeat(width))],
+        [],
+        null,
+      );
+      longest = Math.max(longest, composed.length);
     }
     expect(longest).toBeLessThanOrEqual(199);
   });
