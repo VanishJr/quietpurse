@@ -131,8 +131,11 @@ const CELL_QUOTE_MAX = 24;
 const ENCRYPTED =
   'this PDF is password-protected - open it with its password and save an unprotected copy, or download the statement again from your online banking';
 
+// "looks like a PDF" rather than "starts with %PDF": a signed container carries the
+// header at an offset (row 33), so the old clause was a claim about the first four
+// bytes that anyone holding one could open a hex editor and disprove.
 const NOT_A_PDF =
-  'this file starts with %PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
+  'this file looks like a PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
 
 const NOT_RECOGNISED =
   "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today";

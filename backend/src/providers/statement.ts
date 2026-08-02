@@ -94,6 +94,23 @@ const SIZE_CAP: Record<ImportSourceType, SizeCap | null> = {
 };
 
 /**
+ * What this importer reads, named the way the person holding the file would name it.
+ * Total over ImportSourceType for SIZE_CAP's reason and one of its own: the two
+ * refusals in `sniff` described a two-format world for as long as PDF has been
+ * accepted, and a fourth format added without a name here is a TS2741 rather than a
+ * sentence that has quietly stopped being true.
+ */
+const FORMAT_NAME: Record<ImportSourceType, string> = {
+  csv: 'CSV',
+  xlsx: 'Excel (.xlsx)',
+  pdf: 'PDF',
+};
+
+const FORMAT_NAMES = Object.values(FORMAT_NAME);
+/** "CSV, Excel (.xlsx) or PDF" - the list a refusal names, derived and never typed out. */
+const FORMATS = `${FORMAT_NAMES.slice(0, -1).join(', ')} or ${FORMAT_NAMES[FORMAT_NAMES.length - 1]}`;
+
+/**
  * And a page cap as well, because the byte cap does not bound the page count even
  * loosely: 500 pages of dense transactions is 3.6 MB before compression, and
  * compressed streams are the point of the format. A yearly retail statement runs
@@ -103,8 +120,18 @@ const SIZE_CAP: Record<ImportSourceType, SizeCap | null> = {
  */
 const MAX_PDF_PAGES = 200;
 
-/** How many bytes of a text file are searched for the NUL that says it is not one. */
-const NUL_SCAN_BYTES = 8192;
+/**
+ * How many bytes of a text file are searched for the NUL that says it is not one.
+ *
+ * Exported for the test, like readSheet and CURRENCY_CODE_MAX and for the same
+ * reason: a container fixture that carries no NUL inside this window is classified
+ * the same whether the branch above the scan exists or not, so the case pinning that
+ * order has to state the precondition and has to compose it from this number.
+ */
+export const NUL_SCAN_BYTES = 8192;
+
+/** The five bytes pdfjs itself searches for (PDF_HEADER_SIGNATURE), dash included. */
+const PDF_HEADER = '%PDF-';
 
 /** Notices and row problems share this budget - the client renders the first three. */
 const MAX_PROBLEMS = 5;
@@ -294,6 +321,11 @@ export type StatementImportResult =
  * What the bytes are, by content only - never by the extension or the browser's
  * Content-Type, both of which the user's bank chose and neither of which is checked
  * anywhere. Everything this refuses gets a message saying what to do instead.
+ *
+ * It answers a type and nothing else, deliberately: a classifier with no bytes to
+ * hand back cannot give a caller a buffer different from the one it was passed, so
+ * the bytes hashed, the bytes stored and the bytes parsed stay one buffer even for a
+ * file whose document starts at an offset (row 33).
  */
 export function sniff(bytes: Buffer): ImportSourceType {
   const starts = (...signature: number[]): boolean =>
@@ -320,11 +352,34 @@ export function sniff(bytes: Buffer): ImportSourceType {
   while (i < bytes.length && blank.has(bytes[i])) i++;
   if (bytes[i] === 0x3c) {
     throw new Error(
-      'this looks like XML or HTML, not a CSV or Excel statement - CAMT.053 and MT940 are not supported yet',
+      `this looks like XML or HTML, not a ${FORMATS} statement - CAMT.053 and MT940 are not supported yet`,
     );
   }
+  // A bank's own export can be a signed container: the whole statement inside a CMS
+  // envelope, `%PDF-` at byte 71 rather than at 0 (ROADMAP row 33). Answered on the
+  // header being FOUND and never on the lead-in - "it starts like an ASN.1 SEQUENCE"
+  // is not evidence a statement is in there. 0x30 is also ASCII `0`, so a CSV whose
+  // first cell is 01.07.2026 reaches this line; the second byte is what parts them,
+  // and only because 0x80-0x84 are UTF-8 continuation bytes, which cannot follow an
+  // ASCII digit in a text file. Short form (<= 0x7f) says the whole value is at most
+  // 127 bytes and cannot hold a document; 0x80 is BER indefinite length, which a
+  // signer that streams emits. The two real containers carry 0x83, and the same bank's
+  // statement under 64 KiB would carry 0x82 - so a rule narrowed to 0x83 passes every
+  // test written from the documents in hand and refuses the same bank's next one.
+  //
+  // Searched whole rather than within a window: readPdf gets this same buffer, and
+  // pdfjs finds the header at any offset - past its own 1024-byte find() it
+  // reconstructs the xref, and a header at 262 144 was measured reaching its template
+  // - so a window here would make the classifier stricter than the reader it feeds
+  // and refuse a file this product can read. Only a file that already matched the
+  // lead-in gets this far, so no CSV pays for the search.
+  if (bytes[0] === 0x30 && bytes[1] >= 0x80 && bytes[1] <= 0x84 && bytes.includes(PDF_HEADER)) {
+    return 'pdf';
+  }
   if (bytes.subarray(0, NUL_SCAN_BYTES).includes(0)) {
-    throw new Error('this file is neither a CSV nor an Excel workbook (.xlsx)');
+    throw new Error(
+      `this file is not a ${FORMATS} statement - export the statement in one of those from your online banking and upload that`,
+    );
   }
   return 'csv';
 }

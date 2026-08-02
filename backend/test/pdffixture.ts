@@ -143,6 +143,46 @@ export function buildPdf(pages: PlacedText[][], options: Options = {}): Buffer {
   return Buffer.concat(parts);
 }
 
+/**
+ * The same document inside a signed container: a bank's own export can be a CMS
+ * envelope carrying the statement, so `%PDF-` sits at an offset rather than at 0
+ * (row 33). It is not valid CMS and does not need to be - what a fixture has to
+ * carry is the shape the sniffer classifies on and the bytes it used to be refused
+ * for.
+ *
+ * The NUL that makes it binary sits in the preamble, ahead of the document, and that
+ * placement is the fixture's whole job: after a realistic inner PDF the first NUL
+ * falls past NUL_SCAN_BYTES, and a container the NUL scan would not have refused is
+ * classified the same whether the new branch sits above that scan or below it. The
+ * real containers carry their first NUL at 406, ahead of `%PDF-` at 71.
+ *
+ * `filler` is how far in the document starts, so a case can put the header past
+ * pdfjs's own 1024-byte header search.
+ */
+export function buildSignedContainer(inner: Buffer, filler = 32): Buffer {
+  const body = Buffer.concat([
+    // 1.2.840.113549.1.7.2, CMS signedData, at byte 5 as in the real documents
+    Buffer.from([0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02]),
+    Buffer.alloc(filler),
+    inner,
+    // certificates and signerInfos follow the content in CMS, which is why a
+    // container does not end at %%EOF
+    Buffer.alloc(512, 0x5a),
+  ]);
+  // SEQUENCE, long form with three length bytes, and the length is the true one: the
+  // real containers are one complete DER value with nothing appended after it
+  const length = [(body.length >> 16) & 0xff, (body.length >> 8) & 0xff, body.length & 0xff];
+  return Buffer.concat([Buffer.from([0x30, 0x83, ...length]), body]);
+}
+
+/**
+ * Tag, long-form marker and three length bytes - where a container's own bytes begin.
+ * A body under 64 KiB puts a NUL in that length field by arithmetic, so a test asking
+ * whether the fixture is binary before the document has to start looking past it or
+ * it is reading the fixture's size rather than its shape.
+ */
+export const CONTAINER_HEADER_BYTES = 5;
+
 /** A page that draws a filled rectangle and carries no text at all: a "scan". */
 export const buildImagePdf = (): Buffer =>
   buildPdf([[]], { raw: '0.2 0.2 0.2 rg 50 50 500 700 re f' });

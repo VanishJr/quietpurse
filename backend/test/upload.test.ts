@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { initAuth } from '../src/auth';
 import { dbInstance, setWorkspaceFallback } from '../src/db';
+import { buildPdf, buildSignedContainer } from './pdffixture';
 import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (label: string): Buffer =>
@@ -46,6 +47,7 @@ const imports = async (): Promise<
     originalFilename: string | null;
     status: string;
     documentAvailable: boolean;
+    errorDetail: string | null;
   }[]
 > => (await agent.get('/api/imports')).body.imports;
 
@@ -232,7 +234,7 @@ describe('POST /api/imports', () => {
       .attach('file', Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'), 'statement.pdf');
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/starts with %PDF but could not be opened as one/);
+    expect(res.body.error).toMatch(/looks like a PDF but could not be opened as one/);
     const after = await imports();
     expect(after).toHaveLength(before + 1);
     expect(after[0]).toMatchObject({
@@ -241,6 +243,74 @@ describe('POST /api/imports', () => {
       status: 'failed',
       documentAvailable: true,
     });
+  });
+
+  /**
+   * Row 33, and it is a band change asserted rather than discovered: these bytes used
+   * to be refused inside `sniff`, before createImport, so they left no import row and
+   * no stored document. A container is a PDF now, so the file is opened, the document
+   * is kept, and the miss is a `failed` import someone can download - which is what
+   * row 31 builds the third template from.
+   */
+  it('a statement inside a signed container fails as a pdf import, naming the layout', async () => {
+    const before = (await imports()).length;
+    const inner = buildPdf([
+      [
+        { x: 39.7, y: 27.1, text: 'Sparkasse Hamburg' },
+        { x: 42.7, y: 700, text: 'Buchungstag' },
+        { x: 124.8, y: 700, text: 'Verwendungszweck' },
+        { x: 335.1, y: 700, text: 'Betrag' },
+        { x: 42.7, y: 680, text: '02.07.2026' },
+        { x: 124.8, y: 680, text: 'REWE SAGT DANKE' },
+        { x: 335.1, y: 680, text: '-5,68' },
+      ],
+    ]);
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', 'Wrapped Bank')
+      .field('currency', 'EUR')
+      .attach('file', buildSignedContainer(inner), 'report.pdf');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/layout is not one this importer recognises yet/);
+    // and not what a person holding a readable statement used to be told
+    expect(res.body.error).not.toMatch(/not a CSV, Excel \(\.xlsx\) or PDF statement/);
+
+    const after = await imports();
+    expect(after).toHaveLength(before + 1);
+    expect(after[0]).toMatchObject({
+      sourceType: 'pdf',
+      originalFilename: 'report.pdf',
+      status: 'failed',
+      documentAvailable: true,
+    });
+    expect(after[0].errorDetail).toMatch(/layout is not one this importer recognises yet/);
+  });
+
+  /**
+   * What the container rule has to keep out of: a DER SEQUENCE opens 0x30, which is
+   * ASCII `0`, and this file's leading index column starts with one. What this case
+   * pins is that such a CSV imports, and nothing about which half of the rule parted
+   * it from a container - the file carries no `%PDF-` anywhere, so the header search
+   * refuses it on its own. The second byte is held by pdf.test.ts's lead-byte loop,
+   * which is where a classifier boundary belongs.
+   */
+  it('a CSV whose first byte is the zero a container tag shares still imports', async () => {
+    const csv = Buffer.from(
+      ['0;date;amount;description', '1;01.07.2026;-10,00;REWE SAGT DANKE'].join('\n'),
+      'utf8',
+    );
+    expect(csv[0]).toBe(0x30);
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', 'Zero Led Bank')
+      .field('currency', 'EUR')
+      .attach('file', csv, 'statement.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary).toMatchObject({ total: 1, accepted: 1, skipped: 0 });
   });
 
   it('a legacy .xls is refused with the message for that format', async () => {
@@ -274,11 +344,15 @@ describe('POST /api/imports', () => {
       'camt.xml',
     );
     expect(xml.status).toBe(400);
-    expect(xml.body.error).toMatch(/XML or HTML.*CAMT\.053 and MT940 are not supported yet/);
+    expect(xml.body.error).toMatch(
+      /XML or HTML, not a CSV, Excel \(\.xlsx\) or PDF statement.*CAMT\.053 and MT940 are not supported yet/,
+    );
 
     const binary = await send(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]), 'chart.png');
     expect(binary.status).toBe(400);
-    expect(binary.body.error).toBe('this file is neither a CSV nor an Excel workbook (.xlsx)');
+    expect(binary.body.error).toBe(
+      'this file is not a CSV, Excel (.xlsx) or PDF statement - export the statement in one of those from your online banking and upload that',
+    );
   });
 
   it('rejects a request with no file, a bad currency or a mapping that is not an object', async () => {
