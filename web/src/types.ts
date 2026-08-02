@@ -128,6 +128,17 @@ export interface AppSettings {
 }
 
 /**
+ * Why an opening/closing pair is missing from a summary whose file does state a
+ * running balance. A slug, like every other vocabulary the API sends: the sentences
+ * live in the client dictionary (see BALANCES_NOT_SHOWN in CsvImport).
+ */
+export type BalancesNotShown =
+  | 'rows-outside-the-balance'
+  | 'rows-without-a-balance'
+  | 'balance-closes-on-itself'
+  | 'more-than-one-currency';
+
+/**
  * What an uploaded statement was read as, for the user to accept or reject. None of
  * it is in the database yet — the rows are staged on the backend and become data
  * only when the import is confirmed.
@@ -159,11 +170,22 @@ export interface ImportSummary {
   totals: { currency: string; net: number }[];
   /**
    * The statement's own opening and closing balance, which the backend checked these
-   * rows add up between. Absent means the format states none — CSV and Excel never
-   * do — and never means a check that failed: a statement that does not add up is
-   * refused, so no summary is sent for one.
+   * rows against — printed by the document for a PDF, derived from the running
+   * balance a CSV or Excel file prints per row. Never a check that failed: a break
+   * is refused, so no summary is sent for one.
+   *
+   * `series` is how many running balances the pair was summed from, and it is absent
+   * exactly when the document printed the pair itself. So it says two things at once
+   * and both decide the sentence: whether the numbers are a sum the user will not
+   * find in any cell, and which of the two checks was actually run.
    */
-  balances?: { opening: number; closing: number; currency: string };
+  balances?: { opening: number; closing: number; currency: string; series?: number };
+  /**
+   * Why no pair is shown for a file that DOES state a running balance. Absent
+   * together with `balances` means the format states none, and the two must not read
+   * the same — a file that never claimed to carry a balance gets no line at all.
+   */
+  balancesNotShown?: BalancesNotShown;
   /** an earlier upload of these same bytes was waiting, and has been discarded */
   supersededImportId?: string;
 }

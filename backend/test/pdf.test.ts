@@ -33,6 +33,7 @@ import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import {
   CURRENCY_CODE_MAX,
   ParsedFile,
+  StatedBalances,
   importStatement,
   readSheet,
   reconcile,
@@ -41,6 +42,13 @@ import {
 import { NewTransaction } from '../src/types';
 import { importAndConfirm } from './helpers';
 import { PlacedText, buildImagePdf, buildPdf } from './pdffixture';
+
+/**
+ * What the sheet mapper stated beside a PDF's rows, which is nothing: a PDF's
+ * balances come off the template that read it and the pdf arm never looks at this
+ * argument. The one value every reconcile call below passes (row 54).
+ */
+const NO_BALANCES: StatedBalances = { kind: 'none' };
 
 // the x-intervals the revolut-ru template declares, one literal each so a test that
 // places a cell outside its column has to say so. The last five are the balance
@@ -817,22 +825,26 @@ describe('pdf: the reconciliation gate', () => {
       },
     });
 
+    // NO_BALANCES throughout: the sheet mapper states nothing for a PDF, so the arm
+    // below reads its balances off the template and never off this argument (row 54)
     it('refuses rather than checking against whichever currency came first', () => {
-      expect(() => reconcile(parsed('EUR'), [tx('EUR', 10), tx('PLN', 20)], 0)).toThrow(
+      expect(() =>
+        reconcile(parsed('EUR'), [tx('EUR', 10), tx('PLN', 20)], 0, NO_BALANCES),
+      ).toThrow(
         'this Revolut statement states its balances in EUR, but the lines read are in EUR, PLN' +
           ' - this importer cannot check a statement that mixes currencies',
       );
     });
 
     it("refuses one currency that is not the balances' either", () => {
-      expect(() => reconcile(parsed('EUR'), [tx('PLN', 30)], 0)).toThrow(
+      expect(() => reconcile(parsed('EUR'), [tx('PLN', 30)], 0, NO_BALANCES)).toThrow(
         'states its balances in EUR, but the lines read are in PLN',
       );
     });
 
     it('names three and counts the rest', () => {
       const many = ['AAA', 'BBB', 'CCC', 'DDD', 'EEE'].map((c) => tx(c, 1));
-      expect(() => reconcile(parsed('EUR'), many, 0)).toThrow(
+      expect(() => reconcile(parsed('EUR'), many, 0, NO_BALANCES)).toThrow(
         'the lines read are in AAA, BBB, CCC and 2 more',
       );
     });
@@ -1346,7 +1358,7 @@ describe('pdf: what a template says about its gross totals', () => {
     // -51,00 and +50,00 against a document showing one line of -1,00: the ends
     // still meet, and there is nothing printed for either half to be checked
     // against, so it imports
-    expect(reconcile(parsed, [tx(-51), tx(50)], 0).balances).toEqual({
+    expect(reconcile(parsed, [tx(-51), tx(50)], 0, NO_BALANCES).balances).toEqual({
       opening: 10,
       closing: 9,
       currency: 'EUR',
@@ -1624,7 +1636,7 @@ describe('the diagnostic budget', () => {
       throw new Error('did not refuse');
     };
 
-    const short = refusalOf(() => reconcile(parsed('EUR'), [tx('EUR', 1e20)], 0));
+    const short = refusalOf(() => reconcile(parsed('EUR'), [tx('EUR', 1e20)], 0, NO_BALANCES));
     expect(short).toContain('100000000000000000000.00 EUR');
     expect(short).toContain('so an operation is probably missing');
 
@@ -1633,6 +1645,7 @@ describe('the diagnostic budget', () => {
         parsed(CCY),
         Array.from({ length: MAX_DATA_ROWS }, (_, i) => tx(CCY, i === 0 ? -2e20 : 0)),
         MAX_DATA_ROWS,
+        NO_BALANCES,
       ),
     );
     expect(longest).toContain('are probably where it went');
@@ -1653,6 +1666,7 @@ describe('the diagnostic budget', () => {
           tx(CCY, i === 0 ? -2e20 : i === 1 ? 2e20 : 0),
         ),
         MAX_DATA_ROWS,
+        NO_BALANCES,
       ),
     );
     expect(sides).toContain('opening and closing balance agree, but its two halves do not');
@@ -1666,6 +1680,7 @@ describe('the diagnostic budget', () => {
         parsed(CCY),
         ['A', 'B', 'C', 'D', 'E'].map((c) => tx(c.repeat(CURRENCY_CODE_MAX + 2), 1)),
         0,
+        NO_BALANCES,
       ),
     );
     expect(mixed).toContain('and 2 more');

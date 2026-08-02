@@ -161,6 +161,22 @@ export interface CsvPresetMapping {
    * be guessed by the generic mapper or supplied by a request.
    */
   readonly fee?: NonEmpty<string>;
+  /**
+   * The running balance the statement prints after each row, and the column saying
+   * which running balance a row belongs to - one export interleaves several under a
+   * single column (Revolut: Текущий and Сбережения).
+   *
+   * Declared by a preset and nowhere else, for the inverse of `fee`'s reason: a
+   * guessed fee column corrupts silently, where a guessed balance column REFUSES a
+   * file that imports today - on the one path every uncovered user is told to fall
+   * back to. Nested rather than two flat fields so that a series column without a
+   * balance column cannot be spelled: it would have no reader at all.
+   */
+  readonly balance?: {
+    readonly column: NonEmpty<string>;
+    /** absent = the file states one running balance for the whole statement */
+    readonly series?: NonEmpty<string>;
+  };
   readonly dateFormat?: CsvMapping['dateFormat'];
   readonly decimal?: CsvMapping['decimal'];
   readonly delimiter?: string;
@@ -212,6 +228,11 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapp
       // about itself (−1742.18 out, +1953.40 in) to the cent, where Сумма alone is
       // short by exactly the fees on the outgoing side
       fee: ['Fee', 'Комиссия'],
+      // the last column of ten in the measured export, and the series column beside
+      // it is not a convenience: one file states two running balances under one
+      // column, and a check that inferred the split from the numbers could not tell
+      // a second product from a lost row (row 54, R2)
+      balance: { column: ['Balance', 'Остаток средств'], series: ['Product', 'Продукт'] },
       dateFormat: 'iso',
       decimal: '.',
       delimiter: ',',

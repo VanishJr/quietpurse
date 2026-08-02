@@ -2,6 +2,7 @@ import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
 import { mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
+import { BalancesNotShown } from '../types';
 import { CsvImport } from './CsvImport';
 
 /**
@@ -135,11 +136,10 @@ describe('the summary panel', () => {
   });
 
   /**
-   * The reconciliation line, and the half that matters more: CSV and Excel state no
-   * balances at all, which is 100% of imports today. A "couldn't be reconciled"
-   * sentence on that path would be a warning about nothing on the common path — the
-   * summary fixture carries no `balances`, and the first case above is where its
-   * absence is asserted.
+   * The reconciliation line, and the half that matters more: a file that states no
+   * balance of any kind gets no sentence at all — neither a pair nor a reason. The
+   * summary fixture carries neither field, and the first case above is where the
+   * pair's absence is asserted.
    */
   it('names the balances it was checked against, and only when there are any', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
@@ -147,6 +147,7 @@ describe('the summary panel', () => {
     await upload(container);
     expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
     expect(screen.queryByText(/Checked against the statement/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/running balance/)).not.toBeInTheDocument();
     unmount();
 
     mockFetch({
@@ -162,6 +163,79 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
       /1,200 EUR at the start, 59\.76 EUR at the end\. The rows add up\./,
     );
+  });
+
+  /**
+   * A pair derived from the file's own running balances is a different sentence, and
+   * it has to be: on the real two-product export neither number appears in any cell,
+   * so a card saying "the statement's own balances: 387.40" sends the user to compare
+   * it against a column that reads 134.85. And the closing claim shrinks — both ends
+   * come out of these same rows, so a row lost from either END moves an end rather
+   * than breaking the run, and "the rows add up" would be a completeness claim the
+   * check cannot make.
+   */
+  it('says how many running balances a derived pair was summed from', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            balances: { opening: 387.40, closing: 579.85, currency: 'EUR', series: 2 },
+          }),
+        ),
+    });
+    const { container, unmount } = mount();
+    await upload(container);
+    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+      /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
+    );
+    expect(screen.queryByText(/The rows add up/)).not.toBeInTheDocument();
+    unmount();
+
+    // one series states the pair plainly, and still makes only the claim it checked
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            balances: { opening: 72.40, closing: 134.85, currency: 'EUR', series: 1 },
+          }),
+        ),
+    });
+    const single = mount();
+    await upload(single.container);
+    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+      /72\.40 EUR at the start, 134\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
+    );
+    expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The third state, which must not spell like the first: a file that DOES print a
+   * running balance and got no pair out of it says why. One case per slug, because a
+   * missing entry in the dictionary renders a blank line rather than failing.
+   */
+  it('says why a file that states a running balance shows no pair', async () => {
+    const cases: [BalancesNotShown, RegExp][] = [
+      ['rows-outside-the-balance', /also covers rows that weren't imported/],
+      ['rows-without-a-balance', /state no running balance/],
+      // "a running balance", never "this file's": one series closing on itself
+      // suppresses the pair for a file whose other series did move
+      ['balance-closes-on-itself', /A running balance in this file ends where it began/],
+      ['more-than-one-currency', /running balance per currency/],
+    ];
+    for (const [slug, sentence] of cases) {
+      mockFetch({
+        ...BASE,
+        'POST /api/imports': () => ok(summaryResult({ balancesNotShown: slug })),
+      });
+      const { container, unmount } = mount();
+      await upload(container);
+      expect(await screen.findByText(sentence)).toBeInTheDocument();
+      // and never a pair alongside the reason it could not be derived
+      expect(screen.queryByText(/at the start,/)).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });
 

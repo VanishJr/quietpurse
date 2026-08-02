@@ -13,7 +13,16 @@ import {
 } from '../src/providers/csv';
 import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
 import { importAndConfirm } from './helpers';
-import { feeRefused, importStatement, noRowsParsed } from '../src/providers/statement';
+import {
+  CURRENCY_CODE_MAX,
+  ParsedFile,
+  balanceBreaks,
+  feeRefused,
+  importStatement,
+  noRowsParsed,
+  reconcile,
+} from '../src/providers/statement';
+import { NewTransaction } from '../src/types';
 
 describe('parseCsv', () => {
   it('quotes, escaped quotes, CRLF, semicolon', () => {
@@ -156,6 +165,15 @@ describe('a CSV statement: pipeline and deduplication', () => {
     expect((await getAccount(r1.accountId))!.balance).toBe(-930.45);
   });
 
+  /**
+   * The `PENDING` row states a balance, which the real export never does - kept as
+   * found (row 54, D3), because it is the case R10's discriminator was written for:
+   * the balance column covers a row this import drops, so the gate turns itself off
+   * rather than reading a run it does not cover. That verdict is asserted on its own
+   * fixture in the gate block below - `importAndConfirm` hands back no summary, so it
+   * cannot be asserted here - and this case is still about the status filter and the
+   * currency column.
+   */
   it('revolut preset: State=COMPLETED filter, currency from the file', async () => {
     const revolut = [
       'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance',
@@ -288,12 +306,20 @@ describe('a bank export in a language the preset also accepts', () => {
   const EN_HEADER =
     'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
 
+  /**
+   * The balance column reads 195.30 and not 195.80, and the pending row states none.
+   * Both were repaired towards what the real export was measured to do (row 54, D3):
+   * this fixture broke by EXACTLY the fee, which is the pre-037a arithmetic the bank's
+   * own running balance disproves, and the real export leaves the cell empty on every
+   * `В ОБРАБОТКЕ` row. Tuning either number to make the gate pass would have put that
+   * defect back inside a test.
+   */
   it('the Russian export imports under the same revolut preset', async () => {
     const ru = [
       RU_HEADER,
       'CARD_PAYMENT,Current,2026-02-01 09:00:00,2026-02-02 10:00:00,Кофейня на углу,-4.20,0.00,EUR,ВЫПОЛНЕНО,95.80',
-      'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Пополнение счёта,100.00,0.50,EUR,ВЫПОЛНЕНО,195.80',
-      'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает подтверждения,-9.99,0.00,EUR,В ОБРАБОТКЕ,185.81',
+      'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Пополнение счёта,100.00,0.50,EUR,ВЫПОЛНЕНО,195.30',
+      'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает подтверждения,-9.99,0.00,EUR,В ОБРАБОТКЕ,',
     ].join('\n');
 
     const r = await importAndConfirm({
@@ -440,20 +466,25 @@ describe('a bank export in a language the preset also accepts', () => {
  * plan-fee row - Amount 0.00, Fee 2.99 - is a real charge the importer used to drop
  * whole at the `amount === 0` guard.
  *
- * There is no reconciliation gate on this path (reconcile's sheet arm returns totals
- * and checks nothing), so these assertions are the only thing holding the arithmetic.
+ * These assertions were the only thing holding the arithmetic until row 54 gave this
+ * path a gate; the bank's own running balance now says the same thing independently,
+ * in the block below.
+ *
+ * Neither header carries a `Balance` column any more. It sat in both as filler - the
+ * parser ignored it, so a literal 0 on every row cost nothing - and filler becomes an
+ * assertion the day something reads the column: every one of those rows claims the
+ * account was left at zero. A fixture must not carry a column it does not mean (row
+ * 54, D3), and what these cases mean is the fee.
  */
 describe('a fee the statement states beside the amount', () => {
-  const WITH_FEE =
-    'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
-  const WITHOUT_FEE =
-    'Type,Product,Started Date,Completed Date,Description,Amount,Currency,State,Balance';
+  const WITH_FEE = 'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State';
+  const WITHOUT_FEE = 'Type,Product,Started Date,Completed Date,Description,Amount,Currency,State';
 
   const withFee = (description: string, amount: string, fee: string, day = '01'): string =>
-    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},${fee},EUR,COMPLETED,0`;
+    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},${fee},EUR,COMPLETED`;
 
   const withoutFee = (description: string, amount: string, day = '01'): string =>
-    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},EUR,COMPLETED,0`;
+    `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},EUR,COMPLETED`;
 
   const importRevolut = (accountName: string, ...rows: string[]) =>
     importAndConfirm({
@@ -606,7 +637,6 @@ describe('a fee the statement states beside the amount', () => {
       0.44,
       'EUR',
       'COMPLETED',
-      0,
     ]);
 
     const r = await importAndConfirm({
@@ -644,6 +674,500 @@ describe('a fee the statement states beside the amount', () => {
     });
     expect(second.inserted).toBe(0);
     expect(await listTransactions({ accountId: first.accountId })).toHaveLength(1);
+  });
+});
+
+/**
+ * The gate the sheet path did not have (ROADMAP row 54). The statement prints a
+ * running balance after each row, so every accepted row is a step from the balance
+ * before it to the one after it, and a complete statement's steps form ONE unbroken
+ * run. A row the parser dropped or misread splits the run in two, and the gap where
+ * it splits is the missing money.
+ *
+ * Every fixture below is fabricated, and the three headline numbers of the first case
+ * are the ones the owner's real July export was measured to state: two products under
+ * one balance column, 387.40 at the start, 579.85 at the end, 192.45 net - which is
+ * also what the PDF of the same month prints about itself.
+ */
+describe("the statement's own running balance, on the sheet path", () => {
+  const HEADER =
+    'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
+  /** the same export from a bank that does not print one, which has to keep importing */
+  const NO_BALANCE =
+    'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State';
+
+  interface Row {
+    description: string;
+    amount: string;
+    /** the running balance after this row; '' is a cell the file left empty */
+    balance?: string;
+    product?: string;
+    fee?: string;
+    currency?: string;
+    state?: string;
+    day?: string;
+  }
+
+  const line = (r: Row): string =>
+    [
+      'CARD_PAYMENT',
+      r.product ?? 'Current',
+      `2026-09-${r.day ?? '01'} 09:00:00`,
+      `2026-09-${r.day ?? '01'} 10:00:00`,
+      r.description,
+      r.amount,
+      r.fee ?? '0.00',
+      r.currency ?? 'EUR',
+      r.state ?? 'COMPLETED',
+      r.balance ?? '',
+    ].join(',');
+
+  const upload = (accountName: string, header: string, rows: Row[]) =>
+    importStatement({
+      accountName,
+      currency: 'EUR',
+      preset: 'revolut',
+      bytes: Buffer.from([header, ...rows.map(line)].join('\n'), 'utf8'),
+    });
+
+  const summaryOf = async (accountName: string, ...rows: Row[]) => {
+    const result = await upload(accountName, HEADER, rows);
+    if (result.outcome !== 'awaiting_confirmation') {
+      throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
+    }
+    return result.summary;
+  };
+
+  const refusalOf = async (accountName: string, ...rows: Row[]): Promise<string> => {
+    const thrown = await summaryOf(accountName, ...rows).then(
+      () => null,
+      (e: Error) => e,
+    );
+    if (!thrown) throw new Error('expected a refusal, got a summary');
+    return thrown.message;
+  };
+
+  // Текущий 72.40 -> 66.72 -> 166.72 -> 134.85 and Сбережения 315.00 -> 445.00, in
+  // the real export's own shape: two products interleaved under one balance column,
+  // the single-row one first, and the file in no date order at all
+  const SAVINGS: Row = {
+    description: 'Savings top-up',
+    product: 'Savings',
+    amount: '130.00',
+    balance: '445.00',
+    day: '02',
+  };
+  const CARD: Row = { description: 'Card payment', amount: '-5.68', balance: '66.72', day: '03' };
+  const IN: Row = { description: 'Incoming', amount: '100.00', balance: '166.72', day: '04' };
+  const RENT: Row = { description: 'Rent', amount: '-31.87', balance: '134.85', day: '05' };
+
+  it('two products under one balance column reconcile to the pair the file implies', async () => {
+    const summary = await summaryOf('Balance Two Series', SAVINGS, RENT, CARD, IN);
+
+    expect(summary.accepted).toBe(4);
+    // neither number appears in any cell of the file: they are sums across the two
+    // running balances it states, which is why the card has to say how many
+    expect(summary.balances).toEqual({
+      opening: 387.40,
+      closing: 579.85,
+      currency: 'EUR',
+      series: 2,
+    });
+    expect(summary.balancesNotShown).toBeUndefined();
+    expect(summary.totals).toEqual([{ currency: 'EUR', net: 192.45 }]);
+  });
+
+  /**
+   * R1, and the reason the check is stated over links rather than over the first and
+   * last row: file order is a property of one bank's exporter, and the day one of
+   * them ships newest-first a gate that read row 1 as the opening starts refusing
+   * good statements. Nothing here reads a row index.
+   */
+  it('the verdict and the pair are the same under any order of the rows', async () => {
+    const expected = {
+      opening: 387.40,
+      closing: 579.85,
+      currency: 'EUR',
+      series: 2,
+    };
+    const shuffled = await summaryOf('Balance Shuffled', IN, SAVINGS, RENT, CARD);
+    expect(shuffled.balances).toEqual(expected);
+    // fully reversed, which is what a newest-first export is
+    const reversed = await summaryOf('Balance Reversed', IN, CARD, RENT, SAVINGS);
+    expect(reversed.balances).toEqual(expected);
+  });
+
+  /**
+   * The €2.99 case, which is the whole reason this row exists: a row that never
+   * reached the import, found by the file's own arithmetic instead of by a human
+   * comparing two formats a month later.
+   */
+  it('one row removed is refused, and the sentence names the gap', async () => {
+    // in posting order, so the two lines the sentence names really are the two the
+    // missing operation sat between and the gap really is its movement.
+    //
+    // "Current" and not "current": the Product cell is folded to decide which rows
+    // share a running balance, and the folded form may not reach the sentence
+    expect(await refusalOf('Balance Row Removed', CARD, RENT)).toBe(
+      'this statement\'s own running balance breaks: in "Current" the line stating' +
+        ' 134.85 EUR does not follow the one stating 66.72 EUR - 100.00 EUR is unaccounted' +
+        ' for between them, so an operation is probably missing - export the same statement' +
+        ' again from your online banking and upload it',
+    );
+  });
+
+  /**
+   * Q7, and the limit of the diagnostic said out loud. The VERDICT is order-independent
+   * and this file is refused either way; the two lines the sentence names are the first
+   * adjacent pair that does not chain in the file's own order, so on a file that is not
+   * in posting order they are a true fact about two lines rather than the missing
+   * operation. The wording claims only that one does not follow the other.
+   */
+  it('the same file out of order is refused too, naming two lines that do not chain', async () => {
+    expect(await refusalOf('Balance Row Removed Shuffled', RENT, CARD)).toBe(
+      'this statement\'s own running balance breaks: in "Current" the line stating' +
+        ' 66.72 EUR does not follow the one stating 134.85 EUR - 62.45 EUR is unaccounted' +
+        ' for between them, so an operation is probably missing - export the same statement' +
+        ' again from your online banking and upload it',
+    );
+  });
+
+  /** No tolerance, anywhere: one cent of slack hides a systematically dropped fee. */
+  it('a one-cent break is a break', async () => {
+    expect(await refusalOf('Balance One Cent', { ...CARD, balance: '66.73' }, IN, RENT)).toContain(
+      '0.01 EUR is unaccounted for between them',
+    );
+  });
+
+  /**
+   * Cents throughout, never decimals: 0.10 + 0.20 is 0.30000000000000004 in binary
+   * floating point, and a comparison made there refuses a statement that is exact.
+   */
+  it('a statement of tenths reconciles', async () => {
+    const summary = await summaryOf(
+      'Balance Tenths',
+      { description: 'One', amount: '0.10', balance: '0.10', day: '06' },
+      { description: 'Two', amount: '0.20', balance: '0.30', day: '07' },
+      { description: 'Three', amount: '0.30', balance: '0.60', day: '08' },
+    );
+    expect(summary.balances).toMatchObject({ opening: 0, closing: 0.6, series: 1 });
+  });
+
+  /**
+   * Connectivity is load-bearing rather than decoration: the degrees below balance
+   * everywhere but the second pair is a run of its own, and a check that counted only
+   * excesses would call this one unbroken series.
+   */
+  it('a proper chain plus a detached cycle is two runs, and is refused', async () => {
+    expect(
+      await refusalOf(
+        'Balance Detached Cycle',
+        { description: 'A', amount: '10.00', balance: '110.00', day: '09' },
+        { description: 'B', amount: '20.00', balance: '130.00', day: '10' },
+        { description: 'C', amount: '100.00', balance: '600.00', day: '11' },
+        { description: 'D', amount: '-100.00', balance: '500.00', day: '12' },
+      ),
+    ).toContain("this statement's own running balance breaks");
+  });
+
+  /**
+   * DoD 4, and feeColumn's argument applied to a second slot: the balance column is
+   * resolved outside resolvePreset, so it records no unresolved slot and cannot refuse
+   * a header - and resolveColumns is the XLSX header scan's predicate too.
+   */
+  it('a Revolut-preset header with no balance column imports exactly as it did', async () => {
+    const result = await upload('Balance Column Absent', NO_BALANCE, [
+      { description: 'First', amount: '-10.00', day: '13' },
+      { description: 'Second', amount: '-20.00', day: '14' },
+    ]);
+    if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+
+    expect(result.summary.accepted).toBe(2);
+    expect(result.summary.skipped).toBe(0);
+    // both absent: this file never claimed to carry a balance, so nothing on the
+    // screen may say it could not be checked (row 6b, Trap 9)
+    expect(result.summary.balances).toBeUndefined();
+    expect(result.summary.balancesNotShown).toBeUndefined();
+  });
+
+  /**
+   * R10's second class, and the case that would otherwise be a regression on the
+   * fallback path: the pending row states a balance the import correctly drops, so the
+   * run the gate can see has a hole in it that is not missing money. The gate turns
+   * itself off and says which state it is in - it does not refuse, and it does not
+   * spell the same as a file that states no balance at all.
+   */
+  it('a skipped row that states a balance turns the gate off rather than refusing', async () => {
+    const summary = await summaryOf(
+      'Balance Covers Skipped',
+      { description: 'Before', amount: '-10.00', balance: '90.00', day: '15' },
+      {
+        description: 'Pending',
+        amount: '-15.00',
+        balance: '75.00',
+        state: 'PENDING',
+        day: '16',
+      },
+      { description: 'After', amount: '-5.00', balance: '70.00', day: '17' },
+    );
+    expect(summary.accepted).toBe(2);
+    expect(summary.balances).toBeUndefined();
+    expect(summary.balancesNotShown).toBe('rows-outside-the-balance');
+  });
+
+  it('an imported row that states no balance turns it off too', async () => {
+    const summary = await summaryOf(
+      'Balance Missing Cell',
+      { description: 'Stated', amount: '-10.00', balance: '90.00', day: '18' },
+      { description: 'Unstated', amount: '-5.00', day: '19' },
+    );
+    expect(summary.accepted).toBe(2);
+    expect(summary.balances).toBeUndefined();
+    expect(summary.balancesNotShown).toBe('rows-without-a-balance');
+  });
+
+  /**
+   * D14, and the two cases the pair above cannot pin: both of them are single-series
+   * files, where "a run we cannot use turns the gate off" and "a broken run refuses"
+   * agree. They disagree the moment a file has two running balances and one of each,
+   * and there the file's own arithmetic saying money is missing outranks our
+   * uncertainty about a DIFFERENT balance - one blank cell anywhere would otherwise
+   * disarm the refusal for the whole file, which is the €2.99 case surviving the row
+   * built to catch it.
+   */
+  it('a run we cannot use does not disarm a break in another one', async () => {
+    expect(
+      await refusalOf(
+        'Balance Unusable Beside Broken',
+        CARD,
+        RENT,
+        { description: 'Savings, no cell', product: 'Savings', amount: '130.00', day: '26' },
+      ),
+    ).toContain('100.00 EUR is unaccounted for between them');
+  });
+
+  it('and neither does a skipped row that states a balance', async () => {
+    expect(
+      await refusalOf(
+        'Balance Skipped Beside Broken',
+        CARD,
+        RENT,
+        SAVINGS,
+        {
+          description: 'Savings pending',
+          product: 'Savings',
+          amount: '-40.00',
+          balance: '370.00',
+          state: 'PENDING',
+          day: '27',
+        },
+      ),
+    ).toContain('100.00 EUR is unaccounted for between them');
+  });
+
+  /**
+   * Q5: the run is provably unbroken, and the balances alone cannot say which value it
+   * starts at. Nothing says money is missing, so refusing would be the R10 mistake.
+   */
+  it('a series that ends where it began shows no pair and is not refused', async () => {
+    const summary = await summaryOf(
+      'Balance Circuit',
+      { description: 'Up', amount: '10.00', balance: '110.00', day: '20' },
+      { description: 'Down', amount: '-10.00', balance: '100.00', day: '21' },
+    );
+    expect(summary.accepted).toBe(2);
+    expect(summary.balances).toBeUndefined();
+    expect(summary.balancesNotShown).toBe('balance-closes-on-itself');
+  });
+
+  /**
+   * Trap 5. The pdf arm REFUSES a file whose rows are not all in the balances'
+   * currency, because the document states its box in one; the sheet arm must not
+   * inherit that - a Revolut file with two pockets imports today and nothing printed a
+   * single claim about it. Each currency is its own running balance, each is checked,
+   * and what is missing is only the pair.
+   */
+  it('a file carrying two currencies is checked per currency and still imports', async () => {
+    const summary = await summaryOf(
+      'Balance Two Currencies',
+      { description: 'Euro out', amount: '-5.00', balance: '95.00', day: '22' },
+      { description: 'Zloty out', amount: '-20.00', balance: '80.00', currency: 'PLN', day: '23' },
+    );
+    expect(summary.accepted).toBe(2);
+    expect(summary.balances).toBeUndefined();
+    expect(summary.balancesNotShown).toBe('more-than-one-currency');
+  });
+
+  it('and a break in either of them still refuses the file', async () => {
+    expect(
+      await refusalOf(
+        'Balance Two Currencies Broken',
+        { description: 'Euro out', amount: '-5.00', balance: '95.00', day: '22' },
+        { description: 'Zloty A', amount: '-20.00', balance: '80.00', currency: 'PLN', day: '23' },
+        { description: 'Zloty B', amount: '-20.00', balance: '40.00', currency: 'PLN', day: '24' },
+      ),
+    ).toContain('20.00 PLN is unaccounted for between them');
+  });
+
+  /**
+   * Trap 3, and it is a behaviour change on merged code stated rather than discovered:
+   * a row with an unreadable fee is refused row-level and deliberately so (037a), but
+   * the money really did not import, and the statement's own balance now says so. The
+   * file-level refusal is the right end of that - an import short by a row, reported as
+   * complete, is the failure CLAUDE.md ranks above a crash.
+   */
+  it('a row refused for its fee refuses the file, and is named as the cause', async () => {
+    const message = await refusalOf('Balance Fee Refused', CARD, { ...IN, fee: 'cucumber' }, RENT);
+    expect(message).toContain('100.00 EUR is unaccounted for between them');
+    expect(message).toContain(
+      'the 1 transaction line this importer could not read are probably where it went',
+    );
+  });
+
+  /**
+   * Trap 4, and it needs no special case: a row whose movement is zero is dropped
+   * before it becomes a transaction, and its balance equals its predecessor's - so the
+   * step it would have been is a loop on one value, and removing it changes no degree
+   * and joins no two values.
+   */
+  it('a zero-movement row is dropped and the run is unaffected', async () => {
+    const summary = await summaryOf(
+      'Balance Zero Movement',
+      CARD,
+      { description: 'Nothing moved', amount: '0.00', balance: '66.72', day: '25' },
+      IN,
+      RENT,
+    );
+    expect(summary.accepted).toBe(3);
+    expect(summary.skipped).toBe(1);
+    expect(summary.balances).toEqual({
+      opening: 72.40,
+      closing: 134.85,
+      currency: 'EUR',
+      series: 1,
+    });
+  });
+
+  /**
+   * And the cause clause counts rows the parser genuinely failed on, never the ones it
+   * dropped on purpose (row 6b, R5). A zero-movement row was read perfectly and is
+   * provably not where the money went - its balance is a self-loop - so pointing the
+   * user at it names a cause that is not the cause.
+   */
+  it('a row dropped for a zero movement is not named as a line that could not be read', async () => {
+    const message = await refusalOf(
+      'Balance Zero Movement Broken',
+      CARD,
+      { description: 'Nothing moved', amount: '0.00', balance: '66.72', day: '25' },
+      RENT,
+    );
+    expect(message).toContain('100.00 EUR is unaccounted for between them');
+    expect(message).toContain('so an operation is probably missing');
+    expect(message).not.toContain('could not read');
+  });
+
+  /**
+   * The two arrays are aligned by index and by nothing else, and every link is built
+   * from `stated.rows[i]` against `txs[i]`. A caller that filtered `txs` between
+   * building the pairs and calling this would read every balance against the wrong
+   * row - refusing good files or passing broken ones, and never indexing past the end,
+   * so nothing would fail. The check is structural because a review pass cannot see
+   * the edit that breaks it.
+   */
+  it('reconcile refuses balances that are not one per transaction', () => {
+    const parsed: ParsedFile = {
+      kind: 'sheet',
+      sheet: { rows: [], rowLabel: (i) => i },
+      preset: null,
+      mapping: undefined,
+    };
+    const tx: NewTransaction = {
+      accountId: 'a',
+      provider: 'upload',
+      amount: -1,
+      currency: 'EUR',
+      date: '2026-09-01T00:00:00.000Z',
+      description: 'One',
+      category: 'other',
+      fee: null,
+    };
+    expect(() =>
+      reconcile(parsed, [tx], 0, {
+        kind: 'stated',
+        rows: [
+          { series: '', label: '', postCents: 100 },
+          { series: '', label: '', postCents: 90 },
+        ],
+        coveredButSkipped: [],
+        unreadable: 0,
+      }),
+    ).toThrow('stated balances and transactions are not the same length');
+  });
+
+  /**
+   * Trap 9: the XLSX path shares this arm and there is no real Revolut workbook in the
+   * tree. A workbook hands the mapper a float where a CSV hands it a string, so this
+   * is the other branch of the Cell seam through the same gate - and there is no second
+   * implementation for it to drift from.
+   */
+  describe('the same gate through a workbook', () => {
+    const workbook = async (rows: (string | number | Date)[][]): Promise<Buffer> => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Statement');
+      ws.addRow(HEADER.split(','));
+      for (const r of rows) ws.addRow(r);
+      return Buffer.from(await wb.xlsx.writeBuffer());
+    };
+    const sheetRow = (
+      description: string,
+      amount: number,
+      balance: number,
+      day: number,
+    ): (string | number | Date)[] => [
+      'CARD_PAYMENT',
+      'Current',
+      new Date(`2026-09-${String(day).padStart(2, '0')}T09:00:00.000Z`),
+      new Date(`2026-09-${String(day).padStart(2, '0')}T10:00:00.000Z`),
+      description,
+      amount,
+      0,
+      'EUR',
+      'COMPLETED',
+      balance,
+    ];
+
+    it('reconciles off numeric balance cells', async () => {
+      const result = await importStatement({
+        accountName: 'Balance Workbook',
+        currency: 'EUR',
+        preset: 'revolut',
+        bytes: await workbook([
+          sheetRow('Book card', -5.68, 66.72, 3),
+          sheetRow('Book in', 100, 166.72, 4),
+          sheetRow('Book rent', -31.87, 134.85, 5),
+        ]),
+      });
+      if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+      expect(result.summary.balances).toEqual({
+        opening: 72.40,
+        closing: 134.85,
+        currency: 'EUR',
+        series: 1,
+      });
+    });
+
+    it('and refuses the same workbook with a row taken out', async () => {
+      const thrown = await importStatement({
+        accountName: 'Balance Workbook Broken',
+        currency: 'EUR',
+        preset: 'revolut',
+        bytes: await workbook([
+          sheetRow('Book card', -5.68, 66.72, 3),
+          sheetRow('Book rent', -31.87, 134.85, 5),
+        ]),
+      }).catch((e) => e as Error);
+      expect((thrown as Error).message).toContain('100.00 EUR is unaccounted for between them');
+    });
   });
 });
 
@@ -755,6 +1279,42 @@ describe('what the new refusals may spend', () => {
       longest = Math.max(longest, composed.length);
     }
     expect(longest).toBeLessThanOrEqual(199);
+  });
+
+  /**
+   * And row 54's, against ERROR_DETAIL_MAX rather than against 199: it is a throw from
+   * reconcile, not a clause of noRowsParsed, so xlsx.ts's NOTICE_MAX is untouched by
+   * it. Built FROM the bounds rather than beside them (row 6b, D10) - the currency
+   * code is composed out of CURRENCY_CODE_MAX, and the series name is swept rather
+   * than sampled because what its bound buys is only spent by a name wide enough to
+   * be cut.
+   *
+   * Every amount is at the widest toFixed(2) produces before it turns to exponential
+   * notation, and negative, which is the only way any of the three can be wider still.
+   * Both shapes of the sentence, because the located-pair clause is what a run whose
+   * every adjacent pair chains cannot supply.
+   */
+  it('the broken-balance refusal fits what error_detail keeps, at its extreme', () => {
+    const located = {
+      before: { preCents: 0, postCents: -1e22 },
+      after: { preCents: -3e22, postCents: -1e22 },
+    };
+    let longest = 0;
+    for (let width = 1; width <= 200; width++) {
+      for (const unreadable of [0, MAX_DATA_ROWS]) {
+        for (const at of [located, undefined]) {
+          const composed = balanceBreaks(
+            'П'.repeat(width),
+            'C'.repeat(CURRENCY_CODE_MAX + 2),
+            at,
+            unreadable,
+          );
+          expect(composed).toContain("this statement's own running balance breaks");
+          longest = Math.max(longest, composed.length);
+        }
+      }
+    }
+    expect(longest).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
   });
 });
 

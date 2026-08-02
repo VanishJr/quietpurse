@@ -133,6 +133,15 @@ const STATUS_LIST_MAX = 72;
  */
 const FEE_QUOTE_MAX = 24;
 
+/**
+ * And what a series name may spend inside its quotes, derived the same way as the
+ * two above. The refusal it sits in is not part of noRowsParsed - it is a throw from
+ * reconcile, so xlsx.ts's NOTICE_MAX is untouched by it - and it is measured against
+ * ERROR_DETAIL_MAX directly in csv.test.ts's budget block. A product name wider than
+ * this is not a product name, and bounded() leaves the mark that says so.
+ */
+const SERIES_QUOTE_MAX = 24;
+
 export interface StatementImportRequest {
   /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
   accountName: string;
@@ -173,7 +182,34 @@ export type CheckedBalances = {
   opening: number;
   closing: number;
   currency: string;
+  /**
+   * How many running balances the pair was summed from, when it was derived from
+   * them at all. Absent means the document printed the pair itself, which is the PDF
+   * path and can never be a count: there is one balance box and it is not a series.
+   * So the field says two things at once and both are facts about where the numbers
+   * came from - the client needs the second to know which sentence is true of them.
+   */
+  series?: number;
 } & { readonly [checked]: true };
+
+/**
+ * Why no opening/closing pair is shown for a file that DOES state a running balance.
+ * Absent together with `balances` means the format states none, and the two must not
+ * spell the same (row 6a, Ruling 1): after this row a third state exists - a preset
+ * declared a balance column, it resolved, and the check could not be completed.
+ *
+ * A slug over the wire with the sentence in the client dictionary, which is this
+ * codebase's own idiom for a value a screen renders as prose.
+ */
+export type BalancesNotShown =
+  /** the status filter dropped rows the balance column also covers */
+  | 'rows-outside-the-balance'
+  /** an imported row states no balance, or one this parser could not read */
+  | 'rows-without-a-balance'
+  /** the series ends where it began: unbroken, but with no endpoints to name */
+  | 'balance-closes-on-itself'
+  /** every series reconciled, and one pair cannot carry two currencies */
+  | 'more-than-one-currency';
 
 /** The one place either brand is applied, and it is private to this module. */
 const check = <T>(value: T): T & { readonly [checked]: true } =>
@@ -212,11 +248,15 @@ export interface ImportSummary {
   totals: CheckedTotals;
   /**
    * The statement's own opening and closing balance, which these rows were checked
-   * to add up between. Absent means the format states none - CSV and XLSX never do -
-   * and never means a check that failed: a mismatch throws, so no summary is built
-   * for one at all.
+   * to add up between - printed by the document on the PDF path, derived from the
+   * running balance the file prints per row on the sheet path. Absent means either
+   * the format states none, or it does and `balancesNotShown` says why no pair could
+   * be derived. It never means a check that failed: a break throws, so no summary is
+   * built for one at all.
    */
   balances?: CheckedBalances;
+  /** set only when the file states a running balance and no pair came out of it */
+  balancesNotShown?: BalancesNotShown;
   /**
    * An earlier upload of these same bytes was still awaiting confirmation and has
    * been discarded to make room for this one. A field rather than a sentence: the
@@ -478,6 +518,10 @@ interface Columns {
   currencyCol: number;
   /** -1 = the file states no fees, which is every format but a Revolut sheet */
   feeCol: number;
+  /** -1 = the file states no running balance, so there is nothing to check against */
+  balanceCol: number;
+  /** -1 = one running balance for the whole file; only read when balanceCol is not */
+  seriesCol: number;
   /** the accepted values folded once here, so the row loop compares and nothing else */
   onlyWhen: { col: number; column: string; accepted: ReadonlySet<string> } | null;
 }
@@ -546,6 +590,28 @@ function feeColumn(header: string[], preset: CsvPresetMapping | null): number {
 }
 
 /**
+ * The running balance column and the one naming its series, or -1 each. feeColumn's
+ * shape and for feeColumn's reason, which binds harder here: a Revolut export whose
+ * header has no Balance column imports today, and a slot that could refuse a header
+ * would also move which row the XLSX header scan settles on.
+ *
+ * The series column is a refinement and never a precondition - a file that states one
+ * running balance and does not say so has one series, which is the correct reading.
+ */
+function balanceColumns(
+  header: string[],
+  preset: CsvPresetMapping | null,
+): { balanceCol: number; seriesCol: number } {
+  const index = (candidates: readonly string[] | undefined): number => {
+    if (!candidates) return -1;
+    const name = matchColumn(header, candidates);
+    return name === undefined ? -1 : header.findIndex((h) => fold(h) === fold(name));
+  };
+  const balanceCol = index(preset?.balance?.column);
+  return { balanceCol, seriesCol: balanceCol < 0 ? -1 : index(preset?.balance?.series) };
+}
+
+/**
  * Which column is which, for one header row. The XLSX header scan and the mapper
  * call this same function: a scan with a laxer predicate would settle on a row
  * above the real header, and the mapper would then read every data row against the
@@ -600,6 +666,7 @@ function resolveColumns(
     ).map((name) => colIndex('description', name)),
     currencyCol: effective.currency ? colIndex('currency', effective.currency) : -1,
     feeCol: feeColumn(header, preset),
+    ...balanceColumns(header, preset),
     onlyWhen: effective.onlyWhen
       ? {
           col: colIndex('status', effective.onlyWhen.column),
@@ -639,6 +706,60 @@ function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
 type FeeCell = { ok: true; fee: number | null } | { ok: false; text: string };
 
 /**
+ * What the sheet stated beside the rows it accepted, on its way to reconcile and
+ * nowhere else. Not on Sheet, not on ParsedFile's sheet arm, not on NewTransaction
+ * and not on a table (row 6a Ruling 1, row 6b R6): these are cells of the file, read
+ * by the one loop that builds the transactions and thrown away once the gate has run.
+ */
+export type StatedBalances =
+  | { kind: 'none' }
+  | {
+      kind: 'stated';
+      /** one per element of txs, at the same index */
+      rows: readonly StatedRow[];
+      /**
+       * The series and currency of every row the status filter dropped that stated a
+       * balance anyway. The gate covers exactly the rows `onlyWhen` accepts, and that
+       * alignment holds only while "has a running balance" and "is accepted" are the
+       * same predicate - measured true of the real export, where all three pending
+       * rows leave the cell empty. This is the detector for the day a bank diverges
+       * from it, and it is carried per row rather than as a count because a dropped
+       * row punches its hole in ONE running balance: which one it names decides
+       * whether a break somewhere else in the file is explained by it or not.
+       */
+      coveredButSkipped: readonly { series: string; currency: string }[];
+      /** rows the parser could not read at all - what the refusal's cause clause counts */
+      unreadable: number;
+    };
+
+export interface StatedRow {
+  /** the folded series cell, '' when no series column resolved */
+  series: string;
+  /**
+   * And the same cell as the file spelled it, for the refusal to quote. Folding is
+   * only for deciding which rows belong to the same running balance - `Current` and
+   * `current` are one series and must not become two - so it may not reach a sentence
+   * a person reads beside their own statement (the status values are quoted the same
+   * way, and for the same reason).
+   */
+  label: string;
+  /** the balance stated after this row, in cents; null = empty or unreadable */
+  postCents: number | null;
+}
+
+/**
+ * What the file stated for one accepted row's running balance. An empty cell and an
+ * unreadable one are both null and neither refuses the row: a balance cell this
+ * parser cannot read costs the check, never the transaction. The text test comes
+ * first for readFee's reason.
+ */
+function readBalance(c: Cell | undefined, decimal: CsvMapping['decimal']): number | null {
+  if (!cellText(c).trim()) return null;
+  const value = cellAmount(c, decimal);
+  return value === null ? null : toCents(value);
+}
+
+/**
  * What the file stated for one row's fee. null is "it stated nothing" - an empty
  * cell - and never a zero this importer invented; the empty test is on the text and
  * comes first, exactly as the currency column's does, because parseAmount('') answers
@@ -671,8 +792,17 @@ async function mapAndStore(
   const header = sheet.rows[0].map((c) => cellText(c).trim());
   const resolved = resolveColumns(header, preset, parsed.mapping);
   if (!resolved.ok) throw new Error(resolved.error);
-  const { mapping, dateCol, amountCol, descCols, currencyCol, feeCol, onlyWhen } =
-    resolved.columns;
+  const {
+    mapping,
+    dateCol,
+    amountCol,
+    descCols,
+    currencyCol,
+    feeCol,
+    balanceCol,
+    seriesCol,
+    onlyWhen,
+  } = resolved.columns;
 
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
@@ -681,7 +811,11 @@ async function mapAndStore(
     );
   }
 
-  const txs: NewTransaction[] = [];
+  // Pairs rather than two arrays, and txs is derived from them below: what the gate
+  // checks and what the file stated beside it are read in one loop and cannot come
+  // apart by an index (reconcile's own doc comment, and ROADMAP 5.3's argument about
+  // newRows).
+  const accepted: { tx: NewTransaction; stated: StatedRow }[] = [];
   // a notice is a fact about the file, not a rejected row: it goes in front of the
   // row problems (the client shows the first three) and touches no count. The two
   // are kept apart so that neither has to be recovered from the other by index -
@@ -693,6 +827,19 @@ async function mapAndStore(
   const statusSkips = new Map<string, number>();
   let skipped = 0;
   let statusSkipped = 0;
+  const coveredButSkipped: { series: string; currency: string }[] = [];
+  // counted where the rows are dropped rather than subtracted from `skipped` after the
+  // loop: a row the status filter took and a row dropped for a zero movement were both
+  // read perfectly, and a refusal naming either as a line it could not read names a
+  // cause that is not the cause (row 6b, R5)
+  let unreadable = 0;
+  // read the same way for a row that is dropped as for one that is kept: the two have
+  // to agree on which running balance a row belongs to, and a dropped row that read
+  // its currency differently would name a run that does not exist
+  const rowCurrency = (row: Cell[]): string =>
+    currencyCol >= 0 && cellText(row[currencyCol]).trim()
+      ? cellText(row[currencyCol]).trim().toUpperCase()
+      : req.currency.toUpperCase();
 
   for (let i = 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i];
@@ -709,6 +856,16 @@ async function mapAndStore(
         skipped++;
         statusSkipped++;
         statusSkips.set(value, (statusSkips.get(value) ?? 0) + 1);
+        // recorded and nothing more: no sentence, no MAX_PROBLEMS slot, and the filter
+        // stays first in the loop. A row the bank has not finished which nevertheless
+        // states a balance means the balance column covers a row this import drops, so
+        // the running balance it names has a hole in it that is not missing money
+        if (balanceCol >= 0 && cellText(row[balanceCol]).trim()) {
+          coveredButSkipped.push({
+            series: seriesCol >= 0 ? fold(cellText(row[seriesCol])) : '',
+            currency: rowCurrency(row),
+          });
+        }
         continue;
       }
     }
@@ -722,6 +879,7 @@ async function mapAndStore(
         : { ok: true, fee: null };
     if (!statedFee.ok) {
       skipped++;
+      unreadable++;
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
         rowProblems.push(feeRefused(sheet, i, statedFee.text));
       }
@@ -750,6 +908,7 @@ async function mapAndStore(
     // so both wait for row 23 and are fixed as one.
     if (date === null || amount === null || amount === 0) {
       skipped++;
+      if (date === null || amount === null) unreadable++;
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
         rowProblems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount: rawAmount }));
       }
@@ -760,23 +919,28 @@ async function mapAndStore(
       .filter(Boolean)
       .join(' ')
       .replace(/\s+/g, ' ');
-    const currency =
-      currencyCol >= 0 && cellText(row[currencyCol]).trim()
-        ? cellText(row[currencyCol]).trim().toUpperCase()
-        : req.currency.toUpperCase();
+    const currency = rowCurrency(row);
 
-    txs.push({
-      accountId,
-      provider: 'upload',
-      amount,
-      currency,
-      date,
-      description,
-      category: categorize(undefined, description, amount),
-      fee: statedFee.fee,
+    accepted.push({
+      tx: {
+        accountId,
+        provider: 'upload',
+        amount,
+        currency,
+        date,
+        description,
+        category: categorize(undefined, description, amount),
+        fee: statedFee.fee,
+      },
+      stated: {
+        series: seriesCol >= 0 ? fold(cellText(row[seriesCol])) : '',
+        label: seriesCol >= 0 ? cellText(row[seriesCol]).trim() : '',
+        postCents: balanceCol >= 0 ? readBalance(row[balanceCol], mapping.decimal) : null,
+      },
     });
   }
 
+  const txs = accepted.map((a) => a.tx);
   const status: StatusSkips | null =
     onlyWhen && statusSkips.size
       ? { column: onlyWhen.column, counts: statusSkips, skipped: statusSkipped }
@@ -791,7 +955,19 @@ async function mapAndStore(
   // statement's rows are already present and are skipped - so a gate re-run there
   // would refuse every legitimate overlapping import, which is the common case
   // ROADMAP 4.3's second layer exists for.
-  const reconciled = reconcile(parsed, txs, skipped);
+  const reconciled = reconcile(
+    parsed,
+    txs,
+    skipped,
+    balanceCol < 0
+      ? { kind: 'none' }
+      : {
+          kind: 'stated',
+          rows: accepted.map((a) => a.stated),
+          coveredButSkipped,
+          unreadable,
+        },
+  );
 
   // The account is deliberately NOT created here. One created now would stand on
   // Overview with a balance of 0 before the user confirmed anything, and would
@@ -844,6 +1020,7 @@ async function mapAndStore(
       to: days[days.length - 1],
       totals: reconciled.totals,
       ...(reconciled.balances ? { balances: reconciled.balances } : {}),
+      ...(reconciled.balancesNotShown ? { balancesNotShown: reconciled.balancesNotShown } : {}),
       ...(superseded[0] ? { supersededImportId: superseded[0] } : {}),
     },
   };
@@ -944,6 +1121,256 @@ const mixedCurrencies = (title: string, currency: string, found: string[]): stri
   `this ${title} statement states its balances in ${bounded(currency, CURRENCY_CODE_MAX)}, but the lines read are in ${currencyList(found)} - this importer cannot check a statement that mixes currencies - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
+ * One accepted row as an edge of the running balance it belongs to: the balance the
+ * file states after it, and the one it must have had before, which the file does not
+ * state and which is `post - movement`.
+ */
+interface Link {
+  preCents: number;
+  postCents: number;
+}
+
+/** One running balance the file states: every accepted row of one series and currency. */
+interface RunningBalance {
+  /** the series as the file spelled it, taken from the row that opened the run */
+  label: string;
+  currency: string;
+  /** an accepted row of this one stated no balance this parser could read */
+  incomplete: boolean;
+  /** in the file's own order, which the verdict never reads and the diagnostic does */
+  links: Link[];
+}
+
+/**
+ * Which running balance a row belongs to: the series the file names AND the row's
+ * currency. Built here for both the accepted rows and the skipped ones that stated a
+ * balance, so the two cannot be keyed differently and quietly stop meeting.
+ */
+const runKey = (series: string, currency: string): string => `${series}\u0000${currency}`;
+
+/** `circuit` is unbroken and endpointless; `broken` is the one that refuses. */
+type Verdict =
+  | { kind: 'path'; openingCents: number; closingCents: number }
+  | { kind: 'circuit' }
+  | { kind: 'broken' };
+
+/**
+ * Whether the links of one running balance form a single unbroken run of it.
+ *
+ * The property is an Eulerian path over the balance VALUES, and stating it that way
+ * is what makes it order-independent rather than order-independent by convention: a
+ * complete series has every link in one connected component, exactly one value with
+ * one more link leaving it than entering (the opening) and exactly one with one more
+ * entering than leaving (the closing). Degrees and components are multiset facts, so
+ * a permutation of the file's rows - a bank exporting newest-first - gives the same
+ * verdict and the same pair.
+ *
+ * Removing an interior row splits the run in two, which shows up as a second
+ * component and as a second value with an excess. That is the whole content of the
+ * check, and it is deliberately NOT `opening + net = closing`: over endpoints derived
+ * from these same rows that is an identity and holds however many rows are missing.
+ *
+ * It is blind at the ENDS, and the blindness is structural: losing the first or last
+ * row of a run does not break it, it moves where it starts or stops. Measured on the
+ * real export, 3 of 70 single-row removals pass that way and every one is a boundary
+ * row - which is why the confirmation screen may claim the run and may not claim the
+ * statement is complete.
+ *
+ * Connectivity is load-bearing rather than decoration: 100->110, 110->130 plus a
+ * detached 500->600, 600->500 has balanced degrees at every value and is two runs.
+ *
+ * A row whose movement rounds to zero cents needs no special case and gets none: its
+ * pre equals its post, so it is a self-loop, which changes no degree and joins no two
+ * values. Dropping it - as the `amount === 0` guard does - leaves the run intact.
+ */
+function runsAsOne(links: readonly Link[]): Verdict {
+  const out = new Map<number, number>();
+  const into = new Map<number, number>();
+  const parent = new Map<number, number>();
+  const find = (v: number): number => {
+    let root = v;
+    for (let p = parent.get(root); p !== undefined && p !== root; p = parent.get(root)) root = p;
+    for (let n = v; n !== root; ) {
+      const next = parent.get(n) ?? n;
+      parent.set(n, root);
+      n = next;
+    }
+    return root;
+  };
+  for (const { preCents, postCents } of links) {
+    out.set(preCents, (out.get(preCents) ?? 0) + 1);
+    into.set(postCents, (into.get(postCents) ?? 0) + 1);
+    if (!parent.has(preCents)) parent.set(preCents, preCents);
+    if (!parent.has(postCents)) parent.set(postCents, postCents);
+    const a = find(preCents);
+    const b = find(postCents);
+    if (a !== b) parent.set(a, b);
+  }
+
+  const excessOut: number[] = [];
+  const excessIn: number[] = [];
+  let wild = false;
+  for (const value of parent.keys()) {
+    const degree = (out.get(value) ?? 0) - (into.get(value) ?? 0);
+    if (degree === 1) excessOut.push(value);
+    else if (degree === -1) excessIn.push(value);
+    else if (degree !== 0) wild = true;
+  }
+  const roots = new Set([...parent.keys()].map(find));
+  if (wild || excessOut.length > 1 || roots.size > 1) return { kind: 'broken' };
+  // balanced everywhere: the run is provably unbroken and the balances alone cannot
+  // say which value it starts at. Nothing here says money is missing
+  if (excessOut.length === 0) return { kind: 'circuit' };
+  return { kind: 'path', openingCents: excessOut[0], closingCents: excessIn[0] };
+}
+
+/**
+ * Where the run breaks, in the file's own order, or undefined.
+ *
+ * The verdict above is order-independent and this is not, deliberately: what a person
+ * holding the statement needs is two lines they can find. Reached only for a run the
+ * verdict already called broken, and one always exists there - a run whose every
+ * adjacent pair links is a single walk, and a walk is an Eulerian path or a circuit,
+ * neither of which is broken. The undefined arm is what stops that argument being
+ * load-bearing at runtime; balanceBreaks below composes a true sentence without it.
+ */
+function firstBreak(links: readonly Link[]): { before: Link; after: Link } | undefined {
+  for (let i = 1; i < links.length; i++) {
+    if (links[i].preCents !== links[i - 1].postCents) {
+      return { before: links[i - 1], after: links[i] };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * How the sheet arm refuses: the file's own running balance does not run through the
+ * rows that were read, so an operation between two of its lines is not in the import
+ * the user is about to confirm (ROADMAP 5.3 - refuse and explain the discrepancy).
+ *
+ * Every number named is a number the file prints - and so is the series, quoted as the
+ * file spelled it and never as the accept test folded it. The two balances are quoted
+ * as adjacent lines rather than as the endpoints of the whole run: on a file that is not
+ * in posting order the located pair is a true fact about two lines and not the missing
+ * operation, so the wording claims only that one does not follow the other. The gap is
+ * a magnitude for the same reason doesNotAddUp's difference is - which side it falls
+ * on is the missing row's, not either named line's, and on a file out of posting order
+ * the sign is a claim the sentence has no right to make.
+ *
+ * `unreadable` counts rows the parser genuinely failed on and never the ones the
+ * status filter took, for row 6b's R5 - and the cause clause is in the head rather
+ * than appended for row 035's R1. The tail differs from the pdf arm's on purpose:
+ * "export it as CSV or Excel" is advice for someone holding a PDF.
+ *
+ * Exported for the budget test, like noRowsParsed and feeRefused and for the same
+ * reason: what this composes at its extreme is a measurement, and one made by hand is
+ * true only on the day it is taken.
+ */
+export const balanceBreaks = (
+  label: string,
+  currency: string,
+  at: { before: Link; after: Link } | undefined,
+  unreadable: number,
+): string => {
+  const where = label ? ` in "${bounded(label, SERIES_QUOTE_MAX)}"` : '';
+  const cause = unreadable
+    ? `, and the ${lineCount(unreadable)} this importer could not read are probably where it went`
+    : ', so an operation is probably missing';
+  const head = at
+    ? `this statement's own running balance breaks:${where} the line stating ${money(at.after.postCents, currency)} does not follow the one stating ${money(at.before.postCents, currency)} - ${money(Math.abs(at.after.preCents - at.before.postCents), currency)} is unaccounted for between them`
+    : `this statement's own running balance breaks: the lines read${where} do not form one unbroken run`;
+  return `${head}${cause} - export the same statement again from your online banking and upload it`;
+};
+
+/**
+ * The sheet arm's verdict for the whole file, per running balance and then over all
+ * of them.
+ *
+ * A break refuses whatever else is true of the OTHER runs: the file's own arithmetic
+ * says money is missing from what was read, and a statement short by a row staged for
+ * confirmation is the failure CLAUDE.md ranks above a crash. One blank cell in a
+ * pocket the user barely uses may not disarm the refusal for the account it sits
+ * beside.
+ *
+ * "Whatever else is true of the others" is doing the work in that sentence, because a
+ * run this importer cannot use is never examined for a break at all - and that is
+ * where R10's protection sits. Both ways it happens take their hole out of ONE run
+ * and leave its links a subset by construction: a balance cell this parser could not
+ * read is a link it never built, and a row the status filter dropped is a step of that
+ * series the gate never sees. What is left of either run breaks, and the break is ours
+ * rather than the file's. A locale whose balances this `decimal` setting misreads, and
+ * a bank that prints a running balance on its pending rows, are the two files that
+ * live there - both import today, both must keep importing, and neither may cost a
+ * refusal on the one path with nowhere further to fall back to.
+ *
+ * Everything past the loop is only whether a pair can honestly be shown.
+ */
+function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances): SheetBalances {
+  if (stated.kind === 'none') return { kind: 'none' };
+  const coveredRuns = new Set(stated.coveredButSkipped.map((c) => runKey(c.series, c.currency)));
+  // a dropped row naming a running balance that no accepted row belongs to has no run
+  // to disarm - and "has a balance" and "is accepted" have still come apart, which is
+  // the fact the discriminator exists to carry
+  let covered = [...coveredRuns].some((key) => !running.has(key));
+
+  const pairs: { openingCents: number; closingCents: number; currency: string }[] = [];
+  let incomplete = false;
+  let circuit = false;
+  for (const [key, run] of running) {
+    if (run.incomplete) {
+      incomplete = true;
+      continue;
+    }
+    if (coveredRuns.has(key)) {
+      covered = true;
+      continue;
+    }
+    const verdict = runsAsOne(run.links);
+    if (verdict.kind === 'broken') {
+      throw new Error(
+        balanceBreaks(run.label, run.currency, firstBreak(run.links), stated.unreadable),
+      );
+    }
+    if (verdict.kind === 'circuit') circuit = true;
+    else pairs.push({ ...verdict, currency: run.currency });
+  }
+  if (incomplete) return { kind: 'unusable', reason: 'rows-without-a-balance' };
+  if (covered) return { kind: 'unusable', reason: 'rows-outside-the-balance' };
+  // one run with no endpoints leaves the sum without them too, and a pair summed over
+  // the rest would be a pair of a part of the statement presented as the whole (R11)
+  if (circuit || pairs.length === 0) {
+    return { kind: 'unusable', reason: 'balance-closes-on-itself' };
+  }
+  const currencies = new Set(pairs.map((p) => p.currency));
+  if (currencies.size !== 1) return { kind: 'unusable', reason: 'more-than-one-currency' };
+  return {
+    kind: 'checked',
+    openingCents: pairs.reduce((sum, p) => sum + p.openingCents, 0),
+    closingCents: pairs.reduce((sum, p) => sum + p.closingCents, 0),
+    currency: pairs[0].currency,
+    series: pairs.length,
+  };
+}
+
+/**
+ * The three states a sheet's balances can be in, and there is no fourth. R9's holder:
+ * "this file states no running balance" and "it stated one and it could not be used"
+ * are different variants, so collapsing the second into the first cannot happen by
+ * omission - it would have to be written out - and the exhaustive switch below makes
+ * a state added here a `tsc` error rather than a review finding.
+ */
+type SheetBalances =
+  | { kind: 'none' }
+  | {
+      kind: 'checked';
+      openingCents: number;
+      closingCents: number;
+      currency: string;
+      series: number;
+    }
+  | { kind: 'unusable'; reason: BalancesNotShown };
+
+/**
  * The net movement of the file per currency, and - for a format that states its own
  * balances - the check that the rows actually run from the opening one to the
  * closing one, and that each half of them comes to what the document printed for it.
@@ -960,6 +1387,12 @@ const mixedCurrencies = (title: string, currency: string, found: string[]): stri
  * systematically dropped fee on a small statement and lets a drifted template import
  * plausible numbers, which ROADMAP 5.2 says is the one outcome worse than refusing.
  *
+ * `stated` is required and not optional, and that is R9 at the call site: an optional
+ * one forgotten at a sheet caller reads as "this format states no balances", which is
+ * exactly the collapse the type below exists to prevent. The pdf path passes
+ * `{ kind: 'none' }`, which is true of it - the sheet mapper stated nothing for a PDF
+ * - and the pdf arm never looks at it.
+ *
  * Exported for the test, like readSheet and noRowsParsed and for the same reason:
  * the mixed-currency arm is unreachable through today's one template, which declares
  * a single currency symbol, so nothing else can watch it throw.
@@ -968,7 +1401,16 @@ export function reconcile(
   parsed: ParsedFile,
   txs: NewTransaction[],
   skipped: number,
-): { totals: CheckedTotals; balances?: CheckedBalances } {
+  stated: StatedBalances,
+): { totals: CheckedTotals; balances?: CheckedBalances; balancesNotShown?: BalancesNotShown } {
+  // The two are aligned by index and by nothing else, and the failure of that is
+  // silent in the direction that matters: a caller that filters `txs` between building
+  // the pairs and calling this builds every link from the wrong row's balance and the
+  // gate then refuses good files or passes broken ones without ever indexing past the
+  // end. A length is the cheapest thing that can be true here, so it is checked.
+  if (stated.kind === 'stated' && stated.rows.length !== txs.length) {
+    throw new Error('stated balances and transactions are not the same length');
+  }
   const cents = new Map<string, number>();
   // the file's own two halves, out of the same loop as the net for the reason above.
   // Currency-blind, which is safe only because the pdf arm below refuses unless there
@@ -980,11 +1422,31 @@ export function reconcile(
   // incoming side adding nothing to it. There is no case for a guard to catch.
   let outCents = 0;
   let inCents = 0;
-  for (const t of txs) {
+  // and the file's own running balances out of it too, for the same reason: the
+  // movement every link is built from is the toCents this loop already computed, so
+  // the number the gate checks and the number the user reads cannot drift
+  const running = new Map<string, RunningBalance>();
+  for (let i = 0; i < txs.length; i++) {
+    const t = txs[i];
     const c = toCents(t.amount);
     cents.set(t.currency, (cents.get(t.currency) ?? 0) + c);
     if (c < 0) outCents += c;
     else inCents += c;
+    if (stated.kind === 'none') continue;
+    // series AND currency: a Revolut pocket per currency carries its own running
+    // balance under one Product, and keying on the product alone would interleave two
+    // of them into one chain and refuse a file that imports today. It cannot split a
+    // bank that keeps one converted balance across currencies by accident, because the
+    // balance column is preset-declared and nothing guesses it (R4)
+    const row = stated.rows[i];
+    const key = runKey(row.series, t.currency);
+    let run = running.get(key);
+    if (!run) {
+      run = { label: row.label, currency: t.currency, incomplete: false, links: [] };
+      running.set(key, run);
+    }
+    if (row.postCents === null) run.incomplete = true;
+    else run.links.push({ preCents: row.postCents - c, postCents: row.postCents });
   }
   // one line for the overwhelming case; a file with a currency column carries more
   // than one, and a single labelled number would be wrong for it
@@ -995,8 +1457,29 @@ export function reconcile(
   );
 
   switch (parsed.kind) {
-    case 'sheet':
-      return { totals };
+    case 'sheet': {
+      const sheet = checkSheet(running, stated);
+      switch (sheet.kind) {
+        case 'none':
+          return { totals };
+        case 'unusable':
+          return { totals, balancesNotShown: sheet.reason };
+        case 'checked':
+          return {
+            totals,
+            balances: check({
+              opening: fromCents(sheet.openingCents),
+              closing: fromCents(sheet.closingCents),
+              currency: sheet.currency,
+              series: sheet.series,
+            }),
+          };
+        default: {
+          const unreachable: never = sheet;
+          throw new Error(`unhandled sheet balances: ${String(unreachable)}`);
+        }
+      }
+    }
     case 'pdf': {
       const { balances, title } = parsed;
       const net = cents.get(balances.currency);
