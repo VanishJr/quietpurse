@@ -12,7 +12,7 @@
  * reads it yet; it is recorded per import so that re-parsing can be targeted
  * later ("re-run everything below CSV parser v2").
  */
-export const CSV_PARSER_VERSION = 2;
+export const CSV_PARSER_VERSION = 3;
 
 // ---------- decoding ----------
 
@@ -149,6 +149,18 @@ export interface CsvPresetMapping {
   readonly amount: NonEmpty<string>;
   readonly description: NonEmpty<NonEmpty<string>>;
   readonly currency?: NonEmpty<string>;
+  /**
+   * The column stating a fee the bank took on top of the amount, which the mapper
+   * subtracts to get the movement the account actually made.
+   *
+   * A preset field with no CsvMapping counterpart, and the asymmetry is deliberate:
+   * a bank that already folds its fee into the amount would have it subtracted a
+   * second time, silently, on every row of every file - and the CSV path has no
+   * reconciliation gate to notice. Whether a column means "on top of" or "included
+   * in" is a fact about a file a human has read, so it is declared here and cannot
+   * be guessed by the generic mapper or supplied by a request.
+   */
+  readonly fee?: NonEmpty<string>;
   readonly dateFormat?: CsvMapping['dateFormat'];
   readonly decimal?: CsvMapping['decimal'];
   readonly delimiter?: string;
@@ -195,6 +207,11 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapp
       amount: ['Amount', 'Сумма'],
       description: [['Description', 'Описание']],
       currency: ['Currency', 'Валюта'],
+      // stated on top of Amount, never inside it: measured over a real July export,
+      // Сумма − Комиссия reproduces both halves the PDF of the same month prints
+      // about itself (−1742.18 out, +1953.40 in) to the cent, where Сумма alone is
+      // short by exactly the fees on the outgoing side
+      fee: ['Fee', 'Комиссия'],
       dateFormat: 'iso',
       decimal: '.',
       delimiter: ',',
@@ -238,7 +255,15 @@ export function matchColumn(
   return undefined;
 }
 
-/** Candidate column names for the generic preset. */
+/**
+ * Candidate column names for the generic preset.
+ *
+ * Deliberately no fee, and it is not an omission to tidy up: the generic mapper runs
+ * against banks nobody here has measured, and a guessed fee column that a bank in
+ * fact already includes in its amount gets subtracted a second time - on every row of
+ * every file from that bank, in silence, with no gate on this path to notice. A fee
+ * is declared by a preset whose file a human has read, and nowhere else.
+ */
 const GENERIC_CANDIDATES: Record<'date' | 'amount' | 'description' | 'currency', string[]> = {
   // 'дата выполнения' sits before 'дата' and the position is load-bearing: candidate
   // order decides a tie, so the general name ahead of the specific one takes the

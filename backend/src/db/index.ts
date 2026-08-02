@@ -33,7 +33,7 @@ import { recurringKey } from '../categorizer';
 import { config } from '../config';
 import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
 import { causeChain, logDb } from '../logger';
-import { fromCents, fromCentsOrUndefined, toCents } from '../money';
+import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
 import {
   Account,
   CategorySummary,
@@ -475,6 +475,7 @@ export async function insertTransactionsOn(
         dedupKey,
         provider: t.provider,
         amountCents,
+        feeCents: toCentsOrNull(t.fee),
         currency: t.currency,
         date: t.date,
         description: t.description,
@@ -514,6 +515,7 @@ interface TxRow {
   account_id: string;
   provider: string;
   amount_cents: number;
+  fee_cents: number | null;
   currency: string;
   date: string;
   description: string;
@@ -536,6 +538,7 @@ function rowToTx(r: TxRow): Transaction {
     accountId: r.account_id,
     provider: r.provider as Transaction['provider'],
     amount: fromCents(r.amount_cents),
+    fee: fromCentsOrUndefined(r.fee_cents),
     currency: r.currency,
     date: r.date,
     description: r.description,
@@ -975,6 +978,7 @@ const stagedToNew = (r: StagedRow): NewTransaction => ({
   accountId: r.accountId,
   provider: r.provider as NewTransaction['provider'],
   amount: fromCents(r.amountCents),
+  fee: r.feeCents === null ? null : fromCents(r.feeCents),
   currency: r.currency,
   date: r.date,
   description: r.description,
@@ -1008,6 +1012,7 @@ export async function stageImport(
     accountId: t.accountId,
     provider: t.provider,
     amountCents: toCents(t.amount),
+    feeCents: toCentsOrNull(t.fee),
     currency: t.currency,
     date: t.date,
     description: t.description,

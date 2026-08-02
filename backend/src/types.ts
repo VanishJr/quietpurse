@@ -89,6 +89,12 @@ export interface Transaction {
   recurring?: boolean;
   /** one-off large purchase — amortized in average spending; set manually */
   oneOff?: boolean;
+  /**
+   * The fee the statement stated for this operation, as it printed it (positive).
+   * Absent on the way out and null on the way in — the source stated none; never a
+   * zero this importer invented. `amount` is already net of it.
+   */
+  fee?: number | null;
 }
 
 /**
@@ -100,8 +106,16 @@ export interface Transaction {
  * one today — an uploaded statement carries no such reference, so every key is
  * computed by insertTransactions — and the field is where a format that does carry
  * one plugs in (ROADMAP 5.2 names CAMT.053 and MT940).
+ *
+ * fee is required here and optional on Transaction, and that asymmetry is the point:
+ * a parser that read a fee and a data layer that dropped it would differ only in the
+ * database, where the confirmation screen has already shown the corrected net. Every
+ * producer must say what the source stated, including that it stated nothing.
  */
-export type NewTransaction = Omit<Transaction, 'id'> & { dedupKey?: string };
+export type NewTransaction = Omit<Transaction, 'id' | 'fee'> & {
+  dedupKey?: string;
+  fee: number | null;
+};
 
 /** Total for a category in the base currency. */
 export interface CategorySummary {

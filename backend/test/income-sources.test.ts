@@ -20,6 +20,7 @@ const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   date: '2026-03-05T12:00:00.000Z',
   description: '',
   category: 'other',
+  fee: null,
   ...over,
 });
 

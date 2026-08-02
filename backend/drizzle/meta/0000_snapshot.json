@@ -1,5 +1,5 @@
 {
-  "id": "9b7364bb-be44-46ce-9da6-62078124a7f4",
+  "id": "9c76f4b0-e39f-40f2-9747-c370ca1ae076",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1270,6 +1270,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "fee_cents": {
+          "name": "fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "currency": {
           "name": "currency",
           "type": "text",
@@ -1346,7 +1352,12 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "staged_transactions_fee_cents_nonneg": {
+          "name": "staged_transactions_fee_cents_nonneg",
+          "value": "\"staged_transactions\".\"fee_cents\" >= 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.transactions": {
@@ -1388,6 +1399,12 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "fee_cents": {
+          "name": "fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "currency": {
           "name": "currency",
@@ -1619,7 +1636,12 @@
       },
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "transactions_fee_cents_nonneg": {
+          "name": "transactions_fee_cents_nonneg",
+          "value": "\"transactions\".\"fee_cents\" >= 0"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.transfer_rules": {

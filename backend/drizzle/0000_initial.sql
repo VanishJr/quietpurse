@@ -157,12 +157,14 @@ CREATE TABLE "staged_transactions" (
 	"account_id" text NOT NULL,
 	"provider" text NOT NULL,
 	"amount_cents" integer NOT NULL,
+	"fee_cents" integer,
 	"currency" text NOT NULL,
 	"date" text NOT NULL,
 	"description" text DEFAULT '' NOT NULL,
 	"mcc" integer,
 	"category" text DEFAULT 'other' NOT NULL,
-	CONSTRAINT "staged_transactions_workspace_id_import_id_row_no_pk" PRIMARY KEY("workspace_id","import_id","row_no")
+	CONSTRAINT "staged_transactions_workspace_id_import_id_row_no_pk" PRIMARY KEY("workspace_id","import_id","row_no"),
+	CONSTRAINT "staged_transactions_fee_cents_nonneg" CHECK ("staged_transactions"."fee_cents" >= 0)
 );
 --> statement-breakpoint
 CREATE TABLE "transactions" (
@@ -172,6 +174,7 @@ CREATE TABLE "transactions" (
 	"dedup_key" text NOT NULL,
 	"provider" text NOT NULL,
 	"amount_cents" integer NOT NULL,
+	"fee_cents" integer,
 	"currency" text NOT NULL,
 	"date" text NOT NULL,
 	"description" text DEFAULT '' NOT NULL,
@@ -187,7 +190,8 @@ CREATE TABLE "transactions" (
 	"recurring" boolean DEFAULT false NOT NULL,
 	"one_off" boolean DEFAULT false NOT NULL,
 	"import_id" text,
-	CONSTRAINT "transactions_workspace_id_id_pk" PRIMARY KEY("workspace_id","id")
+	CONSTRAINT "transactions_workspace_id_id_pk" PRIMARY KEY("workspace_id","id"),
+	CONSTRAINT "transactions_fee_cents_nonneg" CHECK ("transactions"."fee_cents" >= 0)
 );
 --> statement-breakpoint
 CREATE TABLE "transfer_rules" (

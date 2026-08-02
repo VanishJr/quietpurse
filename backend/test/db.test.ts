@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyClassification,
+  createImport,
   getTransaction,
   insertTransactions,
   listRecurringGroups,
   setOneOff,
   setRecurringIgnored,
+  stageImport,
 } from '../src/db';
 import { NewTransaction } from '../src/types';
 import { idOf } from './helpers';
@@ -18,6 +20,7 @@ const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   date: '2026-01-10T12:00:00.000Z',
   description: 'test',
   category: 'other',
+  fee: null,
   ...over,
 });
 
@@ -131,5 +134,61 @@ describe('hiding recurring groups', () => {
       g.description.startsWith('Miete'),
     )!;
     expect(restored.ignored).toBe(false);
+  });
+});
+
+/**
+ * What Postgres itself refused. drizzle re-throws a driver error wrapped in a
+ * "Failed query" one whose message names no constraint, so the name is read off the
+ * cause - both drivers this suite runs on, PGlite and node-postgres, put it there
+ * under the same two fields. A write that is accepted returns a string, which fails
+ * the comparison rather than passing it by absence.
+ */
+type DriverError = { cause?: { code?: string; constraint?: string } };
+
+const violated = async (write: Promise<unknown>): Promise<unknown> => {
+  try {
+    await write;
+    return 'accepted';
+  } catch (e) {
+    const { code, constraint } = (e as DriverError).cause ?? {};
+    return { code, constraint };
+  }
+};
+
+/**
+ * The column is the guard, and it was taken for a producer that does not exist yet:
+ * 37b reads a fee off a PDF and never goes through readFee, so nothing else stands
+ * between it and a negative fee (ROADMAP 37a, D2). The CHECK is declared in
+ * schema.ts and emitted by drizzle-kit - a toolchain that stopped emitting it would
+ * leave the migration without it, the guarantee gone, and every other test green.
+ *
+ * Through the data layer rather than raw SQL, and by the constraint's own name: a
+ * renamed column that quietly dropped the check would still throw something.
+ */
+describe('a negative fee is refused by the column', () => {
+  it('on transactions and on staged_transactions alike', async () => {
+    const badFee = insertTransactions([tx({ fee: -0.01, description: 'bad fee' })]);
+    expect(await violated(badFee)).toEqual({
+      code: '23514',
+      constraint: 'transactions_fee_cents_nonneg',
+    });
+
+    const record = await createImport({
+      fileHash: 'negative-fee',
+      sourceType: 'csv',
+      parserVersion: 1,
+    });
+    expect(
+      await violated(
+        stageImport(record.id, [tx({ fee: -0.01, description: 'bad staged fee' })], 0, {
+          name: 'Negative Fee Bank',
+          currency: 'EUR',
+        }),
+      ),
+    ).toEqual({ code: '23514', constraint: 'staged_transactions_fee_cents_nonneg' });
+
+    // the sign is refused, not the column: a stated zero is a fact a file can carry
+    expect(await insertTransactions([tx({ fee: 0, description: 'zero fee' })])).toBe(1);
   });
 });

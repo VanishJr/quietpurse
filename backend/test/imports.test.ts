@@ -292,6 +292,7 @@ describe('imports: the file layer', () => {
       date: '2026-05-01T10:00:00.000Z',
       description: 'synced, not imported',
       category: 'other',
+      fee: null,
     };
     expect(await insertTransactions([synced])).toBe(1);
     const uploaded = await importFile('Sync Neighbour', csvFile('2026-05-02,-9.00,Uploaded'));
@@ -373,6 +374,7 @@ describe('imports: the file layer', () => {
       date: '2026-07-01T00:00:00.000Z',
       description: 'same group, but the bank named it',
       category: 'other',
+      fee: null,
     };
     expect(await insertTransactions([provided])).toBe(1);
 

@@ -799,6 +799,7 @@ describe('pdf: the reconciliation gate', () => {
       date: '2026-07-02T00:00:00.000Z',
       description: 'x',
       category: 'other',
+      fee: null,
     });
 
     const parsed = (currency: string): ParsedFile => ({
@@ -1340,6 +1341,7 @@ describe('pdf: what a template says about its gross totals', () => {
       date: '2026-07-01T00:00:00.000Z',
       description: 'x',
       category: 'other',
+      fee: null,
     });
     // -51,00 and +50,00 against a document showing one line of -1,00: the ends
     // still meet, and there is nothing printed for either half to be checked
@@ -1597,6 +1599,7 @@ describe('the diagnostic budget', () => {
       date: '2026-07-02T00:00:00.000Z',
       description: 'x',
       category: 'other',
+      fee: null,
     });
     const parsed = (
       currency: string,
