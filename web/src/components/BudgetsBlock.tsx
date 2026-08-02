@@ -15,7 +15,11 @@ import { Sheet } from './Sheet';
 export function BudgetsBlock() {
   const { ink, categoryColor } = useTheme();
 
-  const [budgets, setBudgets] = useState<Budget[]>([]);
+  /**
+   * save() clears the error before its own request resolves, so a boolean beside the
+   * gate below is not a holder.
+   */
+  const [budgets, setBudgets] = useState<Budget[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** category the editor is open for; '' = picking a category for a new budget */
   const [editing, setEditing] = useState<string | null>(null);
@@ -48,26 +52,31 @@ export function BudgetsBlock() {
     }
   };
 
-  const withBudget = new Set(budgets.map((b) => b.category));
-  const addable = CATEGORIES.filter((c) => !withBudget.has(c));
+  const withBudget = new Set(budgets?.map((b) => b.category) ?? []);
+  /**
+   * Nothing is addable over a list never read: every category would look free, and
+   * PUT /api/budgets is an upsert — the limit already set for it would be replaced
+   * without a word.
+   */
+  const addable = budgets === null ? [] : CATEGORIES.filter((c) => !withBudget.has(c));
   const parsed = parseFloat(amount.replace(',', '.'));
 
   return (
     <section style={{ marginTop: 8, marginBottom: 24 }}>
       <div className="header">
         <h2 className="block-title">Monthly budgets</h2>
-        <button className="btn-link" onClick={() => setEditing('')}>
+        <button className="btn-link" disabled={budgets === null} onClick={() => setEditing('')}>
           + Add
         </button>
       </div>
       {error && <p className="error">Error: {error}</p>}
-      {budgets.length === 0 && !error && (
+      {budgets !== null && budgets.length === 0 && (
         <p className="hint">
           A per-category limit and a forecast of "will you go over it at the current pace".
         </p>
       )}
 
-      {budgets.map((b) => {
+      {budgets?.map((b) => {
         const ratio = b.monthly > 0 ? Math.min(1, b.spent / b.monthly) : 0;
         const overForecast = b.forecast > b.monthly;
         return (

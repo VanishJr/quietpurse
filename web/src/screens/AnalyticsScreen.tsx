@@ -56,18 +56,25 @@ export function AnalyticsScreen() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [mode, setMode] = useState<Mode>('expense');
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [months, setMonths] = useState<MonthTotals[]>([]);
+  /**
+   * One object and not a state each: the summary used to land before the months
+   * request, so a failure in the second left a fresh total on the card and twelve
+   * empty bars beside it, describing the same year.
+   */
+  const [data, setData] = useState<{ summary: Summary; months: MonthTotals[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
       const { from, to } = bounds(range, anchor);
-      const s = await api.summary(from, to);
-      setSummary(s);
-      setMonths(range === 'year' ? (await api.months(from, to)).months : []);
+      const summary = await api.summary(from, to);
+      const months = range === 'year' ? (await api.months(from, to)).months : [];
+      setData({ summary, months });
     } catch (e) {
+      // the period label sits directly above the totals, so July's numbers under an
+      // "August 2026" label would be a straight statement of something false
+      setData(null);
       setError((e as Error).message);
     }
   }, [range, anchor]);
@@ -94,9 +101,9 @@ export function AnalyticsScreen() {
     anchor.getFullYear() === now.getFullYear() &&
     anchor.getMonth() === now.getMonth();
 
+  const summary = data?.summary ?? null;
+  // an absent block and a default currency label are absences, not false claims
   const baseCurrency = summary?.baseCurrency ?? 'EUR';
-  const expenseTotal = summary?.totals.expense ?? 0;
-  const incomeTotal = summary?.totals.income ?? 0;
 
   /** Categories of the selected side (expenses/income) — already in the base currency. */
   const byCategory: CategorySummary[] = useMemo(() => {
@@ -108,16 +115,22 @@ export function AnalyticsScreen() {
   const monthlyValues = useMemo(() => {
     if (range !== 'year') return [];
     const values = new Array(12).fill(0);
-    for (const m of months) {
+    for (const m of data?.months ?? []) {
       const idx = parseInt(m.month.slice(5, 7), 10) - 1;
       values[idx] += mode === 'expense' ? m.expense : m.income;
     }
     return values;
-  }, [range, months, mode]);
+  }, [range, data, mode]);
 
   /** Months with money movement — so the average isn't divided by empty months. */
   const activeMonths = monthlyValues.filter((v) => v > 0).length;
-  const total = mode === 'expense' ? expenseTotal : incomeTotal;
+  /**
+   * The `0` is not the fallback this row exists to remove: every site that turns it
+   * into something a person reads is inside a region that renders only once `data`
+   * is there, and the one reader outside is the `total > 0` chart gate below, where
+   * 0 gives the right answer.
+   */
+  const total = summary ? (mode === 'expense' ? summary.totals.expense : summary.totals.income) : 0;
 
   const barMax = niceMax(Math.max(...monthlyValues, 0));
   const barColor = mode === 'expense' ? ink.accent : ink.good;
@@ -178,7 +191,9 @@ export function AnalyticsScreen() {
           onClick={() => setMode('expense')}
         >
           <div className="total-label">Expenses</div>
-          <div className="total-value">{fmtMoney(expenseTotal, baseCurrency)}</div>
+          <div className="total-value">
+            {summary ? fmtMoney(summary.totals.expense, baseCurrency) : '—'}
+          </div>
         </button>
         <button
           className="total-box"
@@ -188,7 +203,7 @@ export function AnalyticsScreen() {
         >
           <div className="total-label">Income</div>
           <div className="total-value" style={{ color: ink.good }}>
-            {fmtMoney(incomeTotal, baseCurrency)}
+            {summary ? fmtMoney(summary.totals.income, baseCurrency) : '—'}
           </div>
         </button>
       </div>
@@ -242,52 +257,55 @@ export function AnalyticsScreen() {
         </div>
       )}
 
-      {byCategory.length === 0 ? (
-        <p className="empty">{emptyText}</p>
-      ) : (
-        <div className="analytics-split">
-          {pieData.length > 0 && (
-            <div className="chart-wrap" style={{ height: 240 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius="62%"
-                    outerRadius="100%"
-                    stroke={ink.page}
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                  >
-                    {pieData.map((d) => (
-                      <Cell key={d.slug} fill={categoryColor(d.slug)} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="donut-center">
-                <div className="donut-value">{fmtMoney(total)}</div>
-                <div className="donut-currency">{baseCurrency}</div>
+      {/* on the state, never on byCategory: the derived array is where a summary that
+          was never read turns back into "you spent nothing this month" */}
+      {data !== null &&
+        (byCategory.length === 0 ? (
+          <p className="empty">{emptyText}</p>
+        ) : (
+          <div className="analytics-split">
+            {pieData.length > 0 && (
+              <div className="chart-wrap" style={{ height: 240 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius="62%"
+                      outerRadius="100%"
+                      stroke={ink.page}
+                      strokeWidth={2}
+                      isAnimationActive={false}
+                    >
+                      {pieData.map((d) => (
+                        <Cell key={d.slug} fill={categoryColor(d.slug)} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="donut-center">
+                  <div className="donut-value">{fmtMoney(total)}</div>
+                  <div className="donut-currency">{baseCurrency}</div>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* legend with values — category identity isn't carried by color alone */}
-          <div className="legend">
-            {byCategory.map((c) => (
-              <div key={c.category} className="legend-row">
-                <span className="dot" style={{ background: categoryColor(c.category) }} />
-                <span className="legend-name">{categoryLabel(c.category)}</span>
-                <span className="legend-pct">
-                  {total > 0 ? Math.round((c.total / total) * 100) : 0}%
-                </span>
-                <span className="legend-value">{fmtMoney(c.total)}</span>
-              </div>
-            ))}
+            {/* legend with values — category identity isn't carried by color alone */}
+            <div className="legend">
+              {byCategory.map((c) => (
+                <div key={c.category} className="legend-row">
+                  <span className="dot" style={{ background: categoryColor(c.category) }} />
+                  <span className="legend-name">{categoryLabel(c.category)}</span>
+                  <span className="legend-pct">
+                    {total > 0 ? Math.round((c.total / total) * 100) : 0}%
+                  </span>
+                  <span className="legend-value">{fmtMoney(c.total)}</span>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        ))}
 
       {/* income by source: your own earnings apart from family help */}
       {mode === 'income' && incomeBySource.length > 0 && (
