@@ -19,18 +19,20 @@
  * bytes and never parsed a second time (ROADMAP 4.3, 4.4).
  */
 import crypto from 'crypto';
-import { uploadAccountId } from '../accountid';
 import { categorize } from '../categorizer';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
+  type ResolvedAccountId,
   countNewKeys,
   createImport,
   failImport,
+  findAccountByName,
   findCommittedImportByHash,
   getAccount,
   listImportAccountIds,
   recordImportDocument,
+  resolveUploadAccountId,
   stageImport,
   supersedeStagedImports,
 } from '../db';
@@ -249,7 +251,13 @@ const check = <T>(value: T): T & { readonly [checked]: true } =>
 export interface ImportSummary {
   /** the import awaiting confirmation - Confirm and Discard address it */
   importId: string;
-  /** where the rows will go: the derived id, the name as typed, and whether it exists */
+  /**
+   * Where the rows will go: the resolved id, the name as typed, and whether an
+   * account with that id is already there. The id is recorded on the import and the
+   * confirm reads it back, so this is where they land and not a guess at it - but
+   * the name is what was typed, and a rename between here and Confirm moves the
+   * account without moving this.
+   */
   accountId: string;
   accountName: string;
   accountExists: boolean;
@@ -303,7 +311,12 @@ export type StatementImportResult =
       outcome: 'duplicate';
       /** the earlier import that already holds the file */
       importId: string;
-      /** accountIds[0], or the requested account when that import owns no rows */
+      /**
+       * accountIds[0], or the account holding the requested name when that import
+       * owns no rows. Empty when neither exists: the earlier import wrote nothing of
+       * its own and no account answers to the name typed here. Never a fresh id -
+       * nothing was imported, so there is no account for one to mean.
+       */
       accountId: string;
       /**
        * Where the earlier import's rows are, which need not be the account this
@@ -401,17 +414,18 @@ export function sniff(bytes: Buffer): ImportSourceType {
 export async function importStatement(
   req: StatementImportRequest,
 ): Promise<StatementImportResult> {
-  const accountId = uploadAccountId(req.accountName);
   const fileHash = crypto.createHash('sha256').update(req.bytes).digest('hex');
 
   const already = await findCommittedImportByHash(fileHash);
   if (already) {
     // the account this upload asked for may not exist at all - the file was
-    // imported under whatever name it was given the first time
+    // imported under whatever name it was given the first time. So the name is
+    // looked up rather than resolved: resolving would mint an id for an account
+    // nothing created, on a request that imported nothing
     const accountIds = await listImportAccountIds(already.id);
     return {
       outcome: 'duplicate',
-      accountId: accountIds[0] ?? accountId,
+      accountId: accountIds[0] ?? (await findAccountByName(req.accountName))?.id ?? '',
       accountIds,
       skipped: already.rowsRejected,
       total: already.rowsAccepted + already.rowsRejected,
@@ -419,6 +433,10 @@ export async function importStatement(
       uploadedAt: already.uploadedAt,
     };
   }
+
+  // below the duplicate short-circuit, and it must stay there: a re-upload of a
+  // committed file resolves nothing and mints nothing
+  const accountId = await resolveUploadAccountId(req.accountName);
 
   // What leaves no `imports` row at all is everything decidable without opening the
   // file: a type the sniffer recognises and refuses, a file past the size cap, a
@@ -837,7 +855,7 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
 async function mapAndStore(
   req: StatementImportRequest,
   parsed: ParsedFile,
-  accountId: string,
+  accountId: ResolvedAccountId,
   importId: string,
   fileHash: string,
 ): Promise<StatementImportResult> {
@@ -1031,6 +1049,7 @@ async function mapAndStore(
   //
   const newRows = await countNewKeys(txs);
   await stageImport(importId, txs, skipped, {
+    id: accountId,
     name: req.accountName,
     currency: req.currency.toUpperCase(),
   });

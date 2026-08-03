@@ -1599,12 +1599,16 @@ describe('pdf: the caps', () => {
 });
 
 /**
- * accountid.ts's whole reason, and the cheapest possible check that the seam did not
- * grow a second account namespace: the prefix is an opaque id and not a claim about
- * the format, so one bank uploaded as a PDF one month and as a CSV the next lands in
- * one account. A `pdf:` prefix would split it, and every row appearing in both files
- * would insert twice - the dedup key is unique per (workspace, account, key), so a
- * second account id defeats it silently.
+ * What replaced accountid.ts, and the cheapest possible check that the seam did not
+ * grow a second account namespace: one resolution point, so a bank uploaded as a PDF
+ * one month and as a CSV the next resolves the same name to the same recorded id and
+ * lands in one account. A parser-specific id would split it, and every row appearing
+ * in both files would insert twice - the dedup key is unique per (workspace, account,
+ * key), so a second account id defeats it silently.
+ *
+ * The two ids are compared to each other, which is what the test was always about:
+ * an id nothing derives has no literal to be checked against, and the deduplication
+ * asserted below is what makes the comparison mean something.
  */
 describe('pdf and csv of the same statement', () => {
   it('land in one account, and the second one deduplicates against the first', async () => {
@@ -1614,7 +1618,6 @@ describe('pdf and csv of the same statement', () => {
       currency: 'EUR',
       bytes: buildPdf(statement('two formats')),
     });
-    expect(fromPdf.accountId).toBe('csv:one-bank-two-formats');
     expect(fromPdf.inserted).toBe(3);
 
     const csv = [

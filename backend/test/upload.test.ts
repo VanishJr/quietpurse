@@ -85,7 +85,6 @@ describe('POST /api/imports', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.outcome).toBe('awaiting_confirmation');
     expect(res.body.summary).toMatchObject({
-      accountId: 'csv:http-bank',
       accountName: 'Http Bank',
       accountExists: false,
       total: 1,
@@ -102,9 +101,11 @@ describe('POST /api/imports', () => {
 
     const confirmed = await confirm(res.body.summary.importId);
     expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    // the confirm lands in the account the summary named, which is what the id
+    // recorded on the import is for - neither end derives it from the name
     expect(confirmed.body).toMatchObject({
-      accountId: 'csv:http-bank',
-      accountIds: ['csv:http-bank'],
+      accountId: res.body.summary.accountId,
+      accountIds: [res.body.summary.accountId],
       inserted: 1,
       skipped: 0,
       total: 1,
@@ -148,11 +149,7 @@ describe('POST /api/imports', () => {
       .attach('file', await xlsxFile('HTTP workbook'), 'statement.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body.summary).toMatchObject({
-      accountId: 'csv:workbook-bank',
-      accepted: 1,
-      total: 1,
-    });
+    expect(res.body.summary).toMatchObject({ accepted: 1, total: 1 });
     expect((await confirm(res.body.summary.importId)).body.inserted).toBe(1);
 
     const [latest] = await imports();
@@ -709,7 +706,7 @@ describe('a body that spans socket reads keeps its workspace', () => {
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const summary = res.body.summary as { importId: string; accountId: string; total: number };
-    expect(summary).toMatchObject({ accountId: 'csv:chunked-bank', total: 1 });
+    expect(summary).toMatchObject({ total: 1 });
     expect((await confirm(summary.importId)).body.inserted).toBe(1);
     // the answer alone is not enough - the row has to be in this workspace
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
@@ -739,7 +736,7 @@ describe('a body that spans socket reads keeps its workspace', () => {
       .attach('file', padded, 'big.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body.summary).toMatchObject({ accountId: 'csv:big-body-bank', total: 1 });
+    expect(res.body.summary).toMatchObject({ total: 1 });
     expect((await confirm(res.body.summary.importId)).body.inserted).toBe(1);
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
     expect(rows.filter((t) => /padded statement/.test(t.description))).toHaveLength(1);

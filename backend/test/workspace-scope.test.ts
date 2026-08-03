@@ -13,20 +13,25 @@ import type { Request, RequestHandler, Response } from 'express';
 import { describe, expect, it } from 'vitest';
 import { withWorkspace } from '../src/app';
 import {
+  type ResolvedAccountId,
   clearImportDocument,
   confirmImport,
+  createAccount,
   currentWorkspaceId,
   dbInstance,
   discardImport,
+  findAccountByName,
   getImportDocumentInfo,
   getSetting,
   listAccounts,
   listIncomeSources,
   recordImportDocument,
+  resolveUploadAccountId,
   runWithWorkspace,
   seedDefaults,
   setWorkspaceFallback,
   stageImport,
+  updateAccount,
 } from '../src/db';
 import { deleteDocument, getDocument, putDocument } from '../src/documents';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
@@ -50,10 +55,25 @@ describe('workspace scoping', () => {
       // the confirmation lifecycle, all three of them writes: staging rows, and two
       // conditional UPDATEs that would otherwise match whatever row holds that id
       await expect(
-        stageImport('scope-import', [], 0, { name: 'Scope', currency: 'EUR' }),
+        stageImport('scope-import', [], 0, {
+          id: 'scope-account' as ResolvedAccountId,
+          name: 'Scope',
+          currency: 'EUR',
+        }),
       ).rejects.toThrow(/no workspace context/);
       await expect(confirmImport('scope-import')).rejects.toThrow(/no workspace context/);
       await expect(discardImport('scope-import')).rejects.toThrow(/no workspace context/);
+      // the account identity queries. This list is hand-written, not a sweep, so a
+      // new query is invisible to it until someone adds it - and an unscoped name
+      // lookup would resolve an upload onto another workspace's account
+      await expect(findAccountByName('Scope')).rejects.toThrow(/no workspace context/);
+      await expect(resolveUploadAccountId('Scope')).rejects.toThrow(/no workspace context/);
+      await expect(createAccount({ name: 'Scope', currency: 'EUR' })).rejects.toThrow(
+        /no workspace context/,
+      );
+      await expect(updateAccount('scope-account', { name: 'Scope' })).rejects.toThrow(
+        /no workspace context/,
+      );
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
       setWorkspaceFallback(TEST_WORKSPACE_ID);

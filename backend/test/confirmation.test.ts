@@ -17,12 +17,14 @@ import path from 'path';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import {
+  type ResolvedAccountId,
   confirmImport,
   createImport,
   dbInstance,
   discardImport,
   exportBackup,
   failImport,
+  findAccountByName,
   getAccount,
   listAccounts,
   listImports,
@@ -99,7 +101,6 @@ describe('an unconfirmed import is not the user’s data', () => {
     );
 
     expect(summary).toMatchObject({
-      accountId: 'csv:invisible-bank',
       accountName: 'Invisible Bank',
       accountExists: false,
       total: 2,
@@ -144,18 +145,20 @@ describe('an unconfirmed import is not the user’s data', () => {
     );
     const result = await confirmImport(summary.importId);
 
+    // the id the summary named is the id the confirm used: it is recorded on the
+    // import at staging and read back here, not derived twice from the name
     expect(result).toEqual({
       confirmed: true,
-      accountId: 'csv:confirm-bank',
-      accountIds: ['csv:confirm-bank'],
+      accountId: summary.accountId,
+      accountIds: [summary.accountId],
       inserted: 2,
       rowsAccepted: 2,
       rowsRejected: 0,
     });
-    expect(await listTransactions({ accountId: 'csv:confirm-bank' })).toHaveLength(2);
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(2);
     // the balance is recomputed inside the confirm transaction: nothing else ever
     // recomputes it, so a window that ended before it would leave 0 for good
-    expect((await getAccount('csv:confirm-bank'))!.balance).toBe(-30);
+    expect((await getAccount(summary.accountId))!.balance).toBe(-30);
     expect(await stagedCount(summary.importId)).toBe(0);
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'committed',
@@ -172,7 +175,7 @@ describe('an unconfirmed import is not the user’s data', () => {
       reason: 'status',
       status: 'committed',
     });
-    expect(await listTransactions({ accountId: 'csv:twice-confirmed-bank' })).toHaveLength(1);
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(1);
   });
 
   it('confirming or discarding an import that does not exist answers nothing', async () => {
@@ -197,7 +200,7 @@ describe('discard', () => {
       transactions: 0,
     });
     expect(await blobExists(first.importId)).toBe(true);
-    expect(await listTransactions({ accountId: 'csv:discard-bank' })).toHaveLength(0);
+    expect(await listTransactions({ accountId: first.accountId })).toHaveLength(0);
 
     // only `committed` ever claimed the hash, so the same bytes go in again
     const second = await upload('Discard Bank', csv);
@@ -218,7 +221,7 @@ describe('discard', () => {
     expect(await discardImport(live.importId)).toEqual({ discarded: false, status: 'committed' });
     // and nothing was done: a destructive-sounding request reported as done with the
     // rows still on every screen is the failure this refusal exists for
-    expect(await listTransactions({ accountId: 'csv:committed-discard-bank' })).toHaveLength(1);
+    expect(await listTransactions({ accountId: live.accountId })).toHaveLength(1);
     expect(await importRow(live.importId)).toMatchObject({ status: 'committed' });
   });
 });
@@ -309,7 +312,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
       second.id,
       [
         {
-          accountId: 'csv:raced-bank',
+          accountId: first.accountId,
           provider: 'upload',
           amount: -25,
           currency: 'EUR',
@@ -320,7 +323,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
         },
       ],
       0,
-      { name: 'Raced Bank', currency: 'EUR' },
+      { id: first.accountId as ResolvedAccountId, name: 'Raced Bank', currency: 'EUR' },
     );
 
     expect(await confirmImport(first.importId)).toMatchObject({ confirmed: true, inserted: 1 });
@@ -332,7 +335,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
     // the loser is left where it was - the server does not discard on the user's
     // behalf here - and its rows never landed twice
     expect(await importRow(second.id)).toMatchObject({ status: 'awaiting_confirmation' });
-    expect(await listTransactions({ accountId: 'csv:raced-bank' })).toHaveLength(1);
+    expect(await listTransactions({ accountId: first.accountId })).toHaveLength(1);
     expect(await discardImport(second.id)).toEqual({ discarded: true });
   });
 });
@@ -357,7 +360,7 @@ describe('a discarded import cannot take another import’s rows', () => {
     expect(await confirmImport(b.importId)).toMatchObject({ confirmed: true, inserted: 3 });
 
     expect(await discardImport(a.importId)).toEqual({ discarded: true });
-    expect(await listTransactions({ accountId: 'csv:q1-bank' })).toHaveLength(3);
+    expect(await listTransactions({ accountId: b.accountId })).toHaveLength(3);
   });
 
   it('and confirming A afterwards honestly reports what was left to insert', async () => {
@@ -371,7 +374,7 @@ describe('a discarded import cannot take another import’s rows', () => {
       inserted: 0,
       rowsAccepted: 2,
     });
-    expect(await listTransactions({ accountId: 'csv:q1-late-bank' })).toHaveLength(3);
+    expect(await listTransactions({ accountId: b.accountId })).toHaveLength(3);
     // and A owns nothing, which is what accountIds says
     expect(await confirmImport(b.importId)).toMatchObject({ confirmed: false });
   });
@@ -394,7 +397,7 @@ describe('the preview count is exactly what the confirm inserts', () => {
     expect(more).toMatchObject({ accepted: 5, newRows: 3, alreadyPresent: 2 });
     const result = await confirmImport(more.importId);
     expect(result).toMatchObject({ confirmed: true, inserted: more.newRows });
-    expect(await listTransactions({ accountId: 'csv:preview-bank' })).toHaveLength(5);
+    expect(await listTransactions({ accountId: more.accountId })).toHaveLength(5);
   });
 
   it('fewer incoming than present', async () => {
@@ -405,7 +408,7 @@ describe('the preview count is exactly what the confirm inserts', () => {
     expect(fewer).toMatchObject({ accepted: 2, newRows: 0, alreadyPresent: 2 });
     const result = await confirmImport(fewer.importId);
     expect(result).toMatchObject({ confirmed: true, inserted: fewer.newRows });
-    expect(await listTransactions({ accountId: 'csv:preview-fewer-bank' })).toHaveLength(5);
+    expect(await listTransactions({ accountId: fewer.accountId })).toHaveLength(5);
   });
 });
 
@@ -434,13 +437,12 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
     });
-    expect(await listTransactions({ accountId: 'csv:partial-bank' })).toHaveLength(0);
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(0);
   });
 
   /**
-   * account_name is nullable because every import from before this step is. Taken as
-   * `?? ''` it slugifies to `csv:account` - a real import landing in an account the
-   * user never named, reported as a success.
+   * account_name is nullable because every import from before this step is. Confirming
+   * one anyway means inventing the account it goes to and reporting that as a success.
    */
   it('an import with no recorded account name is refused', async () => {
     const summary = await upload('Nameless Bank', csvFile('2026-08-05,-12.00,Nameless'));
@@ -450,22 +452,45 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     );
 
     await expect(confirmImport(summary.importId)).rejects.toThrow(
-      /records no account name or currency/,
+      /records no account name, currency or id/,
     );
-    expect(await getAccount('csv:account')).toBeUndefined();
+    // nothing was created under the id the import recorded, nor under the name
+    expect(await getAccount(summary.accountId)).toBeUndefined();
+    expect(await findAccountByName('Nameless Bank')).toBeUndefined();
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
     });
   });
 
   /**
-   * stageImport takes the rows and the account name as independent arguments, there
-   * is no foreign key from transactions.account_id to accounts.id, and the confirm
-   * re-derives the account from imports.account_name. A caller whose rows were built
-   * for another account would otherwise get an account nobody's rows join, rows
-   * against an account with no row, and the balance of the empty one recomputed - all
-   * answered as confirmed. Today's one caller cannot produce it; item 6's PDF path is
-   * the second caller this guard exists for.
+   * The same guard on the column this row added. account_id is nullable because
+   * createImport writes the row before the parse, and a NULL one that reached
+   * `awaiting_confirmation` means the server staged an import without resolving an
+   * account - not something a user can do, so it is a throw and a 5xx.
+   */
+  it('an import with no recorded account id is refused', async () => {
+    const summary = await upload('Idless Bank', csvFile('2026-08-06,-13.00,Idless'));
+    await dbInstance().execute(
+      sql`UPDATE imports SET account_id = NULL
+          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
+    );
+
+    await expect(confirmImport(summary.importId)).rejects.toThrow(
+      /records no account name, currency or id/,
+    );
+    expect(await getAccount(summary.accountId)).toBeUndefined();
+    expect(await findAccountByName('Idless Bank')).toBeUndefined();
+    expect(await importRow(summary.importId)).toMatchObject({
+      status: 'awaiting_confirmation',
+    });
+  });
+
+  /**
+   * stageImport takes the rows and the account as independent arguments and there is
+   * no foreign key from transactions.account_id to accounts.id, so a caller whose rows
+   * were built for another account would otherwise get an account nobody's rows join,
+   * rows against an account with no row, and the balance of the empty one recomputed -
+   * all answered as confirmed. Today's one caller threads one resolved id into both.
    */
   it('staged rows built for another account are refused, not written', async () => {
     const summary = await upload('Guard Bank', csvFile('2026-08-10,-11.00,Elsewhere'));
@@ -474,10 +499,14 @@ describe('the confirm refuses what it cannot honestly complete', () => {
           WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${summary.importId}`,
     );
 
+    // built from the id the import recorded, not from a literal: that id is the
+    // subject of the guard, and a literal here would only assert the message's shape
     await expect(confirmImport(summary.importId)).rejects.toThrow(
-      /recorded against account csv:guard-bank but staged a row for csv:somewhere-else/,
+      new RegExp(
+        `recorded against account ${summary.accountId} but staged a row for csv:somewhere-else`,
+      ),
     );
-    expect(await getAccount('csv:guard-bank')).toBeUndefined();
+    expect(await getAccount(summary.accountId)).toBeUndefined();
     expect(await getAccount('csv:somewhere-else')).toBeUndefined();
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
@@ -616,7 +645,7 @@ describe('backup and restore', () => {
         },
       ],
       0,
-      { name: 'Cascade Bank', currency: 'EUR' },
+      { id: 'csv:cascade-bank' as ResolvedAccountId, name: 'Cascade Bank', currency: 'EUR' },
     );
     expect(await stagedCount(record.id)).toBe(1);
 

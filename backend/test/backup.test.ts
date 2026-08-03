@@ -274,6 +274,67 @@ describe('backup and restore (JSON)', () => {
     });
   });
 
+  /**
+   * imports.account_id is an ordinary column, so it exports and restores with no code
+   * of its own - exportBackup selects whole rows and sanitizeRow keeps every real
+   * column not in NEVER_RESTORED. Asserted rather than assumed, because the failure is
+   * silent: an import that restores without the id it was staged against is one whose
+   * confirm can no longer find its account.
+   */
+  it('the account an import was staged for survives the round-trip', async () => {
+    const imported = await importAndConfirm({
+      accountName: 'Account Id Backup Bank',
+      currency: 'EUR',
+      bytes: Buffer.from('date,amount,description\n2026-06-06,-44.00,Round trip\n', 'utf8'),
+    });
+
+    await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
+
+    const restored = (await listImports()).find((i) => i.id === imported.importId)!;
+    expect(restored.accountId).toBe(imported.accountId);
+    expect(restored.accountName).toBe('Account Id Backup Bank');
+  });
+
+  /**
+   * accounts_name_unique applies to a restore, which inserts a workspace's accounts
+   * wholesale: a backup holding two names differing only in case now fails, whole.
+   * Accepted, and what makes it acceptable rather than catastrophic is that the DELETE
+   * and every INSERT are one transaction - a refused restore leaves the workspace
+   * exactly as it was, which is the half asserted here.
+   */
+  it('a restore refused by the name index leaves the existing rows untouched', async () => {
+    await insertTransactions([tx('restore refusal survivor', -12)]);
+    const before = await listTransactions({ accountId: 'acc1', limit: 100 });
+    expect(before.length).toBeGreaterThan(0);
+    const accountsBefore = (await listAccounts(true)).map((a) => a.id).sort();
+    expect(accountsBefore.length).toBeGreaterThan(0);
+
+    const clashing = {
+      format: 'finto-backup' as const,
+      version: 1 as const,
+      tables: {
+        accounts: [
+          { id: 'dup-a', provider: 'upload', name: 'Doubled', currency: 'EUR', balanceCents: 0 },
+          { id: 'dup-b', provider: 'upload', name: 'DOUBLED', currency: 'EUR', balanceCents: 0 },
+        ],
+      },
+    };
+    // the constraint is read off the cause: drizzle wraps the driver error, and only
+    // the name is evidence that this index is what refused the restore
+    const refused = await restoreBackup(parseBackup(clashing)).then(
+      () => undefined,
+      (e: { cause?: unknown }) => e.cause,
+    );
+    expect(refused).toMatchObject({ code: '23505', constraint: 'accounts_name_unique' });
+
+    expect(await listTransactions({ accountId: 'acc1', limit: 100 })).toHaveLength(before.length);
+    // this is the line that depends on the rollback: accounts IS in the backup, so
+    // its DELETE ran and only the rollback put the workspace's own accounts back. The
+    // transactions line above does not - a table the backup omits is skipped whole
+    expect((await listAccounts(true)).map((a) => a.id).sort()).toEqual(accountsBefore);
+    expect((await listAccounts(true)).map((a) => a.id)).not.toContain('dup-a');
+  });
+
   it('parseBackup rejects files that are not a Finto backup', () => {
     expect(() => parseBackup(null)).toThrow(/not a Finto backup/);
     expect(() => parseBackup({ format: 'something-else' })).toThrow(/not a Finto backup/);

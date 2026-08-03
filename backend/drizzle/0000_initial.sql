@@ -65,6 +65,7 @@ CREATE TABLE "imports" (
 	"original_filename" text,
 	"account_name" text,
 	"account_currency" text,
+	"account_id" text,
 	"uploaded_by" text,
 	"uploaded_at" text NOT NULL,
 	"parser_version" integer NOT NULL,
@@ -243,6 +244,7 @@ ALTER TABLE "staged_transactions" ADD CONSTRAINT "staged_transactions_workspace_
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transactions" ADD CONSTRAINT "transactions_workspace_id_import_id_imports_workspace_id_id_fk" FOREIGN KEY ("workspace_id","import_id") REFERENCES "public"."imports"("workspace_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transfer_rules" ADD CONSTRAINT "transfer_rules_workspace_id_organization_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "accounts_name_unique" ON "accounts" USING btree ("workspace_id",lower("name"));--> statement-breakpoint
 CREATE UNIQUE INDEX "baseline_items_label_unique" ON "baseline_items" USING btree ("workspace_id","label");--> statement-breakpoint
 CREATE UNIQUE INDEX "category_rules_pattern_unique" ON "category_rules" USING btree ("workspace_id","pattern");--> statement-breakpoint
 CREATE UNIQUE INDEX "imports_file_hash_unique" ON "imports" USING btree ("workspace_id","file_hash") WHERE status = 'committed';--> statement-breakpoint
