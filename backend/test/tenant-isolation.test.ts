@@ -17,7 +17,11 @@ import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
+  type ResolvedAccountId,
   addCategoryRule,
+  createAccount,
+  findAccountByName,
+  updateAccount,
   addTransferRule,
   baselineTotal,
   clearImportDocument,
@@ -45,6 +49,7 @@ import {
   listTransactions,
   listTransferRules,
   recordImportDocument,
+  resolveUploadAccountId,
   runWithWorkspace,
   saveFxRate,
   seedDefaults,
@@ -250,6 +255,78 @@ describe('workspace isolation', () => {
     });
   });
 
+  /**
+   * The account identity queries this row added, all four scoped by the same
+   * mechanism. The last leg is the one worth having: accounts_name_unique is
+   * per workspace, so two workspaces naming an account the same is legal - and a
+   * global index would have made one user's account name refuse another's.
+   */
+  it('accounts: a name is neither readable nor writable across workspaces', async () => {
+    let outstandingId: string | undefined;
+    try {
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        expect(await findAccountByName('Theirs')).toBeUndefined();
+        expect((await findAccountByName('Mine'))!.id).toBe('acc-shared-id');
+        // the ids collide on purpose, so a rename that lost its workspace clause
+        // would rename the other workspace's account instead of answering 404
+        expect(await updateAccount('acc-shared-id', { name: 'Mine Renamed' })).toMatchObject({
+          ok: true,
+          account: { name: 'Mine Renamed' },
+        });
+      });
+      await runWithWorkspace(OTHER, async () => {
+        expect((await findAccountByName('Theirs'))!.currency).toBe('USD');
+        expect(await findAccountByName('Mine Renamed')).toBeUndefined();
+        // and the same name in both workspaces is not a collision: the index is
+        // (workspace_id, lower(name))
+        const created = await createAccount({ name: 'Mine Renamed', currency: 'USD' });
+        expect(created).toMatchObject({ ok: true });
+        expect(await runWithWorkspace(TEST_WORKSPACE_ID, () => listAccounts(true))).toHaveLength(1);
+      });
+
+      // Branch (b) of the resolver, which no other case in the suite reaches with two
+      // workspaces: an outstanding import's minted id is offered to a later upload of
+      // the same name - within one workspace only. Without the clause on that query,
+      // the neighbour's unconfirmed preview would decide where these rows land.
+      const outstanding = await runWithWorkspace(TEST_WORKSPACE_ID, () =>
+        createImport({
+          fileHash: 'cross-workspace-resolution',
+          sourceType: 'csv',
+          parserVersion: 1,
+        }),
+      );
+      outstandingId = outstanding.id;
+      const minted = crypto.randomUUID() as ResolvedAccountId;
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        await stageImport(outstanding.id, [], 0, {
+          id: minted,
+          name: 'Unbanked',
+          currency: 'EUR',
+        });
+        expect(await resolveUploadAccountId('Unbanked')).toBe(minted);
+      });
+      await runWithWorkspace(OTHER, async () => {
+        expect(await resolveUploadAccountId('Unbanked')).not.toBe(minted);
+      });
+    } finally {
+      // put all three fixture mutations back, so no test added to this file has to
+      // know this one ran. Each is guarded, because a failure above can leave any of
+      // them undone and a cleanup that throws would hide the failure that caused it.
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        if (outstandingId) await deleteImport(outstandingId);
+        await updateAccount('acc-shared-id', { name: 'Mine' });
+      });
+      await runWithWorkspace(OTHER, async () => {
+        const extra = await findAccountByName('Mine Renamed');
+        if (extra) {
+          await dbInstance().execute(
+            sql`DELETE FROM accounts WHERE workspace_id = ${OTHER} AND id = ${extra.id}`,
+          );
+        }
+      });
+    }
+  });
+
   it('a write in one workspace cannot touch the other workspace row with the same id', async () => {
     try {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
@@ -421,7 +498,7 @@ describe('workspace isolation', () => {
         record.id,
         [tx({ accountId: 'csv:theirs-staged', provider: 'upload', description: 'theirs: staged' })],
         0,
-        { name: 'Theirs Staged', currency: 'EUR' },
+        { id: 'csv:theirs-staged' as ResolvedAccountId, name: 'Theirs Staged', currency: 'EUR' },
       );
       return record.id;
     });
@@ -627,6 +704,17 @@ describe('workspace isolation', () => {
 
     const importPdf = async (workspace: string, bytes: Buffer): Promise<string> =>
       runWithWorkspace(workspace, async () => {
+        // both workspaces are given an account of the same name AND the same id, so
+        // the upload resolves by name onto a colliding id in each. Ids are UUIDs
+        // now, so the collision has to be arranged - and arranging it is the point:
+        // it is the case a query that forgot the workspace would get wrong
+        await upsertAccount({
+          id: 'acc-pdf-isolation',
+          provider: 'upload',
+          name: 'Pdf Isolation',
+          currency: 'EUR',
+          balance: 0,
+        });
         const staged = await importStatement({
           accountName: 'Pdf Isolation',
           currency: 'EUR',

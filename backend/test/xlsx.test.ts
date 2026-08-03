@@ -11,7 +11,13 @@
  */
 import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
-import { ERROR_DETAIL_MAX, getAccount, listAccounts, listImports, listTransactions } from '../src/db';
+import {
+  ERROR_DETAIL_MAX,
+  findAccountByName,
+  listAccounts,
+  listImports,
+  listTransactions,
+} from '../src/db';
 import { logImport } from '../src/logger';
 import { importAndConfirm } from './helpers';
 import { importStatement } from '../src/providers/statement';
@@ -272,7 +278,7 @@ describe('xlsx: finding the statement', () => {
       parserVersion: XLSX_PARSER_VERSION,
       transactions: 0,
     });
-    expect(await getAccount('csv:odd-columns-bank')).toBeUndefined();
+    expect(await findAccountByName('Odd Columns Bank')).toBeUndefined();
 
     // a failed import does not claim the file - only a committed one does
     const retried = await importAndConfirm({
@@ -396,11 +402,13 @@ describe('xlsx: the same statement in two formats', () => {
   });
 
   /**
-   * Why the account id keeps its `csv:` prefix and the rows keep one provider
-   * whatever parser ran: the same bank exported as CSV one month and as XLSX the
-   * next has to land in ONE account. Two accounts would mean two dedup namespaces
-   * - the unique index is (workspace, account, dedup_key) - and every overlapping
-   * row would insert a second time, silently duplicating real history.
+   * Why one name resolves to one id whatever parser ran, and the rows keep one
+   * provider: the same bank exported as CSV one month and as XLSX the next has to
+   * land in ONE account. Two accounts would mean two dedup namespaces - the unique
+   * index is (workspace, account, dedup_key) - and every overlapping row would
+   * insert a second time, silently duplicating real history. The ids are compared
+   * to each other rather than to a literal: what matters is that they agree, and an
+   * id nothing derives has no literal to be written down as.
    */
   it('a statement uploaded as CSV and again as XLSX lands in one account', async () => {
     const rows: [string, number, string][] = [
@@ -442,7 +450,7 @@ describe('the row guard', () => {
     const attempt = () => importStatement({ accountName: 'Huge Bank', currency: 'EUR', bytes });
 
     await expect(attempt()).rejects.toThrow(/50001 data rows/);
-    expect(await getAccount('csv:huge-bank')).toBeUndefined();
+    expect(await findAccountByName('Huge Bank')).toBeUndefined();
     // no committed import claims the hash, so the same bytes are parsed again
     await expect(attempt()).rejects.toThrow(/50001 data rows/);
 
@@ -486,7 +494,7 @@ describe('the row guard', () => {
 
     const r = await importFile('Cover Sheet Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([3, 3, 0]);
-    expect(await getAccount('csv:cover-sheet-bank')).toBeDefined();
+    expect(await findAccountByName('Cover Sheet Bank')).toBeDefined();
     // the counts above are what pins it: the notice is a fact about the file, not a row
     expect(r.problems).toEqual([
       'sheet "Cover" (600000 rows) was too large to read and was skipped - these rows come from "Statement"',
@@ -537,7 +545,7 @@ describe('the row guard', () => {
     const attempt = () => importFile('Oversized Bank', book);
 
     await expect(attempt()).rejects.toThrow(/skipped as too large to read: Huge \(600000 rows\)/);
-    expect(await getAccount('csv:oversized-bank')).toBeUndefined();
+    expect(await findAccountByName('Oversized Bank')).toBeUndefined();
     // no committed import claims the hash, so the same bytes are read again
     await expect(attempt()).rejects.toThrow(/skipped as too large to read/);
 

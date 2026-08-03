@@ -14,6 +14,8 @@ import { CATEGORIES } from './categorizer';
 import { reclassifyAll } from './classify';
 import { config } from './config';
 import {
+  ACCOUNT_NAME_MAX,
+  type ConfirmOutcome,
   ImportNotConfirmable,
   ImportStatus,
   addCategoryRule,
@@ -46,6 +48,7 @@ import {
   upsertIncomeSource,
   listAccounts,
   baselineTotal,
+  createAccount,
   deleteBaselineItem,
   listBaselineItems,
   listBudgets,
@@ -53,7 +56,6 @@ import {
   listRecurringGroups,
   listTransactions,
   listTransferRules,
-  setAccountHidden,
   setBudget,
   setIncomeSourceOverride,
   setOneOff,
@@ -64,6 +66,7 @@ import {
   summaryIncomeBySource,
   summaryMonthlyTotals,
   summaryTotals,
+  updateAccount,
   upsertBaselineItem,
 } from './db';
 import {
@@ -81,7 +84,7 @@ import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
-import { Summary } from './types';
+import { Account, Summary } from './types';
 
 export const app = express();
 
@@ -221,24 +224,106 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, signup: config.signupInviteCode ? 'invite' : 'open' });
 });
 
+/**
+ * An account name, at every door that writes one: create, rename, and the upload's
+ * free-text field. One schema rather than three checks, because a rename that cannot
+ * restore the name an account already has is worse than no bound at all - and zod
+ * runs its checks in the order they are added, so a `.max()` written before `.trim()`
+ * at one door bounds the untrimmed string while the next door bounds the trimmed one.
+ */
+const accountNameSchema = z
+  .string({ error: 'account name must be text' })
+  .trim()
+  .max(ACCOUNT_NAME_MAX, { error: `account name must be at most ${ACCOUNT_NAME_MAX} characters` })
+  .min(1, { error: 'account name must not be empty' });
+
+const currencyCode = z
+  .string({ error: 'currency field required (3-letter ISO code)' })
+  .trim()
+  .regex(/^[A-Za-z]{3}$/, { error: 'currency field required (3-letter ISO code)' });
+
+// strict, for the reason mappingSchema is: a stripped unknown key is a field the
+// user meant to send, silently not applied, answered 200
+const newAccountSchema = z.strictObject({ name: accountNameSchema, currency: currencyCode });
+
+const accountPatchSchema = z.strictObject({
+  name: accountNameSchema.optional(),
+  hidden: z.boolean({ error: 'hidden must be true or false' }).optional(),
+});
+
+/** The first zod issue as a sentence, unknown keys named rather than counted. */
+const badRequest = (error: z.ZodError): string => {
+  const issue = error.issues[0];
+  return issue?.code === 'unrecognized_keys'
+    ? `unknown field: ${issue.keys.map((k) => `"${k}"`).join(', ')}`
+    : (issue?.message ?? 'the request body is not valid');
+};
+
+/**
+ * accounts_name_unique refused the write. The holder's STORED name is quoted rather
+ * than the string that was sent: the two differ in case exactly when the refusal is
+ * most confusing, and the stored one is the one on the user's screen. A hidden holder
+ * is named as hidden - otherwise the user is refused on behalf of a row nothing shows.
+ */
+const nameTaken = (taken: Account | undefined, requested: string): string => {
+  const name = taken?.name ?? requested;
+  return taken?.hidden
+    ? `an account called "${name}" already has that name, and it has been removed from the app - restore it, or pick another name`
+    : `an account called "${name}" already has that name`;
+};
+
 // ?all=1 - including hidden ones (the Accounts screen shows them so they can be restored)
 app.get('/api/accounts', async (req, res) => {
   res.json(await listAccounts(q(req.query.all) === '1'));
 });
 
-/** Remove an account from the app or bring it back. */
+/** An empty account: a name can exist before any statement has been uploaded into it. */
+app.post('/api/accounts', async (req, res) => {
+  const parsed = newAccountSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: badRequest(parsed.error) });
+    return;
+  }
+  const result = await createAccount({
+    name: parsed.data.name,
+    currency: parsed.data.currency.toUpperCase(),
+  });
+  if (!result.ok) {
+    res.status(409).json({ error: nameTaken(result.taken, parsed.data.name) });
+    return;
+  }
+  res.status(201).json(result.account);
+});
+
+/** Rename an account, remove it from the app, or bring it back. */
 app.patch('/api/accounts/:id', async (req, res) => {
-  const hidden = (req.body as { hidden?: unknown }).hidden;
-  if (typeof hidden !== 'boolean') {
-    res.status(400).json({ error: 'hidden field required: true | false' });
+  const parsed = accountPatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: badRequest(parsed.error) });
     return;
   }
-  const account = await setAccountHidden(req.params.id, hidden);
-  if (!account) {
-    res.status(404).json({ error: 'account not found' });
+  const { name, hidden } = parsed.data;
+  // the wire's half of what the patch type holds at the call site: a body that asks
+  // for nothing is refused, never answered 200 for a write that did not happen
+  const patch =
+    name !== undefined ? { name, hidden } : hidden !== undefined ? { hidden } : undefined;
+  if (!patch) {
+    res.status(400).json({ error: 'nothing to change: send name, hidden, or both' });
     return;
   }
-  res.json(account);
+  const result = await updateAccount(req.params.id, patch);
+  if (result.ok) {
+    res.json(result.account);
+    return;
+  }
+  // only a patch that carried a name can meet accounts_name_unique, and narrowing on
+  // it here is what keeps the refusal from having to invent a requested name - the
+  // sentence has no arm that quotes an account called ""
+  if (result.reason === 'name-taken' && name !== undefined) {
+    res.status(409).json({ error: nameTaken(result.taken, name) });
+    return;
+  }
+  res.status(404).json({ error: 'account not found' });
 });
 
 app.get('/api/transactions', async (req, res) => {
@@ -923,16 +1008,25 @@ app.get('/api/imports/presets', (_req, res) => {
  */
 app.post('/api/imports', uploadFile, async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  const accountName = typeof body.accountName === 'string' ? body.accountName.trim() : '';
-  const currency = typeof body.currency === 'string' ? body.currency.trim() : '';
-  if (!accountName) {
+  if (typeof body.accountName !== 'string') {
     res.status(400).json({ error: 'accountName field required' });
     return;
   }
-  if (!/^[A-Za-z]{3}$/.test(currency)) {
-    res.status(400).json({ error: 'currency field required (3-letter ISO code)' });
+  // the same schema the two account routes use: this name reaches accounts.name
+  // through the confirm, and a name only one of the three doors accepts is a name
+  // its own rename endpoint would refuse
+  const named = accountNameSchema.safeParse(body.accountName);
+  if (!named.success) {
+    res.status(400).json({ error: badRequest(named.error) });
     return;
   }
+  const accountName = named.data;
+  const parsedCurrency = currencyCode.safeParse(body.currency);
+  if (!parsedCurrency.success) {
+    res.status(400).json({ error: badRequest(parsedCurrency.error) });
+    return;
+  }
+  const currency = parsedCurrency.data;
   if (!req.file) {
     res.status(400).json({ error: 'file field required (the statement itself)' });
     return;
@@ -986,6 +1080,33 @@ const confirmRefusal = (status: ImportStatus): string => {
 };
 
 /**
+ * Every refusal the confirm can answer, as one switch over the union rather than a
+ * ternary over two of its members: a member added to ConfirmOutcome is then a
+ * compile error here instead of a new refusal rendered with somebody else's
+ * sentence - on the one screen whose job is telling a person whether their rows
+ * landed.
+ */
+const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>): string => {
+  switch (result.reason) {
+    case 'status':
+      return confirmRefusal(result.status);
+    case 'file-committed':
+      return `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`;
+    case 'account-name-taken': {
+      // the holder's stored name, for the reason nameTaken quotes it
+      const holder = result.taken?.name ?? result.accountName;
+      return result.taken?.hidden
+        ? `nothing was imported: another account already uses the name "${holder}", and that account has been removed from the app - restore it or rename it, then upload the file again`
+        : `nothing was imported: another account already uses the name "${holder}", and this import was staged for a different one. Upload the file again and its rows will join that account`;
+    }
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+};
+
+/**
  * Accepts a staged import: the rows become data and the pipeline runs over them.
  * The answer is what actually landed - `inserted` is the database's own count -
  * which can be less than the summary promised if another import wrote some of these
@@ -1015,12 +1136,7 @@ app.post('/api/imports/:id/confirm', async (req, res) => {
     return;
   }
   if (!result.confirmed) {
-    res.status(409).json({
-      error:
-        result.reason === 'status'
-          ? confirmRefusal(result.status)
-          : `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`,
-    });
+    res.status(409).json({ error: confirmConflict(result) });
     return;
   }
   logImport.info(

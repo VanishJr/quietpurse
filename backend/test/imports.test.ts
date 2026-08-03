@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm';
 import {
   dbInstance,
   deleteImport,
+  findAccountByName,
   getAccount,
   getImportDocumentRef,
   insertTransactions,
@@ -71,7 +72,7 @@ describe('imports: the file layer', () => {
     expect(second.duplicate).toBe(true);
     expect(second.importId).toBe(first.importId);
     expect(second.inserted).toBe(0);
-    expect(await getAccount('csv:hash-bank-other-name')).toBeUndefined();
+    expect(await findAccountByName('Hash Bank Other Name')).toBeUndefined();
     expect(await countFor(first.accountId)).toBe(2);
 
     // and the answer names the account the rows are ACTUALLY in, not the one
@@ -108,7 +109,9 @@ describe('imports: the file layer', () => {
     expect(again.duplicate).toBe(true);
     expect(again.importId).toBe(second.importId);
     expect(again.accountIds).toEqual([]);
-    expect(again.accountId).toBe('csv:owns-nothing-bank');
+    // the account exists - the first import created it - so the answer names it
+    // rather than minting a fresh id for a request that imported nothing
+    expect(again.accountId).toBe(first.accountId);
   });
 
   it('a parse that throws leaves a failed import, and the same bytes may be retried', async () => {
@@ -120,7 +123,16 @@ describe('imports: the file layer', () => {
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toMatch(/could not find date\/amount\/description columns/);
     expect(failed[0].transactions).toBe(0);
-    expect(await getAccount('csv:retry-bank')).toBeUndefined();
+    expect(await findAccountByName('Retry Bank')).toBeUndefined();
+    // and the row records no account: createImport writes before the parse, so there
+    // is nothing to record yet. Asserted on the COLUMN, because the mapper is what
+    // would be changed alongside a writer that started filling it in - and an account
+    // id on a row that never parsed is a client-visible field on the history screen
+    const staged = (await dbInstance().execute(
+      sql`SELECT account_id FROM imports
+          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${failed[0].id}`,
+    )) as unknown as { rows: { account_id: string | null }[] };
+    expect(staged.rows[0].account_id).toBeNull();
 
     // a failed import does not claim the file - only a committed one does
     const retried = await importAndConfirm({
@@ -365,8 +377,12 @@ describe('imports: the file layer', () => {
 
   it('renumbering rewrites computed keys only, never a provider reference', async () => {
     const row = '2026-07-01,-3.50,Mixed group';
+    // the import runs first so the provider-referenced row can be built for the
+    // account it actually resolved: the two have to be in one account for the
+    // renumbering to reach them at all
+    const p = await importFile('Mixed Bank', repeated(2, row));
     const provided: NewTransaction = {
-      accountId: 'csv:mixed-bank',
+      accountId: p.accountId,
       provider: 'monobank',
       dedupKey: 'mono:9f3c',
       amount: -3.5,
@@ -378,11 +394,10 @@ describe('imports: the file layer', () => {
     };
     expect(await insertTransactions([provided])).toBe(1);
 
-    const p = await importFile('Mixed Bank', repeated(2, row));
     await importFile('Mixed Bank', repeated(3, row));
     expect((await deleteImport(p.importId))!.removed).toBe(2);
 
-    expect(await dedupKeys('csv:mixed-bank')).toEqual([
+    expect(await dedupKeys(p.accountId)).toEqual([
       'c:2026-07-01|-350|EUR|1',
       'mono:9f3c',
     ]);

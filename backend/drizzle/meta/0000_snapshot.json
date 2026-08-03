@@ -1,5 +1,5 @@
 {
-  "id": "9c76f4b0-e39f-40f2-9747-c370ca1ae076",
+  "id": "26d41379-7878-43a6-87a7-0f07a33d6812",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -59,7 +59,29 @@
           "default": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "accounts_name_unique": {
+          "name": "accounts_name_unique",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"name\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "accounts_workspace_id_organization_id_fk": {
           "name": "accounts_workspace_id_organization_id_fk",
@@ -530,6 +552,12 @@
         },
         "account_currency": {
           "name": "account_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_id": {
+          "name": "account_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
