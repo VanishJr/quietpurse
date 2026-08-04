@@ -13,12 +13,20 @@ Strategy.md
 ROADMAP.md
 DEBT.md
 docs/
-ARCHITECTURE-REVIEW.md
 
-# agent pipeline: prompts, task briefs, memos, reviews
+# agent pipeline. The mechanism is published - how a task is run, the four agent
+# definitions, the six commands - and the material a task produces is not: briefs and
+# memos are 3.3 MB of prose against 2 MB of source, and prompt.md is a working file with
+# a machine path in it. Listed rather than un-ignored wholesale, so that a future
+# .claude/settings.local.json is excluded by default instead of by remembering to.
+.claude/*
+!.claude/agents/
+!.claude/commands/
+.agents/*
+!.agents/README.md
+# CLAUDE.md carries the half that rots - test counts, what a green run covered on which
+# tip. AGENTS.md carries the durable half and is published.
 CLAUDE.md
-.claude/
-.agents/
 
 # personal data: database, backups, bank statements
 backend/data/

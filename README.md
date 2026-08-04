@@ -175,6 +175,15 @@ An update that adds a migration applies it on the next start. Dump the database 
 the data matters to you (`docker compose exec postgres pg_dump -U finto finto > dump.sql`)
 — the app also has a one-click JSON backup on the Overview screen.
 
+## Documentation
+
+| File | What it answers |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | The module map, the path one statement takes from upload to committed rows, and how to add a format |
+| [`SECURITY.md`](SECURITY.md) | The threat model, and the open trade-offs — including the ones to fix before hosting this for anyone |
+| [`AGENTS.md`](AGENTS.md) | What to read before changing anything: the invariants, and what the test suite structurally cannot see |
+| [`.agents/README.md`](.agents/README.md) | How a task is run here, and which checks are worth trusting — ranked by whether a check can be wrong about itself |
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
