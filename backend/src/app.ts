@@ -81,7 +81,7 @@ import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
 import { causeChain, logHttp, logImport, logger } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
-import { importStatement } from './providers/statement';
+import { type StatementDestination, importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
 import { Account, Summary } from './types';
@@ -1008,25 +1008,66 @@ app.get('/api/imports/presets', (_req, res) => {
  */
 app.post('/api/imports', uploadFile, async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  if (typeof body.accountName !== 'string') {
-    res.status(400).json({ error: 'accountName field required' });
+  // The runtime half of StatementDestination's exclusive union. Multipart fields
+  // carry no type, so nothing above this route can hold it, and this route is where
+  // curl and a mobile client meet it. Presence is "the field arrived", never "the
+  // field is a string": multer turns a repeated field into an array, so a typeof test
+  // reads an accountId sent twice as absent and answers a request carrying BOTH arms
+  // as the name arm - staging the upload against a freshly minted id for an account
+  // the caller never picked, one Confirm from existing, with no account delete to
+  // undo it. A non-string is refused rather than normalised: taking the first or the
+  // last picks between two values the caller may not agree on, which is the guess the
+  // exclusivity refusal exists to prevent. A blank accountName is present, and still
+  // reaches accountNameSchema for the refusal it has today.
+  const hasId = body.accountId !== undefined;
+  const hasName = body.accountName !== undefined;
+  if (hasId && hasName) {
+    res.status(400).json({
+      error: 'send accountId or accountName, not both - an upload goes to one account',
+    });
     return;
   }
-  // the same schema the two account routes use: this name reaches accounts.name
-  // through the confirm, and a name only one of the three doors accepts is a name
-  // its own rename endpoint would refuse
-  const named = accountNameSchema.safeParse(body.accountName);
-  if (!named.success) {
-    res.status(400).json({ error: badRequest(named.error) });
+  let destination: StatementDestination;
+  if (hasId) {
+    if (typeof body.accountId !== 'string') {
+      res.status(400).json({ error: 'accountId must be sent once, as a single value' });
+      return;
+    }
+    const pickedId = body.accountId.trim();
+    if (!pickedId) {
+      res.status(400).json({ error: 'accountId must not be empty' });
+      return;
+    }
+    // no shape check beyond that, deliberately: an id restored from a backup or
+    // written before row 25 is not a UUID, and the lookup is what decides whether an
+    // id is real
+    if (body.currency !== undefined) {
+      res.status(400).json({
+        error: 'an account keeps its own currency - send currency only with accountName',
+      });
+      return;
+    }
+    destination = { accountId: pickedId };
+  } else if (hasName) {
+    // the same schema the two account routes use: this name reaches accounts.name
+    // through the confirm, and a name only one of the three doors accepts is a name
+    // its own rename endpoint would refuse. Both schemas refuse a non-string
+    // themselves, so this arm needs no repeat check of its own.
+    const named = accountNameSchema.safeParse(body.accountName);
+    if (!named.success) {
+      res.status(400).json({ error: badRequest(named.error) });
+      return;
+    }
+    const parsedCurrency = currencyCode.safeParse(body.currency);
+    if (!parsedCurrency.success) {
+      res.status(400).json({ error: badRequest(parsedCurrency.error) });
+      return;
+    }
+    destination = { accountName: named.data, currency: parsedCurrency.data };
+  } else {
+    res.status(400).json({ error: 'accountId or accountName field required' });
     return;
   }
-  const accountName = named.data;
-  const parsedCurrency = currencyCode.safeParse(body.currency);
-  if (!parsedCurrency.success) {
-    res.status(400).json({ error: badRequest(parsedCurrency.error) });
-    return;
-  }
-  const currency = parsedCurrency.data;
   if (!req.file) {
     res.status(400).json({ error: 'file field required (the statement itself)' });
     return;
@@ -1043,8 +1084,7 @@ app.post('/api/imports', uploadFile, async (req, res) => {
   }
   try {
     const result = await importStatement({
-      accountName,
-      currency,
+      ...destination,
       preset: typeof body.preset === 'string' ? body.preset : undefined,
       mapping,
       bytes: req.file.buffer,
@@ -1099,6 +1139,8 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
         ? `nothing was imported: another account already uses the name "${holder}", and that account has been removed from the app - restore it or rename it, then upload the file again`
         : `nothing was imported: another account already uses the name "${holder}", and this import was staged for a different one. Upload the file again and its rows will join that account`;
     }
+    case 'account-hidden':
+      return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
     default: {
       const unreachable: never = result;
       return unreachable;

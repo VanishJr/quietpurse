@@ -89,6 +89,40 @@ describe('request() error messages', () => {
   });
 });
 
+/**
+ * The URL, and it is observable nowhere else: harness.tsx's keyOf discards the query
+ * string, so `GET /api/accounts?all=1` and `GET /api/accounts` are one route key and
+ * no dom test can tell a component asking for hidden accounts from one that is not.
+ */
+describe('api.accounts()', () => {
+  /** The URL the call requested. Params declared, so mock.calls is typed. */
+  async function urlOf(call: () => Promise<unknown>): Promise<string> {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response('[]'),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await call();
+    return String(fetchMock.mock.calls[0][0]);
+  }
+
+  /**
+   * The import picker calls this one, and it must never offer an account the server
+   * would refuse an upload into. Filtering hidden accounts in the component instead
+   * would render the same list and move the decision to the layer that does not hold
+   * the contract.
+   */
+  it('asks for visible accounts only by default', async () => {
+    const url = await urlOf(() => api.accounts());
+    expect(url).toContain('/api/accounts');
+    expect(url).not.toContain('all=1');
+  });
+
+  /** And the accounts screen's own call, which is what restoring one goes through. */
+  it('asks for hidden ones too when it is told to', async () => {
+    expect(await urlOf(() => api.accounts(true))).toContain('/api/accounts?all=1');
+  });
+});
+
 describe('401 handling', () => {
   it('throws UnauthorizedError and notifies listeners once', async () => {
     respondWith('', 401, false);

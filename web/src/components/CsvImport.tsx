@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney } from '../format';
 import {
+  Account,
   BalancesNotShown,
   CsvImportResult,
   ImportConfirmed,
@@ -48,6 +49,15 @@ const BALANCES_NOT_SHOWN: Record<BalancesNotShown, string> = {
     'This file states a running balance per currency, so there is no single start and end to show.',
 };
 
+/**
+ * The picker's option for an account that does not exist yet. A bare literal against
+ * account chips keyed `id:<uuid>`, so a collision is impossible by construction
+ * rather than by a fact about how account ids happen to be shaped today.
+ */
+const NEW_ACCOUNT = 'new';
+
+const chipKey = (id: string): string => `id:${id}`;
+
 /** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
@@ -87,6 +97,16 @@ interface Props {
 export function CsvImport({ onBack, onImported }: Props) {
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('generic');
+  /**
+   * The workspace's accounts, and `null` means never loaded — never "you have none",
+   * which is the distinction OverviewScreen holds for the same reason. A failed load
+   * that fell through to "create a new one" would manufacture a second account for a
+   * bank the user already has, and there is no account delete to undo it.
+   */
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  /** which chip is pressed; null until the user picks, because nothing is preselected */
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
   const [accountName, setAccountName] = useState('');
   const [currency, setCurrency] = useState('EUR');
   const [csvText, setCsvText] = useState('');
@@ -111,6 +131,39 @@ export function CsvImport({ onBack, onImported }: Props) {
   }, []);
 
   /**
+   * No argument, so hidden accounts are absent because the server left them out and
+   * not because this filtered them: the server is what refuses a removed account's
+   * id, and a client-side filter over ?all=1 would render the same list while moving
+   * the decision to the layer that does not hold the contract.
+   *
+   * The failure is kept rather than swallowed, unlike the preset load above: presets
+   * have FALLBACK_PRESETS and a person's accounts have no fallback constant.
+   */
+  const loadAccounts = (): Promise<void> =>
+    api.accounts().then(
+      (a) => {
+        setAccounts(a);
+        setAccountsError(null);
+      },
+      (e: Error) => setAccountsError(e.message),
+    );
+
+  useEffect(() => {
+    void loadAccounts();
+  }, []);
+
+  /** The picked account itself, derived — a second copy could come to disagree. */
+  const picked = accounts?.find((a) => chipKey(a.id) === pickedKey) ?? null;
+  /**
+   * With no accounts at all the create arm is the only state there is, so it renders
+   * without a picker above it. `accounts === null` makes both this and `picked`
+   * false, which is what keeps Import disabled after a failed load.
+   */
+  const creating = accounts !== null && (accounts.length === 0 || pickedKey === NEW_ACCOUNT);
+  /** An account was picked, or a name was typed for a new one. Never both, never neither. */
+  const destinationReady = picked !== null || (creating && accountName.trim() !== '');
+
+  /**
    * New input, whichever way it arrived: the pending read no longer describes it,
    * and neither does the last import's outcome. One place, so a pick and a paste
    * cannot come to disagree about which of the three they invalidate.
@@ -124,21 +177,19 @@ export function CsvImport({ onBack, onImported }: Props) {
     return ++pickSeq.current;
   };
 
-  const takeFile = async (picked: File | undefined) => {
-    if (!picked) return;
+  const takeFile = async (chosen: File | undefined) => {
+    if (!chosen) return;
     // before the first await, and fileRows is left cleared if a read throws: the
     // previous file's count standing beside this file's name is an invented number
     const seq = newInput();
-    setFile(picked);
+    setFile(chosen);
     setCsvText('');
-    // a sensible default the user can still edit
-    if (!accountName.trim()) setAccountName(picked.name.replace(/\.(csv|xlsx)$/i, ''));
     // a big file is not worth reading into the tab twice just to count its lines
-    if (picked.size > MAX_PREVIEW_BYTES) return;
+    if (chosen.size > MAX_PREVIEW_BYTES) return;
     try {
-      const head = new Uint8Array(await picked.slice(0, SNIFF_BYTES).arrayBuffer());
+      const head = new Uint8Array(await chosen.slice(0, SNIFF_BYTES).arrayBuffer());
       if (!looksLikeText(head)) return;
-      const rows = (await picked.text()).trim().split(/\r?\n/).length - 1;
+      const rows = (await chosen.text()).trim().split(/\r?\n/).length - 1;
       // a 1 MB .csv followed at once by a workbook, or by a paste: this read
       // finishes last, and without the check it labels whatever came after it
       if (seq === pickSeq.current) setFileRows(rows);
@@ -154,8 +205,13 @@ export function CsvImport({ onBack, onImported }: Props) {
       setConfirmed(null);
       setDiscarded(false);
       const form = new FormData();
-      form.append('accountName', accountName.trim());
-      form.append('currency', currency.trim());
+      // one object of two literals, never two appends behind two conditions: the
+      // request the backend refuses for carrying both arms has to be unbuildable
+      // here, not merely unbuilt
+      const destination = picked
+        ? { accountId: picked.id }
+        : { accountName: accountName.trim(), currency: currency.trim() };
+      for (const [field, value] of Object.entries(destination)) form.append(field, value);
       form.append('preset', preset);
       // the paste fallback goes through the same endpoint: it is a file too
       form.append('file', file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' }));
@@ -175,6 +231,9 @@ export function CsvImport({ onBack, onImported }: Props) {
       setError(null);
       setConfirmed(await api.confirmImport(summary.importId));
       onImported();
+      // the create arm's account exists now: without this a second file in the same
+      // mount cannot be sent to the account this one just made
+      await loadAccounts();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -304,30 +363,77 @@ export function CsvImport({ onBack, onImported }: Props) {
         date, amount and description columns on its own — try it first.
       </p>
 
-      <label className="setting-label" htmlFor="csv-account">
-        Account name and currency
-      </label>
-      <div className="inline-row">
-        <input
-          id="csv-account"
-          className="input"
-          value={accountName}
-          onChange={(e) => setAccountName(e.target.value)}
-          placeholder="Sparkasse Giro"
-        />
-        <input
-          className="input input-code"
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value)}
-          placeholder="EUR"
-          aria-label="Account currency"
-        />
-      </div>
-      <p className="hint">
-        The name groups the statement into an account in the app — reuse the same one next
-        month and the rows join it instead of creating a second account. The currency is
-        used when the file doesn't carry one.
-      </p>
+      {accountsError && (
+        <p className="error">
+          Your accounts couldn't be loaded: {accountsError}.
+          {/* only while there is no list at all: after a failed reload the picker below
+              is still the one that loaded, and telling the user nothing can be imported
+              over a working picker is false */}
+          {accounts === null &&
+            ' Nothing can be imported until the list is there — reload the page and try again.'}
+        </p>
+      )}
+
+      {accounts !== null && accounts.length > 0 && (
+        <>
+          {/* a heading and not a <label>: Chips renders no control to point htmlFor at,
+              and the section above it is headed the same way */}
+          <div className="setting-label">Account</div>
+          <Chips
+            // not "Account": TransactionsScreen's account filter is a group by that
+            // name, and two groups sharing an accessible name is one ambiguity for a
+            // screen reader and another for anything selecting by it
+            label="Account for this import"
+            options={[
+              ...accounts.map((a) => ({ key: chipKey(a.id), label: a.name })),
+              { key: NEW_ACCOUNT, label: '+ New account' },
+            ]}
+            // nothing is preselected: an account chosen by the screen rather than by
+            // the person is how a statement lands in the wrong one behind a 200
+            selected={pickedKey ?? ''}
+            onSelect={setPickedKey}
+          />
+          <p className="hint">
+            Pick the account this statement belongs to — its rows join what's already
+            there, and nothing is duplicated.
+          </p>
+        </>
+      )}
+
+      {/* on any loaded list, empty included: with every account removed the picker is
+          gone, and this is then the only thing on screen saying why the bank the user
+          is looking for is missing */}
+      {accounts !== null && (
+        <p className="hint">Accounts you've removed aren't listed; restore one first.</p>
+      )}
+
+      {creating && (
+        <>
+          <label className="setting-label" htmlFor="csv-account">
+            Account name and currency
+          </label>
+          <div className="inline-row">
+            <input
+              id="csv-account"
+              className="input"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              placeholder="Sparkasse Giro"
+            />
+            <input
+              className="input input-code"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              placeholder="EUR"
+              aria-label="Account currency"
+            />
+          </div>
+          <p className="hint">
+            The account is created when you confirm the import, not now. The currency is
+            used when the file doesn't carry one.
+          </p>
+        </>
+      )}
 
       {/* paste fallback: some banks only show the statement in a browser window */}
       <details>
@@ -353,7 +459,7 @@ export function CsvImport({ onBack, onImported }: Props) {
       <button
         className="btn"
         style={{ display: 'block', width: '100%', marginTop: 12 }}
-        disabled={busy || !accountName.trim() || (!file && !csvText.trim())}
+        disabled={busy || !destinationReady || (!file && !csvText.trim())}
         onClick={runImport}
       >
         {busy && !summary ? 'Reading…' : 'Import'}
@@ -362,7 +468,7 @@ export function CsvImport({ onBack, onImported }: Props) {
       {discarded && (
         <p className="hint" style={{ marginTop: 12 }}>
           Discarded — nothing was imported. The file is untouched, so you can fix the
-          column layout or the account name above and upload it again.
+          column layout or the account above and upload it again.
         </p>
       )}
 

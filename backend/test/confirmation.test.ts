@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type ResolvedAccountId,
   confirmImport,
+  createAccount,
   createImport,
   dbInstance,
   discardImport,
@@ -36,6 +37,7 @@ import {
   summaryMonthlyTotals,
   summaryTotals,
   supersedeStagedImports,
+  updateAccount,
 } from '../src/db';
 import { ImportSummary, importStatement } from '../src/providers/statement';
 import { storageRoot } from '../src/storage';
@@ -53,6 +55,15 @@ async function upload(accountName: string, csv: string): Promise<ImportSummary> 
     currency: 'EUR',
     bytes: Buffer.from(csv, 'utf8'),
   });
+  if (result.outcome !== 'awaiting_confirmation') {
+    throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
+  }
+  return result.summary;
+}
+
+/** The id arm: the account is picked, so the request carries no name and no currency. */
+async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> {
+  const result = await importStatement({ accountId, bytes: Buffer.from(csv, 'utf8') });
   if (result.outcome !== 'awaiting_confirmation') {
     throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
   }
@@ -511,6 +522,59 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
     });
+  });
+});
+
+/**
+ * The second of row 26a's two gates. The upload proved the account was there and not
+ * removed; the user removed it while the summary sat on screen. Landing the rows now
+ * would answer `inserted: 2` for rows VISIBLE_ACCOUNT() keeps out of every list,
+ * every summary and the export - a success nothing displays.
+ *
+ * The fourth part is what makes the first three evidence. A test asserting only the
+ * refusal passes just as well against an implementation that destroyed the import on
+ * its way out, so the same import is confirmed afterwards and the count the summary
+ * promised is the count that lands.
+ *
+ * Only the sequential half of the window is reachable here: PGlite is
+ * single-connection (CLAUDE.md), so nothing can hold this confirm's transaction open
+ * while a PATCH /api/accounts/:id {hidden:true} commits. The FOR UPDATE that closes
+ * that race is uncovered by the default suite and by TEST_DATABASE_URL alike.
+ */
+describe('an account removed between the upload and the confirm', () => {
+  it('refuses, leaves the import confirmable, and lands the rows once it is restored', async () => {
+    const created = await createAccount({ name: 'Vanishing Bank', currency: 'EUR' });
+    const id = created.ok ? created.account.id : '';
+    const summary = await uploadTo(
+      id,
+      csvFile('2026-09-01,-14.00,Before it went', '2026-09-02,-15.00,And after'),
+    );
+    expect(summary.accepted).toBe(2);
+
+    await updateAccount(id, { hidden: true });
+    expect(await confirmImport(summary.importId)).toEqual({
+      confirmed: false,
+      reason: 'account-hidden',
+    });
+
+    // the whole transaction rolled back: the import is where it was, its staged rows
+    // are still there, and the refusal did not un-hide the account on the way out
+    expect(await importRow(summary.importId)).toMatchObject({
+      status: 'awaiting_confirmation',
+    });
+    expect(await stagedCount(summary.importId)).toBe(2);
+    expect((await getAccount(id))!.hidden).toBe(true);
+
+    await updateAccount(id, { hidden: false });
+    expect(await listTransactions({ accountId: id })).toHaveLength(0);
+
+    expect(await confirmImport(summary.importId)).toMatchObject({
+      confirmed: true,
+      accountId: id,
+      inserted: 2,
+    });
+    expect(await listTransactions({ accountId: id })).toHaveLength(2);
+    expect(await stagedCount(summary.importId)).toBe(0);
   });
 });
 

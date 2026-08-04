@@ -275,14 +275,23 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
     })
     .onConflictDoUpdate({
       target: [s.accounts.workspaceId, s.accounts.id],
-      // `hidden` is deliberately not in the set below, and the consequence is sharp
-      // enough to write down: hiding an account is not a delete. Its transactions
-      // stay, so importing into a hidden account answers 200 `inserted: N` for rows
-      // nothing displays - VISIBLE_ACCOUNT() keeps them out of the list, every
-      // summary and the CSV export - while their dedup keys go on blocking a
-      // re-import of the same statement. Clearing `hidden` here is not the fix
-      // (an import must not silently un-hide an account the user hid); a real
-      // account delete, taking the transactions and their imports with it, is.
+      // `hidden` is deliberately not in the set below, and for the reason it always
+      // was: an import must never silently un-hide an account the user removed.
+      // What is no longer a consequence of that is landing rows in one - both gates
+      // ahead of here refuse first (row 26a). The upload resolves its destination
+      // and throws before any `imports` row is written, and the confirm re-reads the
+      // account under FOR UPDATE and rolls back.
+      //
+      // That covers a holder that EXISTS when the confirm's guard reads it, which is
+      // what the lock is over. It does not cover one that does not: an id no accounts
+      // row answers to locks nothing, so a row inserted hidden between that read and
+      // this statement is reached here - the create path, a second import branch (b)
+      // handed the same minted id, and a PATCH {hidden:true}, all inside one window.
+      // Narrow, and nothing in the suite can go red on it (PGlite is
+      // single-connection), so this sentence is the whole of what holds it.
+      //
+      // The dedup keys of the rows already in a hidden account are row 11's - a real
+      // account delete, taking the transactions and their imports.
       //
       // `name` is out of it too, and for a different reason: the account's name is
       // now the user's to change (updateAccount) and the id is what an import is
@@ -387,18 +396,61 @@ declare const resolved: unique symbol;
 
 /**
  * An account id an upload may be staged against. The brand is the point: this type
- * cannot be produced outside resolveUploadAccountId without writing the assertion
- * that says so, and StagedAccount.id requires one - so a second way of turning a
- * name into an id is a compile error rather than a review finding. That is the
- * whole subject of this row; a name was an id once, through a slug function, and
- * two callers deriving it differently put a statement's rows in an account its own
- * summary did not name.
+ * cannot be produced outside this module without writing the assertion that says
+ * so, and StagedAccount.id requires one - so a second way of turning a request into
+ * an id is a compile error rather than a review finding. That is the whole subject
+ * of row 25; a name was an id once, through a slug function, and two callers
+ * deriving it differently put a statement's rows in an account its own summary did
+ * not name.
+ *
+ * There are exactly two producers and they are the same kind of thing:
+ * resolveUploadAccountId, for an upload that names its account, and
+ * resolveUploadAccount, for one that picks it by id. Each reads the id out of this
+ * workspace's own rows or mints it here; neither brands a string that arrived off
+ * the wire unread. Row 26b deletes the first with the name arm, and this goes back
+ * to being one place.
  *
  * Phantom, and it stops at the data layer: nothing that crosses the wire carries it
  * (ImportRecord.accountId, ImportSummary.accountId and Account.id stay plain
  * strings), because the client mirrors plain objects.
  */
 export type ResolvedAccountId = string & { readonly [resolved]: true };
+
+/**
+ * What an upload that picked its account by id may be staged against, or why not.
+ * Two refusals rather than a boolean: they are two different sentences, and only one
+ * of them tells the user their account is still there.
+ */
+export type UploadAccount =
+  | { ok: true; account: StagedAccount }
+  /** no account with that id in this workspace */
+  | { ok: false; reason: 'not-found' }
+  /** it is there and the user removed it from the app */
+  | { ok: false; reason: 'hidden' };
+
+/**
+ * The account an upload picked, proved to be here and not removed. It answers the
+ * whole StagedAccount rather than the id, so the name and the currency an id-arm
+ * import records are the account's OWN (ROADMAP 26(b), 26(d)) by the return type
+ * instead of by the caller remembering to read the row a second time.
+ *
+ * The id handed back is the one this read out of the row, never the string that was
+ * passed in: that is what makes branding it here the same guarantee
+ * resolveUploadAccountId gives.
+ */
+export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
+  const rows = await getDb()
+    .select()
+    .from(s.accounts)
+    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+  const row = rows[0];
+  if (!row) return { ok: false, reason: 'not-found' };
+  if (row.hidden) return { ok: false, reason: 'hidden' };
+  return {
+    ok: true,
+    account: { id: row.id as ResolvedAccountId, name: row.name, currency: row.currency },
+  };
+}
 
 /**
  * Where an upload's rows are going, decided once. The upload and the confirm are two
@@ -1334,6 +1386,9 @@ async function importStateOf(
 /** Rolls the confirm back when its conditional update matched nothing. */
 class NotAwaitingConfirmation extends Error {}
 
+/** Rolls the confirm back when the account its rows go to has been removed. */
+class AccountRemoved extends Error {}
+
 /**
  * A guard inside the confirm refused it: the staged set is not what the import says
  * it is, the account it was staged for is not recorded, or the rows and that record
@@ -1394,7 +1449,15 @@ export type ConfirmOutcome =
       reason: 'account-name-taken';
       accountName: string;
       taken: Account | undefined;
-    };
+    }
+  /**
+   * The account these rows go to was removed from the app between the upload and
+   * the confirm. Nothing was imported: a hidden account's transactions are kept out
+   * of every list, summary and export, so landing them would report a success that
+   * nothing displays. No payload - the caller picked this account seconds ago and
+   * the screen names it, so quoting a stored name buys a bound and says nothing.
+   */
+  | { confirmed: false; reason: 'account-hidden' };
 
 /**
  * Makes a staged import real: its rows go into `transactions` through the same
@@ -1486,6 +1549,26 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
           `import ${id} is recorded against account ${accountId} but staged a row for ${stray.accountId}`,
         );
       }
+      // The second gate on row 26a's defect. The account was there and visible when
+      // the file was uploaded; the user removed it while the summary sat on screen.
+      // A missing row is NOT an error - the name arm's common case is an account
+      // this upsert is about to create.
+      //
+      // FOR UPDATE, and it is load-bearing rather than decoration: under READ
+      // COMMITTED a plain read here can be overtaken by a
+      // PATCH /api/accounts/:id {hidden:true} committing between it and the insert,
+      // and the rows land invisible behind a 200. With the lock that PATCH either
+      // waits for this transaction to commit - hiding an account that legitimately
+      // has rows, which is reversible and correct - or wins first, and this read
+      // then sees hidden = true. Deleting `.for('update')` leaves every test in the
+      // suite green: PGlite is single-connection, so nothing here can hold this
+      // transaction open while a second one commits.
+      const [holder] = await tx
+        .select({ hidden: s.accounts.hidden })
+        .from(s.accounts)
+        .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
+        .for('update');
+      if (holder?.hidden) throw new AccountRemoved();
       await upsertAccountOn(tx, {
         id: accountId,
         provider: 'upload',
@@ -1513,6 +1596,10 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       const state = await importStateOf(id);
       return state && { confirmed: false, reason: 'status', status: state.status };
     }
+    // the rollback has already put the import back to awaiting_confirmation with its
+    // staged rows intact, so restoring the account and pressing Confirm again is the
+    // whole way out - which is what the refusal tells the user to do
+    if (e instanceof AccountRemoved) return { confirmed: false, reason: 'account-hidden' };
     // two uploads of one file overlapping in time both reach awaiting_confirmation
     // (the partial index only blocks `committed`, ROADMAP 4.3), so the second
     // confirm meets the index rather than the status check. Its rows are identical

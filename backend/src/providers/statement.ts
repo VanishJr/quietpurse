@@ -23,7 +23,7 @@ import { categorize } from '../categorizer';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
-  type ResolvedAccountId,
+  type StagedAccount,
   countNewKeys,
   createImport,
   failImport,
@@ -32,6 +32,7 @@ import {
   getAccount,
   listImportAccountIds,
   recordImportDocument,
+  resolveUploadAccount,
   resolveUploadAccountId,
   stageImport,
   supersedeStagedImports,
@@ -171,11 +172,24 @@ const FEE_QUOTE_MAX = 24;
  */
 const SERIES_QUOTE_MAX = 24;
 
-export interface StatementImportRequest {
-  /** the account name in the app ("Sparkasse Giro"); the account id is derived from it */
-  accountName: string;
-  /** the account's currency (if the file has no currency column) */
-  currency: string;
+/**
+ * Where an upload's rows go: an account the caller picked, or a name to create one
+ * under. Exclusive, and the absent keys are carried as optional `never` rather than
+ * left off - a plain union would not hold it, because the excess-property check runs
+ * against the union as a whole and `{accountName, currency, accountId}` satisfies
+ * it. With these, both-at-once is a compile error at every call site, including one
+ * that builds the object in a variable first.
+ *
+ * The second member is temporary by contract: row 26b moves account creation to
+ * POST /api/accounts and deletes it, along with resolveUploadAccountId and the
+ * 'account-name-taken' confirm outcome. It is here for one row so that `main` keeps
+ * an import screen that imports at every commit.
+ */
+export type StatementDestination =
+  | { accountId: string; accountName?: never; currency?: never }
+  | { accountName: string; currency: string; accountId?: never };
+
+export type StatementImportRequest = StatementDestination & {
   /** a preset name from CSV_PRESETS; generic - auto-detect the columns */
   preset?: string;
   /** a custom mapping (overrides the preset) */
@@ -186,7 +200,25 @@ export interface StatementImportRequest {
   originalFilename?: string;
   /** the signed-in user (recorded on the import, not a foreign key) */
   uploadedBy?: string;
-}
+};
+
+/**
+ * The two destination refusals, exported so a test asserts the sentence rather than
+ * a fragment of it: narrowing one to "no such account" would otherwise keep a test
+ * matching on /no such account/ green while the way out disappeared from the screen.
+ *
+ * Neither quotes the account: the caller supplied an id, so there is no case
+ * confusion for a stored name to resolve, and a stored name is not bounded (a
+ * restored backup can carry one past ACCOUNT_NAME_MAX). They speak the action the
+ * product has - "removed", restore - because naming one it does not have is a dead
+ * end, and there is no account delete. They name no screen: a constant here cannot
+ * know what the tabs are called, and the tab labelled "Account" is the password form,
+ * not the list that restores one.
+ */
+export const ACCOUNT_NOT_FOUND =
+  'no such account in this workspace - pick one of your accounts, or create a new one';
+export const ACCOUNT_REMOVED =
+  'this account has been removed from the app - restore it, then upload the file again';
 
 declare const checked: unique symbol;
 
@@ -252,11 +284,14 @@ export interface ImportSummary {
   /** the import awaiting confirmation - Confirm and Discard address it */
   importId: string;
   /**
-   * Where the rows will go: the resolved id, the name as typed, and whether an
+   * Where the rows will go: the resolved id, the account's name, and whether an
    * account with that id is already there. The id is recorded on the import and the
-   * confirm reads it back, so this is where they land and not a guess at it - but
-   * the name is what was typed, and a rename between here and Confirm moves the
-   * account without moving this.
+   * confirm reads it back, so this is where they land and not a guess at it.
+   *
+   * The name is the picked account's stored name on the id arm and the string that
+   * was typed on the name arm, where no account exists yet to have one. Either way
+   * it is what the import was uploaded as: a rename between here and Confirm moves
+   * the account without moving this.
    */
   accountId: string;
   accountName: string;
@@ -314,7 +349,9 @@ export type StatementImportResult =
       /**
        * accountIds[0], or the account holding the requested name when that import
        * owns no rows. Empty when neither exists: the earlier import wrote nothing of
-       * its own and no account answers to the name typed here. Never a fresh id -
+       * its own and no account answers to the name typed here. On the id arm no name
+       * is looked up - the requested id says nothing about where the earlier import
+       * put its rows - so empty means only that it owns none. Never a fresh id -
        * nothing was imported, so there is no account for one to mean.
        */
       accountId: string;
@@ -425,7 +462,15 @@ export async function importStatement(
     const accountIds = await listImportAccountIds(already.id);
     return {
       outcome: 'duplicate',
-      accountId: accountIds[0] ?? (await findAccountByName(req.accountName))?.id ?? '',
+      // and on the id arm there is no name to look up at all. The requested id must
+      // not stand in for it: this field says where the EARLIER import's rows are,
+      // and that import may have put them somewhere else entirely
+      accountId:
+        accountIds[0] ??
+        (req.accountName === undefined
+          ? undefined
+          : (await findAccountByName(req.accountName))?.id) ??
+        '',
       accountIds,
       skipped: already.rowsRejected,
       total: already.rowsAccepted + already.rowsRejected,
@@ -435,8 +480,15 @@ export async function importStatement(
   }
 
   // below the duplicate short-circuit, and it must stay there: a re-upload of a
-  // committed file resolves nothing and mints nothing
-  const accountId = await resolveUploadAccountId(req.accountName);
+  // committed file resolves nothing and mints nothing.
+  //
+  // Above `sniff` is a choice and not a necessity. The destination refusal is true
+  // whatever the file turns out to be, and it is the only one of the three the user
+  // cannot discover by looking at the file - so a .docx dropped into a removed
+  // account is told the account is gone rather than told the format is unreadable.
+  // Both are true; this one is the one worth saying first. Moved below the size cap
+  // it would also leave an `imports` row for an upload that was never going to land.
+  const account = await uploadDestination(req);
 
   // What leaves no `imports` row at all is everything decidable without opening the
   // file: a type the sniffer recognises and refuses, a file past the size cap, a
@@ -485,11 +537,35 @@ export async function importStatement(
     // sentence saying it could not be (Ruling 4). What the layout DID reach the
     // screen with is its balances, as a field of the summary and not a sentence.
     if (parsed.kind === 'pdf') logImport.info(`import ${record.id}: read as ${parsed.template}`);
-    return await mapAndStore(req, parsed, accountId, record.id, fileHash);
+    return await mapAndStore(req, parsed, account, record.id, fileHash);
   } catch (e) {
     await failImport(record.id, (e as Error).message);
     throw e;
   }
+}
+
+/**
+ * The one place an upload decides where its rows go, and the one place either
+ * destination refusal is thrown. Both are plain throws above createImport, so a
+ * refused upload leaves no `imports` row, no stored document and no history entry.
+ *
+ * On the name arm the account is read a second time, after the resolver has already
+ * read it and thrown `hidden` away inside branch (a). That is deliberate: the read
+ * misses by construction on the other two branches - (b) requires that no account
+ * holds the id and (c) has just minted one - and folding it into
+ * resolveUploadAccountId would refactor a function row 26b deletes whole.
+ */
+async function uploadDestination(req: StatementImportRequest): Promise<StagedAccount> {
+  if (req.accountId !== undefined) {
+    const found = await resolveUploadAccount(req.accountId);
+    if (!found.ok) {
+      throw new Error(found.reason === 'hidden' ? ACCOUNT_REMOVED : ACCOUNT_NOT_FOUND);
+    }
+    return found.account;
+  }
+  const id = await resolveUploadAccountId(req.accountName);
+  if ((await getAccount(id))?.hidden) throw new Error(ACCOUNT_REMOVED);
+  return { id, name: req.accountName, currency: req.currency.toUpperCase() };
 }
 
 function presetMapping(preset: string | undefined): CsvPresetMapping | null {
@@ -855,7 +931,7 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
 async function mapAndStore(
   req: StatementImportRequest,
   parsed: ParsedFile,
-  accountId: ResolvedAccountId,
+  account: StagedAccount,
   importId: string,
   fileHash: string,
 ): Promise<StatementImportResult> {
@@ -912,7 +988,7 @@ async function mapAndStore(
   const rowCurrency = (row: Cell[]): string =>
     currencyCol >= 0 && cellText(row[currencyCol]).trim()
       ? cellText(row[currencyCol]).trim().toUpperCase()
-      : req.currency.toUpperCase();
+      : account.currency.toUpperCase();
 
   for (let i = 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i];
@@ -996,7 +1072,7 @@ async function mapAndStore(
 
     accepted.push({
       tx: {
-        accountId,
+        accountId: account.id,
         provider: 'upload',
         amount,
         currency,
@@ -1042,17 +1118,19 @@ async function mapAndStore(
         },
   );
 
-  // The account is deliberately NOT created here. One created now would stand on
-  // Overview with a balance of 0 before the user confirmed anything, and would
-  // outlive a discard permanently - there is no account delete yet. So the name and
-  // the currency go on the `imports` row and the account appears at confirm.
+  // The account the name arm names is deliberately NOT created here. One created now
+  // would stand on Overview with a balance of 0 before the user confirmed anything,
+  // and would outlive a discard permanently - there is no account delete yet. So the
+  // name and the currency go on the `imports` row and the account appears at confirm.
   //
+  // Staged as uploadDestination handed it back, not re-uppercased: on the id arm
+  // these ARE the account's own columns, so upsertAccountOn's conflict arm rewrites
+  // the values it already holds and the currency overwrite row 25's §20 accepted
+  // stops being reachable from this path. Uppercasing here would make that arm a
+  // real write, turning a restored 'eur' into 'EUR' on an import that asked for
+  // nothing of the kind.
   const newRows = await countNewKeys(txs);
-  await stageImport(importId, txs, skipped, {
-    id: accountId,
-    name: req.accountName,
-    currency: req.currency.toUpperCase(),
-  });
+  await stageImport(importId, txs, skipped, account);
   // Last, and after the staging rather than before it: a failure anywhere above must
   // not have taken the outstanding import the user is still looking at with it. The
   // reverse order is the one that costs something - two staged copies of one file
@@ -1072,9 +1150,9 @@ async function mapAndStore(
     outcome: 'awaiting_confirmation',
     summary: {
       importId,
-      accountId,
-      accountName: req.accountName,
-      accountExists: (await getAccount(accountId)) !== undefined,
+      accountId: account.id,
+      accountName: account.name,
+      accountExists: (await getAccount(account.id)) !== undefined,
       total,
       accepted: txs.length,
       skipped,

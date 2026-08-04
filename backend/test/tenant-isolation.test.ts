@@ -66,7 +66,7 @@ import {
   upsertIncomeSource,
 } from '../src/db';
 import { getDocument, putDocument } from '../src/documents';
-import { importStatement } from '../src/providers/statement';
+import { ACCOUNT_NOT_FOUND, importStatement } from '../src/providers/statement';
 import { markImportCommitted } from './helpers';
 import { buildPdf } from './pdffixture';
 import { TEST_WORKSPACE_ID } from './pglite';
@@ -518,6 +518,116 @@ describe('workspace isolation', () => {
       expect(confirmed).toMatchObject({ confirmed: true, inserted: 1 });
       await deleteImport(staged);
     });
+  });
+
+  /**
+   * Row 26a's confirm-side guard reads the accounts row by id, and two workspaces
+   * may hold that id legally. Drop its workspace clause and the neighbour's hidden
+   * account decides this confirm: the read finds it and these rows are refused for
+   * an account this workspace never removed.
+   *
+   * Only one row carries the id, so there is nothing for the engine to choose
+   * between: with the clause the read misses and the ordinary create path runs,
+   * without it the read hits the neighbour's. The guard firing for a workspace's
+   * own hidden account is confirmation.test.ts's, and is not repeated here.
+   */
+  it('a neighbour hidden account cannot refuse this workspace confirm', async () => {
+    const shared = crypto.randomUUID();
+    let importId: string | undefined;
+    try {
+      await runWithWorkspace(OTHER, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs Removed',
+          currency: 'USD',
+          balance: 0,
+        });
+        expect(await updateAccount(shared, { hidden: true })).toMatchObject({ ok: true });
+      });
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        const record = await createImport({
+          fileHash: 'neighbour-hidden-account',
+          sourceType: 'csv',
+          parserVersion: 1,
+        });
+        importId = record.id;
+        await stageImport(
+          record.id,
+          [
+            tx({
+              accountId: shared,
+              provider: 'upload',
+              description: 'mine: into an account only the neighbour hid',
+              date: '2026-10-10T00:00:00.000Z',
+            }),
+          ],
+          0,
+          { id: shared as ResolvedAccountId, name: 'Mine Fresh', currency: 'EUR' },
+        );
+        expect(await confirmImport(record.id)).toMatchObject({ confirmed: true, inserted: 1 });
+      });
+    } finally {
+      // both accounts and the import go back, so the counts every case above and
+      // below asserts are the ones the fixture set up. Guarded, because a failure
+      // above must not be hidden by a cleanup that throws.
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        if (importId) await deleteImport(importId);
+      });
+      await dbInstance().execute(
+        sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND id = ${shared}`,
+      );
+    }
+  });
+
+  /**
+   * The same clause on the other gate: resolveUploadAccount reads the accounts row by
+   * the id the upload picked, and widen that filter and the neighbour's account
+   * answers - the rows stage against it and land there on Confirm, in a workspace
+   * that never saw it. Deleting the clause outright is held elsewhere, by
+   * workspace-scope.test.ts, but only because currentWorkspaceId() stops being called
+   * with it; a clause that is present and wrong is what this case sees.
+   *
+   * The neighbour's account is VISIBLE deliberately: against a hidden one both
+   * refusals merely prove the read found or missed something, and the assertion stops
+   * telling a scope failure apart from the removed-account one.
+   */
+  it('an account of the neighbour cannot be uploaded into by id', async () => {
+    const shared = crypto.randomUUID();
+    try {
+      await runWithWorkspace(OTHER, () =>
+        upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs Visible',
+          currency: 'USD',
+          balance: 0,
+        }),
+      );
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        await expect(
+          importStatement({
+            accountId: shared,
+            bytes: Buffer.from(
+              'date,amount,description\n2026-10-11,-11.00,mine: into the neighbour account\n',
+              'utf8',
+            ),
+          }),
+        ).rejects.toThrow(ACCOUNT_NOT_FOUND);
+      });
+    } finally {
+      // the refusal is above createImport, so there is no import to undo - only the
+      // neighbour's account row, which the counts other cases assert would otherwise
+      // include. Guarded, because a failure above must not be hidden by a cleanup
+      // that throws.
+      await dbInstance().execute(
+        sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND id = ${shared}`,
+      );
+    }
   });
 
   /**
