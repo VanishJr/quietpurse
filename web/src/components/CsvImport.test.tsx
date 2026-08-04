@@ -1,8 +1,8 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
-import { mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { BalancesNotShown } from '../types';
+import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
+import { Account, BalancesNotShown } from '../types';
 import { CsvImport } from './CsvImport';
 
 /**
@@ -14,20 +14,52 @@ import { CsvImport } from './CsvImport';
  * the duplicate card fmtDate(uploadedAt), and ROADMAP 6.5 changes one of those.
  */
 
-const BASE: Routes = { 'GET /api/imports/presets': () => ok(PRESETS) };
+/**
+ * The account list is EMPTY here, and that costs something worth writing down: with
+ * no accounts the picker does not render at all and every test mounting through
+ * `BASE` runs the *create* arm. So none of them covers the picker — its whole
+ * coverage is the last describe in this file, which serves a populated list.
+ */
+const BASE: Routes = {
+  'GET /api/imports/presets': () => ok(PRESETS),
+  'GET /api/accounts': () => ok([]),
+};
+
+/**
+ * What GET /api/accounts answers the import screen: visible accounts only, because
+ * the server left the hidden ones out and not because this client filtered them.
+ * ACCOUNTS itself carries a hidden row, so it is not what this endpoint returns.
+ */
+const PICKABLE: Account[] = [
+  { id: 'acc-1', provider: 'upload', name: 'Sparkasse Giro', currency: 'EUR', balance: 1234.5 },
+  { id: 'acc-3', provider: 'upload', name: 'N26', currency: 'EUR', balance: 40 },
+];
+
+const ACCOUNT_ROUTES: Routes = { ...BASE, 'GET /api/accounts': () => ok(PICKABLE) };
 
 const mount = (onImported = vi.fn()) => ({
   onImported,
   ...renderThemed(<CsvImport onBack={vi.fn()} onImported={onImported} />),
 });
 
-/** Pick a file and press Import. The file name is what fills in the account name. */
-async function upload(container: HTMLElement): Promise<void> {
+const chooseFile = (container: HTMLElement, name = 'statement.csv'): void => {
   // hidden and unlabelled, so no RTL query reaches it
   const input = container.querySelector('input[type=file]') as HTMLInputElement;
-  const file = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
+  const file = new File(['date;amount\n2026-06-01;-10'], name, { type: 'text/csv' });
   fireEvent.change(input, { target: { files: [file] } });
-  // parks takeFile's async read inside act before the click
+};
+
+/**
+ * Pick a file, name the account, press Import. The name is typed rather than left to
+ * the file: the prefill that used to fill it in is gone (it is how a database
+ * acquired an account called "account-statement_2026-07-01…_ru_a1b2c3 — копия").
+ */
+async function upload(container: HTMLElement): Promise<void> {
+  chooseFile(container);
+  // awaits the accounts load as well as parking takeFile's read: with `accounts`
+  // still null neither the picker nor the create arm has rendered
+  const name = await screen.findByPlaceholderText('Sparkasse Giro');
+  fireEvent.change(name, { target: { value: 'statement' } });
   await screen.findByText(/click to choose another/);
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 }
@@ -292,5 +324,157 @@ describe('a file that is already in', () => {
 
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The upload picks an account instead of naming one (ROADMAP row 26a). The whole of
+ * the picker's coverage is here, because `BASE` serves an empty list and every test
+ * above therefore runs the create arm.
+ *
+ * What jsdom cannot answer is which account the rows actually reached, so the subject
+ * of every assertion below is the request: the field names on the FormData, and
+ * whether a POST happened at all.
+ */
+describe('the account picker', () => {
+  /** The FormData the upload sent, read off the handler's own init. */
+  const captureUpload = (table: Routes): { sent: FormData | null } => {
+    const captured: { sent: FormData | null } = { sent: null };
+    mockFetch({
+      ...table,
+      'POST /api/imports': (init) => {
+        captured.sent = (init?.body as FormData) ?? null;
+        return ok(summaryResult());
+      },
+    });
+    return captured;
+  };
+
+  it('lists the accounts the endpoint returned, with none of them preselected', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    mount();
+
+    const first = await screen.findByRole('button', { name: 'Sparkasse Giro' });
+    expect(first).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'false');
+    // and the way out of the list, for a bank that has no account yet
+    expect(screen.getByRole('button', { name: '+ New account' })).toBeInTheDocument();
+    // the create arm stays shut until it is asked for: an account chosen by the
+    // screen rather than by the person is how rows land in the wrong one
+    expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
+  });
+
+  /**
+   * The heading is a <div> and not a <label>, because Chips renders no control for
+   * htmlFor to point at. The group's own name has to differ from that heading:
+   * TransactionsScreen's account filter is already a group called "Account", and this
+   * row is what made the name ambiguous. jsdom cannot see the collision itself —
+   * neither screen mounts the other — so what is held here is the distinctness.
+   */
+  it('heads the picker, and does not name its group what the transactions filter is named', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    mount();
+    await screen.findByRole('button', { name: 'Sparkasse Giro' });
+
+    expect(screen.getByText('Account')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Account' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /account/i })).toBeInTheDocument();
+  });
+
+  it('keeps Import disabled until an account is picked', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    const { container } = mount();
+    await screen.findByRole('button', { name: 'N26' });
+    chooseFile(container);
+    await screen.findByText(/click to choose another/);
+
+    expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'N26' }));
+    expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+  });
+
+  it('sends the picked id and neither a name nor a currency', async () => {
+    const captured = captureUpload(ACCOUNT_ROUTES);
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
+    chooseFile(container);
+    await screen.findByText(/click to choose another/);
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/Read 12 of 14 rows/);
+
+    expect(captured.sent!.get('accountId')).toBe('acc-3');
+    // both arms at once is a 400, so a client that sent them would be refused
+    expect(captured.sent!.get('accountName')).toBeNull();
+    expect(captured.sent!.get('currency')).toBeNull();
+  });
+
+  it('sends a name and a currency and no id when a new account is chosen', async () => {
+    const captured = captureUpload(ACCOUNT_ROUTES);
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: '+ New account' }));
+    fireEvent.change(screen.getByPlaceholderText('Sparkasse Giro'), {
+      target: { value: 'Third Bank' },
+    });
+    fireEvent.change(screen.getByLabelText('Account currency'), { target: { value: 'USD' } });
+    chooseFile(container);
+    await screen.findByText(/click to choose another/);
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/Read 12 of 14 rows/);
+
+    expect(captured.sent!.get('accountName')).toBe('Third Bank');
+    expect(captured.sent!.get('currency')).toBe('USD');
+    expect(captured.sent!.get('accountId')).toBeNull();
+  });
+
+  /**
+   * The list is how a user reaches an account that already exists. A screen that
+   * quietly offered only "create a new one" when it failed to load would manufacture
+   * a second account for a bank the user already has, and there is no delete to undo
+   * that — so the failure blocks the import instead of falling through to the create
+   * arm. Held by `accounts === null`, not by a boolean a handler could reset.
+   */
+  it('blocks the import when the accounts could not be loaded, and says so', async () => {
+    mockFetch({ ...BASE, 'GET /api/accounts': () => fail(500) });
+    const { container } = mount();
+    chooseFile(container);
+
+    expect(await screen.findByText(/Your accounts couldn't be loaded/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+    // and no create arm to fall through to
+    expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
+    expect(countOf('POST /api/imports')).toBe(0);
+  });
+
+  /**
+   * With every account removed the endpoint answers `[]`, so the picker is gone and
+   * the create arm is the only state — and this sentence is then the one thing on
+   * screen saying why the bank the user is looking for is missing. It renders on any
+   * loaded list, empty included, which is why it is not inside the picker.
+   */
+  it("says removed accounts aren't listed even when the list is empty", async () => {
+    mockFetch(BASE);
+    mount();
+
+    expect(await screen.findByText(/Accounts you've removed aren't listed/)).toBeInTheDocument();
+    // the empty-list state, not the populated one: there is no picker above it
+    expect(screen.queryByRole('button', { name: '+ New account' })).not.toBeInTheDocument();
+  });
+
+  /**
+   * The prefill is gone (ROADMAP 26(d)): it is how a real database acquired an
+   * account called `account-statement_2026-07-01_2026-07-31_ru_a1b2c3 — копия`.
+   * Naming an account is a deliberate act, and on the id arm no name is typed at all.
+   */
+  it('leaves the account name empty when a file is chosen', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const name = await screen.findByPlaceholderText('Sparkasse Giro');
+    chooseFile(container, 'sparkasse-2026-07.csv');
+    await screen.findByText(/click to choose another/);
+
+    expect(name).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
   });
 });

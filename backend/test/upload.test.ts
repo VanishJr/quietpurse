@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { initAuth } from '../src/auth';
 import { dbInstance, setWorkspaceFallback } from '../src/db';
+import { ACCOUNT_NOT_FOUND, ACCOUNT_REMOVED } from '../src/providers/statement';
 import { buildPdf, buildSignedContainer } from './pdffixture';
 import { TEST_WORKSPACE_ID } from './pglite';
 
@@ -473,6 +474,151 @@ describe('POST /api/imports', () => {
       .attach('file', csvFile('should never be read'), 'statement.csv');
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/sign in required/);
+  });
+});
+
+/**
+ * The wire half of the destination union (ROADMAP row 26a). Multipart fields carry no
+ * type, so the exclusive union `importStatement` takes cannot hold anything here -
+ * these eight cases are what a mobile client and curl meet, and the REST API is the
+ * contract the picker is only one client of.
+ */
+describe('POST /api/imports picks an account by id', () => {
+  /** An empty account over the same door the Accounts screen uses. */
+  const makeAccount = async (name: string): Promise<string> => {
+    const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    return res.body.id as string;
+  };
+
+  /**
+   * Distinct bytes per case, and not for tidiness: the hash short-circuit sits above
+   * the destination resolution and stays there (024's D1), so bytes a committed
+   * import already holds answer `duplicate` with a 200 before any of these refusals
+   * is reached.
+   */
+  const uploadWith = (label: string, fields: Record<string, string>) => {
+    let req = agent.post('/api/imports');
+    for (const [k, v] of Object.entries(fields)) req = req.field(k, v);
+    return req.attach('file', csvFile(label), 'statement.csv');
+  };
+
+  it('imports into the picked account, under its own name', async () => {
+    const id = await makeAccount('Picked Over Http');
+
+    const res = await uploadWith('picked by id', { accountId: id });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary).toMatchObject({
+      accountId: id,
+      accountName: 'Picked Over Http',
+      accountExists: true,
+      accepted: 1,
+    });
+
+    const confirmed = await confirm(res.body.summary.importId);
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(confirmed.body).toMatchObject({ accountId: id, accountIds: [id], inserted: 1 });
+  });
+
+  it('refuses a request that carries both an id and a name', async () => {
+    const id = await makeAccount('Both Arms Bank');
+    const res = await uploadWith('both arms', {
+      accountId: id,
+      accountName: 'Both Arms Bank',
+      currency: 'EUR',
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not both/);
+  });
+
+  it('refuses a request that carries neither', async () => {
+    const res = await uploadWith('neither arm', { currency: 'EUR' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('accountId or accountName field required');
+  });
+
+  /**
+   * An existing account owns its currency (ROADMAP 26(b)). Accepting one here and
+   * then reading the account's instead is a field the caller believes in and nothing
+   * uses - which is how "Savings" stayed EUR through a USD statement and reported it.
+   */
+  it('refuses a currency sent alongside an id', async () => {
+    const id = await makeAccount('Own Currency Bank');
+    const res = await uploadWith('own currency', { accountId: id, currency: 'USD' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/keeps its own currency/);
+  });
+
+  it('refuses an id no account answers to', async () => {
+    const res = await uploadWith('unknown id', { accountId: 'not-an-account' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe(ACCOUNT_NOT_FOUND);
+  });
+
+  /**
+   * The row's own defect at the upload gate, and the half a status code cannot show:
+   * the refusal is above createImport, so it leaves no `imports` row, no stored
+   * document and no history entry for the user to wonder about.
+   */
+  it('refuses a removed account, and leaves no import row behind', async () => {
+    const id = await makeAccount('Removed Over Http');
+    expect((await agent.patch(`/api/accounts/${id}`).send({ hidden: true })).status).toBe(200);
+    const before = (await imports()).length;
+
+    const res = await uploadWith('removed by id', { accountId: id });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe(ACCOUNT_REMOVED);
+    expect(res.body.error).toMatch(/restore it/);
+    expect(await imports()).toHaveLength(before);
+  });
+
+  /**
+   * multer turns a repeated multipart field into an array, so a presence test written
+   * as `typeof x === 'string'` reads a repeat as ABSENT: this request used to answer
+   * 200 as the name arm, staging the rows against a freshly minted id for an account
+   * the caller never picked - one Confirm from existing, with no account delete to
+   * undo it. Unreachable from the picker, which is not the argument: the REST API is
+   * the contract (row 24).
+   */
+  it('refuses a repeated accountId sent alongside a name', async () => {
+    const id = await makeAccount('Repeated With Name');
+    const before = (await imports()).length;
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', id)
+      .field('accountId', id)
+      .field('accountName', 'Some Other Bank')
+      .field('currency', 'EUR')
+      .attach('file', csvFile('repeated id and a name'), 'statement.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.error).toMatch(/not both/);
+    expect(await imports()).toHaveLength(before);
+  });
+
+  /**
+   * Refused, not normalised - picking the first or the last of two values the caller
+   * may not agree on is the guess the exclusivity refusal exists to prevent. The
+   * sentence names the field, because "accountId or accountName field required" is
+   * false of a request that sent one twice.
+   */
+  it('refuses a repeated accountId sent alone, naming the field', async () => {
+    const id = await makeAccount('Repeated Alone');
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', id)
+      .field('accountId', id)
+      .attach('file', csvFile('repeated id alone'), 'statement.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.error).toMatch(/accountId/);
+    expect(res.body.error).not.toMatch(/field required/);
   });
 });
 

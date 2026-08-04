@@ -276,3 +276,43 @@ describe('a confirm whose account name was taken while it waited', () => {
     );
   });
 });
+
+/**
+ * Row 26a's confirm gate on the wire. This is the two-tab case at HTTP scale: the
+ * upload proved the account was there, the account was removed in another tab, and
+ * Confirm is pressed on a summary card that is still on screen. The status is what
+ * matters as much as the sentence - a 409 is the user's to fix, where the 500
+ * ImportNotConfirmable answers would page an operator for a state the user created,
+ * and every clause of its sentence would be false here.
+ */
+describe('a confirm whose account was removed while it waited', () => {
+  it('answers 409 with the way out, and confirms once the account is restored', async () => {
+    const created = await agent
+      .post('/api/accounts')
+      .send({ name: 'Removed Mid Confirm', currency: 'EUR' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+
+    const upload = await agent
+      .post('/api/imports')
+      .field('accountId', created.body.id)
+      .attach('file', csvFile('removed mid confirm'), 'statement.csv');
+    expect(upload.status, JSON.stringify(upload.body)).toBe(200);
+    const staged = upload.body.summary as { importId: string; accountId: string };
+
+    expect((await agent.patch(`/api/accounts/${created.body.id}`).send({ hidden: true })).status)
+      .toBe(200);
+
+    const refused = await confirm(staged.importId);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe(
+      'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again',
+    );
+
+    // the way out the sentence names, walked: restore, press Confirm again
+    expect((await agent.patch(`/api/accounts/${created.body.id}`).send({ hidden: false })).status)
+      .toBe(200);
+    const confirmed = await confirm(staged.importId);
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(confirmed.body).toMatchObject({ accountId: staged.accountId, inserted: 1 });
+  });
+});
