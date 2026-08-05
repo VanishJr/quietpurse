@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney } from '../format';
+import { GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
 import {
   Account,
   BalancesNotShown,
@@ -12,7 +13,7 @@ import {
 import { Chips } from './Chips';
 
 /** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
-const FALLBACK_PRESETS = [{ key: 'generic', title: 'Any statement' }];
+const FALLBACK_PRESETS = [{ key: 'generic', title: GENERIC_PRESET_TITLE }];
 
 /**
  * What the file dialog offers, per format. Total over ImportSourceType for the reason
@@ -487,6 +488,17 @@ export function CsvImport({ onBack, onImported }: Props) {
           <div className="switch-label">
             Read {summary.accepted} of {summary.total} rows — nothing imported yet
           </div>
+          {/*
+            First, and above every number on this card: it says which reader produced
+            them, so it qualifies all of them. Stated unconditionally and never diffed
+            against the chip above — a "you picked X but it read as Y" warning would
+            fire on every PDF uploaded with a chip selected, where the mismatch is by
+            design, and it is knowledge only this client has where the REST response is
+            the contract a mobile client reads.
+          */}
+          <p className="hint" style={{ marginTop: 6 }}>
+            {readAsSentence(summary.readAs)}
+          </p>
           <p className="hint" style={{ marginTop: 6 }}>
             {fmtDay(summary.from)} to {fmtDay(summary.to)}, {summary.totals
               .map((t) => fmtMoney(t.net, t.currency))

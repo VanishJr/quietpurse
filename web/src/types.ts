@@ -138,6 +138,28 @@ export type BalancesNotShown =
   | 'balance-closes-on-itself'
   | 'more-than-one-currency';
 
+/** date, amount and description: the three slots every reader fills, and no others. */
+export interface ReadColumns {
+  date: string;
+  amount: string;
+  description: string[];
+}
+
+/**
+ * Which reader the backend used, and what it filled the columns from. A discriminated
+ * union and not a name plus optionals: a preset has a slug and a title, a PDF layout
+ * has a title and no columns at all, and two states that are not the same must not be
+ * spelled the same way.
+ *
+ * Hand-written against providers/statement.ts, and nothing checks the two are in step —
+ * see readAsSentence, whose fallback exists for the day one of them is edited alone.
+ */
+export type ReadAs =
+  | { kind: 'preset'; preset: string; title: string; columns: ReadColumns }
+  | { kind: 'auto-detected'; columns: ReadColumns }
+  | { kind: 'request-mapping'; columns: ReadColumns }
+  | { kind: 'pdf-template'; title: string };
+
 /**
  * What an uploaded statement was read as, for the user to accept or reject. None of
  * it is in the database yet — the rows are staged on the backend and become data
@@ -168,6 +190,15 @@ export interface ImportSummary {
   to: string;
   /** net movement per currency: a file with a currency column carries more than one */
   totals: { currency: string; net: number }[];
+  /**
+   * Which reader filled the date, amount and description columns, and what it filled
+   * them from — the one thing the counts above cannot say. Required, so a summary that
+   * names no reader is a compile error rather than a card with a paragraph missing.
+   *
+   * Only those three slots. A request can also supply the date format, the decimal
+   * separator and a status filter, and none of them is reported here.
+   */
+  readAs: ReadAs;
   /**
    * The statement's own opening and closing balance, which the backend checked these
    * rows against — printed by the document for a PDF, derived from the running

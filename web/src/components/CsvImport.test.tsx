@@ -168,6 +168,58 @@ describe('the summary panel', () => {
   });
 
   /**
+   * ROADMAP row 56. The card's own claim about which reader produced every number
+   * under it, so its POSITION is asserted and not just its presence: below the date
+   * range it would qualify nothing.
+   *
+   * Two arms, not one: the fixture's default is auto-detected, so every other case in
+   * this file renders that arm and only that arm. The pdf-template arm is the one a
+   * chip cannot decide (Ruling 3), and the preset arm is where the title on the card
+   * is asserted to be the string the chip itself renders.
+   */
+  it('names the reader above the numbers it qualifies, for a preset and for a PDF', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            readAs: {
+              kind: 'preset',
+              preset: 'revolut',
+              title: 'Revolut (Statement CSV)',
+              columns: { date: 'Дата выполнения', amount: 'Сумма', description: ['Описание'] },
+            },
+          }),
+        ),
+    });
+    const { container, unmount } = mount();
+    await upload(container);
+
+    const line = await screen.findByText(/Read with the "Revolut \(Statement CSV\)" preset/);
+    expect(line).toHaveTextContent(/date from "Дата выполнения"/);
+    // the chip's own label and the summary's title are one string, off one backend
+    // list — a second dictionary in this package is what the field exists to avoid
+    expect(screen.getByRole('button', { name: 'Revolut (Statement CSV)' })).toBeInTheDocument();
+    // first paragraph of the card, above the date range and everything below it
+    const card = line.closest('.card') as HTMLElement;
+    expect(card.querySelectorAll('p.hint')[0]).toBe(line);
+    unmount();
+
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(summaryResult({ readAs: { kind: 'pdf-template', title: 'Revolut' } })),
+    });
+    const second = mount();
+    await upload(second.container);
+    expect(await screen.findByText(/Read as a Revolut PDF statement/)).toHaveTextContent(
+      /a PDF has no column header/,
+    );
+    // no column is named for a document that has no header to name one from
+    expect(screen.queryByText(/date from "/)).not.toBeInTheDocument();
+  });
+
+  /**
    * The reconciliation line, and the half that matters more: a file that states no
    * balance of any kind gets no sentence at all — neither a pair nor a reason. The
    * summary fixture carries neither field, and the first case above is where the
