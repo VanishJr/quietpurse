@@ -96,7 +96,24 @@ export const INDEPENDENCE: Independence = {
   hours: null,
 };
 
-export const PRESETS = { presets: [{ key: 'generic', title: 'Any statement' }] };
+/**
+ * `revolut` is here so one case can assert that the title the summary names and the
+ * label the chip renders are the same string, rather than claiming it. Nothing else in
+ * web/ asserts the chip set, so the cost is one extra chip in tests that ignore chips.
+ *
+ * `generic` carries the backend's own long title and not GENERIC_PRESET_TITLE: the chip
+ * a user sees online reads the parenthetical, and a fixture spelling the short form is
+ * the reason no case here could see that the two differ.
+ */
+export const PRESETS = {
+  presets: [
+    {
+      key: 'generic',
+      title: 'Any statement (auto-detect the date, amount and description columns)',
+    },
+    { key: 'revolut', title: 'Revolut (Statement CSV)' },
+  ],
+};
 
 /** The fixed import id keeps `POST /api/imports/imp-1/confirm` a literal route key. */
 export const IMPORT_ID = 'imp-1';
@@ -117,6 +134,12 @@ export const summaryResult = (patch: Partial<ImportSummary> = {}): CsvImportResu
     from: '2026-06-01',
     to: '2026-06-30',
     totals: [{ currency: 'EUR', net: -420.5 }],
+    // the arm the component's own default chip ('generic') produces, so every case
+    // that does not patch it renders the one a real upload from this screen would
+    readAs: {
+      kind: 'auto-detected',
+      columns: { date: 'Datum', amount: 'Betrag', description: ['Verwendungszweck'] },
+    },
     ...patch,
   },
 });

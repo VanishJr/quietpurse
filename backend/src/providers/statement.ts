@@ -173,6 +173,24 @@ const FEE_QUOTE_MAX = 24;
 const SERIES_QUOTE_MAX = 24;
 
 /**
+ * What one column name may spend in the summary's readAs. A RENDER bound, and the one
+ * number in this band that is NOT part of the ERROR_DETAIL_MAX derivation the three
+ * above share: readAs is a field of the summary, never a problem and never an
+ * error_detail, so nothing it carries is measured by error-budget.test.ts.
+ *
+ * 40 because the widest column name any preset in this tree resolves is
+ * "Beguenstigter/Zahlungspflichtiger" at 33 (csv.ts), so every name this importer can
+ * name today survives whole with headroom, and a header cell wider than this is a
+ * paragraph rather than a column - bounded() leaves the mark that says so.
+ *
+ * The NUMBER of description names is deliberately not bounded. A truncated list of
+ * column names reads exactly like a complete one, and a "+N more" tail is a fifth
+ * state on a type whose whole point is that two states are never spelled the same way
+ * (row 6a, the optional-fields ruling). The per-name bound is the one that is safe.
+ */
+const COLUMN_NAME_MAX = 40;
+
+/**
  * Where an upload's rows go: an account the caller picked, or a name to create one
  * under. Exclusive, and the absent keys are carried as optional `never` rather than
  * left off - a plain union would not hold it, because the excess-property check runs
@@ -272,6 +290,25 @@ export type BalancesNotShown =
   /** every series reconciled, and one pair cannot carry two currencies */
   | 'more-than-one-currency';
 
+/** date, amount and description: the three slots every reader fills, and no others. */
+export interface ReadColumns {
+  date: string;
+  amount: string;
+  description: string[];
+}
+
+/**
+ * What a sheet reader can answer. resolveColumns produces exactly this and nothing
+ * else, which is the point of splitting it out of ReadAs below: a sheet parse cannot
+ * claim a PDF layout and a PDF cannot acquire columns by an edit that compiles.
+ */
+export type SheetReadAs =
+  | { kind: 'preset'; preset: string; title: string; columns: ReadColumns }
+  | { kind: 'auto-detected'; columns: ReadColumns }
+  | { kind: 'request-mapping'; columns: ReadColumns };
+
+export type ReadAs = SheetReadAs | { kind: 'pdf-template'; title: string };
+
 /** The one place either brand is applied, and it is private to this module. */
 const check = <T>(value: T): T & { readonly [checked]: true } =>
   value as T & { readonly [checked]: true };
@@ -316,6 +353,17 @@ export interface ImportSummary {
   to: string;
   /** net total per currency: a file with a currency column can carry more than one */
   totals: CheckedTotals;
+  /**
+   * Which reader filled the date, amount and description columns, and what it filled
+   * them from - the one thing the counts cannot say, and the reason row 20's "every
+   * headline number the row promised, and not one correct reason" was invisible.
+   *
+   * That is the whole of what it answers, and the narrowness is deliberate: a request
+   * can also supply dateFormat, decimal, delimiter and onlyWhen, and those decide how
+   * the amounts parse and which rows are dropped. None of them is reported here, so a
+   * line that would report one still has to be written.
+   */
+  readAs: ReadAs;
   /**
    * The statement's own opening and closing balance, which these rows were checked
    * to add up between - printed by the document on the PDF path, derived from the
@@ -568,11 +616,36 @@ async function uploadDestination(req: StatementImportRequest): Promise<StagedAcc
   return { id, name: req.accountName, currency: req.currency.toUpperCase() };
 }
 
-function presetMapping(preset: string | undefined): CsvPresetMapping | null {
+/**
+ * A preset that resolved, carrying its identity as well as its columns. `mapping` is
+ * nested and must stay nested: CsvPresetMapping's date/amount/description are
+ * required, so every call site that has not threaded `.mapping` through is a compile
+ * error. Flattened into { key, title, ...mapping } this type would be structurally
+ * assignable to CsvPresetMapping, a missed site would read `preset?.fee` as undefined,
+ * and the Revolut fee would silently stop being subtracted (row 37a's defect, restored
+ * by an edit that compiles).
+ */
+interface NamedPreset {
+  key: string;
+  title: string;
+  mapping: CsvPresetMapping;
+}
+
+/**
+ * The preset the request named, or null for generic. It answers the preset's identity
+ * as well as its mapping: the key is the slug a caller sends back in `preset=` and the
+ * title is the string on the chip, and the summary names both (row 56). Dropping them
+ * here is what made "which reader read this file" unrecoverable downstream.
+ */
+function presetMapping(preset: string | undefined): NamedPreset | null {
   if (!preset || preset === 'generic') return null;
-  const known = CSV_PRESETS[preset];
+  // hasOwn and not CSV_PRESETS[preset]: the record is a plain object literal, so
+  // `toString` and every other Object.prototype member reads as a truthy entry whose
+  // .mapping is undefined - which reaches readSheet as a preset and dies there on
+  // `preset.mapping.delimiter`, an internal TypeError in error_detail.
+  const known = Object.hasOwn(CSV_PRESETS, preset) ? CSV_PRESETS[preset] : undefined;
   if (!known) throw new Error(`unknown preset: ${preset}`);
-  return known.mapping;
+  return { key: preset, ...known };
 }
 
 /**
@@ -593,7 +666,7 @@ export type ParsedFile =
   | {
       kind: 'sheet';
       sheet: Sheet;
-      preset: CsvPresetMapping | null;
+      preset: NamedPreset | null;
       mapping: Partial<CsvMapping> | undefined;
     }
   | {
@@ -616,7 +689,7 @@ export type ParsedFile =
 export async function readSheet(
   req: StatementImportRequest,
   sourceType: ImportSourceType,
-  preset: CsvPresetMapping | null,
+  preset: NamedPreset | null,
 ): Promise<ParsedFile> {
   switch (sourceType) {
     case 'xlsx':
@@ -628,7 +701,8 @@ export async function readSheet(
       };
     case 'csv': {
       const text = decodeCsv(req.bytes);
-      const delimiter = req.mapping?.delimiter ?? preset?.delimiter ?? detectDelimiter(text);
+      const delimiter =
+        req.mapping?.delimiter ?? preset?.mapping.delimiter ?? detectDelimiter(text);
       return {
         kind: 'sheet',
         sheet: { rows: parseCsv(text, delimiter), rowLabel: (i) => i + 1 },
@@ -661,6 +735,15 @@ export async function readSheet(
 
 interface Columns {
   mapping: CsvMapping;
+  /**
+   * Which reader filled the slots below, answered here so that the indices and the
+   * statement of what produced them cannot come apart. One producer, and it is also
+   * the XLSX header scan's predicate: a candidate row the scan rejects is refused
+   * above this site, and the only kind that reaches it - an override naming all three
+   * slots - takes its names from `effective` rather than from the row, so even a
+   * descriptor that leaked could not differ from the header the scan settled on.
+   */
+  readAs: SheetReadAs;
   dateCol: number;
   amountCol: number;
   descCols: number[];
@@ -768,13 +851,13 @@ function balanceColumns(
  */
 function resolveColumns(
   header: string[],
-  preset: CsvPresetMapping | null,
+  preset: NamedPreset | null,
   override: Partial<CsvMapping> | undefined,
 ): Resolved {
   const unresolved: Unresolved[] = [];
   let mapping: Partial<CsvMapping> | null = null;
   if (preset) {
-    const resolved = resolvePreset(preset, header, override);
+    const resolved = resolvePreset(preset.mapping, header, override);
     mapping = resolved.mapping;
     unresolved.push(...resolved.unresolved);
   } else {
@@ -799,6 +882,37 @@ function resolveColumns(
     return { ok: false, error: 'mapping must specify the date, amount and description columns' };
   }
   const effective: CsvMapping = { ...merged, date, amount, description };
+  const descNames = Array.isArray(effective.description)
+    ? effective.description
+    : [effective.description];
+
+  // From `effective` and never from header[dateCol]: the descriptor is built above the
+  // unresolved check below, colIndex answers -1 for a slot the header has not got, and
+  // this function is also the XLSX header scan's predicate - so header[-1] would make
+  // bounded() throw on the first non-header row of every workbook. Bounded here, at the
+  // one construction site, so an unbounded ReadColumns never exists as a value.
+  const readColumns: ReadColumns = {
+    date: bounded(effective.date, COLUMN_NAME_MAX),
+    amount: bounded(effective.amount, COLUMN_NAME_MAX),
+    description: descNames.map((name) => bounded(name, COLUMN_NAME_MAX)),
+  };
+  // A preset with an override still reads as the preset: even with all three column
+  // slots replaced, the preset is the only source of the fee and balance columns, which
+  // a request cannot name at all, and those decide what the totals came to and whether
+  // the file reconciled.
+  // The names above are the EFFECTIVE ones, so the sentence stays true where the arm
+  // is a simplification. On the preset and auto-detected arms a name is the file's own
+  // header cell (matchColumn answers header[i]); on request-mapping it is the caller's
+  // spelling, which matches the header only up to fold().
+  const requested =
+    override?.date !== undefined ||
+    override?.amount !== undefined ||
+    override?.description !== undefined;
+  const readAs: SheetReadAs = preset
+    ? { kind: 'preset', preset: preset.key, title: preset.title, columns: readColumns }
+    : requested
+      ? { kind: 'request-mapping', columns: readColumns }
+      : { kind: 'auto-detected', columns: readColumns };
 
   const colIndex = (slot: string, name: string): number => {
     const i = header.findIndex((h) => fold(h) === fold(name));
@@ -807,15 +921,13 @@ function resolveColumns(
   };
   const columns: Columns = {
     mapping: effective,
+    readAs,
     dateCol: colIndex('date', effective.date),
     amountCol: colIndex('amount', effective.amount),
-    descCols: (Array.isArray(effective.description)
-      ? effective.description
-      : [effective.description]
-    ).map((name) => colIndex('description', name)),
+    descCols: descNames.map((name) => colIndex('description', name)),
     currencyCol: effective.currency ? colIndex('currency', effective.currency) : -1,
-    feeCol: feeColumn(header, preset),
-    ...balanceColumns(header, preset),
+    feeCol: feeColumn(header, preset?.mapping ?? null),
+    ...balanceColumns(header, preset?.mapping ?? null),
     onlyWhen: effective.onlyWhen
       ? {
           col: colIndex('status', effective.onlyWhen.column),
@@ -952,6 +1064,30 @@ async function mapAndStore(
     seriesCol,
     onlyWhen,
   } = resolved.columns;
+
+  // Which reader the summary names. `req` is deliberately unread on the pdf arm: the
+  // chip persists across files and a PDF's outcome does not depend on it (Ruling 3), so
+  // a descriptor built from the request would state, in the one place the user is asked
+  // to trust, something the parser did not do.
+  //
+  // And resolveColumns HAS answered a SheetReadAs here even on the pdf path - readSheet
+  // hands the mapper a synthetic pdf:date/pdf:amount/pdf:description header, which comes
+  // out as request-mapping. That value is dropped by this switch on purpose: those three
+  // strings are this importer's own invented words, not the document's. Deleting the
+  // switch and taking resolved.columns.readAs compiles, keeps every PDF summary equal to
+  // every other, and prints them at the user.
+  const readAs: ReadAs = ((): ReadAs => {
+    switch (parsed.kind) {
+      case 'pdf':
+        return { kind: 'pdf-template', title: parsed.title };
+      case 'sheet':
+        return resolved.columns.readAs;
+      default: {
+        const unreachable: never = parsed;
+        throw new Error(`unhandled parsed file: ${String(unreachable)}`);
+      }
+    }
+  })();
 
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
@@ -1171,6 +1307,7 @@ async function mapAndStore(
       from: days[0],
       to: days[days.length - 1],
       totals: reconciled.totals,
+      readAs,
       ...(reconciled.balances ? { balances: reconciled.balances } : {}),
       ...(reconciled.balancesNotShown ? { balancesNotShown: reconciled.balancesNotShown } : {}),
       ...(superseded[0] ? { supersededImportId: superseded[0] } : {}),

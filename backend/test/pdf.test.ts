@@ -500,6 +500,24 @@ describe('pdf: bytes to rows', () => {
     expect(summaries[2]).toEqual(summaries[0]);
   });
 
+  /**
+   * The other half of Ruling 3, and the half the test above cannot hold: it asserts the
+   * three summaries are equal to EACH OTHER, never what any of them says. A summary
+   * built from resolveColumns' own answer keeps all three equal - readSheet's pdf arm
+   * forces preset: null and hands the mapper a synthetic pdf:date/pdf:amount header, so
+   * every chip produces the same request-mapping descriptor - and prints this
+   * importer's invented column names at the user as if they were the document's.
+   *
+   * The chip is set to the one a Revolut PDF's uploader would plausibly have left on,
+   * so this also refuses a descriptor built from `preset`: that names the chip's title,
+   * "Revolut (Statement CSV)", where the layout is called "Revolut".
+   */
+  it('the summary names the PDF layout that read it, and no column at all', async () => {
+    const staged = await importPdf('Revolut Pdf Read As', statement('read as'), 'revolut');
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('the PDF was refused');
+    expect(staged.summary.readAs).toEqual({ kind: 'pdf-template', title: 'Revolut' });
+  });
+
   /** presetMapping still throws on a name no preset has: that is a client bug. */
   it('an unknown preset is still loud on the PDF path', async () => {
     await expect(importPdf('Revolut Bad Preset', statement('bad preset'), 'not-a-bank')).rejects.toThrow(

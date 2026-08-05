@@ -196,6 +196,45 @@ describe('xlsx: finding the statement', () => {
     );
   });
 
+  /**
+   * Row 56's I3, on the path that runs the column resolver most: readXlsx calls it once
+   * per candidate row, and this file makes most of those calls rejections. None of them
+   * builds a descriptor - genericMapping answers null for "Kontoauszug 2026" and for
+   * "Datum | irgendwas", so resolveColumns returns ok: false above the site that builds
+   * one. What this case pins is the outcome: the header the scan settled on is the
+   * header the summary names.
+   *
+   * importStatement and not importFile: the confirming shim reads named fields and drops
+   * the summary, so there would be nothing to assert.
+   */
+  it('the summary names the header the scan settled on, not the near-header above it', async () => {
+    const book = await xlsx((wb) => {
+      const ws = wb.addWorksheet('Kontoauszug');
+      ws.addRow(['Kontoauszug 2026']);
+      ws.addRow(['Datum', 'irgendwas']);
+      ws.addRow([
+        'Buchungstag',
+        'Betrag',
+        'Beguenstigter/Zahlungspflichtiger',
+        'Verwendungszweck',
+        'Waehrung',
+      ]);
+      ws.addRow([utc('2026-04-01'), -12.5, 'Baecker Mueller', 'Broetchen', 'EUR']);
+      ws.addRow([utc('2026-04-05'), -30, 'Stadtwerke', 'Strom', 'EUR']);
+    });
+
+    const staged = await importStatement({
+      accountName: 'Near Header Bank',
+      currency: 'EUR',
+      bytes: book,
+    });
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('the workbook was refused');
+    expect(staged.summary.readAs).toEqual({
+      kind: 'auto-detected',
+      columns: { date: 'Buchungstag', amount: 'Betrag', description: ['Verwendungszweck'] },
+    });
+  });
+
   it('reads the first visible sheet that has a header, not simply the first', async () => {
     const book = await xlsx((wb) => {
       const notes = wb.addWorksheet('Notes');

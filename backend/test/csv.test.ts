@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ERROR_DETAIL_MAX, getAccount, listTransactions } from '../src/db';
 import {
   CSV_PRESETS,
+  CsvMapping,
   decodeCsv,
   detectDelimiter,
   genericMapping,
@@ -15,6 +16,7 @@ import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
 import { importAndConfirm } from './helpers';
 import {
   CURRENCY_CODE_MAX,
+  ImportSummary,
   ParsedFile,
   balanceBreaks,
   feeRefused,
@@ -456,6 +458,186 @@ describe('a bank export in a language the preset also accepts', () => {
         '- pick a different preset or set a mapping; ' +
         'the header reads: Дата, Сумма операции, Назначение',
     );
+  });
+
+  /**
+   * A prototype member and not another invented slug: CSV_PRESETS is a plain object
+   * literal, so `toString` reads as a truthy entry there while `not-a-bank` does not.
+   * Looked up without hasOwn it would slip past this throw carrying an undefined
+   * mapping and die inside readSheet on `preset.mapping.delimiter` - an internal
+   * TypeError in error_detail, on a failed import row a client bug should never write.
+   */
+  it('a preset named after an Object.prototype member is refused like any other', async () => {
+    const file = ['Дата выполнения,Сумма,Описание', '2026-06-01,-1.00,тест'].join('\n');
+
+    const thrown = await importStatement({
+      accountName: 'Revolut Prototype Preset',
+      currency: 'EUR',
+      preset: 'toString',
+      bytes: Buffer.from(file, 'utf8'),
+    }).catch((e) => e as Error);
+
+    expect(thrown.message).toBe('unknown preset: toString');
+  });
+
+  /**
+   * ROADMAP row 56, and the incident it was raised for: the same file read by the
+   * preset and by the generic reader produces the SAME five headline figures, so the
+   * screen was right by coincidence three times running while nothing on it said which
+   * reader had run. The two summaries differ in readAs and the counts do not - which is
+   * what makes the differing descriptor evidence rather than decoration.
+   *
+   * Both uploads go through importStatement and neither is confirmed: committing the
+   * first would make the second answer `duplicate`, which carries no summary at all.
+   * The rows differ from the committing case above by their descriptions and by
+   * nothing else, for the same reason one file up: identical bytes would already be
+   * committed by the time this runs, and file order inside a run is vitest's.
+   */
+  it('the same file names the preset that read it, or the generic reader', async () => {
+    const ru = [
+      RU_HEADER,
+      'CARD_PAYMENT,Current,2026-02-01 09:00:00,2026-02-02 10:00:00,Пекарня у дома,-4.20,0.00,EUR,ВЫПОЛНЕНО,95.80',
+      'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Перевод на счёт,100.00,0.50,EUR,ВЫПОЛНЕНО,195.30',
+      'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает обработки,-9.99,0.00,EUR,В ОБРАБОТКЕ,',
+    ].join('\n');
+    const upload = (preset?: string) =>
+      importStatement({
+        accountName: 'Revolut Named Reader',
+        currency: 'EUR',
+        preset,
+        bytes: Buffer.from(ru, 'utf8'),
+      });
+
+    const named = await upload('revolut');
+    const auto = await upload();
+    if (named.outcome !== 'awaiting_confirmation' || auto.outcome !== 'awaiting_confirmation') {
+      throw new Error('both uploads were expected to stage');
+    }
+
+    // the title comes off CSV_PRESETS and is never re-spelled here: it is the string
+    // the chip renders, and comparing the two is the whole point of the field
+    expect(named.summary.readAs).toEqual({
+      kind: 'preset',
+      preset: 'revolut',
+      title: CSV_PRESETS.revolut.title,
+      columns: { date: 'Дата выполнения', amount: 'Сумма', description: ['Описание'] },
+    });
+    expect(auto.summary.readAs).toEqual({
+      kind: 'auto-detected',
+      columns: { date: 'Дата выполнения', amount: 'Сумма', description: ['Описание'] },
+    });
+    expect(auto.summary.readAs).not.toEqual(named.summary.readAs);
+
+    const headline = (s: ImportSummary) => ({
+      total: s.total,
+      accepted: s.accepted,
+      skipped: s.skipped,
+      from: s.from,
+      to: s.to,
+    });
+    expect(headline(named.summary)).toEqual({
+      total: 3,
+      accepted: 2,
+      skipped: 1,
+      from: '2026-02-02',
+      to: '2026-02-04',
+    });
+    // the pending row is dropped by onlyWhen under the preset and by its empty date
+    // under the generic reader, so all five agree and none of them says so
+    expect(headline(auto.summary)).toEqual(headline(named.summary));
+  });
+});
+
+/**
+ * The rest of row 56: what the descriptor names when a preset is not what read the
+ * file. Every case here drives importStatement rather than building a summary, because
+ * a descriptor that echoes the request passes any test that does not open the file.
+ */
+describe('the summary names the columns the parser settled on', () => {
+  /**
+   * A header carrying two date columns and two description ones, so a wrong answer is
+   * visible: sparkasse takes Buchungstag and joins two description columns, the generic
+   * reader takes Datum (candidate order: date, datum, buchungstag) and one. The two
+   * date columns hold different dates, so `from`/`to` move with the descriptor and it
+   * is asserted to track a parse that demonstrably happened rather than to be a label.
+   */
+  const TWO_DATES = [
+    'Buchungstag;Datum;Betrag;Beguenstigter/Zahlungspflichtiger;Verwendungszweck;Waehrung',
+    '01.03.2026;02.03.2026;-12,50;Baecker Mueller;Broetchen;EUR',
+    '05.03.2026;06.03.2026;-30,00;Stadtwerke;Strom;EUR',
+  ].join('\n');
+
+  it("names the file's own header cells, and they differ by reader", async () => {
+    const upload = (preset?: string) =>
+      importStatement({
+        accountName: 'Two Date Columns',
+        currency: 'EUR',
+        preset,
+        bytes: Buffer.from(TWO_DATES, 'utf8'),
+      });
+
+    const named = await upload('sparkasse');
+    const auto = await upload();
+    if (named.outcome !== 'awaiting_confirmation' || auto.outcome !== 'awaiting_confirmation') {
+      throw new Error('both uploads were expected to stage');
+    }
+
+    expect(named.summary.readAs).toEqual({
+      kind: 'preset',
+      preset: 'sparkasse',
+      title: CSV_PRESETS.sparkasse.title,
+      columns: {
+        date: 'Buchungstag',
+        amount: 'Betrag',
+        description: ['Beguenstigter/Zahlungspflichtiger', 'Verwendungszweck'],
+      },
+    });
+    expect(auto.summary.readAs).toEqual({
+      kind: 'auto-detected',
+      columns: { date: 'Datum', amount: 'Betrag', description: ['Verwendungszweck'] },
+    });
+
+    // the dates the two readers actually imported, one column apart
+    expect([named.summary.from, named.summary.to]).toEqual(['2026-03-01', '2026-03-05']);
+    expect([auto.summary.from, auto.summary.to]).toEqual(['2026-03-02', '2026-03-06']);
+  });
+
+  /**
+   * The arm no client in this repository reaches and every other one does: POST
+   * /api/imports accepts a mapping, so an iOS or Android client can send one. The
+   * generic reader WOULD have matched this header - the request replaces one slot of
+   * three - which is the boundary of the predicate rather than its easy end.
+   */
+  it('a request that overrides one column of three reads as a request mapping', async () => {
+    const file = [
+      'date,amount,description,note',
+      '2026-04-01,-5.00,Card payment,Kiosk am Bahnhof',
+      '2026-04-02,-6.00,Card payment,Baecker Mueller',
+    ].join('\n');
+    const upload = (mapping?: Partial<CsvMapping>) =>
+      importStatement({
+        accountName: 'Mapping Sent With The Upload',
+        currency: 'EUR',
+        mapping,
+        bytes: Buffer.from(file, 'utf8'),
+      });
+
+    const sent = await upload({ description: 'note' });
+    const auto = await upload();
+    if (sent.outcome !== 'awaiting_confirmation' || auto.outcome !== 'awaiting_confirmation') {
+      throw new Error('both uploads were expected to stage');
+    }
+
+    expect(sent.summary.readAs).toEqual({
+      kind: 'request-mapping',
+      columns: { date: 'date', amount: 'amount', description: ['note'] },
+    });
+    // the same bytes with nothing overridden: the generic reader would have found all
+    // three, and names the column the request replaced
+    expect(auto.summary.readAs).toEqual({
+      kind: 'auto-detected',
+      columns: { date: 'date', amount: 'amount', description: ['description'] },
+    });
   });
 });
 

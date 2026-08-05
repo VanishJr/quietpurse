@@ -182,6 +182,7 @@ describe('POST /api/imports', () => {
       'importId',
       'newRows',
       'problems',
+      'readAs',
       'skipped',
       'to',
       'total',
@@ -727,6 +728,11 @@ describe('the routes around it', () => {
       'dkb',
       'revolut',
     ]);
+    // the string web/src/imports.ts's GENERIC_PRESET_TITLE is a prefix of: the chip
+    // renders this title and the summary's sentence names the short form, and the two
+    // stop being the same reader the moment this stops starting with it
+    const generic = res.body.presets.find((p: { key: string }) => p.key === 'generic');
+    expect(generic.title.startsWith('Any statement')).toBe(true);
   });
 
   it('the JSON CSV endpoints are gone', async () => {
