@@ -948,15 +948,53 @@ describe("the statement's own running balance, on the sheet path", () => {
 
     expect(summary.accepted).toBe(4);
     // neither number appears in any cell of the file: they are sums across the two
-    // running balances it states, which is why the card has to say how many
+    // running balances it states, which is why the card has to say how many. And
+    // "Savings" is a single row, so its run is a single link that no verdict could
+    // have failed on - 315.00 of that opening and 445.00 of that closing were checked
+    // by nothing at all. How many were summed and how many were checked are two
+    // different numbers on this file, so the card carries both (row 63)
     expect(summary.balances).toEqual({
       opening: 387.40,
       closing: 579.85,
       currency: 'EUR',
-      series: 2,
+      series: { summed: 2, checked: 1 },
     });
     expect(summary.balancesNotShown).toBeUndefined();
     expect(summary.totals).toEqual([{ currency: 'EUR', net: 192.45 }]);
+  });
+
+  /**
+   * Row 63's other end: a file every run of which is one row. Nothing was compared
+   * anywhere in it - two links, neither of them next to another - and the pair is
+   * still true and still shown. Withholding it would take a correct pair off the
+   * fallback path's confirmation screen, which is R10's failure mode with a new
+   * cause; `balancesNotShown` is why no pair could be DERIVED and one was.
+   */
+  it('a pair every run of which is one row is shown, and claims nothing', async () => {
+    const summary = await summaryOf('Balance No Interior', SAVINGS, CARD);
+
+    expect(summary.accepted).toBe(2);
+    expect(summary.balances).toEqual({
+      opening: 387.40,
+      closing: 511.72,
+      currency: 'EUR',
+      series: { summed: 2, checked: 0 },
+    });
+    expect(summary.balancesNotShown).toBeUndefined();
+  });
+
+  /** The degenerate one: one row, one link, one series, and no junction in the file. */
+  it('a one-row statement derives its pair and checks none of it', async () => {
+    const summary = await summaryOf('Balance One Row', CARD);
+
+    expect(summary.accepted).toBe(1);
+    expect(summary.balances).toEqual({
+      opening: 72.40,
+      closing: 66.72,
+      currency: 'EUR',
+      series: { summed: 1, checked: 0 },
+    });
+    expect(summary.balancesNotShown).toBeUndefined();
   });
 
   /**
@@ -966,11 +1004,13 @@ describe("the statement's own running balance, on the sheet path", () => {
    * good statements. Nothing here reads a row index.
    */
   it('the verdict and the pair are the same under any order of the rows', async () => {
+    // and so is how much of it was checked: a run's link count is a multiset fact
+    // about it, exactly like the verdict and the endpoints
     const expected = {
       opening: 387.40,
       closing: 579.85,
       currency: 'EUR',
-      series: 2,
+      series: { summed: 2, checked: 1 },
     };
     const shuffled = await summaryOf('Balance Shuffled', IN, SAVINGS, RENT, CARD);
     expect(shuffled.balances).toEqual(expected);
@@ -1032,7 +1072,11 @@ describe("the statement's own running balance, on the sheet path", () => {
       { description: 'Two', amount: '0.20', balance: '0.30', day: '07' },
       { description: 'Three', amount: '0.30', balance: '0.60', day: '08' },
     );
-    expect(summary.balances).toMatchObject({ opening: 0, closing: 0.6, series: 1 });
+    expect(summary.balances).toMatchObject({
+      opening: 0,
+      closing: 0.6,
+      series: { summed: 1, checked: 1 },
+    });
   });
 
   /**
@@ -1226,7 +1270,7 @@ describe("the statement's own running balance, on the sheet path", () => {
       opening: 72.40,
       closing: 134.85,
       currency: 'EUR',
-      series: 1,
+      series: { summed: 1, checked: 1 },
     });
   });
 
@@ -1305,9 +1349,10 @@ describe("the statement's own running balance, on the sheet path", () => {
       amount: number,
       balance: number,
       day: number,
+      product = 'Current',
     ): (string | number | Date)[] => [
       'CARD_PAYMENT',
-      'Current',
+      product,
       new Date(`2026-09-${String(day).padStart(2, '0')}T09:00:00.000Z`),
       new Date(`2026-09-${String(day).padStart(2, '0')}T10:00:00.000Z`),
       description,
@@ -1334,7 +1379,58 @@ describe("the statement's own running balance, on the sheet path", () => {
         opening: 72.40,
         closing: 134.85,
         currency: 'EUR',
-        series: 1,
+        series: { summed: 1, checked: 1 },
+      });
+    });
+
+    /**
+     * The real export's own shape through real ExcelJS bytes: a product of three rows
+     * beside a product of one. The counting rule is in checkSheet and the workbook
+     * reaches it through the other branch of the Cell seam, so this is where a float
+     * cell reading as its own series would show up as a count rather than as a pair.
+     */
+    it('counts a single-row product beside a multi-row one as checked once', async () => {
+      const result = await importStatement({
+        accountName: 'Balance Workbook Two Series',
+        currency: 'EUR',
+        preset: 'revolut',
+        bytes: await workbook([
+          sheetRow('Book savings', 130, 445, 2, 'Savings'),
+          sheetRow('Book card', -5.68, 66.72, 3),
+          sheetRow('Book in', 100, 166.72, 4),
+          sheetRow('Book rent', -31.87, 134.85, 5),
+        ]),
+      });
+      if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+      expect(result.summary.balances).toEqual({
+        opening: 387.40,
+        closing: 579.85,
+        currency: 'EUR',
+        series: { summed: 2, checked: 1 },
+      });
+    });
+
+    /**
+     * The third of the three cases, which the CSV arm carries twice and this one
+     * carried not at all: the value that drops the run claim off the card entirely,
+     * out of real float cells rather than out of strings.
+     */
+    it('claims nothing for a workbook every run of which is one row', async () => {
+      const result = await importStatement({
+        accountName: 'Balance Workbook No Interior',
+        currency: 'EUR',
+        preset: 'revolut',
+        bytes: await workbook([
+          sheetRow('Book savings', 130, 445, 2, 'Savings'),
+          sheetRow('Book card', -5.68, 66.72, 3),
+        ]),
+      });
+      if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+      expect(result.summary.balances).toEqual({
+        opening: 387.40,
+        closing: 511.72,
+        currency: 'EUR',
+        series: { summed: 2, checked: 0 },
       });
     });
 

@@ -632,12 +632,13 @@ describe('a stated fee survives staging', () => {
 
     // the number on the confirmation screen is already the movement, not the column
     expect(summary.totals).toEqual([{ currency: 'EUR', net: -73.62 }]);
-    // and the statement's own running balance says the same, off one series
+    // and the statement's own running balance says the same, off one series - whose
+    // two rows are one junction, so the run is one the verdict could have failed on
     expect(summary.balances).toEqual({
       opening: 100,
       closing: 26.38,
       currency: 'EUR',
-      series: 1,
+      series: { summed: 1, checked: 1 },
     });
     expect(await stagedFeeCents(summary.importId)).toEqual([44, 0]);
 

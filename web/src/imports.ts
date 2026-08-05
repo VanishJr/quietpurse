@@ -1,4 +1,4 @@
-import { ReadAs, ReadColumns } from './types';
+import { ReadAs, ReadColumns, SeriesCounts } from './types';
 
 /**
  * Import status dictionary: the API returns stable slugs, the sentences live here
@@ -66,6 +66,71 @@ const quoted = (names: readonly string[]): string => {
 
 const columnClause = (columns: ReadColumns): string =>
   `date from "${columns.date}", amount from "${columns.amount}", description from ${quoted(columns.description)}`;
+
+/**
+ * The two ends of the balance sentence on the confirmation card: what the numbers are,
+ * and what was actually verified about them.
+ *
+ * One function for both halves because they are one claim. The lead-in says where the
+ * pair came from and the claim says what the check could have caught, and a lead-in
+ * that outran its claim — "Checked against" over a pair nothing checked — is the
+ * completeness claim row 54 removed, re-acquired through the front of the sentence.
+ *
+ * Four arms, and only two of them existed before row 63:
+ *
+ * - no counts at all: the document printed the pair, and every row between them adds
+ *   up to it. That is the PDF, and row 63's blindness never applied to it.
+ * - every run checked: the pair is derived and the rows read run unbroken through it.
+ * - some checked: the pair is still true and still shown, and the part of it that
+ *   rests on a run of one row is named. On the owner's real export that is one of two.
+ * - none checked: every run is a single row, so no balance in the file was ever
+ *   compared with another. The lead-in drops to "Read from" here, because nothing was
+ *   checked and "Checked against" would be the claim wearing a hat.
+ *
+ * A derived pair is never withheld for this: the numbers are true and readable back
+ * against the file, and "no pair could be derived" (balancesNotShown) is a different
+ * state that must not be spelled the same way.
+ */
+export function balanceClaim(series: SeriesCounts | undefined): { lead: string; claim: string } {
+  if (series === undefined) {
+    return {
+      lead: "Checked against the statement's own balances: ",
+      claim: 'The rows add up.',
+    };
+  }
+  const { summed, checked } = series;
+  // the verb is the only difference between the two lead-ins, and it is the whole of
+  // what the arm below may not say: a pair summed over runs nothing could fail on was
+  // read out of the file, not checked against it
+  const leadIn = (verb: string): string =>
+    summed > 1
+      ? `${verb} the ${summed} running balances this statement states, added together: `
+      : `${verb} the statement's own balances: `;
+  if (checked === 0) {
+    return {
+      lead: leadIn('Read from'),
+      claim:
+        summed > 1
+          ? 'Each of them states a single row, so nothing here was checked.'
+          : 'It states a single row, so nothing here was checked.',
+    };
+  }
+  const lead = leadIn('Checked against');
+  if (checked === summed) {
+    return { lead, claim: 'The rows read run unbroken from one to the other.' };
+  }
+  // an unchecked run is a run of one link and there is no other kind, so "states a
+  // single row" is true of every one of them rather than true of the ones measured
+  const unchecked = summed - checked;
+  const others =
+    unchecked === 1
+      ? 'the other states a single row'
+      : `the other ${unchecked} state a single row each`;
+  return {
+    lead,
+    claim: `${checked} of them run${checked === 1 ? 's' : ''} unbroken from one to the other; ${others}, so nothing could check ${unchecked === 1 ? 'it' : 'them'}.`,
+  };
+}
 
 /**
  * Which reader produced the numbers on the confirmation card. The one thing the counts
