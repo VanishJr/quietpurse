@@ -1,75 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
-import { apiLabel, auth, onUnauthorized, SessionResult, SessionUser } from './api';
-import { AccountScreen } from './screens/AccountScreen';
-import { AnalyticsScreen } from './screens/AnalyticsScreen';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { apiLabel, auth, onUnauthorized, SessionResult } from './api';
 import { AuthScreen } from './screens/AuthScreen';
-import { IndependenceScreen } from './screens/IndependenceScreen';
-import { OverviewScreen } from './screens/OverviewScreen';
-import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ThemeProvider } from './theme';
 
-const TABS = [
-  { key: 'overview', title: 'Overview' },
-  { key: 'transactions', title: 'Transactions' },
-  { key: 'analytics', title: 'Analytics' },
-  { key: 'goal', title: 'Goal' },
-  { key: 'account', title: 'Account' },
-] as const;
-
-type TabKey = (typeof TABS)[number]['key'];
-
-/** The app itself — mounted only with a session, so every request below is scoped to the user's workspace. */
-function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
-  const [tab, setTab] = useState<TabKey>('overview');
-
-  const signOut = async () => {
-    try {
-      await auth.logout();
-    } finally {
-      // even if the call failed, drop back to the login screen: whatever went
-      // wrong, staying in a UI whose requests 401 is worse
-      onSignedOut();
-    }
-  };
-
-  return (
-    <div className="app">
-      {/*
-        Screens stay mounted so filters and already-loaded data survive a tab switch;
-        `hidden` only takes the inactive ones out of layout and the a11y tree.
-      */}
-      <main className="screens">
-        <div className="screen" hidden={tab !== 'overview'}>
-          <OverviewScreen />
-        </div>
-        <div className="screen" hidden={tab !== 'transactions'}>
-          <TransactionsScreen />
-        </div>
-        <div className="screen" hidden={tab !== 'analytics'}>
-          <AnalyticsScreen />
-        </div>
-        <div className="screen" hidden={tab !== 'goal'}>
-          <IndependenceScreen />
-        </div>
-        <div className="screen" hidden={tab !== 'account'}>
-          <AccountScreen user={user} onSignOut={signOut} />
-        </div>
-      </main>
-
-      <nav className="tabbar" aria-label="Sections">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            aria-current={tab === t.key ? 'page' : undefined}
-          >
-            {t.title}
-          </button>
-        ))}
-      </nav>
-    </div>
-  );
-}
+/**
+ * The app, fetched when there is a session to show it to.
+ *
+ * Static, this import put all five screens and recharts into the bundle that
+ * serves the sign-in form — 429 kB, 127 over the wire, downloaded in full by
+ * everyone who has not signed in yet and by everyone whose session had expired.
+ * None of it can render until the session comes back, and on the two branches
+ * below that it cannot, none of it ever renders at all.
+ *
+ * The cost of the split is one network round trip between "signed in" and the
+ * Overview screen, on a path that is already waiting for /api/auth/get-session.
+ */
+const SignedIn = lazy(() => import('./SignedIn').then((m) => ({ default: m.SignedIn })));
 
 /**
  * A server nobody can reach is not a user who is signed out. The one thing this
@@ -146,7 +92,11 @@ function Root() {
       return <AuthScreen onSignedIn={checkSession} />;
     case 'signed-in':
       return (
-        <SignedIn user={session.user} onSignedOut={() => setSession({ state: 'signed-out' })} />
+        // the same blank shell 'checking' paints, for the same reason: the chunk is
+        // a moment away and a spinner for it would be a second thing to look at
+        <Suspense fallback={<div className="app" />}>
+          <SignedIn user={session.user} onSignedOut={() => setSession({ state: 'signed-out' })} />
+        </Suspense>
       );
     default: {
       // a component may return undefined, so a state added without a branch above

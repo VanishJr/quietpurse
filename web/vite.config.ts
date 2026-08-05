@@ -1,3 +1,4 @@
+import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -26,5 +27,21 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    /**
+     * Two pages, not one. `index.html` is the app; `landing.html` is the public
+     * page "Back to Website" points at, and it shares nothing with the app but the
+     * font and the palette — no session, no /api call, no bundle in common.
+     *
+     * A real deployment probably wants the landing at `/` and the app at `/app`.
+     * That is a routing decision about where the product lives, and it belongs to
+     * whoever deploys it; keeping the app's own URL where it has always been is
+     * what makes this change nothing but an addition.
+     */
+    rollupOptions: {
+      input: {
+        app: resolve(__dirname, 'index.html'),
+        landing: resolve(__dirname, 'landing.html'),
+      },
+    },
   },
 });

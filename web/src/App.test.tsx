@@ -17,7 +17,7 @@ describe('signed out', () => {
     render(<App />);
 
     // anchor: the sign-in screen, which renders only once the session came back null
-    expect(await screen.findByRole('heading', { name: 'Finto' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Welcome Back!' })).toBeInTheDocument();
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
 
     expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
@@ -76,7 +76,7 @@ describe('signed in', () => {
     render(<App />);
 
     // anchor: the sign-in screen, reached only by way of onUnauthorized
-    expect(await screen.findByRole('heading', { name: 'Finto' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Welcome Back!' })).toBeInTheDocument();
     // the anchor alone is satisfied by an app that never signed in, which would make
     // the assertion below true for the trivial reason: pin the request that 401'd
     expect(requests()).toContain('GET /api/accounts');

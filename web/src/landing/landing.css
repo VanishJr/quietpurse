@@ -1,0 +1,1251 @@
+/**
+ * The landing page, and nothing else.
+ *
+ * It is not `styles.css` and it is not `styles/auth.css`. The palette, the radii
+ * and the durations it shares with the auth screens are in `styles/tokens.css`,
+ * which both of them load — that is what makes the two sides of the "Back to
+ * Website" button one product rather than two files that agree today. It borrows
+ * none of the auth screens' rules, though — those scale every vertical measurement
+ * to the window because a login form must not start scrolling when a refusal
+ * appears, and a page you scroll on purpose has the opposite requirement.
+ *
+ * ---------------------------------------------------------------------------
+ * Motion
+ *
+ * Every reveal here is progressive enhancement, in the strict sense: the content
+ * is visible with no animation applied at all. The animation is added only inside
+ * `@supports (animation-timeline: view())` AND `prefers-reduced-motion:
+ * no-preference`, so a browser without scroll-driven animations, or a person who
+ * has asked for less movement, gets the finished page rather than a blank one
+ * waiting for an observer that will never fire.
+ *
+ * That ordering is the whole trick and it is easy to get backwards. Hiding things
+ * by default and revealing them with script is how a marketing page ends up blank
+ * for everyone whose browser had one opinion the author did not test.
+ *
+ * Only `opacity` and `transform` are animated, so the reveals stay off the layout
+ * path. The two exceptions are the hero bar and the chart columns, which animate
+ * `width` and `height` because they are three and six elements respectively and
+ * the honesty of the shape matters more than a compositor hint.
+ */
+
+/**
+ * This page does not load `styles.css`, and that stylesheet is where the app's
+ * reset lives — so without these three lines the landing kept the UA's 8px body
+ * margin (a band of bare canvas around a page that is meant to be edge-to-edge)
+ * and `.landing { min-height: 100% }` resolved against a body of auto height,
+ * which is to say against nothing.
+ */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+/* the ground, on the element the browser paints the overscroll from */
+html {
+  background: var(--c-ground);
+}
+
+.landing {
+  /* the auth screens' ground, unchanged - it is the same product either side of
+     that button */
+  --ink: var(--c-ground);
+  --paper: var(--c-paper);
+  --muted: var(--c-ink-2);
+  --line: var(--c-line);
+
+  /* on the dark ground the design's #009405 is nearly invisible, so the green is
+     lifted for dark and kept for the paper panels */
+  --own: var(--c-good-ground);
+  --own-ink: var(--c-good-paper);
+  /* #ECEEA9 already means "look at this one" on the auth screens. Here it means
+     "this part is not yours", which is the same instruction */
+  --external: var(--c-attention);
+  --bad: var(--c-danger);
+
+  /* 7.8:1 on the ground */
+  --paper-dim: var(--c-on-ground-2);
+  /* Was 0.38, which is 3.46:1 - under the 4.5 that normal text needs, on 46 of the
+     elements on this page: every dial label and hint, the legend, the chart labels
+     and axis note, the caveats, the slice percentages and the whole footer. The
+     quietest thing on the page is still text somebody has to read. 0.50 is 5.3:1;
+     the break-even is 0.47 and the margin is deliberate. */
+  --paper-faint: var(--c-on-ground-3);
+  /* decorative rules and card edges: not required to be seen, only to be felt */
+  --hair: var(--c-hairline);
+  /* the same line where it is the edge OF a control, which WCAG asks to be 3:1 -
+     0.35 is 3.05:1. Used by the currency buttons and the switch, and nowhere that
+     is only a card. */
+  --hair-control: var(--c-hairline-control);
+
+  --col: 1120px;
+  /* the auth card's corner, which this page borrowed and now reads from the token
+     rather than from a second copy of the number */
+  --radius: var(--r-xl);
+
+  box-sizing: border-box;
+  min-height: 100%;
+  background: var(--ink);
+  color: var(--c-on-ground-1);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: var(--fs-lg);
+  line-height: 1.55;
+  /* long prose on a wide page is what this stops being a wall */
+  text-wrap: pretty;
+}
+
+.landing *,
+.landing *::before,
+.landing *::after {
+  box-sizing: border-box;
+}
+
+/**
+ * `:where()` because these are resets, and a reset must never outrank the rules
+ * that come after it.
+ *
+ * Written as `.landing p` this is specificity (0,1,1) — a class and a type — and
+ * every single-class rule below it, `.hero-line`, `.section-sub`, `.spend-say`,
+ * is (0,1,0) and loses. The page silently ignored most of its own vertical
+ * spacing, which read as "the design is a bit tight" rather than as the bug it
+ * was, and was on its way to being papered over one `!important` at a time.
+ * `:where()` contributes nothing, so the reset applies and anything named beats it.
+ */
+.landing :where(h1, h2, h3) {
+  margin: 0;
+  font-weight: 500;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.landing :where(p) {
+  margin: 0;
+}
+
+/* `:where()` for the same reason as the reset above, and it is not theoretical
+   here: written as `.landing a` this is (0,1,1) and `.cta-primary`, at (0,1,0),
+   lost to it — so every primary button on the page was painting white text on
+   its white background.
+
+   The same treatment has since been given to the three descendant selectors that
+   were beating single-class rules further down the file — `.nav nav a`,
+   `.opinion-words p` and `.formats span`. Each was outranking a rule written to
+   override it, and each was being answered with an `!important` rather than by
+   giving the reset the specificity a reset should have. Ten `!important`
+   declarations are now none: four were load-bearing against those three
+   selectors, and the other six had stopped doing anything at all when this
+   `:where()` treatment first landed and were never taken out. */
+.landing :where(a) {
+  color: inherit;
+}
+
+/* keyboard users should not have to walk the whole nav to reach the argument */
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 24px;
+  top: 24px;
+  z-index: var(--z-raised);
+  padding: 12px 18px;
+  border-radius: var(--r-md);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+:where(.landing) :focus-visible {
+  outline: 2px solid var(--own);
+  outline-offset: 3px;
+  border-radius: var(--r-xs);
+}
+
+/* ---------- nav ---------- */
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+
+.nav-logo {
+  font-size: var(--fs-xl);
+  text-decoration: none;
+}
+
+.nav nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  font-size: var(--fs-md);
+}
+
+.nav :where(nav a) {
+  color: var(--paper-dim);
+  text-decoration: none;
+}
+
+.nav :where(nav a):hover {
+  color: var(--c-on-ground-1);
+}
+
+.nav-signin {
+  padding: 9px 20px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+  color: var(--c-on-ground-1);
+}
+
+.nav-signin:hover {
+  background: var(--c-wash-1);
+}
+
+/* ---------- shared ---------- */
+
+.landing section {
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 0 24px 140px;
+}
+
+.section-h {
+  font-size: clamp(30px, 4.2vw, 46px);
+}
+
+/* 28, not 18: a heading set at 1.08 has almost no descender room under it, so the
+   optical gap is a good deal smaller than the number says */
+.section-sub {
+  max-width: 62ch;
+  margin-top: 28px;
+  color: var(--paper-dim);
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+  padding: 0 30px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-lg);
+  text-decoration: none;
+  transition: transform var(--dur-1) ease, background-color var(--dur-1) ease;
+}
+
+.cta:active {
+  transform: translateY(1px);
+}
+
+.cta-primary {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.cta-primary:hover {
+  background: var(--c-paper-hi);
+}
+
+/* ---------- hero ---------- */
+
+.hero {
+  padding-top: 40px;
+}
+
+/* the category sentence. It sits above the eyebrow and reads smaller than the
+   line under it on purpose: it is the label on the tin, not the argument */
+.hero-what {
+  max-width: 46ch;
+  color: var(--paper-dim);
+  font-size: var(--fs-md);
+}
+
+.hero-eyebrow {
+  margin-top: 10px;
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+/* the output, at the size a headline usually wastes on an adjective */
+.hero-verdict {
+  margin-top: 20px;
+  font-size: clamp(40px, 7.4vw, 84px);
+  letter-spacing: -0.02em;
+}
+
+.hero-verdict em {
+  font-style: normal;
+  color: var(--own);
+  /* the tabular figures stop the headline shifting sideways while a slider moves */
+  font-variant-numeric: tabular-nums;
+}
+
+/* the headline is 84px at 1.08, so this needs real room or it reads as a fourth
+   line of the headline rather than a sentence about it. Large type wants space in
+   proportion to itself, not the 20-odd px that looks generous under body copy */
+.hero-line {
+  max-width: 56ch;
+  margin-top: 44px;
+  color: var(--paper-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-bar {
+  display: flex;
+  height: 22px;
+  margin-top: 40px;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+  background: var(--c-wash-1);
+}
+
+/* width and not transform: three elements, and a scaled block would drag its
+   neighbours' edges with it. 140ms is short enough to keep up with a thumb */
+.hero-bar .seg {
+  transition: width var(--dur-1) ease;
+}
+
+.seg-own {
+  background: var(--own);
+}
+
+.seg-external {
+  background: var(--external);
+}
+
+/* the uncovered part is drawn as absence: a hatch, not a colour */
+.seg-gap {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--c-wash-3) 0 2px,
+    transparent 2px 7px
+  );
+}
+
+.hero-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.hero-legend li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.key {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-xs);
+}
+
+.key-own {
+  background: var(--own);
+}
+
+.key-external {
+  background: var(--external);
+}
+
+.key-gap {
+  background: var(--c-wash-3);
+}
+
+.hero-dials {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 30px;
+  margin-top: 44px;
+}
+
+.dial-label {
+  display: block;
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.dial-value {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-2xl);
+  font-variant-numeric: tabular-nums;
+}
+
+.dial-hint {
+  margin-top: 6px;
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+}
+
+.hero-hours {
+  max-width: 60ch;
+  margin-top: 40px;
+  padding-top: 26px;
+  border-top: 1px solid var(--hair);
+  color: var(--paper-dim);
+}
+
+.hero-hours strong {
+  color: var(--c-on-ground-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* the one sentence on the page that is allowed to be a warning */
+.hero-hours em {
+  display: block;
+  margin-top: 10px;
+  color: var(--external);
+  font-style: normal;
+}
+
+.hero-rate {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 26px;
+  padding-bottom: 26px;
+  border-bottom: 1px solid var(--hair);
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.hero-rate input[type='range'] {
+  margin-top: 0;
+}
+
+.hero-rate input[type='range'] {
+  flex: 1 1 200px;
+  max-width: 300px;
+}
+
+.hero-rate output {
+  min-width: 4ch;
+  color: var(--c-on-ground-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-currency {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.hero-currency legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* the edge IS the button here, so it takes the 3:1 line rather than the hairline */
+.hero-currency label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--hair-control);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+/* the weight is here so that which currency is picked is not carried by the colour
+   alone; the box is a fixed size, so 600 costs no layout */
+.hero-currency label.is-on {
+  border-color: var(--own);
+  color: var(--own);
+  font-weight: 600;
+}
+
+/**
+ * The radio is what takes focus and it is `opacity: 0`, so the page's focus ring
+ * was being drawn faithfully on something nobody can see: tabbing into this group
+ * showed nothing at all, and the only way to tell where you were was to press an
+ * arrow key and watch the € change. The ring goes on the label, which is the part
+ * that looks like the control.
+ */
+.hero-currency label:has(input:focus-visible) {
+  outline: 2px solid var(--own);
+  outline-offset: 3px;
+}
+
+.hero-currency input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hero-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 34px;
+}
+
+/* ---------- range inputs ---------- */
+
+.landing input[type='range'] {
+  width: 100%;
+  height: 26px;
+  margin: 10px 0 0;
+  padding: 0;
+  background: none;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.landing input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--c-wash-2);
+}
+
+.landing input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--c-wash-2);
+}
+
+.landing input[type='range']::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-paper-hi);
+}
+
+.landing input[type='range']::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-paper-hi);
+}
+
+/* ---------- opinions ---------- */
+
+.opinion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 60px;
+  align-items: center;
+  margin-top: 90px;
+  padding: 48px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+}
+
+.opinion-reverse .opinion-words {
+  order: 2;
+}
+
+.opinion-n {
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.opinion h3 {
+  margin: 10px 0 18px;
+  font-size: clamp(26px, 3vw, 34px);
+}
+
+.opinion-words :where(p) {
+  color: var(--paper-dim);
+}
+
+.opinion-words :where(p + p) {
+  margin-top: 14px;
+}
+
+.opinion-words strong {
+  color: var(--c-on-ground-1);
+  font-weight: 600;
+}
+
+.opinion-caveat {
+  margin-top: 16px;
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+}
+
+.toggle {
+  display: inline-flex;
+  margin-top: 24px;
+  padding: 4px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-pill);
+}
+
+.toggle button {
+  padding: 9px 18px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: none;
+  color: var(--paper-dim);
+  font: inherit;
+  font-size: var(--fs-md);
+  cursor: pointer;
+  transition: background-color var(--dur-1) ease, color var(--dur-1) ease;
+}
+
+.toggle button.is-on {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---------- the chart ---------- */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 220px;
+}
+
+.chart-col {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  height: 100%;
+}
+
+/* The bar's height is a percentage, and a percentage needs a box that is only the
+   plot. Resolved against the whole column it also counts the label's line, so
+   everything above ~86% overflowed and was clamped to the same height by flex —
+   the two tallest bars came out identical, which is precisely the reading this
+   section exists to disprove. */
+.chart-plot {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  align-items: flex-end;
+}
+
+/* height, deliberately: the shape of these six bars IS the argument, and a
+   scaled bar would carry its label's baseline with it */
+.chart-bar {
+  position: relative;
+  width: 100%;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  background: linear-gradient(180deg, var(--own), color-mix(in srgb, var(--own) 35%, transparent));
+  transition: height var(--dur-3) var(--ease-out), background var(--dur-3) ease;
+}
+
+/* flat is the lie, and it is drawn in the colour the design keeps for "look here" */
+.chart[data-flat='true'] .chart-bar {
+  background: linear-gradient(180deg, var(--external), color-mix(in srgb, var(--external) 30%, transparent));
+}
+
+.chart-value {
+  position: absolute;
+  top: -26px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--paper-dim);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-label {
+  flex: none;
+  margin-top: 10px;
+  text-align: center;
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+}
+
+.chart-caption {
+  margin-top: 22px;
+  color: var(--paper-dim);
+  font-size: var(--fs-md);
+}
+
+/* the truncation, admitted — set as the footnote it is, and far enough from the
+   caption that the two do not read as one paragraph */
+.chart-floor {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hair);
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.chart-caption strong {
+  color: var(--c-on-ground-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- the switch ---------- */
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 26px;
+  color: var(--paper-dim);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+.switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* likewise a control and not a card: its edge is the whole of its off state */
+.switch-track {
+  flex: none;
+  width: 50px;
+  height: 30px;
+  padding: 3px;
+  border: 1px solid var(--hair-control);
+  border-radius: var(--r-pill);
+  transition: background-color var(--dur-2) ease;
+}
+
+.switch-knob {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--paper-dim);
+  transition: transform var(--dur-2) var(--ease-out), background-color var(--dur-2) ease;
+}
+
+.switch input:checked + .switch-track {
+  background: var(--external);
+}
+
+.switch input:checked + .switch-track .switch-knob {
+  transform: translateX(20px);
+  background: var(--ink);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 2px solid var(--own);
+  outline-offset: 3px;
+}
+
+/* ---------- the big percentage ---------- */
+
+.opinion-demo-center {
+  text-align: center;
+}
+
+.big-pct {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-size: clamp(72px, 11vw, 132px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.big-pct-sign {
+  color: var(--paper-faint);
+  font-size: 0.4em;
+}
+
+.big-pct-label {
+  margin-top: 10px;
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.opinion-demo-center .chart-caption {
+  max-width: 42ch;
+  margin: 26px auto 0;
+  text-align: left;
+}
+
+/* ---------- import ---------- */
+
+.import-words .formats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.formats :where(span) {
+  padding: 6px 14px;
+  border: 1px solid var(--hair);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+
+.formats-note {
+  border: 0;
+  padding-left: 4px;
+  color: var(--paper-faint);
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin: 56px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 26px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+}
+
+.step-n {
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.step-say {
+  margin-top: auto;
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+  font-size: var(--fs-md);
+}
+
+.file-size {
+  color: var(--paper-faint);
+}
+
+/* real rows, not a screenshot of rows: they stay sharp, they take the palette,
+   and every one of them can be animated on its own */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--fs-sm);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  background: var(--c-wash-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.row b {
+  color: var(--paper-faint);
+  font-weight: 400;
+}
+
+.row i {
+  margin-left: auto;
+  font-style: normal;
+}
+
+.row-muted {
+  color: var(--paper-faint);
+}
+
+.tag {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--own) 16%, transparent);
+  color: var(--own);
+  font-style: normal;
+  font-size: var(--fs-sm);
+}
+
+.tag-muted {
+  background: var(--c-wash-1);
+  color: var(--paper-faint);
+}
+
+/* ---------- spending ---------- */
+
+.spend-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  gap: 56px;
+  align-items: center;
+  margin-top: 56px;
+  padding: 44px 48px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius);
+}
+
+.donut {
+  position: relative;
+}
+
+.donut svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* the slices are wider when active and would otherwise clip on the viewBox */
+  overflow: visible;
+}
+
+/* SVG circles start at 3 o'clock; a chart of a month starts at 12 */
+.ring {
+  transform: rotate(-90deg);
+  transform-origin: 100px 100px;
+}
+
+.ring-track {
+  fill: none;
+  stroke: var(--c-wash-1);
+  stroke-width: 30;
+}
+
+.slice {
+  fill: none;
+  stroke-width: 30;
+  cursor: pointer;
+  transition: stroke-width var(--dur-1) ease, opacity var(--dur-1) ease;
+}
+
+/* Dimming the others rather than only brightening the active one: on a ramp
+   that is already seven lightnesses, "brighter" is not a signal any single
+   slice can own. Absence of the rest is.
+   Driven by a class rather than by `:hover`, because the paths are not focusable
+   — the way in for a keyboard is the legend button, and a `:hover` rule would
+   leave that user with the readout changing under a ring that never reacted. */
+.ring.is-picking .slice {
+  opacity: 0.26;
+}
+
+/* Full white, and not the slice's own tone. At the dim end of the ramp
+   `0.24 × 1` is no brighter than `0.95 × 0.26` at the other end, so a highlight
+   made of the tone would be strongest on the slices that need it least and
+   invisible on the one being pointed at. The tone still identifies the slice at
+   rest and in the legend; the highlight is width, brightness and the readout. */
+.ring.is-picking .slice.is-on {
+  opacity: 1;
+  stroke: var(--c-on-ground-1);
+  stroke-width: 40;
+}
+
+/* the readout in the hole. Grid rather than flow so the three lines keep their
+   positions as the text under them changes length */
+.donut-mid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.donut-cat {
+  color: var(--paper-dim);
+  font-size: var(--fs-sm);
+}
+
+.donut-n {
+  font-size: var(--fs-2xl);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.donut-say {
+  max-width: 15ch;
+  color: var(--paper-faint);
+  font-size: var(--fs-sm);
+  line-height: 1.35;
+}
+
+.slices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* a button and not a div: hover is not available to a keyboard and does not
+   exist on a phone, and this row is the only way in for both */
+.slice-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-1) ease;
+}
+
+.slice-row.is-on {
+  background: var(--c-wash-1);
+}
+
+.slice-key {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-xs);
+}
+
+.slice-name {
+  flex: 1;
+}
+
+.slice-amt {
+  color: var(--paper-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.slice-pct {
+  min-width: 4ch;
+  color: var(--paper-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* min-height because this line swaps between two lengths and the CTA under it
+   should not jump while somebody is reading across the ring */
+.spend-say {
+  min-height: 3em;
+  max-width: 62ch;
+  margin-top: 26px;
+  color: var(--paper-dim);
+}
+
+.spend-say strong {
+  color: var(--c-on-ground-1);
+  font-weight: 600;
+}
+
+.spend-cta {
+  display: flex;
+  margin-top: 20px;
+}
+
+/* ---------- footer ---------- */
+
+.foot {
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 40px 24px 70px;
+  border-top: 1px solid var(--hair);
+  color: var(--paper-faint);
+  font-size: var(--fs-md);
+}
+
+.foot p {
+  max-width: 62ch;
+}
+
+.foot-links {
+  display: flex;
+  gap: 24px;
+  margin-top: 20px;
+}
+
+/* ---------- motion ---------- */
+
+/* 10px, not the 24 this kind of thing usually gets. The sites that do this best
+   displace by 2-3px and are done inside 200ms; the movement is meant to be
+   noticed peripherally and never waited for. A section is larger than a tile, so
+   this is a little more than theirs and still well under the usual. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/**
+ * Both conditions, and in this order. Without the @supports the animation is
+ * simply not applied and every element keeps the styles above, which are the
+ * finished ones — that is what makes this an enhancement rather than a dependency.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .opinion,
+    .step,
+    .import-words,
+    .spend-grid {
+      animation: rise linear both;
+      animation-timeline: view();
+      /**
+       * Both ends inside `entry`, and this is load-bearing rather than taste.
+       *
+       * `cover` runs from the element appearing to the element having left
+       * entirely, so any range expressed in it needs scroll distance BELOW the
+       * element to complete. The last cards on a page do not have any: at maximum
+       * scroll their progress is still near zero, `fill: both` holds them on the
+       * first keyframe, and they sit there at opacity 0 — permanently invisible,
+       * on the one part of the page a reader reaches by finishing it.
+       *
+       * `entry` ends when the element is fully in view, which happens to every
+       * element that can be seen at all. Finishing at 60% of it means the fade is
+       * over slightly before then, so nothing is still moving while it is being
+       * read.
+       */
+      animation-range: entry 5% entry 60%;
+    }
+
+    /**
+     * The three-card rows arrive as a wavefront rather than together, because
+     * they are a sequence — "1, 2, 3" for the steps, and the reading order for
+     * the facts.
+     *
+     * Offsetting the range, not `animation-delay`: a delay is a duration, and a
+     * scroll-driven animation has no duration to be late against. Moving the
+     * range start is the equivalent, and it stays tied to the scroll rather than
+     * to a clock.
+     */
+    .step:nth-child(2) {
+      animation-range: entry 11% entry 66%;
+    }
+
+    .step:nth-child(3) {
+      animation-range: entry 17% entry 72%;
+    }
+  }
+}
+
+/* Nothing here needs a transition to be correct, so under reduced motion they all
+   go — including the ones on the bar and the chart, which then simply cut to the
+   right shape. */
+@media (prefers-reduced-motion: reduce) {
+  .landing *,
+  .landing *::before,
+  .landing *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 900px) {
+  .opinion {
+    grid-template-columns: 1fr;
+    gap: 36px;
+    padding: 32px;
+  }
+
+  .opinion-reverse .opinion-words {
+    order: 0;
+  }
+
+  /* minmax(0, 1fr) and not 1fr: a bare `1fr` track is `minmax(auto, 1fr)`, and that
+     auto minimum is the widest thing inside it — the legend rows, whose name,
+     amount and percentage do not shrink. Below about 340px the grid was pushing
+     itself wider than the page. The desktop rule above always had the minmax; the
+     narrow override dropped it. */
+  .steps,
+  .hero-dials,
+  .spend-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* the ring stops being a column and becomes a figure above the list */
+  .spend-grid {
+    gap: 36px;
+    padding: 32px;
+    justify-items: center;
+  }
+
+  .donut {
+    width: 100%;
+    max-width: 300px;
+  }
+
+  .slices {
+    width: 100%;
+  }
+
+  .landing section {
+    padding-bottom: 96px;
+  }
+}
+
+@media (max-width: 620px) {
+  /* The 17px base that was here, and the 15px on the nav, are gone with the rest of
+     the sizes between 13 and 18: a phone is not a reason to set body copy a point
+     smaller, and the nav wraps now rather than being shrunk into fitting. */
+
+  /* The four links and the wordmark need about 420px of one line and a 360px phone
+     has 324 of them, so at the narrow end the row was 25px wider than the document
+     and the whole page scrolled sideways. Flex items with text in them cannot
+     shrink past their longest word, so nothing here was ever going to absorb it:
+     the row wraps instead, wordmark on top and the links under it. */
+  .nav {
+    flex-wrap: wrap;
+    row-gap: 14px;
+    padding: 20px 18px;
+  }
+
+  .nav nav {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .landing section {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .toggle {
+    width: 100%;
+  }
+
+  .toggle button {
+    flex: 1;
+  }
+}
