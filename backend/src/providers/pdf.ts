@@ -18,6 +18,7 @@
  */
 import { toCents } from '../money';
 import { CsvMapping, parseAmount } from './csv';
+import { ISSUERS, issuerName } from './issuer';
 import { loadPdfjs } from './pdfjsloader';
 import { Cell, Sheet, cellText } from './sheet';
 
@@ -121,7 +122,7 @@ const CELL_QUOTE_MAX = 24;
  * be called with numbers from the other side of the seam, which couples the two
  * modules for the sake of one file (row 6b, D2).
  *
- * The first two are what the document turned out not to be, the next three what the
+ * The first two are what the document turned out not to be, the next four what the
  * template list could not settle on, and the rest what a template found and could
  * not finish. Each says what to do instead, and none of them is a dead end: CSV and
  * Excel from the same online banking import today, which for as long as the
@@ -137,8 +138,24 @@ const ENCRYPTED =
 const NOT_A_PDF =
   'this file looks like a PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
 
-const NOT_RECOGNISED =
-  "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today";
+/**
+ * The half that says what to do instead, shared by both wordings so that the named
+ * refusal and the unnamed one cannot come to give different advice (row 30, Q4).
+ */
+const NOT_RECOGNISED_TAIL =
+  'layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today';
+
+const NOT_RECOGNISED = `this statement's ${NOT_RECOGNISED_TAIL}`;
+
+/**
+ * The same refusal, for a document that printed enough to say whose it is. The name is
+ * the institution `issuerName` read off the document's own every-page IBAN, never a
+ * template title (row 30, D-G): a title names a layout, this names a bank, and a
+ * redesigned layout at a bank the directory knows is refused BY that bank's name -
+ * which is §5.2's decay being loud rather than a bug to suppress.
+ */
+const notRecognisedFrom = (name: string): string =>
+  `this looks like a statement from ${name}, and its ${NOT_RECOGNISED_TAIL}`;
 
 const SCANNED =
   'this looks like a scan - this importer reads the text layer of a PDF and this one has none; download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
@@ -1066,6 +1083,17 @@ function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalanc
 }
 
 /**
+ * The document's text as issuerName reads it: one entry per page of the DOCUMENT,
+ * including a page that produced no lines at all, because that page is part of what
+ * "on every page" is counted against.
+ */
+const pageLines = (lines: TextLine[], pages: number): string[][] => {
+  const byPage: string[][] = Array.from({ length: pages }, () => []);
+  for (const line of lines) byPage[line.page - 1]?.push(line.items.map((i) => i.text).join(' '));
+  return byPage;
+};
+
+/**
  * Bytes to rows. maxPages is passed in rather than declared here so that it is read
  * beside the byte cap it does not replace (see SIZE_CAP in statement.ts).
  *
@@ -1086,7 +1114,14 @@ export async function readPdf(
   const { lines, pages, chars } = await readLines(bytes, maxPages);
 
   const template = selectTemplate(templates, lines);
-  if (!template) throw new Error(chars / pages < MIN_CHARS_PER_PAGE ? SCANNED : NOT_RECOGNISED);
+  if (!template) {
+    // two statements and not a ternary: a document with no text layer has nothing to
+    // read an issuer off and its advice does not change with one, so the scan is
+    // unreachable from that arm rather than merely wasted there
+    if (chars / pages < MIN_CHARS_PER_PAGE) throw new Error(SCANNED);
+    const name = issuerName(pageLines(lines, pages));
+    throw new Error(name === null ? NOT_RECOGNISED : notRecognisedFrom(name));
+  }
 
   const { rows, notes } = readRows(template, lines);
   if (rows.length === 0) throw new Error(noTransactionLines(template.title));
@@ -1361,7 +1396,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
  * Every sentence in the refusal set, composed at its own extreme out of every
  * template's own literals: the title a refusal names the layout by, the balance
  * labels it quotes back, the currency codes it declares and the example it offers,
- * against the widest cell a quote may hold and the widest count one may carry.
+ * against the widest cell a quote may hold and the widest count one may carry - and
+ * out of the issuer directory's own longest entry, for the one refusal that names a
+ * bank rather than a layout.
  *
  * Exported for the 'diagnostic budget' case in test/pdf.test.ts, like readSheet in
  * statement.ts and for the same reason. It composes rather than measures because a
@@ -1385,6 +1422,10 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
     ENCRYPTED,
     NOT_A_PDF,
     NOT_RECOGNISED,
+    // the real directory and never a placeholder: 'W'.repeat(n) bounds a constant
+    // nobody enforces, where the longest entry that actually ships bounds the data -
+    // so a long bank name added later has to move the number below
+    notRecognisedFrom(longest(Object.values(ISSUERS))),
     SCANNED,
     tooManyPages(found, found),
     ambiguousLayout(templates.map((t) => t.title)),
