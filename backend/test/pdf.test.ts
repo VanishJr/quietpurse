@@ -1392,6 +1392,42 @@ describe('pdf: what a template says about its gross totals', () => {
 });
 
 /**
+ * Two IBANs at bank codes the issuer directory carries, invented account and check
+ * digits and hand-written here rather than read off ISSUERS: a fixture composed from
+ * the rule's own literal goes on passing under every narrowing of that rule (row 034,
+ * D4). Nothing in either is anyone's account - the ten digits after the bank code are
+ * zeroes, and the eight the row turns on are public routing data.
+ */
+const IBANS = { c24: 'DE64500240240000000001', n26: 'DE65100110010000000002' } as const;
+
+/**
+ * A German layout nothing in the tree was measured against, over as many pages as the
+ * case wants, each printing whatever `lines` gives for it. Those lines are placed 12.3
+ * apart - six times TOLERANCE, the pitch the real C24 statement puts its IBAN and its
+ * BIC at - so a case can print the two the way the document does and get two lines,
+ * which is what the fixed-length slice has to survive.
+ */
+const unknownLayout = (pages: number, lines: (page: number) => string[]): PlacedText[][] =>
+  Array.from({ length: pages }, (_, i) => [
+    { x: 39.7, y: 780, text: 'Kontoauszug 06/2026' },
+    ...lines(i + 1).map((text, n) => ({ x: 45.4, y: 760 - n * 12.3, text })),
+    { x: 42.7, y: 700, text: 'Buchungstag' },
+    { x: 124.8, y: 700, text: 'Verwendungszweck' },
+    { x: 335.1, y: 700, text: 'Betrag' },
+    ...row(680, '02.07.2026', 'REWE SAGT DANKE', { debit: '-5,68' }),
+    { x: 39.7, y: 27.1, text: `Seite ${i + 1}` },
+  ]);
+
+const refusalOfPdf = async (bytes: Buffer): Promise<string> => {
+  try {
+    await readPdf(bytes, 200);
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+  throw new Error('did not refuse');
+};
+
+/**
  * Every refusal below needed the file opened, so every one leaves a `failed` import
  * with its document (statement.ts's band comment) - which is what makes the miss
  * diagnosable, and what ROADMAP 5.2 means by recording which template to build next.
@@ -1424,6 +1460,11 @@ describe('pdf: the refusals', () => {
       /this statement's layout is not one this importer recognises yet/,
     ],
     [
+      'a statement in a layout nobody has written a template for, from a bank it can name',
+      () => buildPdf(unknownLayout(2, () => [`IBAN: ${IBANS.c24}`, 'BIC: DEFFDEFFXXX'])),
+      /this looks like a statement from C24 Bank, and its layout is not one this importer recognises yet/,
+    ],
+    [
       'a statement in a known layout with no transaction lines in it',
       () => buildPdf([[ISSUER, ...header(700)]]),
       /looks like a Revolut statement but no transaction lines were found in it/,
@@ -1449,6 +1490,79 @@ describe('pdf: the refusals', () => {
   it('every one of them is a different sentence', () => {
     const sentences = cases.map(([, , message]) => message.source);
     expect(new Set(sentences).size).toBe(cases.length);
+  });
+});
+
+/**
+ * ROADMAP row 30. A layout no template matches is still somebody's statement, and the
+ * IBAN it prints carries the bank code, so the refusal can say whose - which is the
+ * difference between "this importer does not read this" and "this importer does not
+ * read C24 yet". Read against pdf.test's own seam rather than issuer.test's, because
+ * what this row ships is a sentence and not a boolean.
+ */
+describe('pdf: a refusal that names the bank', () => {
+  /**
+   * The measured shape of a real statement and the whole of the evidence for the rule:
+   * the account's own IBAN once on every page, a counterparty's twice a page on a
+   * subset - four occurrences against three. Under a most-frequent rule this document
+   * is named after the counterparty, which was measured happening in both directions
+   * on the two statements the row was built against.
+   */
+  it("names the account's bank and not the counterparty printed more often", async () => {
+    const message = await refusalOfPdf(
+      buildPdf(
+        unknownLayout(3, (page) => [
+          `IBAN: ${IBANS.n26}`,
+          ...(page <= 2 ? [`Empfänger: ${IBANS.c24}`, `Auftraggeber: ${IBANS.c24}`] : []),
+        ]),
+      ),
+    );
+    expect(message).toBe(
+      'this looks like a statement from N26 Bank Berlin, and its layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today',
+    );
+    expect(message).not.toContain('C24');
+  });
+
+  /**
+   * A page with no text layer is still a page of the document. Counted only over the
+   * pages that yielded lines, the IBAN on the two that did would be "on every page" -
+   * a denominator derived from the same data it checks.
+   */
+  it('counts a page that carries no text at all, and then names nothing', async () => {
+    const printed = unknownLayout(2, () => [`IBAN: ${IBANS.c24}`]);
+    expect(await refusalOfPdf(buildPdf(printed))).toContain('from C24 Bank');
+    expect(await refusalOfPdf(buildPdf([...printed, []]))).toBe(
+      "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today",
+    );
+  });
+
+  /**
+   * The scan is unreachable until selectTemplate has already answered, so a recognised
+   * statement cannot be diverted by what it prints. Pinned by consequence rather than
+   * by intention: the same document with three foreign IBANs added imports to exactly
+   * the rows it imports without them.
+   */
+  it('does not run at all on a statement a template claimed', async () => {
+    // past the credit column's right edge, so every cell of these lines is empty and
+    // the only thing they change about the document is that it prints IBANs. The
+    // directory-known one is on both pages, which is the exact shape that earns a
+    // name: if identity could reach template selection, this document would be refused
+    // as C24's rather than imported as the layout it is.
+    const elsewhere: PlacedText[] = [
+      IBANS.c24,
+      'LT711600000000000005',
+      'UA503220010000000000000000007',
+    ].map((iban, n) => ({ x: 520, y: 600 - n * 20, text: `IBAN: ${iban}` }));
+    const [plain = []] = statement('foreign ibans');
+
+    const control = await readPdf(buildPdf([plain, []]), 200);
+    const read = await readPdf(buildPdf([[...plain, ...elsewhere], elsewhere]), 200);
+
+    expect(read.template).toBe(control.template);
+    expect(read.title).toBe(control.title);
+    expect(read.balances).toEqual(control.balances);
+    expect(read.sheet.rows).toEqual(control.sheet.rows);
+    expect(read.sheet.rows).toHaveLength(4);
   });
 });
 
