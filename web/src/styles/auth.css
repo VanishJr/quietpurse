@@ -1,0 +1,680 @@
+/**
+ * The login / register screen, and nothing else.
+ *
+ * Kept out of styles.css and namespaced `.auth-*` on purpose: `.input`, `.btn`,
+ * `.title` and `.hint` are shared by every other screen, and this design disagrees
+ * with all four of them (60px boxes, 15px radii, 20px type). Restyling the shared
+ * classes to match would repaint the whole app.
+ *
+ * Every number here is measured off Figma design file, node 2008:79,
+ * whose frame is 1440x1024. The one class borrowed from styles.css is `.error` —
+ * the tests select on it — and it is only ever overridden under `.auth`.
+ *
+ * The frame is a split: photo left, form panel right. This is that frame without
+ * the photo — the panel is a card centred on the dark ground, and the two things
+ * that sat over the photo keep their corners.
+ *
+ * ---------------------------------------------------------------------------
+ * --s, and why every vertical number is a calc
+ *
+ * The frame is 1024 tall. A browser window is not: a maximised one on a 1080p
+ * screen leaves about 910 after the chrome, a windowed one far less. At the
+ * frame's own size the card plus a two-line refusal is ~906, so the page started
+ * scrolling the moment a refusal appeared - the form growing by two lines pushed
+ * a whole screen into motion, which is the wrong thing to move.
+ *
+ * So --s scales the form to the window's height, and every value that adds up to
+ * that height is written as `design px * var(--s)`. The design's numbers stay
+ * legible in the source, and their ratios survive: shrink the type without the
+ * gaps and the rhythm the frame was drawn with is gone.
+ *
+ * It comes in three parts. --band is the window's answer and the media queries at
+ * the foot of this file set it. --tab is the tab's: register carries a second name
+ * box, four password rules and a terms row the login tab does not, and stands a
+ * quarter taller, so it takes 0.75. One table sized for the taller tab would shrink
+ * the login screen - the one nearly every visit sees - to fit a page it is not on.
+ *
+ * --s is their product, floored at 0.8, and the floor is the third part.
+ *
+ * ---------------------------------------------------------------------------
+ * The floor, and why the guarantee stops here
+ *
+ * Unfloored, the product went where no amount of rhythm is worth following. On a
+ * 360x760 phone the narrow step takes --band to 0.74 and register multiplies it to
+ * 0.555: 11px labels, an 11px input, a 33px box, a 29px button and a 17px tick.
+ * Every input on both tabs sat under 16px, which is the width at which iOS zooms
+ * the page the moment somebody taps one - so the screen that must not scroll was
+ * arranging for the browser to scroll it, and doing it while unreadable.
+ *
+ * It is also what zoom does. The steps below key on `max-height` in CSS pixels, and
+ * browser zoom is a change in CSS pixels: zooming to 200% halves the window's CSS
+ * height, drops --band two or three steps, and shrinks the design by about the
+ * factor the zoom just magnified it. Someone who zooms in gets a smaller design at
+ * a larger size and nets almost nothing, which is what WCAG 1.4.4 is about.
+ *
+ * 0.8 is 16px of body type - the iOS threshold, and the smallest this design's 20px
+ * reads at. Below it the page scrolls instead, which `overflow-y: auto` on `.auth`
+ * has always been ready to do. The no-scroll guarantee is kept everywhere it can be
+ * had honestly and given up where the price was the form's legibility: a page that
+ * moves is a nuisance, and a form nobody can read is not a form.
+ *
+ * Horizontal values are not scaled - width is not what runs out - and neither are
+ * the icons, whose box and leaf sizes are the exported assets' own.
+ */
+
+/* The names below are this screen's, and what is behind them is tokens.css: the
+   frame's palette is the landing page's palette, and the two were being kept equal
+   by hand. The local name is what says which meaning is intended here — the same
+   #ECEEA9 that marks "not yours" on the landing marks "this box" on this screen. */
+.auth {
+  --auth-ink: var(--c-ground);
+  --auth-panel: var(--c-paper);
+  --auth-line: var(--c-line);
+  /* The same line, darkened for the one place it is read rather than seen: #7E7E7E
+     on white is 4.06:1 and a placeholder is text. This is 5.3:1. The borders keep
+     the frame's own colour - 4.06 is comfortably past the 3:1 an edge needs. */
+  --auth-placeholder: var(--c-line-strong);
+  --auth-muted: var(--c-ink-2);
+  --auth-bad: var(--c-danger);
+  /* the register frame's tick; --auth-bad is also its cross */
+  --auth-good: var(--c-good-paper);
+  /* the fill the design puts on the box the refusal is about */
+  --auth-wrong: var(--c-attention);
+  /* content column: 461px of column inside 618px of panel */
+  --auth-col: 461px;
+  /* the frame's own scale; the steps at the bottom of this file take it down */
+  --band: 1;
+  /* the tab's share, overridden by the two tall ones at the foot of this file */
+  --tab: 1;
+  /* 0.8 is 16px of the design's 20px body type - see the note above */
+  --s: max(0.8, calc(var(--band) * var(--tab)));
+
+  box-sizing: border-box;
+  height: 100%;
+  /* only when it is genuinely taller than the window - see the note above */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: calc(40px * var(--s)) 35px calc(28px * var(--s));
+  background: var(--auth-ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--c-ink);
+  line-height: normal;
+}
+
+.auth *,
+.auth *::before,
+.auth *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- the two things that used to sit over the photo ---------- */
+
+.auth-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  color: var(--c-on-ground-1);
+}
+
+.auth-logo {
+  margin: 0;
+  font-size: calc(32px * var(--s));
+  font-weight: 400;
+}
+
+/* an <a> since it acquired a destination, so it opens in a tab like any link */
+.auth-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: calc(22px * var(--s));
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.auth-back:hover {
+  text-decoration: underline;
+}
+
+/* ---------- the card ---------- */
+
+/* grows into whatever the bar left, and past it when the card is taller than the
+   window - `.auth` is what scrolls then, so the bar scrolls away with it rather
+   than the card being cut off */
+.auth-middle {
+  flex: 1 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(24px * var(--s)) 0;
+}
+
+.auth-panel {
+  width: 618px;
+  max-width: 100%;
+  padding: calc(56px * var(--s)) clamp(24px, 5.5vw, 78px);
+  border-radius: var(--r-xl);
+  background: var(--auth-panel);
+}
+
+.auth-col {
+  width: 100%;
+  max-width: var(--auth-col);
+  margin: 0 auto;
+}
+
+.auth-heading {
+  margin: 0;
+  font-size: calc(40px * var(--s));
+  font-weight: 500;
+  color: var(--c-ink);
+}
+
+.auth-sub {
+  margin: calc(14px * var(--s)) 0 0;
+  font-size: calc(20px * var(--s));
+  color: var(--auth-muted);
+}
+
+/* 34px between groups is the design's rhythm, and the error block inherits it */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: calc(34px * var(--s));
+  margin-top: calc(37px * var(--s));
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Name and Last name: 220 + 21 + 220 is the frame's 461. Written as fractions
+   rather than the two 220s, because the column gives up its 461 on a narrow
+   window and two fixed halves would not follow it. */
+.auth-names {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 21px;
+}
+
+/* Password box, the rules under it and the terms row: 26px apart in the frame,
+   not the form's 34. One flex child of the form, so the 34 still lands either
+   side of the block and the 26 only inside it. */
+.auth-tight {
+  display: flex;
+  flex-direction: column;
+  gap: calc(26px * var(--s));
+}
+
+/* ---------- what the password still needs ---------- */
+
+/* 34px of pitch between rows of 24 leaves 10 */
+.auth-rules {
+  display: flex;
+  flex-direction: column;
+  gap: calc(10px * var(--s));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* the colour is the icon's - the sentence sets its own below and keeps #595959
+   in both states, which is how the frame draws all four of them */
+.auth-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--auth-bad);
+}
+
+.auth-rule.is-met {
+  color: var(--auth-good);
+}
+
+/* Nothing typed, so nothing is wrong yet. The frame only ever draws this list
+   against a filled password, so the empty box is a state it does not decide -
+   and four red crosses over one is an accusation where the list is meant to be
+   advice. Grey is #7E7E7E, the frame's own line colour, not a fourth invented
+   one; the marks take their two colours the moment there is something to judge. */
+.auth-rules.is-untouched .auth-rule {
+  color: var(--auth-line);
+}
+
+.auth-rule-text {
+  font-size: calc(20px * var(--s));
+  color: var(--auth-muted);
+}
+
+/* The icons are aria-hidden, so without this the four rules reach a screen reader
+   as four requirements with no word on which are already met - the one thing the
+   list is for. */
+.auth-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.auth-label {
+  margin-bottom: calc(11px * var(--s));
+  font-size: calc(20px * var(--s));
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.auth-input {
+  width: 100%;
+  height: calc(60px * var(--s));
+  padding: 0 20px;
+  border: 1px solid var(--auth-line);
+  border-radius: calc(15px * var(--s));
+  background: var(--c-paper-hi);
+  color: var(--auth-ink);
+  font: inherit;
+  font-size: calc(20px * var(--s));
+}
+
+.auth-input::placeholder {
+  color: var(--auth-placeholder);
+}
+
+.auth-input:focus-visible {
+  outline: 2px solid var(--auth-ink);
+  outline-offset: 2px;
+  border-color: var(--auth-ink);
+}
+
+.auth-input:disabled {
+  opacity: 0.6;
+}
+
+/* the box the refusal is about */
+.auth-input.is-wrong {
+  background: var(--auth-wrong);
+}
+
+/* Chrome paints an autofilled box its own lavender and ignores `background`. It
+   is a login form, so nearly every real visit arrives autofilled - the design
+   would be seen only by people typing their address by hand. box-shadow is the
+   one property autofill does not override. */
+.auth-input:-webkit-autofill,
+.auth-input:-webkit-autofill:hover,
+.auth-input:-webkit-autofill:focus {
+  box-shadow: inset 0 0 0 100px var(--c-paper-hi);
+  -webkit-text-fill-color: var(--auth-ink);
+  caret-color: var(--auth-ink);
+  /* autofill also drops the field back to the UA font */
+  font: inherit;
+  font-size: calc(20px * var(--s));
+}
+
+.auth-input.is-wrong:-webkit-autofill,
+.auth-input.is-wrong:-webkit-autofill:hover,
+.auth-input.is-wrong:-webkit-autofill:focus {
+  box-shadow: inset 0 0 0 100px var(--auth-wrong);
+}
+
+/* ---------- the six code boxes ---------- */
+
+/* 6 * 54 + 5 * 9 = the frame's 369, inside the column's 461. They shrink below
+   54 and never grow past it: the row is the one place in this design where the
+   width really can run out, and six boxes that wrap are not a code. */
+.auth-code {
+  display: flex;
+  gap: 9px;
+}
+
+/* 12px, and it is the only radius in this design that is not the inputs' 15 */
+.auth-code-box {
+  flex: 1 1 54px;
+  min-width: 0;
+  max-width: 54px;
+  height: calc(60px * var(--s));
+  padding: 0;
+  border: 1px solid var(--auth-line);
+  border-radius: calc(12px * var(--s));
+  background: var(--c-paper-hi);
+  color: var(--auth-ink);
+  font: inherit;
+  font-size: calc(20px * var(--s));
+  text-align: center;
+}
+
+.auth-code-box:focus-visible {
+  outline: 2px solid var(--auth-ink);
+  outline-offset: 2px;
+  border-color: var(--auth-ink);
+}
+
+.auth-code-box:disabled {
+  opacity: 0.6;
+}
+
+/* ---------- the password box and its eye ---------- */
+
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+}
+
+/* 29px of icon, 20px of it to the box's right edge, 8px of air before the text */
+.auth-input-wrap .auth-input {
+  padding-right: 57px;
+}
+
+.auth-eye {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-ink);
+  cursor: pointer;
+}
+
+.auth-eye:focus-visible {
+  outline: 2px solid var(--auth-ink);
+  outline-offset: 3px;
+  border-radius: var(--r-xs);
+}
+
+/* No opacity for the pressed state any more: the register frame (2009:278) draws
+   the crossed-out eye beside a password in plain text, so the design has both
+   glyphs and the button swaps them instead of dimming one. */
+
+/* ---------- remember me / forgot password / terms ---------- */
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  font-size: calc(20px * var(--s));
+  color: var(--auth-muted);
+  cursor: pointer;
+}
+
+.auth-check input,
+.auth-terms input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: calc(30px * var(--s));
+  height: calc(30px * var(--s));
+  margin: 0;
+  border: 2px solid var(--auth-line);
+  border-radius: calc(8px * var(--s));
+  background: var(--c-paper-hi);
+  cursor: pointer;
+}
+
+/* no checked state in the design; the box takes the ink and the tick is white */
+.auth-check input:checked,
+.auth-terms input:checked {
+  border-color: var(--auth-ink);
+  background: var(--auth-ink)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M2.5 8.5L6 12L13.5 4.5' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / calc(18px * var(--s)) calc(18px * var(--s)) no-repeat;
+}
+
+.auth-check input:focus-visible,
+.auth-terms input:focus-visible {
+  outline: 2px solid var(--auth-ink);
+  outline-offset: 2px;
+}
+
+.auth-terms {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* 600, which is the one weight the login frame never asked for. A <label> over the
+   whole sentence, so the box is named by all of it: the three underlined words are
+   text rather than a control, and there is nothing inside here to be clicked by
+   accident on the way to ticking it. That changes back when a terms document
+   exists and they become a real link. */
+.auth-terms-text {
+  font-size: calc(20px * var(--s));
+  font-weight: 600;
+  color: var(--auth-muted);
+  cursor: pointer;
+}
+
+/* Line 5 in the frame underlines these three words and not the four before them */
+.auth-terms-link {
+  color: var(--auth-ink);
+  text-decoration: underline;
+}
+
+.auth-muted-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--auth-muted);
+  font: inherit;
+  font-size: calc(20px * var(--s));
+  cursor: pointer;
+}
+
+.auth-muted-link:hover {
+  text-decoration: underline;
+}
+
+/* ---------- submit, and the way to the other tab ---------- */
+
+.auth-submit {
+  width: 100%;
+  height: calc(52px * var(--s));
+  border: 0;
+  border-radius: calc(29px * var(--s));
+  background: var(--auth-ink);
+  color: var(--c-on-ground-1);
+  font: inherit;
+  font-size: calc(20px * var(--s));
+  cursor: pointer;
+}
+
+.auth-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.auth-submit:focus-visible {
+  outline: 2px solid var(--auth-ink);
+  outline-offset: 3px;
+}
+
+.auth-foot {
+  margin: calc(37px * var(--s)) 0 0;
+  text-align: center;
+  font-size: calc(20px * var(--s));
+  color: var(--auth-muted);
+}
+
+.auth-foot button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-ink);
+  font: inherit;
+  font-size: calc(20px * var(--s));
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-foot button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---------- the screen after the reset ---------- */
+
+/* The one screen with no frame behind it: the Figma file draws the reset and
+   stops. Built from what the other five are built from - the rules list's tick,
+   the heading, the sub and the submit - and centred, which none of the others
+   are. A hero mark over a left-aligned column reads as a bullet beside nothing,
+   and there is no form here for the left edge to line anything up with. */
+.auth-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* the tick sits where a form's first label would, at the form's own 34 */
+.auth-done .auth-heading {
+  margin-top: calc(34px * var(--s));
+}
+
+.auth-done .auth-submit {
+  margin-top: calc(37px * var(--s));
+}
+
+/* the icon's stroke is currentColor and `.auth` sets that to #000, so without
+   this the one green thing on the screen is black */
+.auth-mark {
+  display: inline-flex;
+  color: var(--auth-good);
+}
+
+/* ---------- the refusal ---------- */
+
+/* .error is styles.css's, and every other screen still gets that one. Scoped here
+   because the tests select `.error` and the sentence must keep the class. */
+.auth .error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--auth-bad);
+  font-size: calc(20px * var(--s));
+  font-weight: 500;
+}
+
+/* ---------- the tab's share of the scale ---------- */
+
+/* Measured, not guessed: at scale 1 the tallest ordinary login state is 904px and
+   the same state on register is 1201px. 904/1201 is 0.75.
+
+   It was 0.91 while register carried one extra field. The register frame
+   (2012:698) adds a second name box - free, it sits beside the first - and then
+   the four password rules and the terms row, which are 204px this tab has and the
+   other does not. So the same guarantee now costs a quarter rather than a tenth:
+   20px type on login, 15px on register, and the step between the tabs is visible
+   where it used to be barely there.
+
+   Kept, because the guarantee is the one this whole file exists for - the page must
+   not begin scrolling at the moment a refusal appears - but no longer kept at any
+   price: the floor on --s wins wherever the product would go under 0.8, and this
+   tab is where it does so first. On a window under about 1130px tall the register
+   screen is floored and scrolls, which is the trade the note at the top explains. */
+.auth[data-mode='register'] {
+  --tab: 0.75;
+}
+
+/* Reset Password, measured the same way: 1060px at scale 1 against login's 904,
+   which is 0.85. It carries two password boxes and the four rules between them,
+   so it lands between login and register — and, like register, it is a screen
+   somebody meets once rather than the one nearly every visit sees. */
+.auth[data-mode='reset'] {
+  --tab: 0.85;
+}
+
+/* Forgot Password and Check your Email! take the band unchanged: 711px and 811px
+   at scale 1, both inside login's 904, so there is nothing to buy by shrinking
+   them. */
+
+/* ---------- the steps ---------- */
+
+/* Each band is sized so that tallest ordinary state - both boxes filled, a
+   two-line refusal - still fits at the SHORT end of the band, not just the tall
+   end: 908 * band <= the next boundary down. Getting this wrong is invisible
+   until a refusal appears, which is the one moment the page must not move. */
+@media (max-height: 940px) {
+  .auth {
+    --band: 0.94;
+  }
+}
+
+@media (max-height: 860px) {
+  .auth {
+    --band: 0.85;
+  }
+}
+
+@media (max-height: 780px) {
+  .auth {
+    --band: 0.77;
+  }
+}
+
+@media (max-height: 700px) {
+  .auth {
+    --band: 0.7;
+  }
+}
+
+@media (max-height: 640px) {
+  .auth {
+    --band: 0.64;
+  }
+}
+
+/* Narrow, where the card gives up its 618 and takes the width. The scale drops
+   too: the type was drawn for a 461px column and this is not one. Placed after
+   the height steps so it wins where both apply. */
+@media (max-width: 760px) {
+  .auth {
+    --band: 0.85;
+    padding: 24px 20px;
+  }
+
+  .auth-panel {
+    padding: calc(40px * var(--s)) 24px;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 760px) {
+  .auth {
+    --band: 0.74;
+  }
+}
+
+/* the row breaks before the two halves collide, and so does the name pair - two
+   boxes of ~180 hold a first name and stop holding a surname */
+@media (max-width: 420px) {
+  .auth-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .auth-names {
+    grid-template-columns: 1fr;
+    gap: calc(34px * var(--s));
+  }
+}
