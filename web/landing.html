@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the landing is pinned to the auth screen's palette, the way that screen is
+         pinned to the design's: it is one dark ground either side of the button -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#010710" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Finto — how much do you need to earn to support yourself?</title>
+    <meta
+      name="description"
+      content="A personal finance tracker for money that lives in more than one currency. Imports your bank statements, converts every transaction at the rate on its own date, and keeps what you earned separate from the support you receive."
+    />
+    <meta name="robots" content="index, follow" />
+
+    <!-- The share card, minus the two tags that need to know where this is deployed:
+         og:url and og:image are absolute by definition, and a guessed domain is
+         worse than a missing tag — it is a wrong tag that looks right. Same for
+         <link rel="canonical">. Whoever deploys this adds the three together. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Finto" />
+    <meta
+      property="og:title"
+      content="Finto — how much do you need to earn to support yourself?"
+    />
+    <meta
+      property="og:description"
+      content="A personal finance tracker for money that lives in more than one currency. Every transaction converted at the rate on its own date, and what you earned kept separate from the support you receive."
+    />
+    <meta name="twitter:card" content="summary" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/landing/main.tsx"></script>
+  </body>
+</html>
