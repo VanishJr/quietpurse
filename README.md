@@ -7,6 +7,8 @@
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
+[![CI](https://github.com/VanishJr/finto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VanishJr/finto/actions/workflows/ci.yml)
+
 A personal finance tracker built around one question: **how much do I need to earn to
 support myself?** It pulls transactions from several banks, converts everything to a single
 currency, and works out the self-sufficiency threshold.
