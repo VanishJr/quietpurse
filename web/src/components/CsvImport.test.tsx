@@ -264,7 +264,12 @@ describe('the summary panel', () => {
       'POST /api/imports': () =>
         ok(
           summaryResult({
-            balances: { opening: 387.40, closing: 579.85, currency: 'EUR', series: 2 },
+            balances: {
+              opening: 387.40,
+              closing: 579.85,
+              currency: 'EUR',
+              series: { summed: 2, checked: 2 },
+            },
           }),
         ),
     });
@@ -282,7 +287,12 @@ describe('the summary panel', () => {
       'POST /api/imports': () =>
         ok(
           summaryResult({
-            balances: { opening: 72.40, closing: 134.85, currency: 'EUR', series: 1 },
+            balances: {
+              opening: 72.40,
+              closing: 134.85,
+              currency: 'EUR',
+              series: { summed: 1, checked: 1 },
+            },
           }),
         ),
     });
@@ -291,6 +301,92 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 134\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
+    expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * Row 63, and the reason the count above was half the truth: a running balance of a
+   * single row is one link, and one link cannot break. The pair is still shown — it is
+   * true, and the closing of a one-row run is a cell the user can find — and the claim
+   * shrinks to the runs the check could have failed on. On the owner's real export
+   * that is one of two, and the unchecked one is four fifths of both numbers here.
+   */
+  it('names the part of a derived pair that nothing could check', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            balances: {
+              opening: 387.40,
+              closing: 579.85,
+              currency: 'EUR',
+              series: { summed: 2, checked: 1 },
+            },
+          }),
+        ),
+    });
+    const { container } = mount();
+    await upload(container);
+    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+      /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it\./,
+    );
+    // the unqualified claim, which is true of neither of these two numbers
+    expect(screen.queryByText(/The rows read run unbroken/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * And where every run is a single row, nothing ran: the lead-in gives way with the
+   * claim, because "Checked against" in front of a pair nothing checked re-acquires
+   * the completeness claim through the front of the sentence while the back of it
+   * disclaims it. The numbers stay — they are what the file states.
+   */
+  it('claims no run at all for a statement whose every run is one row', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            balances: {
+              opening: 387.40,
+              closing: 511.72,
+              currency: 'EUR',
+              series: { summed: 2, checked: 0 },
+            },
+          }),
+        ),
+    });
+    const { container, unmount } = mount();
+    await upload(container);
+    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+      /Read from the 2 running balances this statement states, added together: 387\.40 EUR at the start, 511\.72 EUR at the end\. Each of them states a single row, so nothing here was checked\./,
+    );
+    expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Checked against/)).not.toBeInTheDocument();
+    unmount();
+
+    // the degenerate one: one row, one running balance, and no second balance anywhere
+    // in the file for it to have been compared against
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            balances: {
+              opening: 72.40,
+              closing: 66.72,
+              currency: 'EUR',
+              series: { summed: 1, checked: 0 },
+            },
+          }),
+        ),
+    });
+    const single = mount();
+    await upload(single.container);
+    expect(await screen.findByText(/Read from the statement/)).toHaveTextContent(
+      /72\.40 EUR at the start, 66\.72 EUR at the end\. It states a single row, so nothing here was checked\./,
+    );
+    expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
   });
 

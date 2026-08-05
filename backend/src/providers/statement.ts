@@ -257,18 +257,37 @@ export type CheckedTotals = readonly { currency: string; net: number }[] & {
   readonly [checked]: true;
 };
 
+/**
+ * How many running balances a derived pair was summed from, and how many of those the
+ * check could have failed on.
+ *
+ * Nested rather than a count beside an optional second count, for the reason
+ * CsvPresetMapping.balance is nested: a pair carries both numbers or is not a derived
+ * pair at all, so "we summed N and checked M" is a type rather than a convention two
+ * blocks have to keep. A half-filled one does not compile.
+ *
+ * `checked` counts the runs of more than one link. A run of one link has no junction -
+ * no balance value the file had to state as one row's post and the next one's pre - so
+ * there is nothing for the check to compare, and runsAsOne cannot return `broken` for
+ * it whatever the row says: one link with pre != post is a path always, and pre == post
+ * is the circuit exit. On the owner's real July export that is 1 of 2, and the
+ * unchecked one supplies 315.00 of the 387.40 opening and 445.00 of the 579.85 closing.
+ */
+export type SeriesCounts = { summed: number; checked: number };
+
 export type CheckedBalances = {
   opening: number;
   closing: number;
   currency: string;
   /**
-   * How many running balances the pair was summed from, when it was derived from
-   * them at all. Absent means the document printed the pair itself, which is the PDF
-   * path and can never be a count: there is one balance box and it is not a series.
-   * So the field says two things at once and both are facts about where the numbers
-   * came from - the client needs the second to know which sentence is true of them.
+   * Which running balances the pair was summed from: how many, and how many of those
+   * were checked by anything. Absent means the document printed the pair itself, which
+   * is the PDF path and can never be a count: there is one balance box and it is not a
+   * series. So the field says two things at once and both are facts about where the
+   * numbers came from - the client needs the second to know which sentence is true of
+   * them.
    */
-  series?: number;
+  series?: SeriesCounts;
 } & { readonly [checked]: true };
 
 /**
@@ -1602,7 +1621,14 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   // the fact the discriminator exists to carry
   let covered = [...coveredRuns].some((key) => !running.has(key));
 
-  const pairs: { openingCents: number; closingCents: number; currency: string }[] = [];
+  // `links` rides along because how much of the run the verdict could have failed on is
+  // a fact about the run and is gone by the time the pairs are summed
+  const pairs: {
+    openingCents: number;
+    closingCents: number;
+    currency: string;
+    links: number;
+  }[] = [];
   let incomplete = false;
   let circuit = false;
   for (const [key, run] of running) {
@@ -1621,7 +1647,7 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
       );
     }
     if (verdict.kind === 'circuit') circuit = true;
-    else pairs.push({ ...verdict, currency: run.currency });
+    else pairs.push({ ...verdict, currency: run.currency, links: run.links.length });
   }
   if (incomplete) return { kind: 'unusable', reason: 'rows-without-a-balance' };
   if (covered) return { kind: 'unusable', reason: 'rows-outside-the-balance' };
@@ -1632,12 +1658,18 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   }
   const currencies = new Set(pairs.map((p) => p.currency));
   if (currencies.size !== 1) return { kind: 'unusable', reason: 'more-than-one-currency' };
+  // Both counts are defined here and at no other exit, which is what makes them agree
+  // about their denominator. Every exit above is a whole-file one - one incomplete,
+  // covered or endpointless run takes the entire file to `unusable` - so by the time
+  // this returns, every run produced exactly one pair and every pair is a path.
+  // `summed` is therefore the count this field has carried since row 54, unmoved, and
+  // a circuit is in neither number because a circuit never reaches here at all.
   return {
     kind: 'checked',
     openingCents: pairs.reduce((sum, p) => sum + p.openingCents, 0),
     closingCents: pairs.reduce((sum, p) => sum + p.closingCents, 0),
     currency: pairs[0].currency,
-    series: pairs.length,
+    series: { summed: pairs.length, checked: pairs.filter((p) => p.links > 1).length },
   };
 }
 
@@ -1655,7 +1687,7 @@ type SheetBalances =
       openingCents: number;
       closingCents: number;
       currency: string;
-      series: number;
+      series: SeriesCounts;
     }
   | { kind: 'unusable'; reason: BalancesNotShown };
 

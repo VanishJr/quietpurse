@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { GENERIC_PRESET_TITLE, importStatusLabel, importStatusNote, readAsSentence } from './imports';
+import {
+  balanceClaim,
+  GENERIC_PRESET_TITLE,
+  importStatusLabel,
+  importStatusNote,
+  readAsSentence,
+} from './imports';
 import { ReadAs, ReadColumns } from './types';
 
 describe('importStatusLabel', () => {
@@ -34,6 +40,81 @@ describe('importStatusNote', () => {
     expect(importStatusNote('committed', null)).toBeNull();
     expect(importStatusNote('failed', 'the file is not a spreadsheet')).toBeNull();
     expect(importStatusNote('reparsing', null)).toBeNull();
+  });
+});
+
+describe('balanceClaim', () => {
+  /** The PDF: the document printed both ends, so the rows between them add up to it. */
+  it('claims the arithmetic when the document stated the pair itself', () => {
+    expect(balanceClaim(undefined)).toEqual({
+      lead: "Checked against the statement's own balances: ",
+      claim: 'The rows add up.',
+    });
+  });
+
+  /**
+   * A derived pair every run of which had an interior. The claim is the run and never
+   * the statement: both ends come out of these same rows, so a row lost from an END
+   * moves an end instead of breaking anything (054, D12).
+   */
+  it('claims the run, and not the statement, when every run was checked', () => {
+    expect(balanceClaim({ summed: 1, checked: 1 })).toEqual({
+      lead: "Checked against the statement's own balances: ",
+      claim: 'The rows read run unbroken from one to the other.',
+    });
+    expect(balanceClaim({ summed: 3, checked: 3 })).toEqual({
+      lead: 'Checked against the 3 running balances this statement states, added together: ',
+      claim: 'The rows read run unbroken from one to the other.',
+    });
+  });
+
+  /**
+   * The owner's real July export: two products under one balance column, one of them
+   * a single row. 315.00 of that opening and 445.00 of that closing were compared with
+   * nothing, and before row 63 the card said the rows ran unbroken from one to the
+   * other without qualification.
+   */
+  it('says how many of the runs were checked when only some could be', () => {
+    expect(balanceClaim({ summed: 2, checked: 1 })).toEqual({
+      lead: 'Checked against the 2 running balances this statement states, added together: ',
+      claim:
+        '1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it.',
+    });
+    // and more than one of either, which is where both halves have to agree with the
+    // arithmetic rather than with the singular case they were written against
+    expect(balanceClaim({ summed: 5, checked: 2 }).claim).toBe(
+      '2 of them run unbroken from one to the other; the other 3 state a single row each, so nothing could check them.',
+    );
+  });
+
+  /**
+   * Nothing ran, so the lead-in may not say it did either. "Checked against" in front
+   * of a pair nothing checked makes the completeness claim through the front of the
+   * sentence while the back of it takes it back, which is the whole thing 054's ruling
+   * stands against.
+   */
+  it('drops the lead-in as well as the claim when nothing was checked', () => {
+    expect(balanceClaim({ summed: 1, checked: 0 })).toEqual({
+      lead: "Read from the statement's own balances: ",
+      claim: 'It states a single row, so nothing here was checked.',
+    });
+    expect(balanceClaim({ summed: 2, checked: 0 })).toEqual({
+      lead: 'Read from the 2 running balances this statement states, added together: ',
+      claim: 'Each of them states a single row, so nothing here was checked.',
+    });
+  });
+
+  /** No arm of it may say the rows ran, because in none of them did they. */
+  it('says "run unbroken" in no arm where nothing was checked', () => {
+    for (const series of [
+      { summed: 1, checked: 0 },
+      { summed: 2, checked: 0 },
+      { summed: 9, checked: 0 },
+    ]) {
+      const { lead, claim } = balanceClaim(series);
+      expect(`${lead}${claim}`).not.toContain('run unbroken');
+      expect(`${lead}${claim}`).not.toContain('Checked against');
+    }
   });
 });
 

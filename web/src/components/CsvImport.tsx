@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney } from '../format';
-import { GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
+import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
 import {
   Account,
   BalancesNotShown,
@@ -272,6 +272,13 @@ export function CsvImport({ onBack, onImported }: Props) {
    * With this, the two paragraphs partition the accepted rows exactly.
    */
   const alreadyPresent = summary && confirmed ? summary.alreadyPresent : 0;
+  /**
+   * The pair the backend checked these rows against, and the sentence that says how
+   * much of it it actually reached. Derived here rather than in the card because the
+   * lead-in and the claim are two ends of one sentence, decided by one value.
+   */
+  const balances = summary?.balances ?? null;
+  const balanceLine = balances ? balanceClaim(balances.series) : null;
 
   return (
     <section>
@@ -516,25 +523,23 @@ export function CsvImport({ onBack, onImported }: Props) {
             the numbers below can be a sum the user will find in no single cell, and
             why the sentence says how many were added. A file that states neither
             gets no line: a "couldn't be reconciled" warning about nothing.
+
+            Both halves of the sentence come from balanceClaim, and the claim is where
+            the two checks part company. A PDF states both ends itself, and "the rows
+            add up" is exactly what was verified. A running balance states neither end
+            — both are derived from these same rows, so a row missing from either END
+            of the statement moves an end instead of breaking the run and is invisible
+            here. The sentence may claim the run, and may not claim the statement is
+            complete. And it may claim only the runs it could have failed on: a series
+            of one row is one link, which no verdict can break, so a pair summed over
+            it rests on a check that could not have caught anything (row 63).
           */}
-          {summary.balances && (
+          {balances && balanceLine && (
             <p className="hint" style={{ marginTop: 6 }}>
-              {(summary.balances.series ?? 1) > 1
-                ? `Checked against the ${summary.balances.series} running balances this statement states, added together: `
-                : "Checked against the statement's own balances: "}
-              {fmtMoney(summary.balances.opening, summary.balances.currency)} at the start,{' '}
-              {fmtMoney(summary.balances.closing, summary.balances.currency)} at the end.{' '}
-              {/*
-                Two different checks, so two different claims. A PDF states both ends
-                itself, and "the rows add up" is exactly what was verified. A running
-                balance states neither end — both are derived from these same rows, so
-                a row missing from either END of the statement moves an end instead of
-                breaking the run and is invisible here. The sentence may claim the run,
-                and may not claim the statement is complete.
-              */}
-              {summary.balances.series === undefined
-                ? 'The rows add up.'
-                : 'The rows read run unbroken from one to the other.'}
+              {balanceLine.lead}
+              {fmtMoney(balances.opening, balances.currency)} at the start,{' '}
+              {fmtMoney(balances.closing, balances.currency)} at the end.{' '}
+              {balanceLine.claim}
             </p>
           )}
           {summary.balancesNotShown && (

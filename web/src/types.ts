@@ -138,6 +138,17 @@ export type BalancesNotShown =
   | 'balance-closes-on-itself'
   | 'more-than-one-currency';
 
+/**
+ * How many running balances a derived pair was summed from, and how many of those the
+ * backend's check could have failed on. A run of one row states one balance and has no
+ * second one to agree with, so nothing about it was compared — which is what separates
+ * "checked" from "summed" and is the only reason both numbers are sent.
+ *
+ * Nested, so a pair carries both or is not a derived pair. Hand-written against
+ * providers/statement.ts like the rest of this file.
+ */
+export type SeriesCounts = { summed: number; checked: number };
+
 /** date, amount and description: the three slots every reader fills, and no others. */
 export interface ReadColumns {
   date: string;
@@ -205,12 +216,13 @@ export interface ImportSummary {
    * balance a CSV or Excel file prints per row. Never a check that failed: a break
    * is refused, so no summary is sent for one.
    *
-   * `series` is how many running balances the pair was summed from, and it is absent
-   * exactly when the document printed the pair itself. So it says two things at once
-   * and both decide the sentence: whether the numbers are a sum the user will not
-   * find in any cell, and which of the two checks was actually run.
+   * `series` is which running balances the pair was summed from — how many, and how
+   * many of those were checked by anything — and it is absent exactly when the
+   * document printed the pair itself. So it says three things at once and all of them
+   * decide the sentence: whether the numbers are a sum the user will not find in any
+   * cell, which of the two checks was run, and how much of the pair it reached.
    */
-  balances?: { opening: number; closing: number; currency: string; series?: number };
+  balances?: { opening: number; closing: number; currency: string; series?: SeriesCounts };
   /**
    * Why no pair is shown for a file that DOES state a running balance. Absent
    * together with `balances` means the format states none, and the two must not read
