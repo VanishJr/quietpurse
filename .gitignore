@@ -13,6 +13,11 @@ Strategy.md
 ROADMAP.md
 DEBT.md
 docs/
+# what the auth redesign needs from a server that cannot do it yet, and the decisions
+# taken while drawing it. A working note on the same footing as the plan above: the
+# comments in AuthScreen.tsx and auth.css cite it by section, and it is deliberately
+# not travelling with them.
+REDESIGN-BACK-DEBT.md
 
 # agent pipeline. The mechanism is published - how a task is run, the four agent
 # definitions, the six commands - and the material a task produces is not: briefs and
