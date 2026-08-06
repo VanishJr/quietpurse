@@ -277,8 +277,12 @@ const detailed = (tag: string): PlacedText[][] => {
   return [drawn];
 };
 
-const importPdf = (accountName: string, pages: PlacedText[][], preset?: string) =>
-  importStatement({ accountName, currency: 'EUR', bytes: buildPdf(pages), preset });
+const importPdf = (
+  accountName: string,
+  pages: PlacedText[][],
+  preset?: string,
+  currency = 'EUR',
+) => importStatement({ accountName, currency, bytes: buildPdf(pages), preset });
 
 /** The import row a refused upload left, and the message it recorded. */
 async function lastFailure(before: string[]): Promise<{
@@ -419,7 +423,9 @@ describe('pdf: bytes to rows', () => {
           ...row(580, '3 июл. 2026г.', 'Проценты', { credit: '0,05€' }),
         ],
       ]),
-    ).rejects.toThrow(/has a table this importer cannot read \("Дата начисления"\)/);
+    ).rejects.toThrow(
+      /this Revolut statement has a table this importer cannot read \("Дата начисления"\)/,
+    );
 
     const failed = await lastFailure(before);
     expect(failed.status).toBe('failed');
@@ -753,7 +759,7 @@ describe('pdf: the reconciliation gate', () => {
     [
       'no balance summary at all',
       [],
-      /could not read its balance summary: it expects exactly one "Итого" line and found 0/,
+      /this Revolut statement has a balance summary this importer could not read: it expects exactly one "Итого" line and found 0/,
     ],
     [
       'two of them',
@@ -768,12 +774,12 @@ describe('pdf: the reconciliation gate', () => {
       // it must not be read as 1 200,00 by a laxer pattern
       'an opening balance this template cannot read',
       box(640, '1200,00€', '5,68€', '0,00€', '59,76€'),
-      /the opening balance cell of its "Итого" line reads "1200,00€", where this template reads an amount like "1 234,56€"/,
+      /this Revolut statement's opening balance cell reads "1200,00€" on its "Итого" line, where this template reads an amount like "1 234,56€"/,
     ],
     [
       'a closing balance that is not there',
       box(640, '1 200,00€', '5,68€', '0,00€', ''),
-      /the closing balance cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+      /this Revolut statement's closing balance cell reads "" on its "Итого" line, where this template reads an amount like "1 234,56€"/,
     ],
     [
       // and the two cells this row added, which refuse the same way and after the
@@ -781,7 +787,7 @@ describe('pdf: the reconciliation gate', () => {
       // the sentence it refused with before
       'an outgoing total that is not there',
       box(640, '1 200,00€', '', '0,00€', '94,32€'),
-      /the outgoing total cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+      /this Revolut statement's outgoing total cell reads "" on its "Итого" line, where this template reads an amount like "1 234,56€"/,
     ],
     [
       // and the ordering itself, which every case above leaves free: each breaks
@@ -791,7 +797,7 @@ describe('pdf: the reconciliation gate', () => {
       // reader to the wrong column
       'a closing balance and an outgoing total both gone',
       box(640, '1 200,00€', '', '0,00€', ''),
-      /the closing balance cell of its "Итого" line reads "", where this template reads an amount like "1 234,56€"/,
+      /this Revolut statement's closing balance cell reads "" on its "Итого" line, where this template reads an amount like "1 234,56€"/,
     ],
   ];
 
@@ -1027,7 +1033,7 @@ const twin = (id: string, title: string): PdfTemplate => ({
   amount: {
     pattern: /^([+-]\d+,\d{2})([^\s\d]+)$/u,
     decimal: ',',
-    currency: { '€': 'EUR' },
+    currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
     example: '-1,00€',
   },
   rows: { kind: 'one-line' },
@@ -1263,7 +1269,7 @@ describe('pdf: the second layout', () => {
       page.map((t) => (t.text === '+2.415,77€' ? { ...t, text: '2.415,77€' } : t)),
     );
     await expect(importPdf('N26 Unsigned Balance', pages)).rejects.toThrow(
-      /the opening balance cell of its "Dein alter Kontostand" line reads "2\.415,77€", where this template reads an amount like "-1\.234,56€"/,
+      /this N26 statement's opening balance cell reads "2\.415,77€" on its "Dein alter Kontostand" line, where this template reads an amount like "-1\.234,56€"/,
     );
   });
 
@@ -1298,12 +1304,12 @@ describe('pdf: the second layout', () => {
       amount: {
         pattern: /^([+-]\d+,\d{2})([^\s\d]+)$/u,
         decimal: ',',
-        currency: { '€': 'EUR', '£': 'GBP' },
+        currency: { kind: 'in-the-cell', symbols: { '€': 'EUR', '£': 'GBP' } },
         example: '-1,00€',
       },
     };
     await expect(readPdf(twinDoc('+10,00€', '+9,00£', '-1,00€', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
-      'this looks like a Two Symbols statement but its opening balance ("Anfang") is stated in' +
+      'this Two Symbols statement\'s opening balance ("Anfang") is stated in' +
         ' EUR and its closing balance ("Ende") in GBP - this importer cannot check a statement' +
         ' that mixes currencies',
     );
@@ -1312,9 +1318,564 @@ describe('pdf: the second layout', () => {
     // (row 035, D4): a gross total in a second currency is the same hazard, and
     // the sentence names it by what it is rather than calling it a balance
     await expect(readPdf(twinDoc('+10,00€', '+9,00€', '-1,00£', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
-      'this looks like a Two Symbols statement but its opening balance ("Anfang") is stated in' +
+      'this Two Symbols statement\'s opening balance ("Anfang") is stated in' +
         ' EUR and its outgoing total ("Raus") in GBP',
     );
+  });
+
+  /**
+   * The `two-lines` half of what the one-line box has had pinned since row 035, and
+   * the arm the third layout brought into use: readBalances reads opening, closing,
+   * then the gross pair, in that fixed order, so a box broken in more than one place
+   * goes on refusing with the sentence it refused with before. A refusal blaming a
+   * subtotal where the balance is what drifted sends the reader to the wrong column.
+   *
+   * Every other case on this arm breaks exactly one cell, so a reader taking the
+   * gross pair first would pass all of them. Nothing structural holds the order -
+   * it is statement order inside a switch - so this was SEEN RED rather than merely
+   * written: with the two `read` calls in readBalances' two-lines arm reordered to
+   * take the gross pair before the closing balance, it fails with "this Two Layouts
+   * statement's outgoing total cell reads "" on its "Raus" line".
+   */
+  it('a two-lines box broken in two places refuses by the balance, not the subtotal', async () => {
+    await expect(
+      readPdf(twinDoc('+1,00€', '', '', '+0,00€'), 200, [twin('order', 'Two Layouts')]),
+    ).rejects.toThrow(
+      'this Two Layouts statement\'s closing balance cell reads "" on its "Ende" line',
+    );
+  });
+});
+
+// ---------- the third layout (ROADMAP row 31) ----------
+
+/**
+ * The coordinates the two universalbank templates are measured at, one literal each
+ * so a case that places a cell outside its column has to say so.
+ *
+ * Split into what the two locales share and what they cannot, and the split is the
+ * layout's own: every column here is CENTRED, so both edges of a cell move with the
+ * text and the left edge a span assigns on is a function of how wide the words
+ * happen to be. The two files print the same numbers and different words, so the
+ * three read columns have identical centres and different left edges - which is why
+ * `date`, `time` and `tail` are per locale and the amount column's three are not.
+ *
+ * `ukWrap` is the second baseline of the Ukrainian date heading, and it is the
+ * reason that span stops at 41 rather than at the time's 42.022.
+ */
+const U = {
+  bank: 220.466,
+  /** the balance box's labels, and every left-hand line of the client block */
+  margin: 28.346,
+  description: 99.598,
+  descriptionHeading: 103.239,
+  mcc: 191.25,
+  /** the three amount left edges measured, widest value to narrowest */
+  amountWide: 225.188,
+  amount: 229.94,
+  amountNarrow: 234.944,
+  opAmount: 286.3,
+  running: 523.071,
+} as const;
+
+const UK = {
+  date: 37.018,
+  dateHeading: 37.765,
+  /** "операції", the date heading's own second baseline: outside the date span */
+  wrap: 41.041,
+  time: 42.022,
+  /** where a wrapped description's tail is drawn, on the time baseline */
+  tail: 104.751,
+  mccHeading: 191.012,
+  /** how far below its dated line this locale draws the time */
+  pitch: 10.8,
+  opening: 154.426,
+  closing: 147.703,
+  grossOut: 133.789,
+  grossIn: 154.786,
+} as const;
+
+const EN = {
+  date: 39.519,
+  dateHeading: 33.319,
+  time: 43.967,
+  tail: 113.255,
+  descriptionHeading: 115.495,
+  mccHeading: 192.15,
+  /** the fragment of "Card currency amount, (UAH)" that lands on the header's own
+   * baseline, between amount values at 228.303 and 228.599 - no boundary excludes it */
+  amountHeading: 228.307,
+  pitch: 9.6,
+  opening: 197.5,
+  closing: 170.554,
+  grossOut: 183.046,
+  grossIn: 176.539,
+} as const;
+
+/**
+ * What the DATE heading may spend, and it is the tightest budget in this file.
+ *
+ * The real document draws "Дата i час" as ONE text item at x=37.765, inside a column
+ * that has to stop at 41 to keep "операції" - that same heading's second baseline -
+ * out at 41.041. This fixture's font advances one point per character per point of
+ * size and pdfjs splits a placed run at every space, so at the default 9 the string
+ * comes back as three items at 37.765, 82.765 and 100.765: the date cell reads
+ * "Дата", the header line matches no table, and the whole document is refused. At
+ * 0.5 it still reads "Дата i". At 0.4 the three land at 37.765, 39.765 and 40.565,
+ * cellAt joins them, and the cell reads what the document reads with 0.435 spare.
+ * "Date and time" needs 0.964 and takes the same constant.
+ *
+ * No other heading needs it: "Деталі операції" from 103.239 puts its second fragment
+ * at 166.239, well inside the description column's [50, 190).
+ */
+const UA_HEADING_SIZE = 0.4;
+
+/**
+ * And what every other cell of this layout may spend, which is the budget BOX_SIZE's
+ * comment measures for the other layout. It buys two different things, because this
+ * fixture's font is roughly ten times wider than the generator's and that goes wrong
+ * in two directions.
+ *
+ * A cell that carries a SPACE is split by pdfjs at every space, and each fragment is
+ * assigned to a column by its own left edge - so a label has to END inside its
+ * column, not merely start there. From the margin at x=28.346 the longest of the
+ * eight balance labels, "Balance at the beginning of the period:", puts its last
+ * fragment at 190.346 at the default 9, so the label cell reads "Balance at the" and
+ * "beginning of the period:" lands in the VALUE column; at 4 it is 140.346, still
+ * past `label: [0, 133)` - which is the size the Ukrainian labels fit at and the
+ * English ones do not; at 3, 124.346; at 2, 92.346, which is forty points and twenty
+ * characters of headroom. The deposit-guarantee footer line is the other tight one
+ * and clears the description column's 190 at 2 alone.
+ *
+ * A cell with a WIDE NEIGHBOUR fails the other way, and the MCC cell is the one that
+ * does: "4789" at the default 9 runs from 191.250 to 227.250, which is 16 points
+ * into the amount column, and pdfjs joins it to the amount beside it into a single
+ * item at the MCC's own x. The amount cell then reads empty, the row is skipped, and
+ * the statement fails the gate by exactly that row - measured, not imagined. In the
+ * real document that cell ends at 211.266 with 14 points to spare.
+ *
+ * Two cells need none of this, and saying which is what stops the next reader
+ * dropping the size everywhere and losing the reason: an amount fragments to two
+ * runs that both stay inside [215, 272) at the default size, and so does a box value
+ * inside [133, 596) - even at the narrowest label's x of 133.789, where the first
+ * fragment has 0.789 of the column to spare.
+ */
+const UA_SIZE = 2;
+
+/**
+ * The Ukrainian file's heading block: six baselines, of which exactly one carries
+ * the date and description headings together and is therefore the only one that can
+ * be the table header. On that baseline the amount column is EMPTY, because its own
+ * heading wraps across the four others - which is what the template declares as `''`
+ * and what this fixture has to reproduce, or the declaration is untested.
+ */
+const ukHeading = (y: number): PlacedText[] => [
+  { x: UK.dateHeading, y, text: 'Дата i час', size: UA_HEADING_SIZE },
+  { x: U.descriptionHeading, y, text: 'Деталі операції' },
+  { x: UK.mccHeading, y, text: 'MCC' },
+  { x: 229.724, y: y + 5.669, text: 'Сума в', size: UA_SIZE },
+  { x: 229.949, y: y - 5.131, text: 'валюті' },
+  // 0.041 outside the date column, which is the whole of what keeps this baseline
+  // from being read as a date cell
+  { x: UK.wrap, y: y - UK.pitch, text: 'операції' },
+  { x: 230.543, y: y - 15.931, text: 'картки' },
+  { x: 232.451, y: y - 26.731, text: '(UAH)' },
+];
+
+/**
+ * The English file's, which is eight baselines and one genuinely marginal thing: the
+ * header line is THREE baselines 2.514 apart merged into one, and 2.514 is past
+ * TOLERANCE. They are one line only because readLines seeds a line at the first
+ * item's y and never re-centres it, so the middle baseline has to be emitted first -
+ * which is what the real generator does. The header items are placed first here for
+ * exactly that reason, and reordering them below the other two splits this header
+ * into three lines that match no table.
+ *
+ * That merge is what gives this locale's header its fourth cell: "currency", a
+ * fragment of the amount column's own heading, which is the template's `amount`
+ * heading and the reason its fingerprint is the stronger of the two.
+ */
+const enHeading = (y: number): PlacedText[] => [
+  { x: EN.dateHeading, y, text: 'Date and time', size: UA_HEADING_SIZE },
+  { x: EN.descriptionHeading, y, text: 'Description' },
+  { x: EN.mccHeading, y, text: 'MCC' },
+  { x: 523.245, y, text: 'Balance' },
+  { x: 278.763, y: y + 1.417, text: 'Operation' },
+  { x: EN.amountHeading, y: y - 1.097, text: 'currency' },
+  { x: 236.087, y: y + 8.503, text: 'Card' },
+  { x: 229.655, y: y - 10.697, text: 'amount,' },
+  { x: 233.867, y: y - 20.297, text: '(UAH)' },
+];
+
+/**
+ * One transaction: ten cells on one baseline, and the TIME on a baseline of its own
+ * below it, in the same centred column as the date. The two are told apart by 5.0
+ * points of left edge and nothing else - a coincidence of "dd.mm.yyyy" being 45.0
+ * wide and "hh:mm:ss" 35.0 - so a case that moves either one is moving the thing the
+ * date column's right boundary rests on.
+ *
+ * `tail` is a wrapped description's continuation, drawn on that same time baseline
+ * with no label of any kind. It is the reason this layout takes `continuations`.
+ */
+const uaRow = (
+  L: typeof UK | typeof EN,
+  y: number,
+  date: string,
+  time: string,
+  description: string,
+  amount: string,
+  x = U.amount,
+  tail?: string,
+): PlacedText[] => [
+  { x: L.date, y, text: date },
+  { x: U.description, y, text: description, size: UA_SIZE },
+  { x: U.mcc, y, text: '4789', size: UA_SIZE },
+  { x, y, text: amount },
+  { x: U.opAmount, y, text: '-1.00' },
+  { x: U.running, y, text: '0.00' },
+  { x: L.time, y: y - L.pitch, text: time },
+  ...(tail ? [{ x: L.tail, y: y - L.pitch, text: tail, size: UA_SIZE }] : []),
+];
+
+/** One line of the balance box: its label at the margin, its value in one column. */
+const uaBalance = (y: number, label: string, x: number, value: string): PlacedText[] => [
+  { x: U.margin, y, text: label, size: UA_SIZE },
+  { x, y, text: value, size: UA_SIZE },
+];
+
+/**
+ * What the layout writes BELOW its transactions, which is the whole of what taking
+ * `continuations` obliges a template author to enumerate - and the three mechanisms
+ * that keep it out of a description are three different things, only one of which
+ * the template declares.
+ *
+ * Dropped by label: the signature line and the two deposit-guarantee lines. All
+ * three write in the description column with the date and amount cells empty, which
+ * is a continuation's exact shape, on the page of the transaction above them.
+ *
+ * Held by the description span: four more lines the real document writes as one text
+ * item each at the left margin, with nothing in the description column at all. This
+ * fixture's font cannot draw a sentence as one item - it splits at every space and
+ * the tail would land in a column - so what is placed is the one thing the rule
+ * turns on, a run whose left edge is outside every column this template reads.
+ *
+ * Held by NOTHING the template declares: the ЕЦП verification paragraph, in the
+ * Ukrainian file only. It wraps far enough right to write into the amount column, so
+ * `blank()` refuses it - and a generator that reflowed that paragraph would land it
+ * in a description with nothing refusing. Placed at the left edges the real line
+ * writes at, so a case notices if that stops being true. It is deliberately NOT in
+ * the drop list: a label matched against a line nobody has seen is 6c D17 finding
+ * 2's near miss.
+ */
+const ukFooter = (): PlacedText[] => [
+  { x: 65.941, y: 516.867, text: 'Операційний директор', size: UA_SIZE },
+  { x: U.margin, y: 421.887, text: 'Документ', size: UA_SIZE },
+  { x: 47.795, y: 412.287, text: 'перевірки', size: UA_SIZE },
+  { x: 88.94, y: 412.287, text: 'підпису', size: UA_SIZE },
+  { x: 219.472, y: 412.287, text: 'можете', size: UA_SIZE },
+  { x: 106.433, y: 26.501, text: 'Вклади гарантуються відповідно до Закону', size: UA_SIZE },
+  { x: 103.661, y: 16.901, text: 'Детальна інформація - у Довідці', size: UA_SIZE },
+];
+
+/**
+ * The same three labelled lines in English. This locale's verification paragraph is
+ * one run at the margin rather than a wrapped one, so it is held by the description
+ * span where the Ukrainian file's is held by `blank()`: two files, two different
+ * accidents, one drop list.
+ */
+const enFooter = (): PlacedText[] => [
+  { x: 76.642, y: 703.767, text: 'Operating Director', size: UA_SIZE },
+  { x: U.margin, y: 608.787, text: 'The', size: UA_SIZE },
+  { x: 94.997, y: 26.501, text: 'Deposits are guaranteed subject to the Law', size: UA_SIZE },
+  { x: 128.409, y: 16.901, text: 'Details in the Reference to guarantee', size: UA_SIZE },
+];
+
+/**
+ * Two pages, laid out as the real document lays them out: the balance box is printed
+ * ABOVE the table header, so readRows reaches those four lines while `table` is
+ * still null and can never take one for a continuation. A fixture that put the box
+ * under the transactions would be testing a different document.
+ *
+ * The three amounts are invented and so are the three descriptions; the coordinates
+ * are not. -500.25 + 1 200.00 - 75.50 nets +624.25, which takes the 1 000.00 opening
+ * to the 1 624.25 closing below, and the two halves are 575.75 out and 1 200.00 in -
+ * arithmetic done on these literals and never read back off the parser.
+ */
+const ukStatement = (tag: string, closing = '1 624.25 UAH'): PlacedText[][] => [
+  [
+    { x: U.bank, y: 815.269, text: 'АТ «УНІВЕРСАЛ БАНК»' },
+    { x: U.margin, y: 752.778, text: 'Рух коштів по картці від 01.08.2026р.' },
+    ...uaBalance(507.422, 'Баланс на початок періоду:', UK.opening, '1 000.00 UAH'),
+    ...uaBalance(493.922, 'Баланс на кінець періоду:', UK.closing, closing),
+    ...uaBalance(466.249, 'Сума витрат за період:', UK.grossOut, '575.75 UAH'),
+    ...uaBalance(452.749, 'Сума зарахувань за період:', UK.grossIn, '1 200.00 UAH'),
+    ...ukHeading(412.112),
+    ...uaRow(UK, 368.631, '28.07.2026', '02:16:38', 'Кавʼярня', '-500.25', U.amount, 'на Хрещатику'),
+    ...uaRow(UK, 341.081, '27.07.2026', '15:50:41', 'Зарахування', '1 200.00', U.amountWide),
+    // what makes one case's bytes differ from the next's, in the running-balance
+    // column because that is the one place a tag of ANY length is safe: at the left
+    // margin its second word fragments into the description column and is appended
+    // to the last transaction on the page - measured, with "happy path" landing
+    // "path" on a description - and every column right of `amount` is read by
+    // nothing. The balance box cannot pick it up either: its label cell is empty, so
+    // `only()` never selects this line
+    { x: U.running, y: 15, text: tag, size: UA_SIZE },
+  ],
+  [
+    ...ukHeading(808.506),
+    ...uaRow(UK, 765.025, '26.07.2026', '13:19:38', 'Аптека', '-75.50', U.amountNarrow),
+    ...ukFooter(),
+  ],
+];
+
+/** The same statement in the other locale, at the other locale's own coordinates. */
+const enStatement = (tag: string, closing = '1 624.25 UAH'): PlacedText[][] => [
+  [
+    { x: U.bank, y: 815.269, text: 'UNIVERSAL BANK JSC' },
+    { x: U.margin, y: 744.378, text: 'Cash flow on the card from 01.08.2026.' },
+    ...uaBalance(499.022, 'Balance at the beginning of the period:', EN.opening, '1 000.00 UAH'),
+    ...uaBalance(485.522, 'Balance at the end of the period:', EN.closing, closing),
+    ...uaBalance(457.849, 'Amount of expenses for the period:', EN.grossOut, '575.75 UAH'),
+    ...uaBalance(444.349, 'Amount of charges for the period:', EN.grossIn, '1 200.00 UAH'),
+    ...enHeading(401.737),
+    ...uaRow(EN, 368.631, '28.07.2026', '02:16:38', 'Coffee', '-500.25', U.amount, 'on Khreshchatyk'),
+    ...uaRow(EN, 341.081, '27.07.2026', '15:50:41', 'Transfer', '1 200.00', U.amountWide),
+    // what makes one case's bytes differ from the next's, in the running-balance
+    // column because that is the one place a tag of ANY length is safe: at the left
+    // margin its second word fragments into the description column and is appended
+    // to the last transaction on the page - measured, with "happy path" landing
+    // "path" on a description - and every column right of `amount` is read by
+    // nothing. The balance box cannot pick it up either: its label cell is empty, so
+    // `only()` never selects this line
+    { x: U.running, y: 15, text: tag, size: UA_SIZE },
+  ],
+  [
+    ...enHeading(806.531),
+    ...uaRow(EN, 765.025, '26.07.2026', '13:19:38', 'Pharmacy', '-75.50', U.amountNarrow),
+    ...enFooter(),
+  ],
+];
+
+/**
+ * Page 1 as readLines produces it, for the selection rules. Hand-built rather than
+ * read back off buildPdf, because what these have to carry is the two halves of a
+ * fingerprint - the issuer terms and a `collect` header at the template's own
+ * x-intervals - and nothing else.
+ */
+const ukLines: TextLine[] = [
+  { page: 1, y: 815.269, items: [{ x: U.bank, text: 'АТ «УНІВЕРСАЛ БАНК»' }] },
+  { page: 1, y: 752.778, items: [{ x: U.margin, text: 'Рух коштів по картці від 01.08.2026р.' }] },
+  {
+    page: 1,
+    y: 412.112,
+    items: [
+      { x: UK.dateHeading, text: 'Дата i час' },
+      { x: U.descriptionHeading, text: 'Деталі операції' },
+      { x: UK.mccHeading, text: 'MCC' },
+    ],
+  },
+];
+
+const enLines: TextLine[] = [
+  { page: 1, y: 815.269, items: [{ x: U.bank, text: 'UNIVERSAL BANK JSC' }] },
+  { page: 1, y: 744.378, items: [{ x: U.margin, text: 'Cash flow on the card from 01.08.2026.' }] },
+  {
+    page: 1,
+    y: 401.737,
+    items: [
+      { x: EN.dateHeading, text: 'Date and time' },
+      { x: EN.descriptionHeading, text: 'Description' },
+      { x: EN.mccHeading, text: 'MCC' },
+      { x: EN.amountHeading, text: 'currency' },
+    ],
+  },
+];
+
+describe('pdf: the third layout', () => {
+  /**
+   * The axis this row added, seen working: the amount cells carry no currency at all
+   * and the template supplies UAH, while the balance cells in the same document
+   * carry the ISO code inside the same run and are read by the same pattern. One
+   * anchored pattern whose group 2 was the currency could not have read both.
+   */
+  it('reads a statement whose amount cells carry no currency', async () => {
+    const staged = await importPdf('Universal Uk', ukStatement('happy path'), undefined, 'UAH');
+    expect(staged.outcome).toBe('awaiting_confirmation');
+    if (staged.outcome !== 'awaiting_confirmation') return;
+
+    expect(staged.summary).toMatchObject({
+      total: 3,
+      accepted: 3,
+      skipped: 0,
+      problems: [],
+      from: '2026-07-26',
+      to: '2026-07-28',
+      totals: [{ currency: 'UAH', net: 624.25 }],
+      balances: { opening: 1000, closing: 1624.25, currency: 'UAH' },
+    });
+  });
+
+  it('reads the same statement in the other locale, under the other title', async () => {
+    const st = await readPdf(buildPdf(enStatement('en happy path')), 200);
+    expect(st.template).toBe('universalbank-en');
+    expect(st.title).toBe('UNIVERSAL BANK JSC');
+    expect(st.balances).toEqual({
+      openingCents: 100000,
+      closingCents: 162425,
+      gross: { kind: 'printed', outgoingCents: -57575, incomingCents: 120000 },
+      currency: 'UAH',
+    });
+    // the sign came out of the cell; the currency came out of the template
+    expect(st.sheet.rows.slice(1).map((r) => [r[1], r[3]])).toEqual([
+      [-500.25, 'UAH'],
+      [1200, 'UAH'],
+      [-75.5, 'UAH'],
+    ]);
+
+    // and this locale's own drop list, which until now nothing in the file read: 35 of
+    // its 72 real rows carry an unlabelled tail, so it is the arm where a wrong rule
+    // does the most damage - and a drift in it lengthens a description while every
+    // assertion above stays byte-identical. Composed off the template, the way the uk
+    // case is, because a copied list goes on passing against a rule that has moved.
+    const en = TEMPLATES.find((t) => t.id === 'universalbank-en')!;
+    const drop = en.rows.kind === 'continuations' ? en.rows.drop : [];
+    expect(drop).toHaveLength(3);
+    const descriptions = st.sheet.rows.slice(1).map((r) => String(r[2]));
+    // the control, and it is not decorative: the loop below is just as green under a
+    // rule that drops EVERYTHING, wrapped tail included. This line is what makes
+    // "Coffee on Khreshchatyk" prove the tail was kept while the footer was not.
+    expect(descriptions).toEqual(['Coffee on Khreshchatyk', 'Transfer', 'Pharmacy']);
+    for (const description of descriptions) {
+      for (const label of drop) expect(description).not.toContain(label);
+    }
+  });
+
+  /**
+   * Trap 3, and the invariant nothing else in this file holds for these two: the
+   * locales share an issuer, a card and an account, so a fingerprint that fell back
+   * to any of those would make `matches` true for both and `selectTemplate` throw
+   * ambiguousLayout on a correct document - a statement that never imports. Run over
+   * the whole of TEMPLATES rather than a pair, because what has to hold is that
+   * exactly one of the four claims each file.
+   */
+  it('each locale is claimed by its own template and by no other', () => {
+    expect(selectTemplate(TEMPLATES, ukLines)?.id).toBe('universalbank-uk');
+    expect(selectTemplate(TEMPLATES, enLines)?.id).toBe('universalbank-en');
+    for (const lines of [ukLines, enLines]) {
+      expect(TEMPLATES.filter((t) => selectTemplate([t], lines) !== undefined)).toHaveLength(1);
+    }
+  });
+
+  /**
+   * The form both real documents arrive in: this bank exports its statement inside a
+   * CMS envelope, so `%PDF-` sits at byte 71 and row 33's branch is what classifies
+   * it. Classify, store, parse, rows - the wrapped path whole, on this layout.
+   */
+  it('imports one inside a signed container, end to end', async () => {
+    const imported = await importAndConfirm({
+      accountName: 'Universal Wrapped',
+      currency: 'UAH',
+      bytes: buildSignedContainer(buildPdf(ukStatement('wrapped'))),
+    });
+    expect(imported.inserted).toBe(3);
+    const record = (await listImports()).find((i) => i.id === imported.importId)!;
+    expect(record.sourceType).toBe('pdf');
+  });
+
+  it('a table this layout does not name refuses the document', async () => {
+    const pages = ukStatement('unknown table');
+    // the marker heading, on a line whose other headings are not this template's
+    pages[0].push(
+      { x: UK.dateHeading, y: 300, text: 'Дата', size: UA_HEADING_SIZE },
+      { x: U.descriptionHeading, y: 300, text: 'Деталі операції' },
+    );
+    await expect(importPdf('Universal New Table', pages, undefined, 'UAH')).rejects.toThrow(
+      /this АТ «УНІВЕРСАЛ БАНК» statement has a table this importer cannot read \("Дата"\)/,
+    );
+  });
+
+  /**
+   * The continuation rule in BOTH directions, which is what taking the permissive
+   * arm owes. The tail of a wrapped description is drawn on the time baseline with
+   * no label at all and has to be kept; the three footer lines have the same shape,
+   * on the same page as the transaction above them, and have to be dropped.
+   *
+   * The expectation is composed from the template's OWN drop literals rather than
+   * copied, the way the n26 near-miss case is: a copy drifts, and the case then goes
+   * on passing against a rule that is no longer there. The tail is the control - it
+   * is placed the same way and it IS appended, so a footer line that is absent is
+   * absent because the template dropped it and not because the line was never a
+   * candidate.
+   */
+  it('keeps an unlabelled wrapped tail and drops the footer the template names', async () => {
+    const uk = TEMPLATES.find((t) => t.id === 'universalbank-uk')!;
+    const drop = uk.rows.kind === 'continuations' ? uk.rows.drop : [];
+    expect(drop).toHaveLength(3);
+
+    const r = await importAndConfirm({
+      accountName: 'Universal Continuations',
+      currency: 'UAH',
+      bytes: buildPdf(ukStatement('continuations')),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(rows.sort()).toEqual(['Аптека', 'Зарахування', 'Кавʼярня на Хрещатику']);
+    for (const description of rows) {
+      for (const label of drop) expect(description).not.toContain(label);
+      // and the paragraph no label names, which only `blank()` keeps out
+      expect(description).not.toContain('підпису');
+    }
+  });
+
+  /**
+   * The trailing " UAH" in the pattern is a literal and not " [A-Z]{3}", and this is
+   * the difference: a balance printed in another currency has to refuse loudly. A
+   * three-letter group would have read this cell as 1 000.00 UAH and imported a
+   * dollar statement as hryvnia, which is the silent-wrong-money outcome the whole
+   * module exists to refuse.
+   */
+  it('a balance cell in another currency is refused rather than read as the column one', async () => {
+    const pages = ukStatement('foreign balance').map((page) =>
+      page.map((t) => (t.text === '1 000.00 UAH' ? { ...t, text: '1 000.00 USD' } : t)),
+    );
+    await expect(importPdf('Universal Foreign Balance', pages, undefined, 'UAH')).rejects.toThrow(
+      /this АТ «УНІВЕРСАЛ БАНК» statement's opening balance cell reads "1 000.00 USD" on its "Баланс на початок періоду:" line/,
+    );
+  });
+});
+
+/**
+ * What AmountCurrency's type cannot hold, and this row's whole reason for widening
+ * it rather than nesting group 2 onto something that happened to match.
+ *
+ * `currency: { '': 'UAH' }` type-checks, and under it every cell this parser could
+ * not read resolves to a currency anyway - a silent wrong number where the module's
+ * entire job is a loud refusal. A key that is one punctuation character is the same
+ * defect wearing a key, and a non-empty/no-whitespace/no-digit rule passes it. So the
+ * rule is positive instead: a currency symbol is currency signs or letters - "€",
+ * "£", "zł", "EUR" - and a per-column code is the ISO 4217 literal the template
+ * supplies in place of reading one, which is three uppercase letters or it is not a
+ * code.
+ *
+ * SEEN RED under all three forms - the empty key, the punctuation key and a symbols
+ * map with nothing in it - each written into universalbank-uk in turn.
+ */
+describe('pdf: where a template says an amount currency comes from', () => {
+  it('says it fully, on whichever arm it takes', () => {
+    expect(TEMPLATES.length).toBeGreaterThan(0);
+    for (const t of TEMPLATES) {
+      const { currency } = t.amount;
+      if (currency.kind === 'in-the-cell') {
+        const symbols = Object.entries(currency.symbols);
+        expect(symbols.length, `${t.id} declares no symbol at all`).toBeGreaterThan(0);
+        for (const [symbol, code] of symbols) {
+          expect(symbol, `${t.id} symbol`).toMatch(/^[\p{Sc}\p{L}]+$/u);
+          expect(code, `${t.id} code for ${symbol}`).toMatch(/^[A-Z]{3}$/u);
+        }
+      } else {
+        expect(currency.code, `${t.id} column code`).toMatch(/^[A-Z]{3}$/u);
+      }
+    }
   });
 });
 
@@ -1467,7 +2028,7 @@ describe('pdf: the refusals', () => {
     [
       'a statement in a known layout with no transaction lines in it',
       () => buildPdf([[ISSUER, ...header(700)]]),
-      /looks like a Revolut statement but no transaction lines were found in it/,
+      /this Revolut statement has no transaction lines in it/,
     ],
   ];
 
@@ -1956,17 +2517,27 @@ describe('the diagnostic budget', () => {
    * below, which is the point - the same measurement written into a comment in pdf.ts
    * would simply stop being true (row 6c, D5, and rows 6a D14 / 6b D2 / 6b D10).
    *
-   * 310 before row 035 and 316 after it, and what moved it is the label pool: a
-   * two-lines box now declares four labels rather than two, so n26-de's longest is
-   * "Einkommende Transaktionen" where it was "Dein alter Kontostand" - 24 characters
-   * after `quote`'s own bound cuts it, against 21, twice over. The longest sentence
-   * is still mixedBalanceCurrencies for N26, and the two role words it carries are
-   * unchanged at 15 each.
+   * 310 before row 035, 316 after it, and 313 now. Row 035 moved it by widening the
+   * label pool - a two-lines box declares four labels rather than two, so n26-de's
+   * longest became "Einkommende Transaktionen" - and row 31 moved it twice more, in
+   * opposite directions. R-D's head shortened all five builders and by five different
+   * amounts, because each sentence spends the head differently: measured at n26-de's
+   * own literals, unreadableTable -20, noTransactionLines -24, noBalanceBox -15,
+   * unreadableBalance -19 and mixedBalanceCurrencies -19, which puts the two shipped
+   * templates' longest at 297. The third layout then adds 16 back.
+   *
+   * The longest sentence is still mixedBalanceCurrencies and it has moved template:
+   * universalbank-uk. Every one of those 16 characters is TITLE - "АТ «УНІВЕРСАЛ
+   * БАНК»" at 19 against "N26" at 3 - and none of it is the label, because `quote`
+   * cuts a label at CELL_QUOTE_MAX and the Ukrainian 26 and "Einkommende
+   * Transaktionen"'s 25 both arrive as 24 and cancel. universalbank-en's label is 39,
+   * the widest in the tree, and contributes nothing for the same reason: its sentence
+   * is 312, short of this one by exactly its one character less of title.
    */
   it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
     const all = refusals();
     for (const sentence of all) expect(sentence.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
-    expect(Math.max(...all.map((s) => s.length))).toBe(316);
+    expect(Math.max(...all.map((s) => s.length))).toBe(313);
     // and no two of them read alike, which is what the set exists for
     expect(new Set(all).size).toBe(all.length);
   });
