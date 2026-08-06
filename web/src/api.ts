@@ -457,6 +457,17 @@ export const api = {
   accounts: (includeHidden = false) =>
     request<Account[]>(`/api/accounts${includeHidden ? '?all=1' : ''}`),
 
+  /**
+   * An empty account, named. The endpoint also requires a currency, which the "+ Add"
+   * control does not ask for — the caller passes the workspace's base currency, and
+   * `REDESIGN-BACK-DEBT.md` carries the row that makes the server default it.
+   */
+  createAccount: (name: string, currency: string) =>
+    request<Account>('/api/accounts', json('POST', { name, currency })),
+
+  renameAccount: (id: string, name: string) =>
+    request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { name })),
+
   /** Remove an account from the app or bring it back. */
   setAccountHidden: (id: string, hidden: boolean) =>
     request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { hidden })),

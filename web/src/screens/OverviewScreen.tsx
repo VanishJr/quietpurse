@@ -1,17 +1,66 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api, apiLabel } from '../api';
-import { categoryLabel } from '../categories';
-import { AppSettingsBlock } from '../components/AppSettingsBlock';
+/**
+ * Overview: one account at a time.
+ *
+ * The screen used to be a list of every account with a balance beside each. It is now
+ * a rail of tabs — one tab per account — and everything below it is about the selected
+ * one: its balance, its month, its chart, its last transactions. The list answered
+ * "what do I have"; the rail answers "how is this one doing", which is the question
+ * somebody who has just uploaded a statement actually has.
+ *
+ * ---------------------------------------------------------------------------
+ * Where the numbers come from
+ *
+ * Not from a summary endpoint: there isn't a per-account one. `/api/summary` and
+ * `/api/summary/months` take a date range and sum the whole workspace. So this screen
+ * fetches the account's own transactions and `accounts.ts` does the arithmetic the
+ * server would have done — see the header there, and the row in
+ * `REDESIGN-BACK-DEBT.md` that deletes it.
+ *
+ * Two requests per account, and the second depends on the first. The recent list also
+ * says when this account's newest transaction is, and the chart window is anchored on
+ * that rather than on today: an account whose last statement is eighteen months old
+ * would otherwise answer an empty year while its seven most recent transactions sit
+ * underneath it.
+ *
+ * ---------------------------------------------------------------------------
+ * What is no longer here
+ *
+ * Recurring payments, the app settings, the export and the workspace-wide import
+ * history are about the workspace and not about any one account. They are on the
+ * Account screen, in order. This screen is one account and nothing else.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, SessionUser } from '../api';
+import {
+  foreignCurrencies,
+  LONGEST_WINDOW,
+  monthlyTotals,
+  MonthWindow,
+  monthOf,
+  shiftMonth,
+} from '../accounts';
+import { AccountDialog, DialogKind } from '../components/AccountDialog';
+import { AccountMonths } from '../components/AccountMonths';
+import { AccountSummary } from '../components/AccountSummary';
+import { AccountTabs } from '../components/AccountTabs';
 import { CsvImport } from '../components/CsvImport';
 import { ImportHistory } from '../components/ImportHistory';
-import { saveBlob } from '../download';
-import { fmtDate, fmtMoney } from '../format';
-import { providerLabel } from '../providers';
+import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactions';
+import { fmtMoney } from '../format';
+import { initialOf } from '../identity';
 import { ThemeMode, useTheme } from '../theme';
-import { Account, RecurringSummary } from '../types';
+import { Account, Transaction } from '../types';
 
-/** How many recurring payments to show in the Overview block. */
-const RECURRING_LIMIT = 8;
+/** The window the chart opens on: long enough to be a trend, short enough to be full. */
+const DEFAULT_WINDOW: MonthWindow = 6;
+
+/**
+ * The cap on the chart's fetch. The same number TransactionsScreen uses for a year,
+ * and for the same reason — the endpoint's own default (1000) is inside what a busy
+ * account produces. A response that comes back exactly this long is reported as
+ * incomplete rather than drawn as a total.
+ */
+export const WINDOW_TX_LIMIT = 5_000;
 
 /** Theme button cycle: system → light → dark. */
 const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
@@ -19,13 +68,59 @@ const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
   light: 'dark',
   dark: 'system',
 };
-const MODE_LABEL: Record<ThemeMode, string> = {
-  system: '◐ Auto',
-  light: '☀ Light',
-  dark: '☾ Dark',
-};
+const MODE_GLYPH: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };
+const MODE_NAME: Record<ThemeMode, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
 
-export function OverviewScreen() {
+/**
+ * What one account's dashboard is drawn from. Carries the id it was fetched for, which
+ * is the second of two guards against a tab switch overtaking the one before it: the
+ * fetch drops its own answer when a newer one has been asked for (see `request`), and
+ * this is what the render checks in case one gets past that anyway.
+ */
+interface AccountData {
+  accountId: string;
+  /** Newest first — the endpoint orders by date DESC. */
+  recent: Transaction[];
+  /** The longest window, sliced per toggle rather than re-fetched. */
+  window: Transaction[];
+  truncated: boolean;
+}
+
+/** Which panel has taken the screen over. They are pages, not dialogs. */
+type Panel = { kind: 'import' } | { kind: 'history'; account?: Account } | null;
+
+/**
+ * Which step of the account panel is open, and for which account ('add' has none).
+ * `origin` is the step it was opened at and does not move as the steps do — it is what
+ * tells the panel whether its leftmost button goes back to a menu or closes. Two
+ * things open a step directly: "+ Add", and a hidden account's panel, which has no ⋮
+ * to reach a menu through.
+ */
+type Dialog = { kind: DialogKind; origin: DialogKind; account: Account | null };
+
+/** Opening a step: it is its own origin until something steps away from it. */
+const openAt = (kind: DialogKind, account: Account | null): Dialog => ({
+  kind,
+  origin: kind,
+  account,
+});
+
+interface Props {
+  user: SessionUser;
+  /** Bumped by the sidebar's Import; each new value opens the import panel once. */
+  importAsk: number;
+  /** Opens the Transactions screen with this account's filter already applied. */
+  onOpenTransactions: (accountId: string) => void;
+  /** The avatar's destination: identity and the settings live on that screen. */
+  onOpenAccount: () => void;
+}
+
+export function OverviewScreen({
+  user,
+  importAsk,
+  onOpenTransactions,
+  onOpenAccount,
+}: Props) {
   const { mode, setMode } = useTheme();
 
   /**
@@ -33,97 +128,138 @@ export function OverviewScreen() {
    * is how a failed request came to render as "you have no accounts".
    */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
-  const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
+  const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** edit mode: show hidden accounts and the "remove" / "restore" buttons */
-  const [editing, setEditing] = useState(false);
-  /**
-   * Which panel has taken over the screen — they are forms, not dialogs. One state
-   * and not a boolean each: "both open" would then be representable, and render
-   * order would decide what the user sees. `editing` stays separate on purpose —
-   * it is an in-place mode, and it survives a trip into a panel and back.
-   */
-  const [panel, setPanel] = useState<'import' | 'history' | null>(null);
-  /**
-   * The export's own refusal. The account and recurring handlers clear the screen
-   * error on success, which would wipe it, and this control is at the bottom of a
-   * screen whose error line is at the top.
-   */
-  const [exportError, setExportError] = useState<string | null>(null);
-  /**
-   * In flight, and nothing else: /api/backup serialises every table, so on a real
-   * workspace the screen sits unchanged long enough for a second click. Its own
-   * state because exportError and panel both outlive the request.
-   */
-  const [exporting, setExporting] = useState(false);
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Hidden accounts are off the rail until asked for; restoring them has to stay reachable. */
+  const [showHidden, setShowHidden] = useState(false);
+  const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
+
+  const [panel, setPanel] = useState<Panel>(null);
+  const [dialog, setDialog] = useState<Dialog | null>(null);
+
+  const [data, setData] = useState<AccountData | null>(null);
+  /** The dashboard's own refusal: the rail above it loaded and is still true. */
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      // in edit mode we need the hidden ones too — otherwise there's no way to restore them
+      // hidden ones too: without them there is no way to bring one back
       setAccounts(await api.accounts(true));
-      // Overview background: an error here must not break the accounts list
-      api.recurring().then(setRecurring).catch(() => {});
+      // read for one thing — the currency a new account is created in. See the row in
+      // REDESIGN-BACK-DEBT.md: the endpoint requires one and "Add more" does not ask.
+      api
+        .appSettings()
+        .then((s) => setBaseCurrency(s.baseCurrency))
+        .catch(() => {});
     } catch (e) {
       setError((e as Error).message);
     }
   }, []);
 
-  const toggleHidden = async (a: Account) => {
-    try {
-      setError(null);
-      const updated = await api.setAccountHidden(a.id, !a.hidden);
-      setAccounts((list) => list?.map((x) => (x.id === updated.id ? updated : x)) ?? null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  /** Hide/restore a group of recurring payments (the backend replies with a fresh list). */
-  const toggleRecurring = async (description: string, ignored: boolean) => {
-    try {
-      setError(null);
-      setRecurring(await api.setRecurringIgnored(description, ignored));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
-
-  /**
-   * A fetch and not a link: /api/backup answers 500 like anything else, and a
-   * session that expired in an open tab answers 401 — `<a download>` writes both to
-   * disk as finto-backup-<date>.json, and the user believes they hold their data.
-   */
-  const runExport = async () => {
-    setExporting(true);
-    try {
-      setExportError(null);
-      const blob = await api.backup();
-      // the name the backend's own Content-Disposition would have carried
-      saveBlob(blob, `finto-backup-${new Date().toISOString().slice(0, 10)}.json`);
-    } catch (e) {
-      setExportError((e as Error).message);
-    } finally {
-      setExporting(false);
-    }
-  };
-
   useEffect(() => {
     load();
   }, [load]);
 
-  // outside edit mode, hidden accounts aren't shown at all
-  const loaded = accounts ?? [];
-  const visible = editing ? loaded : loaded.filter((a) => !a.hidden);
-  const hiddenCount = loaded.filter((a) => a.hidden).length;
+  // the sidebar asked for the import panel; 0 is the initial value and asks nothing
+  useEffect(() => {
+    if (importAsk > 0) setPanel({ kind: 'import' });
+  }, [importAsk]);
 
-  // outside edit mode — only visible ones; in edit mode — all, hidden ones at the
-  // end with a "Restore" button (like removed accounts)
-  const active = recurring?.groups.filter((g) => !g.ignored) ?? [];
-  const ignored = recurring?.groups.filter((g) => g.ignored) ?? [];
-  const shownRecurring = editing ? [...active, ...ignored] : active.slice(0, RECURRING_LIMIT);
+  const visible = useMemo(() => (accounts ?? []).filter((a) => !a.hidden), [accounts]);
+  const hidden = useMemo(() => (accounts ?? []).filter((a) => a.hidden), [accounts]);
+  const onRail = useMemo(
+    () => (showHidden ? [...visible, ...hidden] : visible),
+    [showHidden, visible, hidden],
+  );
 
-  if (panel === 'import') {
+  /**
+   * Nothing chosen yet, or what was chosen has left the rail — the first account
+   * stands in. Resolved while rendering rather than in an effect that writes back to
+   * `selectedId`: the effect version painted one frame of a rail with no tab marked
+   * and no panel under it, and everything downstream — which page the rail shows,
+   * which account's transactions are fetched — was deciding against that empty frame.
+   */
+  const selected = onRail.find((a) => a.id === selectedId) ?? onRail[0] ?? null;
+
+  /**
+   * Which fetch the screen is waiting for. Two requests per account and the second
+   * waiting on the first, so a tab switch has a wide window to be overtaken in — and
+   * an answer for a tab nobody is looking at any more is not a slower answer, it is
+   * the wrong one. Writing it anyway left `data` holding an id `mine` then rejected,
+   * which renders no dashboard, no error and no reason to fetch again: the effect's
+   * deps did not move. Dropping it here is what keeps the screen showing the account
+   * whose tab is current.
+   */
+  const request = useRef(0);
+
+  const loadAccount = useCallback(async (account: Account) => {
+    const token = ++request.current;
+    setDataError(null);
+    setData(null);
+    // a hidden account's transactions are filtered out of the endpoint, so asking for
+    // them would answer an empty account rather than a removed one
+    if (account.hidden) {
+      setData({ accountId: account.id, recent: [], window: [], truncated: false });
+      return;
+    }
+    try {
+      const recent = await api.transactions({ accountId: account.id, limit: RECENT_LIMIT });
+      if (token !== request.current) return;
+      if (recent.length === 0) {
+        setData({ accountId: account.id, recent, window: [], truncated: false });
+        return;
+      }
+      // anchored on the newest transaction, not on today: see the header
+      const from = `${shiftMonth(monthOf(recent[0].date), -(LONGEST_WINDOW - 1))}-01`;
+      const rows = await api.transactions({
+        accountId: account.id,
+        from,
+        limit: WINDOW_TX_LIMIT,
+      });
+      if (token !== request.current) return;
+      setData({
+        accountId: account.id,
+        recent,
+        window: rows,
+        truncated: rows.length === WINDOW_TX_LIMIT,
+      });
+    } catch (e) {
+      // a refusal is as stale as an answer: the abandoned tab's 500 would otherwise
+      // paint an error over the account that loaded
+      if (token !== request.current) return;
+      setDataError((e as Error).message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selected) loadAccount(selected);
+  }, [selected, loadAccount]);
+
+  /** The account's row moved on the server — put the new one in the list as it is. */
+  const applyAccount = (updated: Account) => {
+    setAccounts((list) => list?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
+  };
+
+  const afterCreate = (created: Account) => {
+    setDialog(null);
+    setSelectedId(created.id);
+    load();
+  };
+
+  const mine = data?.accountId === selected?.id ? data : null;
+  const months = useMemo(
+    () => (mine ? monthlyTotals(mine.window, window_) : []),
+    [mine, window_],
+  );
+  const foreign = useMemo(
+    () => (mine && selected ? foreignCurrencies(mine.window, selected.currency) : []),
+    [mine, selected],
+  );
+
+  if (panel?.kind === 'import') {
     return (
       <div className="screen-inner">
         <CsvImport onBack={() => setPanel(null)} onImported={load} />
@@ -131,184 +267,200 @@ export function OverviewScreen() {
     );
   }
 
-  if (panel === 'history') {
+  if (panel?.kind === 'history') {
     return (
       <div className="screen-inner">
-        <ImportHistory onBack={() => setPanel(null)} onChanged={load} />
+        <ImportHistory
+          account={panel.account}
+          onBack={() => setPanel(null)}
+          onChanged={() => {
+            load();
+            if (selected) loadAccount(selected);
+          }}
+        />
       </div>
     );
   }
 
   return (
     <div className="screen-inner">
-      <div className="header">
-        <h1 className="title">Accounts</h1>
-        <div className="header-btns">
+      <header className="welcome">
+        <div>
+          <h1 className="welcome-title">Welcome, {user.name || user.email}!</h1>
+          <p className="welcome-sub">{user.email}</p>
+        </div>
+        <div className="welcome-actions">
           <button
-            className="pill"
-            onClick={() => setEditing((v) => !v)}
-            aria-label={editing ? 'Exit account edit mode' : 'Edit accounts'}
-          >
-            {editing ? 'Done' : '✎ Edit'}
-          </button>
-          <button
-            className="pill"
+            className="icon-btn"
             onClick={() => setMode(NEXT_MODE[mode])}
-            aria-label={`Theme: ${MODE_LABEL[mode]}. Click to change`}
+            aria-label={`Theme: ${MODE_NAME[mode]}. Click to change`}
           >
-            {MODE_LABEL[mode]}
+            <span aria-hidden="true">{MODE_GLYPH[mode]}</span>
           </button>
-          <button className="pill" onClick={() => setPanel('import')}>
-            ⭳ Import
+          {/* the letter, not a photograph; it goes where the address and the settings are */}
+          <button className="avatar" onClick={onOpenAccount} aria-label={`Account: ${user.email}`}>
+            <span aria-hidden="true">{initialOf(user)}</span>
           </button>
         </div>
-      </div>
+      </header>
 
       {/* above the content, not below it: a refusal read after the list is a refusal
           the reader has already acted on */}
       {error && <p className="error">Error: {error}</p>}
 
-      {editing && (
-        <p className="edit-hint">
-          A removed account isn't shown and doesn't count in analytics. Its transactions
-          stay in the database — you can restore it any time.
-        </p>
-      )}
-      {!editing && hiddenCount > 0 && (
-        <p className="edit-hint">Hidden accounts: {hiddenCount} · click "Edit" to restore</p>
-      )}
-
-      {visible.map((item) => (
-        <div key={item.id} className="row">
-          <div className="row-main">
-            <div className={`row-title${item.hidden ? ' muted-strike' : ''}`}>{item.name}</div>
-            <div className="row-sub">
-              {providerLabel(item.provider)}
-              {item.hidden ? ' · removed' : ''}
-            </div>
-          </div>
-          <div className={`row-value${item.hidden ? ' muted-strike' : ''}`}>
-            {fmtMoney(item.balance, item.currency)}
-          </div>
-          {editing && (
-            <button
-              className={item.hidden ? 'btn-link' : 'btn-danger'}
-              onClick={() => toggleHidden(item)}
-              aria-label={
-                item.hidden ? `Restore account ${item.name}` : `Remove account ${item.name}`
-              }
-            >
-              {item.hidden ? 'Restore' : 'Remove'}
+      {onRail.length > 0 && (
+        <>
+          <AccountTabs
+            accounts={onRail}
+            selectedId={selected?.id ?? null}
+            onSelect={setSelectedId}
+            onAdd={() => setDialog(openAt('add', null))}
+          />
+          {hidden.length > 0 && (
+            <button className="btn-link" onClick={() => setShowHidden((v) => !v)}>
+              {showHidden
+                ? 'Hide removed accounts again'
+                : `Show ${hidden.length} hidden account${hidden.length === 1 ? '' : 's'}`}
             </button>
           )}
-        </div>
-      ))}
+        </>
+      )}
 
-      {/* hiddenCount, because "no accounts yet" over accounts the user removed is the
-          same untruth as over accounts that never loaded — the hidden line above says
-          what is actually true, and how to undo it */}
-      {accounts !== null && visible.length === 0 && hiddenCount === 0 && (
-        <div className="empty">
-          <p>
-            No accounts yet. Load a bank statement — a .csv, .xlsx or .pdf export — and the
-            accounts, balances and categories all come out of the file.
+      {/* the whole reason this screen exists for a new user: nothing has been uploaded,
+          and the way to upload is the biggest thing on the page */}
+      {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
+        <div className="acct-blank">
+          <h2 className="acct-blank-title">Nothing here yet — start with a statement</h2>
+          <p className="acct-blank-text">
+            Export a statement from your bank in whatever format it offers — .csv, .xlsx or
+            .pdf — and drop it in. Finto reads the transactions out of it and makes an
+            account for them, named after the file. You can rename it afterwards.
           </p>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => setPanel('import')}>
-            ⭳ Import a statement
-          </button>
+          <div className="acct-blank-actions">
+            <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
+              ⭳ Import a statement
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={() => setDialog(openAt('add', null))}
+              disabled={baseCurrency === null}
+            >
+              Create an empty account
+            </button>
+          </div>
+          <p className="hint">
+            An empty account is for money that has no statement — cash, or a card you enter
+            by hand.
+          </p>
         </div>
       )}
 
-      {recurring && recurring.groups.length > 0 && (
-        <section style={{ marginTop: 16, marginBottom: 8 }}>
-          <div className="header">
-            <h2 className="block-title">Recurring payments</h2>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink-accent)' }}>
-              ≈ {fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}/mo
-            </span>
-          </div>
-          {editing && (
-            <p className="edit-hint">
-              "Hide" — if you disagree that this is a recurring payment: the group leaves the
-              list and the monthly total. You can restore it right here.
-            </p>
-          )}
-          {shownRecurring.map((g) => (
-            <div key={g.description} className="row" style={{ padding: '8px 0' }}>
-              <div className="row-main">
-                <div className={`row-title${g.ignored ? ' muted-strike' : ''}`}>
-                  {g.description}
-                </div>
-                <div className="row-sub">
-                  {categoryLabel(g.category)} · {g.months} mo. · last {fmtDate(g.lastDate)}
-                  {g.ignored ? ' · hidden' : ''}
-                </div>
-              </div>
-              <div
-                className={`row-value${g.ignored ? ' muted-strike' : ''}`}
-                style={{ fontSize: 13, color: 'var(--ink-secondary)' }}
-              >
-                {fmtMoney(g.monthlyAvg, recurring.baseCurrency)}/mo
-              </div>
-              {editing && (
-                <button
-                  className={g.ignored ? 'btn-link' : 'btn-danger'}
-                  onClick={() => toggleRecurring(g.description, !g.ignored)}
-                  aria-label={
-                    g.ignored
-                      ? `Restore payment ${g.description}`
-                      : `Hide payment ${g.description}`
-                  }
-                >
-                  {g.ignored ? 'Restore' : 'Hide'}
-                </button>
-              )}
-            </div>
-          ))}
-          {!editing && active.length > RECURRING_LIMIT && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              …and {active.length - RECURRING_LIMIT} more, smaller
-            </p>
-          )}
-          {!editing && ignored.length > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              Hidden payments: {ignored.length} · click "Edit" to restore
-            </p>
-          )}
-        </section>
+      {accounts !== null && onRail.length === 0 && hidden.length > 0 && (
+        <p className="edit-hint">
+          Every account you have is hidden.{' '}
+          <button className="btn-link" onClick={() => setShowHidden(true)}>
+            Show {hidden.length === 1 ? 'it' : 'them'}
+          </button>
+        </p>
       )}
 
-      <AppSettingsBlock />
+      {dataError && <p className="error">Error: {dataError}</p>}
 
-      {/* the only user-reachable data export: unconditional on purpose - it used to
-          sit inside the sync journal, which a workspace that never synced never had */}
-      <div style={{ margin: '8px 0' }}>
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          disabled={exporting}
-          onClick={runExport}
-        >
-          ⬇ Export my data (.json)
-        </button>
-        {exportError && <p className="error">Error: {exportError}</p>}
-        <p className="hint">
-          Every transaction, account and setting, as readable JSON — not encrypted, so
-          anyone who opens the file can read it. The statement files you uploaded are not
-          in it; download those from Import history.
-        </p>
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          onClick={() => setPanel('history')}
-        >
-          ⧉ Import history
-        </button>
-      </div>
+      {selected && mine && (
+        <div className="acct-panel" role="region" aria-label={selected.name}>
+          {selected.hidden ? (
+            /* The ⋮ lives on the balance card, and a hidden account has no balance card
+               to put it on — so this panel carries the same control under the same
+               accessible name. Without it the only route back out of Hidden is a PATCH
+               by hand: the sentence here used to name a menu that was not on the page. */
+            <div className="acct-blank">
+              <h2 className="acct-blank-title">{selected.name} is hidden</h2>
+              <p className="acct-blank-text">
+                Its transactions are out of every figure the app computes — including the
+                ones this screen would draw. Nothing has been deleted, and unhiding it
+                brings all of them back.
+              </p>
+              <div className="acct-blank-actions">
+                <button
+                  className="btn"
+                  onClick={() => setDialog(openAt('hide', selected))}
+                >
+                  Unhide this account
+                </button>
+                <button
+                  className="btn-ghost"
+                  onClick={() => setDialog(openAt('menu', selected))}
+                  aria-haspopup="dialog"
+                  aria-label={`Account menu: ${selected.name}`}
+                >
+                  Account menu
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <AccountSummary
+                account={selected}
+                months={months}
+                foreign={foreign}
+                truncated={mine.truncated}
+                onOpenMenu={() => setDialog(openAt('menu', selected))}
+              />
 
-      <p className="api-hint">API: {apiLabel()}</p>
+              {months.length > 0 ? (
+                <AccountMonths
+                  months={months}
+                  window={window_}
+                  onWindow={setWindow}
+                  currency={selected.currency}
+                  truncated={mine.truncated}
+                />
+              ) : (
+                <div className="acct-blank">
+                  <h2 className="acct-blank-title">
+                    Nothing has been loaded into {selected.name}
+                  </h2>
+                  <p className="acct-blank-text">
+                    The account is here, and it is empty — which is why its balance is{' '}
+                    {fmtMoney(0, selected.currency)}. Import a statement into it and the
+                    figures, the chart and the list below fill in.
+                  </p>
+                  <div className="acct-blank-actions">
+                    <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
+                      ⭳ Import a statement
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {mine.recent.length > 0 && (
+                <RecentTransactions
+                  account={selected}
+                  transactions={mine.recent}
+                  onSeeAll={() => onOpenTransactions(selected.id)}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {dialog && (
+        <AccountDialog
+          kind={dialog.kind}
+          origin={dialog.origin}
+          account={dialog.account}
+          baseCurrency={baseCurrency ?? ''}
+          onStep={(kind) => setDialog({ ...dialog, kind })}
+          onClose={() => setDialog(null)}
+          onOpenHistory={(account) => {
+            setDialog(null);
+            setPanel({ kind: 'history', account });
+          }}
+          onCreated={afterCreate}
+          onUpdated={applyAccount}
+        />
+      )}
     </div>
   );
 }

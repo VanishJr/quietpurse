@@ -1,346 +1,674 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ACCOUNTS, APP_SETTINGS, PRESETS, RECURRING, USER } from '../test/fixtures';
+import { COUNT_LIMIT } from '../components/AccountDialog';
+import { ACCOUNTS, APP_SETTINGS, importRecord, PRESETS, USER } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { OverviewScreen } from './OverviewScreen';
+import { Account, Transaction } from '../types';
+import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
 
 /**
- * Item 13's manual checks 1 and 2, minus what jsdom cannot see: whether the export
- * lands a file on disk is a browser question and stays manual — what is asserted
- * here is that the bytes were checked before anything was saved.
+ * The Overview dashboard: the tab rail, the three cards, the month chart and the last
+ * transactions of the account on the tab. Everything about the workspace rather than
+ * about one account moved to the Account screen and is asserted there.
+ *
+ * Two things this file cannot assert, both limits of the environment rather than gaps:
+ * the chart itself — recharts measures a 0x0 box in jsdom — and anything about width,
+ * so the narrow layout of the transactions table stays a manual check. The chart's
+ * numbers are asserted through the table beside it, which is the same data and is what
+ * a screen reader gets.
+ *
+ * Note on the route table: the harness keys on method and path and discards the query,
+ * so the two transaction reads this screen makes — the recent seven, then the chart's
+ * window — are one entry. The fixture below is short enough and recent enough to be a
+ * true answer to both.
  */
+
+/** Newest first: the endpoint orders by date DESC, and the recent list trusts it. */
+const txn = (date: string, amount: number, patch: Partial<Transaction> = {}): Transaction => ({
+  id: `t-${date}-${amount}`,
+  accountId: 'acc-1',
+  provider: 'upload',
+  currency: 'EUR',
+  description: 'Row',
+  category: 'other',
+  transfer: false,
+  transferManual: null,
+  refund: false,
+  date,
+  amount,
+  ...patch,
+});
+
+const TXS: Transaction[] = [
+  txn('2026-08-04T00:00:00.000Z', 900, { description: 'ACME payroll', category: 'salary' }),
+  txn('2026-08-03T00:00:00.000Z', -120, { description: 'Rewe', category: 'food' }),
+  txn('2026-08-02T00:00:00.000Z', -300, { description: 'To savings', transfer: true }),
+  txn('2026-07-20T00:00:00.000Z', -60, { description: 'Netflix', category: 'subscriptions' }),
+];
 
 const OVERVIEW_ROUTES: Routes = {
   'GET /api/accounts': () => ok(ACCOUNTS),
-  'GET /api/recurring': () => ok(RECURRING),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
+  'GET /api/transactions': () => ok(TXS),
 };
 
-const mount = () => renderThemed(<OverviewScreen />);
+const onOpenTransactions = vi.fn();
+const onOpenAccount = vi.fn();
 
-describe('accounts list', () => {
-  it('renders visible accounts and keeps hidden ones out of the list', async () => {
-    mockFetch(OVERVIEW_ROUTES);
+const mount = (routes: Routes = OVERVIEW_ROUTES, importAsk = 0) => {
+  onOpenTransactions.mockClear();
+  onOpenAccount.mockClear();
+  mockFetch(routes);
+  return renderThemed(
+    <OverviewScreen
+      user={USER}
+      importAsk={importAsk}
+      onOpenTransactions={onOpenTransactions}
+      onOpenAccount={onOpenAccount}
+    />,
+  );
+};
+
+/** The anchor for the rail: no tab exists until /api/accounts came back. */
+const tab = (name: string) => screen.findByRole('button', { name });
+
+/**
+ * The anchor for everything under the rail. It arrives two requests later than the
+ * tab does — the recent seven, and then the window they date — so a synchronous query
+ * after `tab()` is a query run before the panel exists.
+ */
+const panel = (name: string) => screen.findByRole('region', { name });
+
+const account = (patch: Partial<Account>): Account => ({
+  id: 'acc-x',
+  provider: 'upload',
+  name: 'Account',
+  currency: 'EUR',
+  balance: 0,
+  ...patch,
+});
+
+/** Everything already queued has run by the time a macrotask does. */
+const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+describe('the header', () => {
+  it('greets by name and sends the avatar to the Account screen', async () => {
     mount();
+    expect(
+      await screen.findByRole('heading', { name: `Welcome, ${USER.name}!` }),
+    ).toBeInTheDocument();
 
-    // anchor: an account name, which exists only once /api/accounts came back
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-    expect(screen.getByText('1,234.50 EUR')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: `Account: ${USER.email}` }));
 
-    expect(screen.queryByText('Old DKB')).not.toBeInTheDocument();
-    expect(screen.getByText(/Hidden accounts: 1/)).toBeInTheDocument();
+    expect(onOpenAccount).toHaveBeenCalledTimes(1);
   });
 
-  it('reveals hidden accounts and the remove/restore buttons in edit mode', async () => {
-    mockFetch(OVERVIEW_ROUTES);
+  it('opens the import panel when the sidebar asks for it', async () => {
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, 1);
+
+    expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
+  });
+});
+
+describe('the tab rail', () => {
+  it('gives each account a tab and keeps hidden ones off it', async () => {
     mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit accounts' }));
-
-    expect(await screen.findByText('Old DKB')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove account Sparkasse Giro' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Restore account Old DKB' })).toBeInTheDocument();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Old DKB' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Show 1 hidden account/ })).toBeInTheDocument();
   });
 
-  it('renders the empty state when there are no accounts, and it opens the import panel', async () => {
-    mockFetch({
+  it('brings the hidden ones back onto the rail on request', async () => {
+    mount();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+
+    expect(await tab('Old DKB')).toBeInTheDocument();
+  });
+
+  it('cuts a long name in the middle and keeps the whole one reachable', async () => {
+    // the real shape of a default name: the account is named after the file, .pdf and
+    // all, and everything that tells two of them apart is at the end
+    const long = 'report_03-09-2026_11-22-33.pdf';
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok([account({ id: 'acc-1', name: long })]),
+    });
+
+    // the accessible name is the whole thing, which is also what `title` carries
+    const control = await tab(long);
+    // ...and what is painted is not
+    expect(control.textContent).not.toContain(long);
+    expect(control.textContent).toContain('…');
+    expect(control).toHaveAttribute('title', long);
+  });
+
+  it('pages when there are more accounts than fit a line, and follows the selection', async () => {
+    const four = ['A', 'B', 'C', 'D'].map((n, i) =>
+      account({ id: `acc-${i + 1}`, name: `Account ${n}` }),
+    );
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/accounts': () => ok(four) });
+
+    await panel('Account A');
+    // three to a line: the fourth is behind the arrow
+    expect(screen.queryByRole('button', { name: 'Account D' })).not.toBeInTheDocument();
+    expect(screen.getByText(/4 accounts/)).toHaveTextContent('1 of 2');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next accounts' }));
+
+    expect(await tab('Account D')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Account A' })).not.toBeInTheDocument();
+  });
+
+  it('says nothing about paging with one line of accounts', async () => {
+    mount();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Next accounts' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the three cards', () => {
+  it('takes the balance from the account and the month from its transactions', async () => {
+    mount();
+
+    // the figures region, not the account panel around it: the chart's accessible
+    // table repeats these numbers, and it is inside the panel
+    const figures = await panel('Figures for Sparkasse Giro');
+    expect(within(figures).getByText('1,234.50 EUR')).toBeInTheDocument();
+    // August: 900 in, 120 out, and the 300 moved to savings is neither
+    expect(within(figures).getAllByText('Aug 2026').length).toBeGreaterThan(0);
+    expect(within(figures).getByText('+900 EUR')).toBeInTheDocument();
+    expect(within(figures).getByText('−120 EUR')).toBeInTheDocument();
+  });
+
+  it('compares each figure with the month before it, and colours the two differently', async () => {
+    mount();
+    const figures = await panel('Figures for Sparkasse Giro');
+
+    // July: nothing in, 60 out. August: 900 in, 120 out.
+    // Income has no base to compare against (July's income was 0), so it says nothing
+    // rather than printing an infinity dressed up as a percentage.
+    const deltas = within(figures).getAllByText(/%$|%/);
+    expect(deltas.length).toBeGreaterThan(0);
+    // spending doubled, and spending going up is not good news
+    const expense = within(figures).getByText('100.0%').closest('p');
+    expect(expense).toHaveClass('is-bad');
+  });
+
+  it('names the month on the cards, which is the only place it is named', async () => {
+    // uploading July and reading the screen in September must not read as August: the
+    // prose that used to say so is gone, so the label under each figure carries it
+    mount();
+    const figures = await panel('Figures for Sparkasse Giro');
+    expect(within(figures).getAllByText('Aug 2026').length).toBeGreaterThan(0);
+    expect(within(figures).queryByText('Sep 2026')).not.toBeInTheDocument();
+  });
+});
+
+describe('the month chart', () => {
+  it('carries the same numbers beside the drawing, which jsdom cannot see', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+
+    const table = screen.getByRole('table', { name: /Income and expenses by month/ });
+    expect(within(table).getByRole('rowheader', { name: 'Jul 2026' })).toBeInTheDocument();
+    expect(within(table).getByRole('rowheader', { name: 'Aug 2026' })).toBeInTheDocument();
+  });
+
+  it('says which months these are rather than apologising for the rest', async () => {
+    // a six-month view of two months is not explained in a sentence any more; the range
+    // beside the heading is what says what is being looked at
+    mount();
+    await panel('Sparkasse Giro');
+
+    expect(screen.getByText('Jul 2026 – Aug 2026')).toBeInTheDocument();
+    expect(screen.queryByText(/everything this account has/)).not.toBeInTheDocument();
+  });
+
+  it('narrows the window without asking the server again', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+    const before = requests().filter((r) => r === 'GET /api/transactions').length;
+
+    fireEvent.click(screen.getByRole('button', { name: '3 months' }));
+
+    // the chips are the only thing that moved: the months came out of a window already
+    // fetched, and narrowing it is arithmetic rather than a request
+    expect(await screen.findByRole('button', { name: '3 months', pressed: true })).toBeInTheDocument();
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(before);
+  });
+});
+
+describe('switching tabs while a read is in flight', () => {
+  it('drops the answer for the tab the reader left', async () => {
+    const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
+    let release: (r: Response) => void = () => {};
+    let calls = 0;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(two),
+      // the route table keys on the path and discards the query, so which account a
+      // read is for is its ordinal. The first is Slow's, and it does not come back
+      // until this test lets it.
+      'GET /api/transactions': () => {
+        calls += 1;
+        if (calls === 1) return new Promise<Response>((resolve) => (release = resolve));
+        return ok(TXS);
+      },
+    });
+
+    fireEvent.click(await tab('Quick'));
+    await panel('Figures for Quick');
+
+    release(ok(TXS));
+    await settle();
+
+    // Slow's answer must not start Slow's second read, and must not reach `data`: an
+    // id the render then rejects is no dashboard, no error and no reason to fetch
+    // again — the effect's deps did not move, so the screen stays empty until the
+    // reader clicks a third tab
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(3);
+    expect(screen.getByRole('region', { name: 'Figures for Quick' })).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+
+  it('does not paint the abandoned tab’s refusal over the account that loaded', async () => {
+    const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
+    let release: (r: Response) => void = () => {};
+    let calls = 0;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(two),
+      'GET /api/transactions': () => {
+        calls += 1;
+        if (calls === 1) return new Promise<Response>((resolve) => (release = resolve));
+        return ok(TXS);
+      },
+    });
+
+    fireEvent.click(await tab('Quick'));
+    await panel('Figures for Quick');
+
+    release(fail(500));
+    await settle();
+
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Figures for Quick' })).toBeInTheDocument();
+  });
+});
+
+describe('a window that came back at its limit', () => {
+  /**
+   * The endpoint is `date DESC` with a bare limit and no cap of its own, so a response
+   * exactly this long has dropped its far end — the oldest rows in the window, and with
+   * them whole months the chart then draws no bar for.
+   */
+  const atLimit: Transaction[] = Array.from({ length: WINDOW_TX_LIMIT }, (_, i) =>
+    txn(i % 2 === 0 ? '2026-08-10T00:00:00.000Z' : '2026-07-10T00:00:00.000Z', -1),
+  );
+
+  const mountTruncated = () => {
+    let calls = 0;
+    // the recent seven first, then the window: one path, so the ordinal tells them
+    // apart. Only the second is at the limit — the first asked for seven.
+    return mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok((calls += 1) === 1 ? TXS : atLimit),
+    });
+  };
+
+  it('refuses the chart rather than drawing a total it cannot stand behind', async () => {
+    mountTruncated();
+    await panel('Sparkasse Giro');
+
+    // the chart is the one place a cut window is invisible: it draws whatever survived
+    // and looks exactly like a complete one
+    expect(screen.getByText(/the months below are incomplete/)).toBeInTheDocument();
+  });
+
+  it('shows no comparison it cannot stand behind', async () => {
+    mountTruncated();
+    const figures = await panel('Figures for Sparkasse Giro');
+
+    // the month a percentage is measured against may be a part of a month, and the
+    // balance's derived opening figure short by whatever was dropped
+    expect(figures.querySelectorAll('.fig-delta')).toHaveLength(0);
+    expect(
+      screen.getByText(/no comparison with the month before them is shown/),
+    ).toBeInTheDocument();
+    // the balance itself is the server's sum of every row and is not read off the
+    // window, so it stays on screen
+    expect(within(figures).getByText('1,234.50 EUR')).toBeInTheDocument();
+  });
+});
+
+describe('the recent transactions', () => {
+  it('lists them without an account column and without a status it does not have', async () => {
+    mount();
+
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    expect(within(list).getByText('ACME payroll')).toBeInTheDocument();
+    // the category, which is a column of its own and not part of the description
+    expect(within(list).getByText('Salary')).toBeInTheDocument();
+    expect(within(list).getByText('+900 EUR')).toBeInTheDocument();
+    // the transfer is on the list and marked, because it is what the figures above left out
+    expect(within(list).getByText('To savings')).toBeInTheDocument();
+    expect(within(list).getByText('transfer')).toBeInTheDocument();
+    // a status column would have to invent one: a statement records what already happened
+    expect(within(list).queryByText('Completed')).not.toBeInTheDocument();
+    expect(within(list).queryByRole('columnheader', { name: 'Account' })).not.toBeInTheDocument();
+    expect(within(list).queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+  });
+
+  it('keeps every cell in its own column', async () => {
+    // `display: flex` on a <td> takes it out of the table, and CSS fixup then wraps it
+    // together with its adjacent non-cell siblings into ONE anonymous cell — which put
+    // the category underneath the description while the headers stayed put. The layout
+    // lives on a span inside each cell now, and the row has four of them.
+    mount();
+    const list = await panel('Recent transactions in Sparkasse Giro');
+
+    const row = within(list).getByText('ACME payroll').closest('tr');
+    expect(row).not.toBeNull();
+    expect(row!.querySelectorAll('td')).toHaveLength(4);
+    expect(row!.querySelector('.tx-cat')).toHaveTextContent('Salary');
+    expect(row!.querySelector('.tx-desc')).not.toHaveTextContent('Salary');
+  });
+
+  it('hands the account to the Transactions screen rather than navigating blind', async () => {
+    mount();
+    await panel('Recent transactions in Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: 'All transactions →' }));
+
+    expect(onOpenTransactions).toHaveBeenCalledWith('acc-1');
+  });
+});
+
+describe('the empty states', () => {
+  it('makes the upload the point of the screen when there is no account at all', async () => {
+    mount({
       ...OVERVIEW_ROUTES,
       'GET /api/accounts': () => ok([]),
-      // the control mounts CsvImport, which asks for the preset list
       'GET /api/imports/presets': () => ok(PRESETS),
     });
-    mount();
 
     // the tail as well as the opening: this is the first sentence a new user reads
-    // about what to upload, and it is where the stale two-format list lived
-    expect(await screen.findByText(/No accounts yet/)).toHaveTextContent(/\.pdf/);
+    // about what to upload
+    expect(await screen.findByText(/Export a statement from your bank/)).toHaveTextContent(/\.pdf/);
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
 
-    // the point of the control: the empty state does not send the user hunting for a pill
     fireEvent.click(screen.getByRole('button', { name: /Import a statement/ }));
     expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
   });
 
-  it('puts the refusal above the list, not below it', async () => {
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'PATCH /api/accounts/acc-1': () => fail(500, { error: 'the account is locked' }),
-    });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
+  it('does not claim the accounts are empty when the request for them failed', async () => {
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/accounts': () => fail(500) });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit accounts' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Remove account Sparkasse Giro' }));
-
-    // a refusal read after the list is a refusal the reader has already acted on
-    const refusal = await screen.findByText(/^Error:/);
-    const following =
-      refusal.compareDocumentPosition(screen.getByText('Sparkasse Giro')) &
-      Node.DOCUMENT_POSITION_FOLLOWING;
-    expect(following).toBeTruthy();
+    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
+    // `accounts` was never loaded, so there is nothing to be empty
+    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
   });
 
-  it('says nothing about being empty when every account is hidden', async () => {
-    mockFetch({
+  it('says the account is empty rather than that the app is, when it is', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok([account({ id: 'acc-1', name: 'Cash' })]),
+      'GET /api/transactions': () => ok([]),
+      'GET /api/imports/presets': () => ok(PRESETS),
+    });
+    await panel('Cash');
+
+    expect(screen.getByText(/Nothing has been loaded into Cash/)).toBeInTheDocument();
+    // and the tab is still there: the account exists, it is the data that does not
+    expect(await tab('Cash')).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the way out of Hidden on the panel, which is the only one there is', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB'));
+
+    // the ⋮ is on the balance card, and a hidden account draws no balance card — so
+    // this panel carries the same control under the same name. Without it the panel's
+    // own instruction pointed at a menu that was nowhere on the page, and the account
+    // could not be brought back from anywhere in the app
+    expect(
+      await screen.findByRole('button', { name: 'Account menu: Old DKB' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unhide this account' })).toBeInTheDocument();
+  });
+
+  it('closes the unhide step instead of opening a menu nobody came through', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unhide this account' }));
+
+    // the step was opened AT, not stepped into, so there is nothing behind it — and the
+    // button says Cancel rather than Back to mean it
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unhide this account' })).toBeInTheDocument();
+  });
+
+  it('brings a hidden account back, and its dashboard follows', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'PATCH /api/accounts/acc-2': () => ok({ ...ACCOUNTS[1], hidden: false }),
+    });
+    await panel('Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unhide this account' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unhide' }));
+
+    expect(await panel('Figures for Old DKB')).toBeInTheDocument();
+  });
+
+  it('offers a way back when every account is hidden', async () => {
+    mount({
       ...OVERVIEW_ROUTES,
       'GET /api/accounts': () => ok(ACCOUNTS.map((a) => ({ ...a, hidden: true }))),
     });
-    mount();
 
-    // the hidden line is true and already actionable; "No accounts yet" above it is not
-    expect(await screen.findByText(/Hidden accounts: 2/)).toBeInTheDocument();
-    expect(screen.queryByText(/No accounts yet/)).not.toBeInTheDocument();
-  });
-
-  it('does not claim the accounts are empty when the request for them failed', async () => {
-    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/accounts': () => fail(500) });
-    mount();
-
-    // anchor: the refusal, which only exists once the request came back
-    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
-    // `accounts` was never loaded, so there is nothing to be empty. The screen used
-    // to say "No accounts yet" here, over data it had never once seen.
-    expect(screen.queryByText(/No accounts yet/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/Every account you have is hidden/)).toBeInTheDocument();
+    // "no accounts yet" over accounts the user hid is the same untruth as over accounts
+    // that never loaded
+    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
   });
 });
 
-describe('the app settings block', () => {
-  const currency = () => screen.getByLabelText('Base currency') as HTMLInputElement;
-  const owners = () => screen.getByLabelText('Owner names') as HTMLInputElement;
+describe('the account menu', () => {
+  const openMenu = async () => {
+    await panel('Sparkasse Giro');
+    // it is on the balance card, not on the tab: a tab is a name, so that three of
+    // them fit a line without the row becoming a control panel
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu: Sparkasse Giro' }));
+    return screen.findByRole('dialog');
+  };
 
-  /** The anchor: no field exists until GET /api/app-settings came back. */
-  const settled = () => screen.findByLabelText('Base currency');
-
-  it('shows the stored values, with accounts present', async () => {
-    // the populated fixture on purpose: settings only reachable from the empty state
-    // would be the wizard again, in a smaller box
-    mockFetch(OVERVIEW_ROUTES);
+  it('offers the four items and shows the whole name', async () => {
     mount();
-    await settled();
+    const menu = await openMenu();
 
-    expect(currency().value).toBe('EUR');
-    expect(owners().value).toBe('Yurii Kalvenko');
-    expect(screen.getByText('Sparkasse Giro')).toBeInTheDocument();
+    expect(within(menu).getByText('Rename')).toBeInTheDocument();
+    expect(within(menu).getByText('Import history')).toBeInTheDocument();
+    expect(within(menu).getByText('Hide')).toBeInTheDocument();
+    expect(within(menu).getByText('Delete')).toBeInTheDocument();
   });
 
-  it('offers a retry when the settings could not be read, and takes it', async () => {
-    let reads = 0;
-    mockFetch({
+  it('renames the account and the tab follows', async () => {
+    mount({
       ...OVERVIEW_ROUTES,
-      'GET /api/app-settings': () => {
-        reads += 1;
-        return reads === 1 ? fail(500, { error: 'settings unavailable' }) : ok(APP_SETTINGS);
+      'PATCH /api/accounts/acc-1': () => ok({ ...ACCOUNTS[0], name: 'Sparkasse' }),
+    });
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Rename'));
+    const field = await screen.findByLabelText('Name');
+    // prefilled with the whole name, which is the point: this is where a name that came
+    // out of a filename gets shortened
+    expect((field as HTMLInputElement).value).toBe('Sparkasse Giro');
+
+    fireEvent.change(field, { target: { value: 'Sparkasse' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+
+    expect(await tab('Sparkasse')).toBeInTheDocument();
+  });
+
+  it('shows the server refusal instead of pretending the rename landed', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'PATCH /api/accounts/acc-1': () =>
+        fail(409, { error: 'an account called "Old DKB" already has that name' }),
+    });
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Rename'));
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Old DKB' } });
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/already has that name/)).toBeInTheDocument();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
+  });
+
+  it('steps back to the menu from a step that was opened out of it', async () => {
+    mount();
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Hide'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+
+    // the four items again: this one really does have something behind it
+    expect(await screen.findByText('Import history')).toBeInTheDocument();
+  });
+
+  it('tells hiding and deleting apart in what each one says', async () => {
+    mount();
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Hide'));
+    // the whole difference: hiding takes it off the screen and destroys nothing
+    expect(await screen.findByText(/nothing is deleted/)).toBeInTheDocument();
+  });
+
+  it('hides the account, and the rail drops it', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'PATCH /api/accounts/acc-1': () => ok({ ...ACCOUNTS[0], hidden: true }),
+    });
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Hide'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hide' }));
+
+    expect(await screen.findByText(/Every account you have is hidden/)).toBeInTheDocument();
+  });
+
+  it('names what deleting would destroy before offering anything', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/imports': () =>
+        ok({ imports: [importRecord(), importRecord({ id: 'imp-2', documentAvailable: false })] }),
+    });
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Delete'));
+
+    // the counts, and each one is read from somewhere rather than guessed
+    expect(await screen.findByText('4 transactions')).toBeInTheDocument();
+    expect(screen.getByText('2 imports')).toBeInTheDocument();
+    expect(screen.getByText('1 uploaded file')).toBeInTheDocument();
+    // and the honest part: this server has no endpoint for it, said before the click
+    // rather than after it
+    expect(screen.getByText(/no endpoint that deletes an account/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Delete permanently/ })).not.toBeInTheDocument();
+  });
+
+  it('will not print a count that is really the limit', async () => {
+    let calls = 0;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/imports': () => ok({ imports: [importRecord()] }),
+      // the dashboard's two reads, then the dialog's count — which comes back exactly
+      // as long as it asked for. The rows are never read, only counted, so they are
+      // not built: what is under test is the length.
+      'GET /api/transactions': () => {
+        calls += 1;
+        return ok(calls <= 2 ? TXS : new Array(COUNT_LIMIT).fill(null));
       },
     });
-    mount();
+    const menu = await openMenu();
 
-    expect(await screen.findByText(/settings unavailable/)).toBeInTheDocument();
-    // no fields: a form prefilled with values nobody stored is the lie this block avoids
+    fireEvent.click(within(menu).getByText('Delete'));
+
+    // a number that is silently the limit is the one number this dialog must not print
+    expect(await screen.findByText(`at least ${COUNT_LIMIT} transactions`)).toBeInTheDocument();
+    expect(screen.getByText(/it is the limit and not the answer/)).toBeInTheDocument();
+  });
+
+  it('opens the imports of this account and not of the workspace', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/imports': () =>
+        ok({ imports: [importRecord(), importRecord({ id: 'imp-2', accountId: 'acc-2' })] }),
+    });
+    const menu = await openMenu();
+
+    fireEvent.click(within(menu).getByText('Import history'));
+
+    expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
+    // the other account's import is not this account's history
+    expect(screen.getAllByText('statement.csv')).toHaveLength(1);
+  });
+});
+
+describe('adding an account', () => {
+  it('asks for a name and nothing else, then selects what came back', async () => {
+    const created = account({ id: 'acc-3', name: 'Cash' });
+    let list: Account[] = [ACCOUNTS[0]];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      'POST /api/accounts': () => {
+        list = [...list, created];
+        return ok(created, 201);
+      },
+      'GET /api/transactions': () => ok([]),
+    });
+    await panel('Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add more +' }));
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Cash' } });
+    // the currency is not asked for: it is the workspace's base currency
+    expect(screen.getByText(/base currency of this workspace/)).toHaveTextContent('EUR');
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await panel('Cash');
+    expect(await tab('Cash')).toBeInTheDocument();
+    expect(screen.getByText(/Nothing has been loaded into Cash/)).toBeInTheDocument();
+  });
+});
+
+describe('what left this screen', () => {
+  it('carries no workspace settings, no export and no identity form', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+
+    // all four moved to the Account screen, in order, and are asserted there
     expect(screen.queryByLabelText('Base currency')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-    await settled();
-    expect(currency().value).toBe('EUR');
-    expect(owners().value).toBe('Yurii Kalvenko');
-    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
-  });
-
-  it('shows the server\'s refusal instead of a success mark when the save is rejected', async () => {
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'PATCH /api/app-settings': () =>
-        fail(400, { error: 'baseCurrency: a three-letter ISO code, e.g. EUR' }),
-    });
-    mount();
-    await settled();
-
-    fireEvent.change(currency(), { target: { value: 'EURO' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByText(/three-letter ISO code/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Saved/ })).not.toBeInTheDocument();
-  });
-
-  it('marks the save done when the response echoes what was asked for', async () => {
-    // the mirror of the two tests around it: without it they would both pass against
-    // a block that never shows a success mark at all
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'PATCH /api/app-settings': () => ok({ baseCurrency: 'USD', ownerNames: ['Yurii Kalvenko'] }),
-    });
-    mount();
-    await settled();
-
-    fireEvent.change(currency(), { target: { value: 'usd' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByRole('button', { name: 'Saved ✓' })).toBeInTheDocument();
-    // re-rendered from the echoed body, not from what was typed
-    expect(currency().value).toBe('USD');
-    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
-  });
-
-  it('drops the previous save\'s mark when the next save fails', async () => {
-    let saves = 0;
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'PATCH /api/app-settings': () => {
-        saves += 1;
-        return saves === 1
-          ? ok({ baseCurrency: 'USD', ownerNames: ['Yurii Kalvenko'] })
-          : fail(500, { error: 'the settings store is unreachable' });
-      },
-    });
-    mount();
-    await settled();
-
-    fireEvent.change(currency(), { target: { value: 'usd' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByRole('button', { name: 'Saved ✓' })).toBeInTheDocument();
-
-    // the second save edits nothing, so justSaved is still true when it starts: a mark
-    // that outlives the save it affirms reads as current
-    fireEvent.click(screen.getByRole('button', { name: 'Saved ✓' }));
-
-    expect(await screen.findByText(/store is unreachable/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Saved/ })).not.toBeInTheDocument();
-  });
-
-  it('refuses to call a 200 a save when the body came back with something else', async () => {
-    // no route reaches this today - the endpoint answers 400 rather than ignoring a
-    // field. It is the client half of the same rule, and it holds for the fields
-    // this endpoint gains later.
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'PATCH /api/app-settings': () => ok({ baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko'] }),
-    });
-    mount();
-    await settled();
-
-    fireEvent.change(currency(), { target: { value: 'USD' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Saved/ })).not.toBeInTheDocument();
-    // and the field shows what was actually stored, not the rejected edit
-    expect(currency().value).toBe('EUR');
-  });
-});
-
-describe('the data export', () => {
-  const exportControl = () => screen.getByRole('button', { name: /Export my data/ });
-
-  it('fetches the backup and saves what came back', async () => {
-    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/backup': () => ok({ transactions: [] }) });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    fireEvent.click(exportControl());
-
-    // the object URL is the subject: it exists only once a checked 200 came back
-    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
-  });
-
-  it('shows the refusal beside the control and writes no file', async () => {
-    // as a link this landed in Downloads as finto-backup-<date>.json, and the user
-    // believed they held every transaction they own
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      'GET /api/backup': () => fail(500, { error: 'the export could not be assembled' }),
-    });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    fireEvent.click(exportControl());
-
-    expect(await screen.findByText(/the export could not be assembled/)).toBeInTheDocument();
-    expect(URL.createObjectURL).not.toHaveBeenCalled();
-  });
-
-  it('starts one backup per click, not one per impatient click', async () => {
-    let release: (res: Response) => void = () => {};
-    mockFetch({
-      ...OVERVIEW_ROUTES,
-      // held open on purpose: /api/backup serialises every table, and nothing on the
-      // screen moves while it does
-      'GET /api/backup': () => new Promise<Response>((resolve) => (release = resolve)),
-    });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    fireEvent.click(exportControl());
-    expect(exportControl()).toBeDisabled();
-    fireEvent.click(exportControl());
-    release(ok({ transactions: [] }));
-
-    await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
-    expect(requests().filter((r) => r === 'GET /api/backup')).toHaveLength(1);
-    expect(exportControl()).toBeEnabled();
-  });
-});
-
-describe('the import history entry point', () => {
-  it('opens the panel and comes back to the accounts', async () => {
-    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok({ imports: [] }) });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Import history/ }));
-
-    expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
-    // one panel state, so opening this one cannot leave the import form underneath
-    expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-  });
-
-  it('leaves edit mode as it was after a trip into the panel', async () => {
-    // the state a union that had swallowed `editing` would have deleted silently
-    mockFetch({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok({ imports: [] }) });
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Edit accounts' }));
-    expect(await screen.findByText('Old DKB')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /Import history/ }));
-    expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
-
-    expect(await screen.findByText('Old DKB')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Exit account edit mode' })).toBeInTheDocument();
-  });
-});
-
-describe('what moved to the Account screen', () => {
-  it('carries no identity line and no sign-out control', async () => {
-    mockFetch(OVERVIEW_ROUTES);
-    mount();
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    // the props are gone, so the old line cannot render - but a second sign-out
-    // hardcoded here would type-check, and two of them is item 14's CsvImport again
-    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
-    expect(screen.queryByText(USER.email)).not.toBeInTheDocument();
-    // the reachability diagnostic is not account identity and stays
-    expect(screen.getByText(/^API:/)).toBeInTheDocument();
-  });
-});
-
-describe('what item 13 deleted', () => {
-  it('offers no sync controls', async () => {
-    mockFetch(OVERVIEW_ROUTES);
-    mount();
-    // the anchor comes first on purpose: every assertion below passes for free on a
-    // screen that never loaded, and on one that crashed
-    expect(await screen.findByText('Sparkasse Giro')).toBeInTheDocument();
-
-    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Sync journal/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Data current as of/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Sync now/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export my data/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Recurring payments/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^API:/)).not.toBeInTheDocument();
   });
 });

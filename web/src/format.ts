@@ -23,6 +23,17 @@ export function fmtShort(n: number): string {
   return `${sign}${Math.round(abs)}`;
 }
 
+/**
+ * A chart's Y-axis upper bound: the smallest round number that is not below the
+ * data's maximum. Here beside `fmtShort` because it is the same job — the axis — and
+ * because two screens now draw bars and a second copy of it would drift.
+ */
+export function niceMax(max: number): number {
+  if (max <= 0) return 1;
+  const pow = Math.pow(10, Math.floor(Math.log10(max)));
+  return Math.ceil(max / (pow / 2)) * (pow / 2);
+}
+
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -36,6 +47,41 @@ export const MONTHS_SHORT = [
 
 export function fmtMonth(d: Date): string {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/**
+ * A YYYY-MM as "Jul 2026". Split on the string, never through `new Date('2026-07')`,
+ * for the reason `fmtDay` gives: that is UTC midnight, and it reads back as June for
+ * anybody west of UTC.
+ */
+export const fmtMonthKey = (month: string): string =>
+  `${MONTHS_SHORT[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7)} ${month.slice(0, 4)}`;
+
+/** Just the month, for a chart axis where the range is stated above it. */
+export const fmtMonthTick = (month: string): string =>
+  MONTHS_SHORT[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7);
+
+/**
+ * A long name cut in the middle, keeping both ends, with the cut marked.
+ *
+ * End-truncation is the usual answer and it is the wrong one here. An account's
+ * default name is the statement's filename, extension and all — the real ones look
+ * like `report_03-09-2026_11-22-33.pdf`, and everything that distinguishes two of them
+ * is at the end. Cut from the right, every account a bank exports is called
+ * `report_03-09-…`, which names none of them.
+ *
+ * `budget` is the whole result including the ellipsis, so the caller states the width
+ * it has rather than a head and a tail it would have to add up itself. The head keeps
+ * the odd character: a name is read from the left.
+ */
+export function truncateMiddle(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  // below three characters there is no room for a head, a tail and a mark, and a
+  // bare "…" says less than the first letter does
+  if (budget < 3) return text.slice(0, Math.max(0, budget));
+  const keep = budget - 1;
+  const head = Math.ceil(keep / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - (keep - head))}`;
 }
 
 export function fmtDate(iso: string): string {

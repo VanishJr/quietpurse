@@ -63,13 +63,15 @@ textarea {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--ink-page);
+  /* the ground the content panel is laid on; only its edges show on a wide window */
+  background: var(--ink-brand);
 }
 
 .screens {
   flex: 1;
   min-height: 0;
   position: relative;
+  background: var(--ink-page);
 }
 
 /* Screens stay mounted so filters and loaded data survive tab switches. */
@@ -84,24 +86,49 @@ textarea {
   display: none;
 }
 
+/* ---------- navigation ---------- */
+
+/*
+ * One element, two shapes: the bottom bar of the phone app, and the navy sidebar of
+ * the design on a wide window. It carries the brand fill in both, so the text on it
+ * is `--c-on-ground-*` from tokens.css — the ramp that file already defines for text
+ * on a dark ground — rather than the theme's, which flips with the scheme.
+ */
 .tabbar {
   display: flex;
-  border-top: 1px solid var(--ink-grid);
-  background: var(--ink-surface);
+  background: var(--ink-brand);
+  color: var(--c-on-ground-1);
   /* iOS home indicator; 0 on everything else */
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
-.tabbar button {
-  flex: 1;
-  padding: 12px 0;
-  font-size: 14px;
-  color: var(--ink-muted);
+/* the wordmark and the Import action are the sidebar's; five across a phone is four
+   too many */
+.nav-mark,
+.nav-foot {
+  display: none;
 }
 
-.tabbar button[aria-current='page'] {
-  color: var(--ink-accent);
-  font-weight: 700;
+.nav-list {
+  display: flex;
+  flex: 1;
+}
+
+.nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 0;
+  font-size: 11px;
+  color: var(--c-on-ground-3);
+  position: relative;
+}
+
+.nav-item[aria-current='page'] {
+  color: var(--c-on-ground-1);
+  font-weight: 600;
 }
 
 /* ---------- shared primitives ---------- */
@@ -158,10 +185,10 @@ textarea {
 }
 
 .btn {
-  background: var(--ink-accent);
-  color: var(--ink-onAccent);
-  border-radius: 8px;
-  padding: 12px 16px;
+  background: var(--ink-brand);
+  color: var(--ink-onBrand);
+  border-radius: var(--r-pill);
+  padding: 12px 20px;
   font-size: 15px;
   font-weight: 600;
   text-align: center;
@@ -171,25 +198,39 @@ textarea {
   opacity: 0.5;
 }
 
+.btn-sm {
+  padding: 9px 16px;
+  font-size: 13px;
+}
+
 .btn-ghost {
-  border: 1px solid var(--ink-accent);
-  color: var(--ink-accent);
-  border-radius: 8px;
-  padding: 10px 16px;
+  border: 1px solid var(--ink-border);
+  color: var(--ink-primary);
+  background: var(--ink-surface);
+  border-radius: var(--r-pill);
+  padding: 10px 18px;
   font-size: 14px;
   font-weight: 600;
   text-align: center;
+}
+
+.btn-ghost:hover {
+  border-color: var(--ink-muted);
 }
 
 .btn-ghost:disabled {
   opacity: 0.5;
 }
 
+/* underlined, because `accent` is a navy in light mode and a navy word among black
+   words is not visibly a control */
 .btn-link {
   color: var(--ink-accent);
   font-size: 14px;
   padding: 6px 0;
   text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .btn-danger {
@@ -551,6 +592,730 @@ textarea {
   margin: 8px 0;
 }
 
+/* Text for a screen reader and nobody else. The auth screens have their own copy of
+   this (`.auth-sr`) and it stays there: that file is a self-contained frame and does
+   not reach into this one. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* ---------- the screen's own header ---------- */
+
+.welcome {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 26px 0 18px;
+  border-bottom: 1px solid var(--ink-grid);
+  margin-bottom: 18px;
+}
+
+.welcome-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.welcome-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.welcome-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--ink-border);
+  background: var(--ink-surface);
+  color: var(--ink-secondary);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  color: var(--ink-primary);
+}
+
+/* the initial, where a product with photographs would put a photograph */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--ink-accent);
+  color: var(--ink-onAccent);
+  font-size: 13px;
+  font-weight: 700;
+  user-select: none;
+}
+
+/* ---------- the account rail ---------- */
+
+.acct-strip {
+  margin: 4px 0 10px;
+}
+
+/* the design's pill: a white track holding the tabs, with a round arrow at each end
+   when there is more than one line of accounts */
+.acct-rail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-pill);
+  background: var(--ink-surface);
+}
+
+.rail-arrow {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-pill);
+  background: var(--ink-page);
+  color: var(--ink-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.rail-arrow:hover:not(:disabled) {
+  color: var(--ink-primary);
+}
+
+.rail-arrow:disabled {
+  opacity: 0.35;
+}
+
+/* minmax(0,1fr) rather than 1fr: a grid track sized 1fr will not go below its
+   content, so one long name would push the other two tabs out of the rail instead
+   of being cut */
+.rail-tabs {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.rail-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-pill);
+  font-size: 14px;
+  color: var(--ink-secondary);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.rail-tab:hover {
+  background: var(--ink-page);
+  color: var(--ink-primary);
+}
+
+.rail-tab[aria-current='true'] {
+  background: var(--ink-brand);
+  color: var(--ink-onBrand);
+  font-weight: 600;
+}
+
+.rail-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  /* the cut is `truncateMiddle`'s, in characters; this only stops a wrap */
+  white-space: nowrap;
+}
+
+.rail-tab-badge {
+  font-size: 9px;
+  flex: none;
+}
+
+.acct-strip-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.acct-strip-label {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+/* ---------- the three cards ---------- */
+
+.acct-panel {
+  margin-top: 4px;
+}
+
+.acct-figure-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.fig {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+}
+
+/* the balance, which is the one the design fills */
+.fig-brand {
+  border-color: transparent;
+  background: var(--ink-brand);
+  color: var(--ink-onBrand);
+}
+
+.fig-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fig-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.fig-menu {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -8px 0 0;
+  border-radius: var(--r-sm);
+  color: inherit;
+  opacity: 0.7;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.fig-menu:hover {
+  opacity: 1;
+  background: var(--c-wash-1);
+}
+
+.fig-label {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.fig-brand .fig-label {
+  color: var(--c-on-ground-2);
+}
+
+.fig-value {
+  margin: 8px 0 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.fig-value.is-income {
+  color: var(--ink-good);
+}
+
+.fig-delta {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.fig-arrow {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.fig-delta.is-good {
+  color: var(--ink-good);
+}
+
+.fig-delta.is-bad {
+  color: var(--ink-bad);
+}
+
+/* The two above are chosen against the surface; the balance card is a navy fill, and
+   on it they measure 2.89:1 and 2.65:1 against the 4.5:1 this 12px text needs. Same
+   override as .fig-label and .fig-delta-note already carry, on the one coloured
+   element the fill was missed on. */
+.fig-brand .fig-delta.is-good {
+  color: var(--ink-goodOnBrand);
+}
+
+.fig-brand .fig-delta.is-bad {
+  color: var(--ink-badOnBrand);
+}
+
+/* the direction is the coloured part; what it is measured against is not */
+.fig-delta-note {
+  color: var(--ink-muted);
+}
+
+.fig-brand .fig-delta-note {
+  color: var(--c-on-ground-2);
+}
+
+/* ---------- by month ---------- */
+
+.acct-months {
+  margin-top: 24px;
+}
+
+.acct-range {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.acct-legend {
+  display: flex;
+  gap: 16px;
+  margin: 6px 0 2px;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.acct-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.acct-card {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  padding: 18px 20px;
+  margin-top: 10px;
+}
+
+.acct-chart {
+  margin: 8px 0 0;
+}
+
+/* ---------- the two empty states ---------- */
+
+.acct-blank {
+  border: 1px dashed var(--ink-grid);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  padding: 32px 20px;
+  margin: 16px 0;
+  text-align: center;
+}
+
+.acct-blank-title {
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
+
+.acct-blank-text {
+  font-size: 14px;
+  color: var(--ink-secondary);
+  line-height: 1.55;
+  margin: 0 auto;
+  max-width: 48ch;
+}
+
+.acct-blank-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+
+/* ---------- the account panel's four items ---------- */
+
+/* wraps, unlike the tab: this is the one place the whole name is shown as a name */
+.acct-full-name {
+  overflow-wrap: anywhere;
+}
+
+.acct-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.acct-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  text-align: left;
+}
+
+.acct-menu-item:hover {
+  background: var(--ink-page);
+}
+
+.acct-menu-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.acct-menu-item.is-danger .acct-menu-label {
+  color: var(--ink-bad);
+}
+
+.acct-menu-sub {
+  font-size: 12px;
+  color: var(--ink-muted);
+  line-height: 1.35;
+}
+
+/* what deleting would destroy, listed before the control rather than beside it */
+.acct-destroy {
+  margin: 12px 0;
+  padding-left: 20px;
+  font-size: 14px;
+  color: var(--ink-primary);
+  line-height: 1.6;
+}
+
+/* the server cannot do this yet, and the panel says so where the button would be */
+.acct-wall {
+  border-left: 3px solid var(--ink-accent);
+  padding-left: 12px;
+  margin-top: 16px;
+}
+
+/* ---------- recent transactions ---------- */
+
+.tx-recent {
+  margin-top: 24px;
+}
+
+/* the reference's white panel, with the dark header bar sitting inside it */
+.tx-card {
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+
+/*
+ * `fixed`, and the widths are on the header row.
+ *
+ * Under the default `auto` layout a column is as wide as its widest cell wants to be,
+ * so one long description — and a bank writes a whole payment reference into that
+ * field — made the table wider than the card it sits in and pushed Amount off the
+ * edge. `text-overflow: ellipsis` never engaged either, because it needs a cell that
+ * is not free to grow. Fixed gives Date, Category and Amount what they need and hands
+ * the rest to Description, which then cuts.
+ */
+.tx-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+}
+
+.tx-col-date {
+  width: 116px;
+}
+
+.tx-col-cat {
+  width: 168px;
+}
+
+/* wide enough for a grouped amount and a currency code: "−1,234,567.89 EUR" */
+.tx-col-amount {
+  width: 148px;
+}
+
+/*
+ * Nothing here sets `display` on a `<td>`. A table cell told to be a flex container
+ * stops being a cell, and CSS table fixup wraps it — together with every adjacent
+ * non-cell sibling — into one anonymous cell: Description and Category are adjacent,
+ * so both wanting to be flex containers collapsed them into a single column with the
+ * category stacked under the description. Every cell's layout is on `.tx-cell`, a
+ * span inside the `<td>`.
+ */
+.tx-cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  /* the cell is fixed-width now, so anything past it is cut rather than carried out
+     over the neighbour */
+  overflow: hidden;
+}
+
+/* the reference's dark header bar, which inverts in dark mode rather than washing
+   out — that is the point of taking it off the theme's own two ends */
+.tx-table thead th {
+  background: var(--ink-brand);
+  color: var(--ink-onBrand);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 11px 14px;
+  white-space: nowrap;
+}
+
+.tx-table thead th:first-child {
+  border-radius: var(--r-md) 0 0 var(--r-md);
+}
+
+.tx-table thead th:last-child {
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+}
+
+.tx-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ink-grid);
+  vertical-align: middle;
+}
+
+.tx-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.tx-date {
+  color: var(--ink-secondary);
+  white-space: nowrap;
+}
+
+.tx-desc-cell {
+  gap: 12px;
+}
+
+/* the reference's merchant avatar, minus the claim to know which merchant it is */
+.tx-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--r-pill);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  /* the category colours are picked for contrast against the page, and white on the
+     lightest of them is thin — the ring keeps the disc's edge readable either way */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.tx-desc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.tx-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tx-flags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.tx-cat-cell {
+  gap: 8px;
+  color: var(--ink-secondary);
+}
+
+.tx-cat-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tx-num {
+  text-align: right;
+}
+
+.tx-num .tx-cell {
+  justify-content: flex-end;
+}
+
+.tx-amount {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tx-amount.is-income {
+  color: var(--ink-good);
+}
+
+/* ---------- the Account screen's sections ---------- */
+
+/* Everything that is about the workspace rather than about one account lives on that
+   screen now, in order: who you are, how the app computes, what it found, your data,
+   leaving. Each section is a card, so the order reads as separation rather than as a
+   run of headings down one column. */
+.settings-section {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.settings-lead {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.settings-id {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.settings-id .avatar {
+  width: 44px;
+  height: 44px;
+  font-size: 17px;
+}
+
+.settings-id-name {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.settings-id-mail {
+  font-size: 13px;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- narrow ---------- */
+
+@media (max-width: 899px) {
+  /* The same table, stacked. One DOM either way: a phone list rendered beside a
+     desktop table would put every description on the screen twice, and a screen
+     reader would read both. */
+  .tx-table thead {
+    display: none;
+  }
+
+  .tx-table,
+  .tx-table tbody,
+  .tx-table tr,
+  .tx-table td {
+    display: block;
+  }
+
+  /* Two lines and a value, which is the shape every other list on a phone in this app
+     already has: title on top, date and category under it, amount holding the right
+     edge across both. */
+  .tx-table tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'desc desc amount'
+      'date cat  amount';
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--ink-grid);
+  }
+
+  .tx-table tbody td {
+    padding: 0;
+    border-bottom: none;
+  }
+
+  .tx-desc {
+    grid-area: desc;
+  }
+
+  /* 30px of disc plus the 12px beside it: the meta line starts under the description
+     rather than under the disc */
+  .tx-date {
+    grid-area: date;
+    font-size: 12px;
+    padding-left: 42px;
+  }
+
+  .tx-cat {
+    grid-area: cat;
+    font-size: 12px;
+  }
+
+  .tx-amount {
+    grid-area: amount;
+  }
+
+  .acct-figure-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail-tab {
+    padding: 9px 8px;
+    font-size: 12px;
+  }
+
+  .fig-value {
+    font-size: 22px;
+  }
+}
+
 /* ---------- analytics ---------- */
 
 .period-row {
@@ -785,50 +1550,92 @@ details > summary::marker {
   margin-top: 8px;
 }
 
+/* a pill stretched across the column reads as a banner rather than as a control */
+.stack > .btn,
+.stack > .btn-ghost {
+  align-self: flex-start;
+}
+
 /* ---------- wide screens ---------- */
 
 @media (min-width: 900px) {
+  /* row-reverse, so the sidebar is on the left while staying last in the DOM: the
+     screens are what a keyboard and a screen reader should reach first */
   .app {
     flex-direction: row-reverse;
   }
 
+  /* the content panel the design lays on the navy ground */
+  .screens {
+    border-radius: var(--r-panel) 0 0 var(--r-panel);
+    overflow: hidden;
+  }
+
   .screen {
-    padding: 0 32px;
+    padding: 0 40px;
   }
 
   /* content stays readable instead of stretching across the whole monitor */
   .screen-inner {
     max-width: 1100px;
     margin: 0 auto;
-    padding-bottom: 32px;
+    padding-bottom: 40px;
   }
 
-  /* bottom tabs become a sidebar */
+  /* bottom tabs become the sidebar */
   .tabbar {
     flex-direction: column;
-    border-top: none;
-    border-right: 1px solid var(--ink-grid);
-    width: 200px;
+    width: 232px;
     flex: none;
-    padding: 16px 0;
+    padding: 26px 0 20px;
+  }
+
+  .nav-mark {
+    display: block;
+    padding: 0 24px 30px;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .nav-list {
+    flex: none;
+    flex-direction: column;
     gap: 2px;
   }
 
-  .tabbar button {
+  .nav-foot {
+    display: block;
+    margin-top: auto;
+    padding-top: 16px;
+  }
+
+  .nav-item {
     flex: none;
-    text-align: left;
-    padding: 10px 20px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 11px 24px;
     font-size: 15px;
-    border-radius: 0 20px 20px 0;
-    margin-right: 12px;
+    color: var(--c-on-ground-2);
   }
 
-  .tabbar button:hover {
-    background: var(--ink-grid);
+  .nav-item:hover {
+    color: var(--c-on-ground-1);
+    background: var(--c-wash-1);
   }
 
-  .tabbar button[aria-current='page'] {
-    background: var(--ink-grid);
+  /* the marker beside the current item, which colour alone is not */
+  .nav-item[aria-current='page']::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 7px;
+    bottom: 7px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: currentColor;
   }
 
   /* the analytics donut and its legend sit side by side */

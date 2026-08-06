@@ -83,6 +83,22 @@ export interface Transaction {
   oneOff?: boolean;
 }
 
+/**
+ * "All transactions" on the Overview, asking the Transactions screen for one account.
+ *
+ * The nonce is what makes it an event rather than a setting: the screens all stay
+ * mounted and keep their own filters, so a second click on the same account would
+ * otherwise carry the same value and change nothing — after the user had narrowed the
+ * filter by hand in between, which is exactly when they would click it again.
+ *
+ * Here rather than in SignedIn.tsx so that the screen reading it does not have to
+ * import the module that renders it.
+ */
+export interface TxFocus {
+  accountId: string;
+  nonce: number;
+}
+
 /** Category total in the base currency. */
 export interface CategorySummary {
   category: string;
@@ -279,6 +295,13 @@ export interface ImportRecord {
   originalFilename: string | null;
   /** what the upload asked for — NULL before the parse and on every older row */
   accountName: string | null;
+  /**
+   * The account the rows went to, resolved at staging. NULL wherever accountName is.
+   * It, and not the name, is what says where they landed: a rename moves the account
+   * and leaves this row's accountName behind — which is why the per-account import
+   * history filters on this and never on the name.
+   */
+  accountId: string | null;
   uploadedBy: string | null;
   uploadedAt: string;
   parserVersion: number;

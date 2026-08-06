@@ -5,7 +5,14 @@ import { Chips } from '../components/Chips';
 import { Sheet } from '../components/Sheet';
 import { fmtDate, fmtMoney, isoDay } from '../format';
 import { useTheme } from '../theme';
-import { Account, IncomeSource, IncomeSourceDef, Transaction, TransferRule } from '../types';
+import {
+  Account,
+  IncomeSource,
+  IncomeSourceDef,
+  Transaction,
+  TransferRule,
+  TxFocus,
+} from '../types';
 
 type PeriodKey = 'month' | '30d' | '90d' | 'year';
 
@@ -29,7 +36,7 @@ function periodBounds(p: PeriodKey): { from: string; to: string } {
   return { from: isoDay(new Date(now.getTime() - days * 86_400_000)), to };
 }
 
-export function TransactionsScreen() {
+export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const { categoryColor } = useTheme();
 
   const [period, setPeriod] = useState<PeriodKey>('month');
@@ -63,6 +70,19 @@ export function TransactionsScreen() {
     api.incomeSources().then(setSources).catch(() => {});
     loadRules();
   }, [loadRules]);
+
+  /**
+   * Arrived from an account's "All transactions". The link says all of them, so the
+   * other two filters are cleared as well and the period opens at the widest this
+   * screen offers — landing on "this account, this calendar month" would be a link
+   * that hides most of what it promised.
+   */
+  useEffect(() => {
+    if (!focus) return;
+    setAccountId(focus.accountId);
+    setCategory('all');
+    setPeriod(PERIODS[PERIODS.length - 1].key);
+  }, [focus]);
 
   const sourceById = (id?: IncomeSource) => sources.find((s) => s.id === id);
 

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { safeFilename, saveBlob } from '../download';
 import { fmtDate } from '../format';
 import { importStatusLabel, importStatusNote } from '../imports';
-import { ImportRecord } from '../types';
+import { Account, ImportRecord } from '../types';
 
 interface Props {
   /** Required: a mount with no way back strands the user here. */
@@ -13,6 +13,13 @@ interface Props {
    * deleted statement file is not the caller's data, so that does not fire it.
    */
   onChanged: () => void;
+  /**
+   * One account's imports rather than the workspace's, which is what the ⋮ on a tab
+   * opens. Filtered on the id and never on `accountName`: a rename moves the account
+   * and leaves the name recorded on the row behind, so matching by name would drop
+   * every file uploaded before the rename.
+   */
+  account?: Account;
 }
 
 /** Which row's confirmation is open, and for which of the two deletes. One at a time. */
@@ -66,7 +73,7 @@ const ownedClause = (n: number): string =>
  * summary back, and confirming numbers nobody read is what the confirmation step
  * exists to prevent (007 D5).
  */
-export function ImportHistory({ onBack, onChanged }: Props) {
+export function ImportHistory({ onBack, onChanged, account }: Props) {
   /** null = never loaded. A failed read must never render as "nothing imported yet". */
   const [imports, setImports] = useState<ImportRecord[] | null>(null);
   /** The list's own refusal: when it did not arrive there is no row to attach one to. */
@@ -157,12 +164,20 @@ export function ImportHistory({ onBack, onChanged }: Props) {
     }
   };
 
+  /**
+   * `imports` stays whole and the filter is applied here: a per-account view is a
+   * narrower reading of the same list, and re-fetching it per account would be one
+   * request per tab for an endpoint that answers the workspace either way.
+   */
+  const shown = account ? imports?.filter((r) => r.accountId === account.id) : imports;
+
   return (
     <section>
       <button className="btn-link" onClick={onBack}>
         ← Back to accounts
       </button>
       <h1 className="title">Import history</h1>
+      {account && <p className="sheet-meta acct-full-name">{account.name}</p>}
 
       <p className="hint">The most recent imports, newest first — older ones may not be listed.</p>
       <p className="hint">
@@ -187,7 +202,7 @@ export function ImportHistory({ onBack, onChanged }: Props) {
       )}
       {notice && <p className="hint">{notice}</p>}
 
-      {imports?.map((r) => {
+      {shown?.map((r) => {
         const title = titleOf(r);
         const note = importStatusNote(r.status, r.errorDetail);
         const open = confirm?.id === r.id ? confirm : null;
@@ -297,11 +312,12 @@ export function ImportHistory({ onBack, onChanged }: Props) {
         );
       })}
 
-      {imports !== null && imports.length === 0 && (
+      {shown !== null && shown !== undefined && shown.length === 0 && (
         <div className="empty">
           <p>
-            Nothing has been imported yet. Upload a statement and it shows up here, with the
-            file it came from.
+            {account
+              ? `Nothing has been imported into ${account.name} yet. Upload a statement into it and it shows up here, with the file it came from.`
+              : 'Nothing has been imported yet. Upload a statement and it shows up here, with the file it came from.'}
           </p>
         </div>
       )}
