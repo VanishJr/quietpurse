@@ -93,6 +93,8 @@
   --r-md: 12px;
   --r-lg: 15px;
   --r-xl: 19px;
+  /* the app's content panel, laid on the navigation's ground */
+  --r-panel: 24px;
   --r-pill: 29px;
 
   /* ---------- type ---------- */

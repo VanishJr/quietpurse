@@ -163,6 +163,7 @@ export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord =>
   sourceType: 'csv',
   originalFilename: 'statement.csv',
   accountName: 'Sparkasse Giro',
+  accountId: 'acc-1',
   uploadedBy: USER.id,
   uploadedAt: '2026-06-15T10:00:00.000Z',
   parserVersion: 1,

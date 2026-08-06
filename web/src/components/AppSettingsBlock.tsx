@@ -69,9 +69,10 @@ export function AppSettingsBlock() {
     }
   };
 
+  // No heading of its own: its one mount is inside a section on the Account screen
+  // that already names it, and two headings over one form read as two forms.
   return (
-    <section style={{ marginTop: 16, marginBottom: 8 }}>
-      <h2 className="block-title">Settings</h2>
+    <section>
       {error && (
         <p className="error">
           Error: {error}

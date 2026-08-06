@@ -11,6 +11,19 @@ import { fail, FIRST_PAINT_ROUTES, mockFetch, ok, requests, SIGNED_OUT_ROUTES } 
  * available here - nothing below may depend on styles.css.
  */
 
+/**
+ * The Overview's heading, and the anchor for "the app shell really painted".
+ *
+ * Its own helper for the timeout. `SignedIn` is behind `lazy()`, so this wait includes
+ * vitest transforming that whole module graph the first time any test asks for it —
+ * and it is a graph with five screens and recharts in it. On a cold run that landed
+ * within a few milliseconds of the 1000ms default, which fails the test on the
+ * transform rather than on anything the test is about. Nothing here is waiting on the
+ * app.
+ */
+const appMounted = () =>
+  screen.findByRole('heading', { name: /^Welcome,/ }, { timeout: 5_000 });
+
 describe('signed out', () => {
   it('shows the sign-in form and nothing of the app', async () => {
     mockFetch(SIGNED_OUT_ROUTES);
@@ -22,7 +35,7 @@ describe('signed out', () => {
 
     expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('heading', { name: 'Accounts', hidden: true }),
+      screen.queryByRole('heading', { name: /^Welcome,/, hidden: true }),
     ).not.toBeInTheDocument();
   });
 });
@@ -33,7 +46,7 @@ describe('signed in', () => {
     render(<App />);
 
     // anchor: Overview's own heading, so the app shell really painted
-    expect(await screen.findByRole('heading', { name: 'Accounts' })).toBeVisible();
+    expect(await appMounted()).toBeVisible();
 
     // `hidden: true` is required: getByRole excludes a [hidden] subtree from itself,
     // so without it these would throw - and queryByRole(...) === null would pass
@@ -48,7 +61,7 @@ describe('signed in', () => {
   it('moves aria-current and visibility when a tab is clicked', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Accounts' })).toBeVisible();
+    expect(await appMounted()).toBeVisible();
 
     // within the tab bar, so the Transactions *button* is not the Transactions *heading*
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
@@ -62,7 +75,7 @@ describe('signed in', () => {
     );
     expect(tabs.getByRole('button', { name: 'Overview' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('heading', { name: 'Transactions' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Accounts', hidden: true })).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome,/, hidden: true })).not.toBeVisible();
   });
 
   it('drops back to the sign-in form when a mount request comes back 401', async () => {
@@ -124,7 +137,7 @@ describe('the server is unreachable', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
 
-    expect(await screen.findByRole('heading', { name: 'Accounts' })).toBeVisible();
+    expect(await appMounted()).toBeVisible();
   });
 
   it('keeps the screen and the Retry when the retry fails again', async () => {

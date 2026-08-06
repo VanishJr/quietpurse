@@ -37,36 +37,92 @@ export interface Ink {
   onAccent: string;
   /** modal backdrop */
   backdrop: string;
+  /**
+   * The navy the design is built on: the sidebar, the balance card, the selected
+   * tab, a filled button, the expense bars. It is a FILL and not a text colour —
+   * `accent` is what interactive text uses, and the two are the same hue in light
+   * mode and deliberately different in dark, where a navy link would be unreadable.
+   */
+  brand: string;
+  /** The second bar in the chart, and any fill that has to sit beside `brand`. */
+  brandSoft: string;
+  /** text on a `brand` fill */
+  onBrand: string;
+  /**
+   * `good` and `bad` as they have to be ON a `brand` fill. The pair above is chosen
+   * against the surface, and the balance card is the one place they are asked to sit
+   * on the navy instead — where light mode's #0f7a3d measured 2.89:1 and #c02626
+   * 2.65:1, against a 4.5:1 floor for the 12px they are set in. Same value in both
+   * schemes, because `brand` is a dark navy in both.
+   */
+  goodOnBrand: string;
+  badOnBrand: string;
 }
 
+/**
+ * Cool neutrals rather than the warm greys this app started with: the reference
+ * design is navy on near-white, and a warm grey beside a navy card reads as a
+ * mistake in one of the two.
+ */
+/**
+ * Every ratio below is against BOTH backgrounds a light-mode text colour can land on —
+ * `surface` (#ffffff) and `page` (#f1f2f4) — because the page is the darker of the two
+ * and it is what a caption outside a card sits on. Measuring on white alone is how
+ * `muted` came to be published as passing while every hint on `.screens` was at 4.11:1.
+ */
 export const lightInk: Ink = {
-  primary: '#0b0b0b',
-  secondary: '#52514e',
-  muted: '#898781',
-  grid: '#e1e0d9',
-  border: 'rgba(11,11,11,0.10)',
-  surface: '#fcfcfb',
-  page: '#f9f9f7',
-  accent: '#2a78d6',
-  good: '#006300',
-  bad: '#d03b3b',
+  primary: '#0b1220',
+  /* 7.5:1 on white, 6.7:1 on the page */
+  secondary: '#4a5568',
+  /* 5.2:1 on white, 4.7:1 on the page — the warm #898781 this started as was 3.2:1 on
+     the page, and #6b7686, which replaced it for that, was 4.1:1 and so still under
+     the floor for text where most of the muted text on this app actually sits */
+  muted: '#626d7d',
+  grid: '#e3e6ea',
+  border: 'rgba(11,18,32,0.10)',
+  surface: '#ffffff',
+  page: '#f1f2f4',
+  accent: '#12233f',
+  good: '#0f7a3d',
+  bad: '#c02626',
   onAccent: '#ffffff',
-  backdrop: 'rgba(11,11,11,0.35)',
+  backdrop: 'rgba(11,18,32,0.40)',
+  brand: '#12233f',
+  brandSoft: '#5b7290',
+  onBrand: '#ffffff',
+  /* on #12233f: 7.5:1 and 7.1:1 */
+  goodOnBrand: '#4ec98a',
+  badOnBrand: '#ff8f8b',
 };
 
+/* Measured on `surface` (#161c25) and `page` (#0d1117); the page is the lighter-
+   contrast of the two here, which is the reverse of light mode. */
 export const darkInk: Ink = {
-  primary: '#f2f1ec',
-  secondary: '#b6b4ad',
-  muted: '#84827b',
-  grid: '#2e2e2b',
-  border: 'rgba(242,241,236,0.12)',
-  surface: '#1a1a19',
-  page: '#111110',
-  accent: '#6aa6ef',
-  good: '#4cc38a',
+  primary: '#e8ebf0',
+  secondary: '#a9b3c1',
+  /* 5.0:1 on the surface, 5.5:1 on the page */
+  muted: '#818b9b',
+  grid: '#262f3c',
+  border: 'rgba(232,235,240,0.12)',
+  surface: '#161c25',
+  page: '#0d1117',
+  /* not `brand`: navy text on a navy page is not text */
+  accent: '#7aa7ea',
+  good: '#4ec98a',
   bad: '#f2726f',
-  onAccent: '#0b0b0b',
+  onAccent: '#0d1117',
   backdrop: 'rgba(0,0,0,0.6)',
+  /* Lighter than the page here, where in light mode it is darker: a fill has to be
+     distinguishable from the surface behind it, and which direction that is depends
+     on the scheme. It has to clear `surface` (#161c25) and not just `page`, because
+     the selected tab and the balance card both sit on a surface — at #1c2738 the
+     selected tab was a rectangle you had to look for. */
+  brand: '#25344c',
+  brandSoft: '#5b7290',
+  onBrand: '#e8ebf0',
+  /* on #25344c: 6.0:1 and 5.7:1 */
+  goodOnBrand: '#4ec98a',
+  badOnBrand: '#ff8f8b',
 };
 
 // Category palettes — keyed by backend slugs (labels live in categories.ts)

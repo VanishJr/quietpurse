@@ -13,7 +13,7 @@ import { api } from '../api';
 import { categoryLabel } from '../categories';
 import { BudgetsBlock } from '../components/BudgetsBlock';
 import { Chips } from '../components/Chips';
-import { fmtMoney, fmtMonth, fmtShort, isoDay, MONTHS_SHORT } from '../format';
+import { fmtMoney, fmtMonth, fmtShort, isoDay, MONTHS_SHORT, niceMax } from '../format';
 import { useTheme } from '../theme';
 import { CategorySummary, MonthTotals, Summary } from '../types';
 
@@ -38,13 +38,6 @@ function bounds(range: Range, d: Date): { from: string; to: string } {
     from: isoDay(new Date(d.getFullYear(), d.getMonth(), 1)),
     to: isoDay(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
   };
-}
-
-/** Y-axis upper bound: a round number no smaller than the maximum. */
-function niceMax(max: number): number {
-  if (max <= 0) return 1;
-  const pow = Math.pow(10, Math.floor(Math.log10(max)));
-  return Math.ceil(max / (pow / 2)) * (pow / 2);
 }
 
 export function AnalyticsScreen() {
