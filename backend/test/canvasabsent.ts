@@ -34,7 +34,7 @@ const TEMPLATE: PdfTemplate = {
   amount: {
     pattern: /^(-?\d{1,3}(?:\.\d{3})*,\d{2}) (€)$/u,
     decimal: ',',
-    currency: { '€': 'EUR' },
+    currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
     example: '1.234,56 €',
   },
   rows: { kind: 'one-line' },

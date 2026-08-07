@@ -171,18 +171,36 @@ const ambiguousLayout = (titles: string[]): string =>
 const tooManyPages = (pages: number, max: number): string =>
   `this PDF has ${pages} pages, more than the ${max} this importer reads in one file - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
 
+/**
+ * The five builders below open `this ${title} statement` and not `this looks like a
+ * ${title} statement but`, which is what they read as until row 31.
+ *
+ * Two reasons, and the first is the article: `a N26`, and `a АТ «УНІВЕРСАЛ БАНК»`.
+ * The article-free fix that suggests itself - `this looks like a statement from
+ * ${title}` - is taken, by notRecognisedFrom, where it means "this bank is known and
+ * its layout is not"; these five mean the opposite ("the layout is known and
+ * something inside it broke"), and two refusals with one head and opposite meanings
+ * are worse than the article.
+ *
+ * The second is why the hedge can go at all: every one of these fires AFTER a
+ * template has claimed the document, so there is nothing left to hedge about - and
+ * statement.ts's three gate refusals, which fire on the same evidence one seam later,
+ * already assert flatly with `this ${title} statement`. A user cannot tell which side
+ * of that seam a refusal came from and should not have to, so the two sets open
+ * identically and diverge from notRecognisedFrom's at character 6.
+ */
 const unreadableTable = (title: string, cell: string): string =>
-  `this looks like a ${title} statement but it has a table this importer cannot read (${cell}) - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement has a table this importer cannot read (${cell}) - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * mapAndStore's own "no data rows (header only, or empty)" names a header, to
  * someone holding a document that has not got one.
  */
 const noTransactionLines = (title: string): string =>
-  `this looks like a ${title} statement but no transaction lines were found in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking`;
+  `this ${title} statement has no transaction lines in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking`;
 
 const noBalanceBox = (title: string, label: string, found: number): string =>
-  `this looks like a ${title} statement but this importer could not read its balance summary: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement has a balance summary this importer could not read: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * Which cell of the box a refusal is about, as the whole noun phrase rather than a
@@ -207,7 +225,7 @@ const unreadableBalance = (
   cell: string,
   example: string,
 ): string =>
-  `this looks like a ${title} statement but the ${which} cell of its "${label}" line reads ${quote(cell)}, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's ${which} cell reads ${quote(cell)} on its "${label}" line, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * Each cell is named by the line it was read off, because a layout may state them
@@ -218,7 +236,7 @@ const mixedBalanceCurrencies = (
   a: { role: BalanceRole; label: string; currency: string },
   b: { role: BalanceRole; label: string; currency: string },
 ): string =>
-  `this looks like a ${title} statement but its ${a.role} (${quote(a.label)}) is stated in ${a.currency} and its ${b.role} (${quote(b.label)}) in ${b.currency} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's ${a.role} (${quote(a.label)}) is stated in ${a.currency} and its ${b.role} (${quote(b.label)}) in ${b.currency} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /** Cut with a mark, so a value with more behind it does not read as the whole one. */
 const bounded = (text: string, max: number): string =>
@@ -296,16 +314,36 @@ type TableLayout =
     };
 
 /**
+ * Where an amount's currency comes from, which is a different question from what the
+ * amount is. Two of the layouts measured write the symbol in the cell; the third
+ * states it once in a column heading - "Сума в валюті картки (UAH)" - and writes a
+ * bare number in every cell under it, so there is no group 2 for a symbol to be read
+ * out of and no cell that could carry one (row 31).
+ *
+ * A union and never an optional field or an empty key, for the reason TableLayout is
+ * one. `currency: { '': 'UAH' }` is what an optional group 2 invites, and under it
+ * every cell this parser could not read resolves to a currency anyway - the
+ * silent-wrong-money shape the whole module exists to refuse. Here the bare-number
+ * layout names its code once, `symbols` is not reachable on that arm, and tsc refuses
+ * a half-written one. What holds the codes and symbols themselves is a case in
+ * test/pdf.test.ts, because a type cannot see inside a string.
+ */
+type AmountCurrency =
+  /** the cell carries it: group 2 of `pattern` is the symbol, mapped here */
+  | { kind: 'in-the-cell'; symbols: Readonly<Record<string, string>> }
+  /** the layout states it in a column heading; the cell is a bare number */
+  | { kind: 'per-column'; code: string };
+
+/**
  * How this layout writes an amount. The pattern must match the whole cell: a bank
  * that writes "1234,56-" for a debit hands parseFloat a number it reads as positive
  * and stops, so an amount is validated by shape before it is parsed, never after.
  */
 interface AmountFormat {
-  /** group 1 the number, group 2 the currency symbol */
+  /** group 1 the number; group 2 the currency symbol, on the `in-the-cell` arm only */
   pattern: RegExp;
   decimal: CsvMapping['decimal'];
-  /** the symbols this layout writes, and the ISO code each of them means */
-  currency: Readonly<Record<string, string>>;
+  currency: AmountCurrency;
   /** what a cell that matched nothing is told an amount looks like */
   example: string;
 }
@@ -806,6 +844,15 @@ function signed(template: PdfTemplate, heading: string, amount: string): ReadAmo
   return amountCell(template, amount);
 }
 
+/**
+ * The ISO code a matched cell is in, or undefined for a symbol this layout does not
+ * write. `per-column` cannot answer undefined and does not read the match at all: its
+ * code is the template's own literal and there is nothing in the cell to disagree
+ * with it - which is why every caller's undefined arm names a symbol.
+ */
+const currencyOf = (currency: AmountCurrency, m: RegExpExecArray): string | undefined =>
+  currency.kind === 'in-the-cell' ? currency.symbols[m[2]] : currency.code;
+
 /** A cell that is there, against the layout's amount format. */
 function amountCell(template: PdfTemplate, raw: string): ReadAmount {
   const unreadable = {
@@ -815,7 +862,7 @@ function amountCell(template: PdfTemplate, raw: string): ReadAmount {
   };
   const m = template.amount.pattern.exec(raw);
   if (!m) return unreadable;
-  const currency = template.amount.currency[m[2]];
+  const currency = currencyOf(template.amount.currency, m);
   if (currency === undefined) {
     return {
       value: null,
@@ -827,7 +874,17 @@ function amountCell(template: PdfTemplate, raw: string): ReadAmount {
   return value === null ? unreadable : { value, currency };
 }
 
-/** Whether the layout wants this continuation line, by the label it starts with. */
+/**
+ * Whether the layout wants this continuation line, by the label it starts with.
+ *
+ * `startsWith` over a literal, and if a RegExp is ever wanted here it must not carry
+ * the `g` flag. A global regex keeps `lastIndex` between calls, and this runs once
+ * per line over the whole document, so `test` would answer true, false, true, false
+ * for the same line - and every second line the rule was written to drop would land
+ * whole in the description column with nothing refusing it and nothing noting it.
+ * The rule holding no state across lines is the property that would be lost, and
+ * nothing in the type system notices a flag.
+ */
 function wanted(rows: Exclude<RowExtent, { kind: 'one-line' }>, description: string): boolean {
   switch (rows.kind) {
     case 'continuations':
@@ -885,12 +942,22 @@ function readRows(
       // the amount column, something in the description one, and on the page that
       // row's dated line was read on.
       //
+      // FOUR rules meet in this one condition and nowhere else, which is why editing
+      // a line of it moves three things the editor was not looking at: the
+      // continuation rule itself - what a transaction's extent is; the template's own
+      // drop or keep list, through `wanted` below; the page test, whose cost is
+      // stated two paragraphs down; and TOLERANCE, because "nothing in the date
+      // column" is a claim about a line, and which baselines are one line is decided
+      // by readLines before any template is known. None of the four is written down
+      // anywhere else in this file.
+      //
       // The page test is not decoration. Pages 2..n of the N26 statement repeat the
       // title and the period in the description column with both other cells empty,
       // which is a continuation's exact shape, and without it those two lines would
       // be appended to the last transaction of the page before. What it costs is
       // stated rather than hidden - a transaction split across a page break would
-      // lose its tail - and no transaction in the document measured is split. A
+      // lose its tail - and no transaction in any document measured is split: 0 of 72
+      // in each of the third layout's two files, counted rather than assumed. A
       // layout that does split one is a finding for a later row.
       if (
         template.rows.kind !== 'one-line' &&
@@ -981,7 +1048,7 @@ function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalanc
   const read = (line: TextLine, span: Span, label: string, role: BalanceRole): Balance => {
     const raw = cellAt(line, span);
     const m = template.amount.pattern.exec(raw);
-    const currency = m ? template.amount.currency[m[2]] : undefined;
+    const currency = m ? currencyOf(template.amount.currency, m) : undefined;
     const value = m ? parseAmount(m[1], template.amount.decimal) : null;
     if (currency === undefined || value === null) {
       throw new Error(unreadableBalance(template.title, role, label, raw, template.amount.example));
@@ -1211,7 +1278,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // than a currency this template has not met
       pattern: /^(\d{1,3}(?: \d{3})*,\d{2})([^\s\d]+)$/u,
       decimal: ',',
-      currency: { '€': 'EUR' },
+      currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
       example: '1 234,56€',
     },
     // A transaction is a dated line plus one to three detail lines, and every one of
@@ -1329,7 +1396,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // a positive number that was meant to be a debit
       pattern: /^([+-]\d{1,3}(?:\.\d{3})*,\d{2})([^\s\d]+)$/u,
       decimal: ',',
-      currency: { '€': 'EUR' },
+      currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
       example: '-1.234,56€',
     },
     // A transaction is a dated line plus one to five detail lines, all in the
@@ -1390,6 +1457,248 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       },
     },
   },
+  /*
+   * The third layout (ROADMAP row 31), and the two entries below are ONE layout in
+   * two locales: the same bank prints the same statement in Ukrainian and in English,
+   * 4 pages and 72 transactions each, and the two files share no heading, no balance
+   * label and no marker. A CSV preset per language would be a dropdown somebody has
+   * to find their own locale in (row 20); a PDF template is chosen by the document,
+   * so the second entry costs a user nothing and detection is O(templates) over page
+   * 1, which §5.2 has already paid for. 16 literals are the same in both and 16
+   * differ; nothing here is factored into a shared vocabulary, because a data literal
+   * that repeats is not a correctness cost and a vocabulary two templates read
+   * through is a way for one to move the other.
+   *
+   * Both are a text layer and nowhere near MIN_CHARS_PER_PAGE's 50: 1663.0 and 1803.3
+   * characters a page by the count readLines actually keeps, which is the trimmed
+   * non-blank one and not the raw item text (1817.0 and 1944.5 for the same files).
+   * The two differ by a sixth, so a figure quoted for this layout has to say which.
+   *
+   * What this layout cost the reader, stated because the row exists to measure it:
+   * ONE axis, `AmountCurrency` - see its comment. Everything else is data.
+   *
+   * The geometry is the same in both files and is NOT shareable, and the reason is
+   * not stylistic: every column here is CENTRED, so both of its edges move with the
+   * content and the left edge a span assigns on is a function of how wide the text
+   * happens to be. The two files print the same numbers and different words, so the
+   * three columns' centres agree to three decimals (59.527 / 137.479 / 245.195) and
+   * their left-edge ranges do not. Each span below is measured off its own document.
+   */
+  {
+    id: 'universalbank-uk',
+    title: 'АТ «УНІВЕРСАЛ БАНК»',
+    // Both terms are locale-exclusive, which is what stops the two entries claiming
+    // one document and `selectTemplate` throwing ambiguousLayout on a correct file:
+    // measured, neither of these appears anywhere in the English export, and neither
+    // of that one's appears here. Never the IBAN, the card or the holder's name -
+    // those are the per-customer fallback 6c's R3 refuses.
+    issuer: ['АТ «УНІВЕРСАЛ БАНК»', 'Рух коштів по картці'],
+    amounts: 'signed',
+    // Ten columns; this template reads three of them. Every boundary sits in a gap
+    // that was measured over all 72 transaction lines, and the gap is the headroom:
+    //
+    //   date [35, 41)   dates 37.018-37.351, heading "Дата i час" 37.765. 35 clears
+    //     the client block at 28.346; 41 is the tight one - it separates the heading
+    //     from "операції" at 41.041, the second baseline of that same heading, by
+    //     3.276, and it is what keeps the TIME out. The time is not in the date cell:
+    //     it sits on its own baseline 10.8 below, in this same centred column, and
+    //     the only thing telling the two apart is that "dd.mm.yyyy" is 45.0 wide and
+    //     "hh:mm:ss" is 35.0, so centring puts them 5.0 apart. That is a coincidence
+    //     of two fixed widths, not a column boundary, and a generator that changed
+    //     either one would put a time in the date cell.
+    //   description [50, 190)   values 91.467-129.735 with the widest ending 183.492;
+    //     50 clears the time at 42.022, 190 clears "MCC" at 191.012.
+    //   amount [215, 272)   the centred column's own spread is 9.756 (225.188 min
+    //     left edge, 234.944 max) and the widest value ends at 265.202. 215 clears
+    //     MCC's right edge at 211.266 and 272 clears the next column's 279.046, so a
+    //     UAH amount has about 60 points to grow in before it leaves the window - the
+    //     widest measured is 40.0. Measured wide at BOTH ends because the column is
+    //     centred, which is worse than n26-de's right-aligned one: there a value grows
+    //     in one direction only.
+    columns: { date: [35, 41], description: [50, 190], amount: [215, 272] },
+    marker: { column: 'description', text: 'Деталі операції' },
+    tables: [
+      // The heading block is six baselines and only ONE of them carries the date and
+      // description headings together, so only one can be the header - and on that
+      // one the amount column is empty, because its own heading ("Сума в валюті
+      // картки (UAH)") wraps across the other four. The `''` is what that baseline
+      // really reads and inventing a heading it does not carry would make the
+      // fingerprint a fiction. What it costs, said where a template author reads it:
+      // `signed()` composes `is empty in the "" column` for a row with no amount, on
+      // a collect table, which is a poor sentence - it has never fired, because every
+      // one of the 144 transaction lines measured writes an amount.
+      //
+      // The `i` in "Дата i час" is ASCII U+0069, not Cyrillic U+0456, on both this
+      // document and its English twin. It looks like a typo in the generator and it
+      // is the generator's; correcting it here would stop the header matching and
+      // refuse the whole document.
+      {
+        header: { date: 'Дата i час', description: 'Деталі операції', amount: '' },
+        collect: true,
+      },
+    ],
+    // Named after where the vocabulary was first met and not after this document's
+    // locale: the cell is "28.07.2026", zero-padded on all 144 lines across both
+    // files, which is the shape de-numeric already carries. A second entry with an
+    // identical `shape` under a Ukrainian name would be two literals free to drift,
+    // and the drift would be silent because both would go on matching.
+    dateFormat: 'de-numeric',
+    amount: {
+      // "-742.18", "20 000.00", "3 118.40 UAH" - one run each, the group separator
+      // an ASCII space and the decimal a dot. The sign is optional because this
+      // layout writes one on debits and nothing at all on credits, which is the
+      // opposite of n26-de.
+      //
+      // The trailing code is a literal " UAH" and NOT " [A-Z]{3}": a balance printed
+      // in another currency has to fail this pattern and refuse loudly, where a
+      // generic three-letter group would read it as UAH and import somebody's dollar
+      // statement as hryvnia. It is optional because the transaction cells carry no
+      // code at all - the currency is in the column heading, which is the whole
+      // reason AmountCurrency exists, and `per-column` is what supplies it.
+      pattern: /^(-?\d{1,3}(?: \d{3})*\.\d{2})(?: UAH)?$/u,
+      decimal: '.',
+      currency: { kind: 'per-column', code: 'UAH' },
+      example: '-1 234.56',
+    },
+    // One continuation baseline per transaction - the time - and when the description
+    // wraps, its tail is drawn on that same baseline with no label of any kind. 7 of
+    // the 72 rows here carry one, 35 of the 72 in the English file. So this layout
+    // cannot name what it keeps and names what it drops, which is an obligation to
+    // enumerate what the layout writes BELOW its transactions rather than a licence.
+    //
+    // Enumerated, on page 4 of both files: three lines reach the description column
+    // and are dropped by the labels below; four write left of it (x=28.346) and have
+    // an empty description cell; and one - the ЕЦП verification paragraph - is held
+    // out by ACCIDENT and is worth saying so. It wraps far enough right to write into
+    // the amount span, so `blank()` refuses it. Nothing about the drop list or the
+    // spans holds it, and a generator that reflowed that paragraph would land it in a
+    // description with nothing refusing. It is deliberately NOT in the drop list: a
+    // label matched against a line nobody has seen is the near-miss shape 6c D17
+    // finding 2 rules out.
+    //
+    // The client block on page 1 has a continuation's exact shape too and is held by
+    // something stronger: it is printed ABOVE the table header, so `table` is still
+    // null when readRows reaches it. A fixture that puts the box below the
+    // transactions is testing a different document.
+    //
+    // No transaction is split across a page break: 0 of 72 in both files, every page
+    // ending on the time baseline of its last row and every page 2..n opening with
+    // the repeated heading block. So the page test in readRows costs this layout
+    // nothing.
+    rows: {
+      kind: 'continuations',
+      drop: ['Операційний директор', 'Вклади гарантуються', 'Детальна інформація'],
+    },
+    // Four labels on four baselines 13.5 apart, page 1, each stating its value in one
+    // column - so `two-lines`, and `one-line` cannot say it. Each label occurs exactly
+    // once in the whole document, counted over all four pages, which is what `only()`
+    // requires.
+    //
+    // Both per-side totals are printed, as unsigned magnitudes under directional
+    // labels - the same way round as revolut-ru and the opposite of n26-de. Checked
+    // arithmetically rather than read off the words: negating the outgoing magnitude
+    // gives the parsed rows' own outgoing half to the cent.
+    balances: {
+      kind: 'two-lines',
+      // The value's x tracks the LABEL's width, not the value's, because the label is
+      // laid out first: a 26-character label puts its value at 154.426 and a
+      // 22-character one at 133.789. So the boundary sits below the narrowest value's
+      // left edge and above every label's, which all start at 28.346. Unlike
+      // revolut-ru's this cannot be narrowed to a column no transaction reaches: a
+      // transaction line reads its date joined to its description here
+      // ("28.07.2026 <merchant>"), which can never equal a label, but a description
+      // that WAS one of the four labels would make the count 2 and refuse the import
+      // rather than being misread - n26-de's trade, taken for the same reason.
+      label: [0, 133],
+      value: [133, 596],
+      opening: 'Баланс на початок періоду:',
+      closing: 'Баланс на кінець періоду:',
+      gross: {
+        kind: 'printed',
+        signs: 'magnitudes',
+        outgoing: 'Сума витрат за період:',
+        incoming: 'Сума зарахувань за період:',
+      },
+    },
+  },
+  {
+    id: 'universalbank-en',
+    title: 'UNIVERSAL BANK JSC',
+    issuer: ['UNIVERSAL BANK JSC', 'Cash flow on the card'],
+    amounts: 'signed',
+    // The same three columns and the same centres, measured off THIS file and not
+    // copied from the entry above - the left edges differ because the words do.
+    //
+    //   date [30, 42)   dates 39.519-39.815, heading "Date and time" at 33.319, which
+    //     reaches 4.4 further left than the Ukrainian heading does and is why this
+    //     span is not the other one. 30 clears the client block at 28.346; 42 keeps
+    //     the time out, which starts at 43.967 here against 42.022 there.
+    //   description [50, 190)   values 95.923-130.367, widest ending 179.035; 50
+    //     clears the time, 190 clears "MCC" at 192.150.
+    //   amount [215, 272)   left edges 227.411-236.083, widest ending 262.979,
+    //     between MCC's right edge at 210.154 and the next column's 279.851.
+    columns: { date: [30, 42], description: [50, 190], amount: [215, 272] },
+    marker: { column: 'description', text: 'Description' },
+    tables: [
+      // Where the Ukrainian file's header baseline has an empty amount cell, this
+      // one carries "currency" - a fragment of "Card currency amount, (UAH)" that
+      // happens to wrap onto the header's own baseline. It sits at 228.307, BETWEEN
+      // real amount values at 228.303 and 228.599, so no boundary can exclude it
+      // without excluding amounts this template has to read. Declaring it is what
+      // the cell reads, and it makes this fingerprint the stronger of the two.
+      //
+      // It depends on something worth naming: three heading baselines 2.514 apart
+      // merge into this one line, and readLines seeds a line at the FIRST item's y
+      // and never re-centres, so the merge holds because pdfjs emits the middle
+      // baseline first. That is stable for a given generator and it is not
+      // structural. 2.514 is also the closest this document puts two baselines it
+      // keeps apart, against 13.27 for the two layouts TOLERANCE was measured on.
+      {
+        header: { date: 'Date and time', description: 'Description', amount: 'currency' },
+        collect: true,
+      },
+    ],
+    dateFormat: 'de-numeric',
+    amount: {
+      pattern: /^(-?\d{1,3}(?: \d{3})*\.\d{2})(?: UAH)?$/u,
+      decimal: '.',
+      currency: { kind: 'per-column', code: 'UAH' },
+      example: '-1 234.56',
+    },
+    // The same three footer lines as the Ukrainian file, in English, and the same
+    // measurement behind them - though in THIS file it is not the list that rejects
+    // them TODAY. Page 4 carries the signature and footer block and no transaction of
+    // its own, so the row still open is page 3's and the page test rejects all three
+    // before `wanted` is ever reached: counted through readRows, page test 3 and drop
+    // list 0 here against page test 0 and drop list 3 in the Ukrainian file. Which
+    // one fires is data and not layout - a month whose footer shares a page with a
+    // transaction is what the list is here for, and the Ukrainian file, where it
+    // fires on 3 of 3, is the proof these labels match what is printed.
+    //
+    // Its verification paragraph is one run at x=28.346 and writes nothing in the
+    // amount column, so unlike the Ukrainian one it is held by the description span
+    // rather than by `blank()`. Two files, two different accidents, one list.
+    rows: {
+      kind: 'continuations',
+      drop: ['Operating Director', 'Deposits are guaranteed', 'Details in the Reference'],
+    },
+    // Same four baselines, same spans: the labels are longer here and the values sit
+    // further right (170.554-197.500 against 133.789-154.786), so [0, 133) / [133,
+    // 596) holds for both files without either boundary being tuned to this one.
+    balances: {
+      kind: 'two-lines',
+      label: [0, 133],
+      value: [133, 596],
+      opening: 'Balance at the beginning of the period:',
+      closing: 'Balance at the end of the period:',
+      gross: {
+        kind: 'printed',
+        signs: 'magnitudes',
+        outgoing: 'Amount of expenses for the period:',
+        incoming: 'Amount of charges for the period:',
+      },
+    },
+  },
 ];
 
 /**
@@ -1446,7 +1755,11 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
               : []),
           ],
     );
-    const code = longest(Object.values(t.amount.currency));
+    const code = longest(
+      t.amount.currency.kind === 'in-the-cell'
+        ? Object.values(t.amount.currency.symbols)
+        : [t.amount.currency.code],
+    );
     all.push(
       unreadableTable(t.title, quote(cell)),
       noTransactionLines(t.title),
