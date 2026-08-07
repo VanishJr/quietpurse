@@ -30,7 +30,7 @@ const TEMPLATE: PdfTemplate = {
   tables: [
     { header: { date: 'Date', description: 'Description', amount: 'Amount' }, collect: true },
   ],
-  dateFormat: 'de-numeric',
+  dates: { format: 'de-numeric' },
   amount: {
     pattern: /^(-?\d{1,3}(?:\.\d{3})*,\d{2}) (€)$/u,
     decimal: ',',
@@ -39,6 +39,7 @@ const TEMPLATE: PdfTemplate = {
   },
   rows: { kind: 'one-line' },
   balances: {
+    scope: { kind: 'whole-document' },
     kind: 'one-line',
     total: 'Total',
     label: [30, 130],

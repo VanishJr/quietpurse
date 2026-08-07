@@ -1029,7 +1029,7 @@ const twin = (id: string, title: string): PdfTemplate => ({
   tables: [
     { header: { description: 'Beschreibung', date: 'Datum', amount: 'Betrag' }, collect: true },
   ],
-  dateFormat: 'de-numeric',
+  dates: { format: 'de-numeric' },
   amount: {
     pattern: /^([+-]\d+,\d{2})([^\s\d]+)$/u,
     decimal: ',',
@@ -1038,6 +1038,7 @@ const twin = (id: string, title: string): PdfTemplate => ({
   },
   rows: { kind: 'one-line' },
   balances: {
+    scope: { kind: 'whole-document' },
     kind: 'two-lines',
     label: [0, 330],
     value: [460, 596],
@@ -1844,6 +1845,805 @@ describe('pdf: the third layout', () => {
   });
 });
 
+// ---------- the fourth layout (ROADMAP row 57) ----------
+
+/**
+ * The coordinates the c24-de template is measured at, one literal each so a case that
+ * places a cell outside its column has to say so.
+ *
+ * Two of them are the whole of what this layout is about. `sign` and `digits` are one
+ * amount cell drawn as two runs 5.646 apart - the credit's "+" and its number - which
+ * cellAt joins into "+ 0,08 €". And `footerName` is the page footer's "C24 Bank GmbH",
+ * byte-identical to the text at `description` on transaction 1's own first detail line
+ * and 123.363 points to the right of it: the two can be told apart by x and by nothing
+ * else, which is why the template's drop list is empty.
+ */
+const C = {
+  /** the address block, the section headings, the box labels, the footer's month */
+  margin: 45.354,
+  /** and the section title and its period line, which are indented past it */
+  section: 54.354,
+  /** the page-1 header's own closing balance, which stays OUT of the amount span */
+  kontostand: 427.132,
+  buchung: 48.354,
+  valuta: 99.378,
+  description: 150.402,
+  amountHeading: 519.28,
+  /** where "-0,02 €" starts: the transaction column right-aligns at 546.921 */
+  debit: 518.774,
+  /** a credit's sign, drawn as a run of its own ... */
+  sign: 516.024,
+  /** ... 5.646 to the left of its own digits */
+  digits: 521.67,
+  /**
+   * and where a four-figure "-1.234,56 €" would begin against that same right edge,
+   * by this generator's own measured advances - a digit 5.146, a dot 2.364, a space
+   * 2.339, a minus 2.896. The document prints no such amount and an ordinary month
+   * does; this is the boundary that decides whether one imports.
+   */
+  wide: 500.893,
+  /** the summary block's label column, three points left of the date cells' */
+  boxLabel: 45.354,
+  /** and its value column, which right-aligns at 549.921 and not at 546.921 */
+  boxValue: 519.524,
+  /** where the widest value the document prints, "-10,02 €", starts in that column */
+  boxValueWide: 516.628,
+  /** the quarterly page's own three columns, every one of them read by nothing */
+  interestLabel: 53.354,
+  rate: 204.3,
+  range: 332.889,
+  interest: 516.67,
+  footerName: 273.765,
+  footerAddress: 233.88,
+  footerPage: 500.003,
+  footerVat: 271.094,
+} as const;
+
+/**
+ * What every cell of this layout may spend, which is the budget BOX_SIZE's and
+ * UA_SIZE's comments measure for the other three. Two cells decide it, in opposite
+ * directions, and both were built through buildPdf and read back rather than reasoned
+ * about:
+ *
+ *   the credit's "+" at 516.024 against its digits at 521.670, 5.646 apart. At 9 the
+ *     sign advances past the digits and pdfjs hands back two items in the wrong order;
+ *     at 5 and at 4 the two MERGE into one item "+ 0,08" at the sign's x, and the cell
+ *     then reads a number with no currency after it. At 3 and below they come back as
+ *     the two runs the document draws.
+ *   "Steuerabrechnung Zinsgutschrift" from 150.402, the longest description here. This
+ *     fixture's font advances one point per character per point of size and pdfjs
+ *     splits a placed run at every space, so at 9 its second fragment lands at 303.402,
+ *     outside the description column's [135, 250) - and the line stops being a
+ *     continuation at all, which is the silent direction: the case would pass having
+ *     exercised nothing. At 3 it lands at 201.402, with sixteen characters of headroom.
+ *
+ * So 3 is the one budget that satisfies both, and every other cell clears its column at
+ * it: "Buchung" ends 69.354 before Valuta's 99.378, "Transaktionsinformation" ends
+ * 219.402 inside 250, "Kontogutschriften" ends 96.354 inside the label span, and every
+ * amount fragment stays inside [460, 596).
+ */
+const C24_SIZE = 3;
+
+/** The block every page of this document repeats above whatever it carries. */
+const c24Frame = (): PlacedText[] => [
+  { x: C.margin, y: 727.344, text: 'C24 Smartkonto', size: C24_SIZE },
+  { x: C.margin, y: 715.069, text: 'Girokonto', size: C24_SIZE },
+  { x: C.margin, y: 690.52, text: 'BIC: DEFFDEFFXXX', size: C24_SIZE },
+];
+
+/**
+ * A section's own two lines: the title the balance scope opens and closes on, and the
+ * period the year of every row is read out of. Both are at the same x on both sections
+ * of the real document and both carry a number that varies, which is why the scope
+ * matches a prefix rather than a whole cell.
+ */
+const c24Section = (y: number, title: string, period: string): PlacedText[] => [
+  { x: C.section, y, text: title, size: C24_SIZE },
+  { x: C.section, y: y - 12.274, text: period, size: C24_SIZE },
+];
+
+/** The four headings, of which the template names four and reads three. */
+const c24Table = (y: number, valuta = 'Valuta'): PlacedText[] => [
+  { x: C.buchung, y, text: 'Buchung', size: C24_SIZE },
+  { x: C.valuta, y, text: valuta, size: C24_SIZE },
+  { x: C.description, y, text: 'Transaktionsinformation', size: C24_SIZE },
+  { x: C.amountHeading, y, text: 'Betrag', size: C24_SIZE },
+];
+
+/**
+ * One transaction. Both date cells carry the same text, as every row of the document
+ * measured does, and `amount` is a list because a credit's sign is a run of its own.
+ */
+const c24Row = (
+  y: number,
+  date: string,
+  description: string,
+  amount: readonly { x: number; text: string }[],
+): PlacedText[] => [
+  { x: C.buchung, y, text: date, size: C24_SIZE },
+  { x: C.valuta, y, text: date, size: C24_SIZE },
+  { x: C.description, y, text: description, size: C24_SIZE },
+  ...amount.map((a) => ({ x: a.x, y, text: a.text, size: C24_SIZE })),
+];
+
+/** A line under a transaction: the description column, no label of any kind. */
+const c24Detail = (y: number, text: string): PlacedText[] => [
+  { x: C.description, y, text, size: C24_SIZE },
+];
+
+/**
+ * A summary block: its heading, then a label and a value on each of four baselines
+ * 20.425 apart. `outgoingX` is here because the value column is right-aligned and the
+ * widest number the document prints - the quarterly block's "-10,02 €" - starts 2.896
+ * further left than the rest.
+ */
+const c24Box = (
+  y: number,
+  opening: string,
+  outgoing: string,
+  incoming: string,
+  closing: string,
+  outgoingX: number = C.boxValue,
+): PlacedText[] => [
+  { x: C.margin, y: y + 24.817, text: 'Zusammenfassung', size: C24_SIZE },
+  ...(
+    [
+      ['Startsaldo', opening, C.boxValue],
+      ['Kontobelastungen', outgoing, outgoingX],
+      ['Kontogutschriften', incoming, C.boxValue],
+      ['Endsaldo', closing, C.boxValue],
+    ] as const
+  ).flatMap(([label, value, x], n) => [
+    { x: C.boxLabel, y: y - n * 20.425, text: label, size: C24_SIZE },
+    { x, y: y - n * 20.425, text: value, size: C24_SIZE },
+  ]),
+];
+
+/**
+ * The three footer lines, which are where this layout's whole fingerprint lives and
+ * where Trap 4 is. The first and the last write between the description column and the
+ * amount column, in no cell at all; the middle one writes in the date cell and in the
+ * amount cell, and is held out of a description twice over.
+ */
+const c24Footer = (page: number, of: number, month = '06/2026'): PlacedText[] => [
+  { x: C.footerName, y: 23.687, text: 'C24 Bank GmbH', size: C24_SIZE },
+  { x: C.margin, y: 16.704, text: month, size: C24_SIZE },
+  {
+    x: C.footerAddress,
+    y: 16.704,
+    text: 'Neue Mainzer Straße 14 - 18, 60311 Frankfurt am Main',
+    size: C24_SIZE,
+  },
+  { x: C.footerPage, y: 16.704, text: `Seite ${page} von ${of}`, size: C24_SIZE },
+  { x: C.footerVat, y: 11.148, text: 'Ust.-ID DE 322 469 451', size: C24_SIZE },
+];
+
+/**
+ * The two transactions the document prints, with the four unlabelled detail lines
+ * under them. Transaction 1's first detail line is "C24 Bank GmbH", which is the page
+ * footer's text exactly - the control that makes the footer's absence mean something.
+ */
+const c24Transactions = (): PlacedText[] => [
+  ...c24Row(558.919, '30.06.', 'Steuern', [{ x: C.debit, text: '-0,02 €' }]),
+  ...c24Detail(546.644, 'C24 Bank GmbH'),
+  ...c24Detail(534.37, 'Steuerabrechnung Zinsgutschrift'),
+  ...c24Row(513.945, '30.06.', 'Zinsen', [
+    { x: C.sign, text: '+' },
+    { x: C.digits, text: '0,08 €' },
+  ]),
+  ...c24Detail(501.67, 'C24 Bank'),
+  ...c24Detail(489.395, '31.03.2026-29.06.2026'),
+];
+
+/** the four numbers the statement's own summary block prints, in the order it prints them */
+const C24_BOX = ['84,16 €', '-0,02 €', '+0,08 €', '84,22 €'] as const;
+const C24_PERIOD = '01.06.2026 - 30.06.2026';
+
+const c24StatementPage = (
+  period: string,
+  rows: PlacedText[],
+  box: readonly [string, string, string, string],
+): PlacedText[] => [
+  ...c24Frame(),
+  ...c24Section(648.575, 'Kontoauszug 06/2026', period),
+  // the third place this document states its closing balance, on the title's own
+  // baseline. Drawn at size 1 rather than C24_SIZE for a fixture reason with a real
+  // consequence: the document draws it as ONE run at 427.132, outside the amount span,
+  // and at size 3 this font would fragment it and drop "84,22" past 460 - so the
+  // fixture would print an amount cell the document does not print
+  { x: C.kontostand, y: 648.575, text: 'Kontostand 84,22 €', size: 1 },
+  { x: C.margin, y: 601.5, text: 'Transaktionsübersicht', size: C24_SIZE },
+  ...c24Table(579.344),
+  ...rows,
+  ...c24Box(424.039, ...box),
+];
+
+/**
+ * The section that makes this row a row: the same four labels, at the same x, three of
+ * whose four numbers agree with the statement's own. Only Startsaldo differs, and it
+ * is the one number the rows would have to supply.
+ */
+const c24QuarterlyPage = (): PlacedText[] => [
+  ...c24Frame(),
+  ...c24Section(648.575, 'Rechnungsabschluss 2/2026', '01.04.2026 - 30.06.2026'),
+  { x: C.margin, y: 590.161, text: 'Entgelte', size: C24_SIZE },
+  { x: C.boxValue, y: 565.344, text: '0,00 €', size: C24_SIZE },
+  { x: C.margin, y: 524.804, text: 'Zinsen', size: C24_SIZE },
+  // row-shaped from two directions - they write in the amount column AND carry
+  // date-shaped text - and three separate things keep them out: a non-empty date cell,
+  // a non-blank amount cell, and the page their own section is printed on. The first is
+  // the one the spans rely on, and it is a choice: `date` starts at 40, below anything
+  // this layout draws, so every line written in the left margin has a date cell
+  ...(
+    [
+      [499.987, 'Sollzinsen', '7,49 % p.a.', '0,00 €'],
+      [471.563, 'Habenzinsen', '0,50 % p.a.', '0,08 €'],
+    ] as const
+  ).flatMap(([y, label, rate, value]) => [
+    { x: C.interestLabel, y, text: label, size: C24_SIZE },
+    { x: C.rate, y, text: rate, size: C24_SIZE },
+    { x: C.range, y, text: '31.03.2026 - 30.06.2026', size: C24_SIZE },
+    { x: C.interest, y, text: value, size: C24_SIZE },
+  ]),
+  ...c24Box(383.702, '94,16 €', '-10,02 €', '+0,08 €', '84,22 €', C.boxValueWide),
+];
+
+/**
+ * The legal page, which is here for two things it does NOT carry. It writes nothing at
+ * all on the 648.575 baseline the other two put their section titles on - so that slot
+ * belongs to whichever section starts there and is not a per-page frame - and its one
+ * sentence beginning "Rechnungsabschluss" is a second line the scope's `closes` would
+ * match if the scope did not stop at the first.
+ *
+ * `tag` is what makes one case's bytes differ from the next's: identical bytes answer
+ * "already imported" without being parsed at all. It sits here because no transaction
+ * is open on this page, so a line of any width is safe.
+ */
+const c24LegalPage = (tag: string): PlacedText[] => [
+  ...c24Frame(),
+  { x: C.margin, y: 657.575, text: 'Weitere Informationen', size: C24_SIZE },
+  {
+    x: C.margin,
+    y: 603.423,
+    text: 'Rechnungsabschluss. Der Abschnitt weiter oben ist der maßgebliche.',
+    size: C24_SIZE,
+  },
+  { x: C.margin, y: 5, text: tag, size: C24_SIZE },
+];
+
+const c24Statement = (
+  tag: string,
+  over: {
+    period?: string;
+    rows?: PlacedText[];
+    box?: readonly [string, string, string, string];
+  } = {},
+): PlacedText[][] => [
+  [
+    ...c24StatementPage(
+      over.period ?? C24_PERIOD,
+      over.rows ?? c24Transactions(),
+      over.box ?? C24_BOX,
+    ),
+    ...c24Footer(1, 3),
+  ],
+  [...c24QuarterlyPage(), ...c24Footer(2, 3)],
+  [...c24LegalPage(tag), ...c24Footer(3, 3)],
+];
+
+/**
+ * Page 1 as readLines produces it, for the selection rules. Hand-built rather than read
+ * back off buildPdf, because what these have to carry is the two halves of a
+ * fingerprint and nothing else: the issuer terms off the footer, and a `collect` header
+ * at the template's own x-intervals - including the fourth heading, which shares the
+ * date span with the third.
+ */
+const c24Lines: TextLine[] = [
+  {
+    page: 1,
+    y: 579.344,
+    items: [
+      { x: C.buchung, text: 'Buchung' },
+      { x: C.valuta, text: 'Valuta' },
+      { x: C.description, text: 'Transaktionsinformation' },
+      { x: C.amountHeading, text: 'Betrag' },
+    ],
+  },
+  { page: 1, y: 23.687, items: [{ x: C.footerName, text: 'C24 Bank GmbH' }] },
+  { page: 1, y: 11.148, items: [{ x: C.footerVat, text: 'Ust.-ID DE 322 469 451' }] },
+];
+
+const c24Template = (): PdfTemplate => TEMPLATES.find((t) => t.id === 'c24-de')!;
+
+/** The same template with the scope it would have had before this row: the whole file. */
+const c24Unscoped = (): PdfTemplate => {
+  const c24 = c24Template();
+  if (c24.balances.kind !== 'two-lines') throw new Error('the c24 box is two-lines');
+  return { ...c24, balances: { ...c24.balances, scope: { kind: 'whole-document' } } };
+};
+
+describe('pdf: the fourth layout', () => {
+  /**
+   * The two axes this row added, seen working at once: the transaction dates carry no
+   * year and the document prints the balance box's four labels twice.
+   */
+  it('reads a statement whose dates carry no year and whose box is printed twice', async () => {
+    const staged = await importPdf('C24 Happy', c24Statement('happy path'));
+    expect(staged.outcome).toBe('awaiting_confirmation');
+    if (staged.outcome !== 'awaiting_confirmation') return;
+
+    expect(staged.summary).toMatchObject({
+      total: 2,
+      accepted: 2,
+      skipped: 0,
+      problems: [],
+      // both rows are booked on the period's last day, which is where a bank books its
+      // interest and its fees - so an exclusive period test would skip both
+      from: '2026-06-30',
+      to: '2026-06-30',
+      totals: [{ currency: 'EUR', net: 0.06 }],
+      // 84,16 and not the 94,16 the quarterly block states under the same label
+      balances: { opening: 84.16, closing: 84.22, currency: 'EUR' },
+    });
+  });
+
+  it('names the layout, and reads all four of the numbers its own section prints', async () => {
+    const st = await readPdf(buildPdf(c24Statement('four numbers')), 200);
+    expect(st.template).toBe('c24-de');
+    expect(st.title).toBe('C24 Bank GmbH');
+    expect(st.balances).toEqual({
+      openingCents: 8416,
+      closingCents: 8422,
+      gross: { kind: 'printed', outgoingCents: -2, incomingCents: 8 },
+      currency: 'EUR',
+    });
+    // the credit's sign is a text run of its own, so the cell reads "+ 0,08 €" with a
+    // space the document does not print
+    expect(st.sheet.rows.slice(1).map((r) => [r[1], r[3]])).toEqual([
+      [-0.02, 'EUR'],
+      [0.08, 'EUR'],
+    ]);
+  });
+
+  /**
+   * Trap 4, in both directions and in one case, because one direction alone proves
+   * nothing here. "C24 Bank GmbH" is transaction 1's own first detail line AND the page
+   * footer, byte for byte, on the page the last transaction was read on and blank in
+   * the amount column - a continuation's exact shape. A drop list naming it would take
+   * both; the description span's 250 takes only the footer, and the appended copy is
+   * the control that says so.
+   */
+  it('keeps a detail line and drops the footer line whose text it shares', async () => {
+    const c24 = c24Template();
+    expect(c24.rows.kind === 'continuations' && c24.rows.drop).toEqual([]);
+
+    const r = await importAndConfirm({
+      accountName: 'C24 Descriptions',
+      currency: 'EUR',
+      bytes: buildPdf(c24Statement('descriptions')),
+    });
+    const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
+      (t) => t.description,
+    );
+    expect(rows.sort()).toEqual([
+      'Steuern C24 Bank GmbH Steuerabrechnung Zinsgutschrift',
+      'Zinsen C24 Bank 31.03.2026-29.06.2026',
+    ]);
+    // the other two footer lines, and the summary block under the transactions
+    for (const description of rows) {
+      expect(description).not.toMatch(/Ust\.-ID|Neue Mainzer|Seite|Zusammenfassung|Startsaldo/);
+    }
+    // and the footer's own copy is gone while the detail line's is not: one occurrence
+    // of a string the document prints twice
+    expect(rows.join(' ').match(/C24 Bank GmbH/gu)).toHaveLength(1);
+  });
+
+  /**
+   * The scope, all five ways. (a) is the shipped document: both blocks printed, three
+   * of their four numbers equal, and the statement's own opening balance read.
+   */
+  it('reads the transaction section box where two are printed under one set of labels', async () => {
+    const st = await readPdf(buildPdf(c24Statement('two boxes')), 200);
+    expect(st.balances.openingCents).toBe(8416);
+  });
+
+  /**
+   * (b) the same two sections in the opposite order, which is what kills "take the
+   * first balance line in reading order" in the suite rather than in a comment: under
+   * that rule this document reads 94,16 - an opening balance the statement never
+   * printed for this period - and reconciles or does not by luck.
+   *
+   * The y-coordinates here are constructed and the x-coordinates are the measured ones.
+   * The document prints one section per page and this fixture puts both on page 1,
+   * because a template is claimed by what page 1 carries: a fixture whose first page
+   * held no table header would be refused before any of this was reached.
+   */
+  it('reads it by its section and not by which block comes first', async () => {
+    const bytes = buildPdf([
+      [
+        ...c24Frame(),
+        ...c24Section(660, 'Rechnungsabschluss 2/2026', '01.04.2026 - 30.06.2026'),
+        ...c24Box(611, '94,16 €', '-10,02 €', '+0,08 €', '84,22 €', C.boxValueWide),
+        ...c24Section(520, 'Kontoauszug 06/2026', C24_PERIOD),
+        { x: C.margin, y: 495, text: 'Transaktionsübersicht', size: C24_SIZE },
+        ...c24Table(483),
+        ...c24Row(463, '30.06.', 'Steuern', [{ x: C.debit, text: '-0,02 €' }]),
+        ...c24Detail(451, 'C24 Bank GmbH'),
+        ...c24Row(431, '30.06.', 'Zinsen', [
+          { x: C.sign, text: '+' },
+          { x: C.digits, text: '0,08 €' },
+        ]),
+        ...c24Box(345, ...C24_BOX),
+        ...c24Footer(1, 2),
+      ],
+      [...c24LegalPage('reordered'), ...c24Footer(2, 2)],
+    ]);
+    const st = await readPdf(bytes, 200);
+    expect(st.balances.openingCents).toBe(8416);
+  });
+
+  /**
+   * (c) the transaction section with no box of its own. The quarterly block still
+   * prints all four labels once each, so a whole-document locator would find exactly
+   * one of everything and import an opening balance the statement never printed for
+   * this period - silent, wrong, and reported as success. Scoped, it is `found 0`.
+   */
+  it('refuses when its own section has no box, rather than reading the other one', async () => {
+    const pages = c24Statement('no box of its own');
+    pages[0] = pages[0].filter((t) => t.text !== 'Startsaldo' && t.text !== '84,16 €');
+    await expect(importPdf('C24 No Box', pages)).rejects.toThrow(
+      /it expects exactly one "Startsaldo" line and found 0/,
+    );
+  });
+
+  /**
+   * (d) the ruling that the scope opens on the FIRST title and not the only one, and
+   * the case is red under the alternative. A transaction section long enough to span
+   * pages may reprint its own frame at the top of each; whether this bank's does is
+   * unmeasured in both directions, and first-match is the choice that does not need to
+   * know. Under unique-or-refuse this document - a correct one - is refused with
+   * "found 2", which is the ordinary busy month being rejected for a property the
+   * dormant one happens not to have.
+   *
+   * The frame reprinted here is the whole of it, title and period line both, which is
+   * also what pins the period being counted over DISTINCT lines: two prints of one
+   * period are one period, and two different periods still refuse.
+   */
+  it('opens its scope on the first section title, not on the only one', async () => {
+    const staged = await importPdf('C24 Two Pages', [
+      [
+        ...c24Frame(),
+        ...c24Section(648.575, 'Kontoauszug 06/2026', C24_PERIOD),
+        { x: C.margin, y: 601.5, text: 'Transaktionsübersicht', size: C24_SIZE },
+        ...c24Table(579.344),
+        ...c24Row(558.919, '30.06.', 'Steuern', [{ x: C.debit, text: '-0,02 €' }]),
+        ...c24Detail(546.644, 'C24 Bank GmbH'),
+        ...c24Footer(1, 4),
+      ],
+      [
+        ...c24Frame(),
+        ...c24Section(648.575, 'Kontoauszug 06/2026', C24_PERIOD),
+        ...c24Table(579.344),
+        ...c24Row(558.919, '30.06.', 'Zinsen', [
+          { x: C.sign, text: '+' },
+          { x: C.digits, text: '0,08 €' },
+        ]),
+        ...c24Detail(546.644, 'C24 Bank'),
+        ...c24Box(424.039, ...C24_BOX),
+        ...c24Footer(2, 4),
+      ],
+      [...c24QuarterlyPage(), ...c24Footer(3, 4)],
+      [...c24LegalPage('two page section'), ...c24Footer(4, 4)],
+    ]);
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');
+    expect(staged.summary).toMatchObject({
+      total: 2,
+      accepted: 2,
+      balances: { opening: 84.16, closing: 84.22, currency: 'EUR' },
+    });
+  });
+
+  /**
+   * (e) the arm the OTHER eight months take, which every fixture above closes over. C24
+   * prints a Rechnungsabschluss at the end of March, June, September and December only,
+   * so in two thirds of the year no line of the document begins with the scope's
+   * `closes` term at all and the section runs from its title to the end of the file.
+   * That is the majority configuration of the only document this template ships for,
+   * and it is the one `scopeOf` arm no other case reaches.
+   *
+   * The page-2 legal text is built here rather than taken from c24LegalPage on purpose:
+   * that helper's "Rechnungsabschluss." sentence is what pins `closes` stopping at the
+   * FIRST match, so deleting it to reach this arm would trade one uncovered arm for
+   * another. Both rows dated proves the period resolved inside the open-ended scope
+   * too - the scope serves the box and the year out of one line set.
+   */
+  it('reads a month that prints no closing section at all', async () => {
+    const st = await readPdf(
+      buildPdf([
+        [
+          ...c24Frame(),
+          ...c24Section(648.575, 'Kontoauszug 07/2026', '01.07.2026 - 31.07.2026'),
+          { x: C.margin, y: 601.5, text: 'Transaktionsübersicht', size: C24_SIZE },
+          ...c24Table(579.344),
+          ...c24Row(558.919, '31.07.', 'Steuern', [{ x: C.debit, text: '-0,02 €' }]),
+          ...c24Detail(546.644, 'C24 Bank GmbH'),
+          ...c24Row(513.945, '31.07.', 'Zinsen', [
+            { x: C.sign, text: '+' },
+            { x: C.digits, text: '0,08 €' },
+          ]),
+          ...c24Box(424.039, ...C24_BOX),
+          ...c24Footer(1, 2, '07/2026'),
+        ],
+        [
+          ...c24Frame(),
+          { x: C.margin, y: 657.575, text: 'Weitere Informationen', size: C24_SIZE },
+          {
+            x: C.margin,
+            y: 603.423,
+            text: 'Der Abschnitt oben ist der maßgebliche.',
+            size: C24_SIZE,
+          },
+          ...c24Footer(2, 2, '07/2026'),
+        ],
+      ]),
+      200,
+    );
+    expect(st.balances).toMatchObject({ openingCents: 8416, closingCents: 8422 });
+    expect(st.sheet.rows.slice(1).map((r) => (r[0] as Date).toISOString().slice(0, 10))).toEqual([
+      '2026-07-31',
+      '2026-07-31',
+    ]);
+  });
+
+  /**
+   * The reversal, kept in the suite rather than only in a report: the same document
+   * against the same template with `whole-document` in place of its section. Handed
+   * through readPdf's `templates` parameter, which is what makes an arm nothing ships
+   * watchable at all (row 6c, D6).
+   *
+   * The scope serves the box and the period out of one line set, and unscoping breaks
+   * both - so the document as printed refuses on the period first, and reaching the box
+   * at all takes a variant whose quarterly section states no period of its own. Both
+   * are asserted, because "which one fires first" is the ordering readPdf declares.
+   */
+  it('finds two of every label when the scope is the whole document', async () => {
+    await expect(readPdf(buildPdf(c24Statement('unscoped')), 200, [c24Unscoped()])).rejects.toThrow(
+      /expects exactly one such line and found 2/,
+    );
+
+    const onePeriod = c24Statement('unscoped box');
+    onePeriod[1] = onePeriod[1].filter((t) => t.text !== '01.04.2026 - 30.06.2026');
+    const bytes = buildPdf(onePeriod);
+    await expect(readPdf(bytes, 200, [c24Unscoped()])).rejects.toThrow(
+      /it expects exactly one "Startsaldo" line and found 2/,
+    );
+    // and the same bytes against the shipped template read the statement's own
+    expect((await readPdf(bytes, 200, [c24Template()])).balances.openingCents).toBe(8416);
+  });
+
+  it('refuses a document whose section heading it cannot find at all', async () => {
+    const pages = c24Statement('no heading');
+    pages[0] = pages[0].filter((t) => t.text !== 'Kontoauszug 06/2026');
+    await expect(importPdf('C24 No Heading', pages)).rejects.toThrow(
+      /it reads the summary of the section headed "Kontoauszug", and this document prints no such heading/,
+    );
+  });
+
+  it('refuses when the period its years come from is missing or ambiguous', async () => {
+    const gone = c24Statement('no period');
+    gone[0] = gone[0].filter((t) => t.text !== C24_PERIOD);
+    await expect(importPdf('C24 No Period', gone)).rejects.toThrow(
+      /reads the year off the period the statement covers - and it expects exactly one such line and found 0/,
+    );
+
+    // a SECOND period, different from the first and inside the same section
+    const two = c24Statement('two periods');
+    two[0].push({ x: C.section, y: 620, text: '01.05.2026 - 31.05.2026', size: C24_SIZE });
+    await expect(importPdf('C24 Two Periods', two)).rejects.toThrow(
+      /expects exactly one such line and found 2/,
+    );
+  });
+
+  /**
+   * The year rule, and both ends of the period are inclusive. A statement spanning a
+   * year boundary is where a rule that always answers goes wrong silently: the gate
+   * sums amounts and cannot see a date, so a row given the wrong year reconciles to the
+   * cent, imports, and lands in the wrong month.
+   *
+   * SEEN RED against a resolver that answers the period's end year unconditionally: the
+   * two December rows then read 2026-12-01 and 2026-12-15.
+   */
+  it('reads each row the one year of the period that contains its day and month', async () => {
+    const st = await readPdf(
+      buildPdf(
+        c24Statement('year boundary', {
+          period: '01.12.2025 - 31.01.2026',
+          rows: [
+            ...c24Row(558.919, '01.12.', 'Erster Tag', [{ x: C.debit, text: '-1,00 €' }]),
+            ...c24Row(538.494, '15.12.', 'Dezember', [{ x: C.debit, text: '-2,00 €' }]),
+            ...c24Row(518.069, '15.01.', 'Januar', [{ x: C.debit, text: '-3,00 €' }]),
+            ...c24Row(497.644, '31.01.', 'Letzter Tag', [
+              { x: C.sign, text: '+' },
+              { x: C.digits, text: '6,00 €' },
+            ]),
+          ],
+          box: ['100,00 €', '-6,00 €', '+6,00 €', '100,00 €'],
+        }),
+      ),
+      200,
+    );
+    expect(st.sheet.rows.slice(1).map((r) => (r[0] as Date).toISOString().slice(0, 10))).toEqual([
+      '2025-12-01',
+      '2025-12-15',
+      '2026-01-15',
+      '2026-01-31',
+    ]);
+  });
+
+  /**
+   * And the other half of the same rule: a year it cannot answer is answered with
+   * nothing. A skipped row with its own note, never a dropped one and never a guessed
+   * one - and the note is this arm's own rather than the shape failure's, because the
+   * template CAN read "15.03. 15.03." as a date and sending the reader to inspect that
+   * column would send them to one that is fine.
+   *
+   * The sum is then short and the gate refuses out loud, which is the whole argument
+   * for the rule: the alternative reconciles to the cent and lands in the wrong month.
+   */
+  it('skips a row the period does not contain, and the gate then refuses', async () => {
+    const outside = (tag: string): PlacedText[][] =>
+      c24Statement(tag, {
+        rows: [
+          ...c24Transactions(),
+          ...c24Row(469, '15.03.', 'Zu frueh', [{ x: C.debit, text: '-1,00 €' }]),
+        ],
+        box: ['84,16 €', '-1,02 €', '+0,08 €', '83,22 €'],
+      });
+
+    const st = await readPdf(buildPdf(outside('outside note')), 200);
+    expect(st.sheet.rows[3][0]).toBeNull();
+    expect(st.sheet.note!(3, 0)).toBe(
+      `reads "15.03. 15.03.", which this statement's period (${C24_PERIOD}) does not contain`,
+    );
+
+    await expect(importPdf('C24 Outside Period', outside('outside gate'))).rejects.toThrow(
+      /this C24 Bank GmbH statement does not add up: .* a difference of 1\.00 EUR, and the 1 transaction line this importer could not read/,
+    );
+  });
+
+  /**
+   * The third arm of the same rule, which no real document reaches and which exists
+   * because the rule is total: a period longer than a year makes some day-months
+   * ambiguous, and two answers are as good as none. Its own sentence again, because
+   * "outside the period" and "in the period twice" are different things to be told.
+   */
+  it('skips a row the period contains twice, and says which of the two it is', async () => {
+    const st = await readPdf(
+      buildPdf(
+        c24Statement('two candidates', {
+          period: '01.01.2025 - 31.12.2026',
+          rows: [...c24Row(558.919, '15.06.', 'Zweimal', [{ x: C.debit, text: '-1,00 €' }])],
+          box: ['100,00 €', '-1,00 €', '+0,00 €', '99,00 €'],
+        }),
+      ),
+      200,
+    );
+    expect(st.sheet.rows[1][0]).toBeNull();
+    expect(st.sheet.note!(1, 0)).toBe(
+      'reads "15.06. 15.06.", which this statement\'s period (01.01.2025 - 31.12.2026) contains in more than one year',
+    );
+  });
+
+  /**
+   * The amount span, from the side that carries the sign. The document draws a credit
+   * as two runs and this is the real shape, asserted at the real x's - but it cannot go
+   * red on its own: with the span's left edge above 516.024 the cell reads "0,08 €",
+   * the optional sign matches and the value is +0.08 either way. A dropped "+" is
+   * arithmetically invisible, and that is what the template's comment says it costs.
+   */
+  it('reads a credit whose sign is a run of its own', async () => {
+    const st = await readPdf(buildPdf(c24Statement('split credit')), 200);
+    expect(st.sheet.rows[2][1]).toBe(0.08);
+  });
+
+  /**
+   * So this is the case that CAN go red, and it goes red for money: the same split
+   * shape carrying a MINUS. Under a span whose left edge is above 516.024 the sign run
+   * is dropped, the value reads +0.02, the row lands on the wrong side and the
+   * statement no longer adds up.
+   *
+   * The shape is invented in one respect and the comment says so rather than hiding it:
+   * this generator splits a sign from its digits for a credit and this document never
+   * prints a debit that way. What the case pins is the parser's contract with a
+   * generator that does it, which this one demonstrably is.
+   */
+  it('reads a debit whose sign is a run of its own, and the sides then agree', async () => {
+    const pages = c24Statement('split debit', {
+      rows: [
+        ...c24Transactions(),
+        ...c24Row(469, '30.06.', 'Gebuehr', [
+          { x: C.sign, text: '-' },
+          { x: C.digits, text: '0,02 €' },
+        ]),
+      ],
+      box: ['84,16 €', '-0,04 €', '+0,08 €', '84,20 €'],
+    });
+    const st = await readPdf(buildPdf(pages), 200);
+    expect(st.sheet.rows[3][1]).toBe(-0.02);
+
+    const staged = await importPdf('C24 Split Debit', pages);
+    expect(staged.outcome).toBe('awaiting_confirmation');
+  });
+
+  /**
+   * And the other end of the same span, which is the boundary that protects money on an
+   * ordinary month. The amount column is right-aligned, so a wide number grows leftward
+   * from a fixed right edge: the widest amount this document prints starts at 516.628
+   * and a four-figure one starts near 500.9, which is within a point of the footer's own
+   * "Seite N von 3" at 500.003 - so the obvious boundary, just above that footer run,
+   * separates nothing, and any span clearing it drops the five-figure amounts outright.
+   * A span that misses one reads an empty amount cell, skips the row and refuses.
+   */
+  it('reads an amount wider than any this document prints', async () => {
+    const st = await readPdf(
+      buildPdf(
+        c24Statement('four figures', {
+          rows: [
+            ...c24Transactions(),
+            ...c24Row(469, '29.06.', 'Miete', [{ x: C.wide, text: '-1.234,56 €' }]),
+          ],
+          box: ['84,16 €', '-1.234,58 €', '+0,08 €', '-1.150,34 €'],
+        }),
+      ),
+      200,
+    );
+    expect(st.sheet.rows[3][1]).toBe(-1234.56);
+    expect(st.balances).toMatchObject({ openingCents: 8416, closingCents: -115034 });
+  });
+
+  it('a table this layout does not name refuses the document', async () => {
+    const pages = c24Statement('unknown table');
+    // the marker heading, on a line whose date heading is not this template's pair
+    pages[0].push(
+      { x: C.buchung, y: 300, text: 'Datum', size: C24_SIZE },
+      { x: C.description, y: 300, text: 'Transaktionsinformation', size: C24_SIZE },
+    );
+    await expect(importPdf('C24 New Table', pages)).rejects.toThrow(
+      /this C24 Bank GmbH statement has a table this importer cannot read \("Datum"\)/,
+    );
+  });
+
+  /**
+   * What naming the fourth column with data buys, and the only case that can show it:
+   * the template reads three columns and names four, so a heading it reads NOTHING from
+   * still has to be where the template says. Renamed, the header line's date cell reads
+   * "Buchung Wertstellung", no `collect` header is found on page 1, and the document
+   * falls through to the refusal for a layout nobody has written a template for -
+   * rather than being read against columns that have moved.
+   */
+  it('does not claim a document whose fourth heading has been renamed', async () => {
+    const pages = c24Statement('renamed heading');
+    pages[0] = pages[0].map((t) => (t.text === 'Valuta' ? { ...t, text: 'Wertstellung' } : t));
+    expect(pages[0].some((t) => t.text === 'Wertstellung')).toBe(true);
+    await expect(importPdf('C24 Renamed', pages)).rejects.toThrow(
+      /this statement's layout is not one this importer recognises yet/,
+    );
+  });
+
+  /**
+   * Trap 3's instance for this layout, run over the whole of TEMPLATES rather than a
+   * pair: what has to hold is that exactly one of the five claims this document. The
+   * fingerprint is drawn off the footer for a reason this case cannot see - the
+   * synthetic document that pins row 30's by-name C24 refusal prints "Kontoauszug
+   * 06/2026" and "BIC: DEFFDEFFXXX", so a fingerprint drawn from those would start
+   * living inside that fixture.
+   */
+  it('is claimed by its own template and by no other', () => {
+    expect(selectTemplate(TEMPLATES, c24Lines)?.id).toBe('c24-de');
+    expect(TEMPLATES.filter((t) => selectTemplate([t], c24Lines) !== undefined)).toHaveLength(1);
+  });
+});
+
 /**
  * What AmountCurrency's type cannot hold, and this row's whole reason for widening
  * it rather than nesting group 2 onto something that happened to match.
@@ -1908,6 +2708,7 @@ describe('pdf: what a template says about its gross totals', () => {
     const noGross: PdfTemplate = {
       ...twin('no-gross', 'No Gross'),
       balances: {
+        scope: { kind: 'whole-document' },
         kind: 'two-lines',
         label: [0, 330],
         value: [460, 596],
@@ -2517,14 +3318,14 @@ describe('the diagnostic budget', () => {
    * below, which is the point - the same measurement written into a comment in pdf.ts
    * would simply stop being true (row 6c, D5, and rows 6a D14 / 6b D2 / 6b D10).
    *
-   * 310 before row 035, 316 after it, and 313 now. Row 035 moved it by widening the
-   * label pool - a two-lines box declares four labels rather than two, so n26-de's
-   * longest became "Einkommende Transaktionen" - and row 31 moved it twice more, in
-   * opposite directions. R-D's head shortened all five builders and by five different
-   * amounts, because each sentence spends the head differently: measured at n26-de's
-   * own literals, unreadableTable -20, noTransactionLines -24, noBalanceBox -15,
-   * unreadableBalance -19 and mixedBalanceCurrencies -19, which puts the two shipped
-   * templates' longest at 297. The third layout then adds 16 back.
+   * 310 before row 035, 316 after it, and 313 since row 31. Row 035 moved it by
+   * widening the label pool - a two-lines box declares four labels rather than two, so
+   * n26-de's longest became "Einkommende Transaktionen" - and row 31 moved it twice
+   * more, in opposite directions. R-D's head shortened all five builders and by five
+   * different amounts, because each sentence spends the head differently: measured at
+   * n26-de's own literals, unreadableTable -20, noTransactionLines -24, noBalanceBox
+   * -15, unreadableBalance -19 and mixedBalanceCurrencies -19, which puts the two
+   * shipped templates' longest at 297. The third layout then adds 16 back.
    *
    * The longest sentence is still mixedBalanceCurrencies and it has moved template:
    * universalbank-uk. Every one of those 16 characters is TITLE - "АТ «УНІВЕРСАЛ
@@ -2533,6 +3334,16 @@ describe('the diagnostic budget', () => {
    * Transaktionen"'s 25 both arrive as 24 and cancel. universalbank-en's label is 39,
    * the widest in the tree, and contributes nothing for the same reason: its sentence
    * is 312, short of this one by exactly its one character less of title.
+   *
+   * ROW 57 ADDED A FIFTH TEMPLATE AND TWO BUILDERS AND MOVED NOTHING, which is a fact
+   * about the number and is why this comment is rewritten rather than left standing.
+   * c24-de's title is 13, so its own longest sentence is mixedBalanceCurrencies at 293;
+   * of its two new refusals, unplacedBalanceBox composes 276 and noStatementPeriod 289
+   * at the widest count one can carry, both short of 313. What did move is
+   * ambiguousLayout, 257 to 277, because it names every title in the tree - still 36
+   * short of the longest, and the set is 49 sentences where it was 39: seven fixed
+   * sentences and eight per template, so a fifth template costs ten - its own eight,
+   * plus the two builders this row added for the templates whose arms can reach them.
    */
   it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
     const all = refusals();

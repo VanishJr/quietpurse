@@ -172,7 +172,7 @@ const tooManyPages = (pages: number, max: number): string =>
   `this PDF has ${pages} pages, more than the ${max} this importer reads in one file - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
 
 /**
- * The five builders below open `this ${title} statement` and not `this looks like a
+ * The seven builders below open `this ${title} statement` and not `this looks like a
  * ${title} statement but`, which is what they read as until row 31.
  *
  * Two reasons, and the first is the article: `a N26`, and `a АТ «УНІВЕРСАЛ БАНК»`.
@@ -201,6 +201,26 @@ const noTransactionLines = (title: string): string =>
 
 const noBalanceBox = (title: string, label: string, found: number): string =>
   `this ${title} statement has a balance summary this importer could not read: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+/**
+ * A `section` scope whose opening heading is nowhere in the document (row 57, D2).
+ *
+ * No count, and there is no arm for one: the opener resolves to the FIRST line that
+ * carries it, so a repeat is not an error and 0 is the only number this can be
+ * composed with. An argument with one reachable value is an arm nobody can watch throw
+ * (row 6c, D6). What holds the choice of section is `only()` inside it, unchanged.
+ */
+const unplacedBalanceBox = (title: string, opens: string): string =>
+  `this ${title} statement's balance summary is one this importer could not place: it reads the summary of the section headed "${opens}", and this document prints no such heading - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+/**
+ * A layout whose date cells carry no year states the period once, and the year of
+ * every row is read out of it - so a document that states it twice over, or not at
+ * all, is one whose rows cannot be dated. Counted over the DISTINCT period lines
+ * inside the scope, which is why a reprinted page frame is not two.
+ */
+const noStatementPeriod = (title: string, found: number): string =>
+  `this ${title} statement's rows carry a day and a month and no year, so this template reads the year off the period the statement covers - and it expects exactly one such line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * Which cell of the box a refusal is about, as the whole noun phrase rather than a
@@ -420,6 +440,49 @@ type GrossLabels =
   | NoGrossTotals;
 
 /**
+ * Which lines readBalances searches - and, for a layout whose date cells carry no
+ * year, where the statement's own period is read (row 57, R-A(1)).
+ *
+ * Required and total, with no optional field and no default. `whole-document` is a
+ * DECLARATION that each of this box's labels was measured to occur exactly once in
+ * the whole file, not an escape hatch: it is what the four layouts measured before
+ * this one all say, and `only()`'s throw is what enforces it.
+ *
+ * `section` exists because one layout prints the same four labels twice - once for
+ * the statement, once for a quarterly Rechnungsabschluss covering a different period -
+ * and three of the four numbers agree, so no arithmetic can tell the blocks apart.
+ * The one that differs is the opening balance, which is the number the rows would have
+ * to supply. Both literals are matched as PREFIXES of the cell at `label`, because a
+ * section title carries a month or a quarter beside it: the rule is anchored on the
+ * generator's own label with the varying part left outside it, which is the direction
+ * 6c D17 finding 2 permits.
+ *
+ * `opens` resolves to the FIRST line that carries it and a repeat is not an error, for
+ * a reason worth writing down: a section long enough to span pages may reprint its own
+ * title at the top of each, and refusing that would reject an ordinary month for a
+ * property a dormant one happens not to have. Nothing is given up by it - the
+ * fail-closed property was never held by the opener's uniqueness. Opening too early
+ * admits a second box and `only()` finds 2; too late excludes the statement's own and
+ * it finds 0. There is no arrangement in which the first opener selects exactly one
+ * box and it is the wrong one, because `opens` and `closes` name two DIFFERENT labels -
+ * which is what separates this from "take the first opening-balance line", a rule that
+ * chooses between two identically-labelled things and cannot be loud about it.
+ *
+ * `closes` is a non-empty tuple: `[]` would mean "this section never ends", a section
+ * scope that scopes nothing, written by the author least sure of what they were
+ * reading - the shape this whole type exists to make unwritable.
+ */
+type BalanceScope =
+  | { kind: 'whole-document' }
+  | {
+      kind: 'section';
+      /** the prefix of the line that opens it, read at the box's own `label` span */
+      opens: string;
+      /** and the prefixes of whichever heading ends it first */
+      closes: readonly [string, ...string[]];
+    };
+
+/**
  * Where the layout states the statement's own opening and closing balance, and what
  * each side came to, for the whole document rather than for one of its products.
  *
@@ -443,8 +506,13 @@ type GrossLabels =
  * a two-lines box would be x-intervals with no line to read them off: a cross-field
  * inconsistency `tsc` cannot see. Nested, it cannot be written. Neither kind is a way
  * to write "no balances".
+ *
+ * `scope` is nested here rather than sitting beside `balances` on PdfTemplate for the
+ * reason `gross` is: it is resolved at the `label` span this node declares, and a span
+ * declared on one node and read from another is a cross-field inconsistency `tsc`
+ * cannot see.
  */
-type BalanceBox =
+type BalanceBox = { scope: BalanceScope } & (
   | {
       /** one line states both, under one label */
       kind: 'one-line';
@@ -466,7 +534,8 @@ type BalanceBox =
       closing: string;
       /** two more labels, read at the `value` span this box already has */
       gross: GrossLabels;
-    };
+    }
+);
 
 /** Exported for the tests that hand readPdf and selectTemplate a list of their own. */
 export type PdfTemplate = TableLayout & {
@@ -488,7 +557,7 @@ export type PdfTemplate = TableLayout & {
    * over the union rather than a switch - and it removes a freedom no layout uses.
    */
   marker: { column: keyof RowCells; text: string };
-  dateFormat: DateFormat;
+  dates: DateSource;
   amount: AmountFormat;
   rows: RowExtent;
   balances: BalanceBox;
@@ -496,7 +565,28 @@ export type PdfTemplate = TableLayout & {
 
 // ---------- dates ----------
 
-type DateFormat = 'ru-abbrev' | 'de-numeric';
+type DateFormat = 'ru-abbrev' | 'de-numeric' | 'de-day-month-pair';
+
+/**
+ * How this layout writes a date and, when the cell carries no year, where the year
+ * is (row 57, R-A(2)).
+ *
+ * One union node and not a `dateFormat` beside an optional `year`, for the reason
+ * TableLayout and AmountCurrency are unions: a year source declared for a vocabulary
+ * whose cell already carries one, or omitted for a vocabulary whose cell does not, is
+ * then not writable at all rather than caught by a branch.
+ */
+type DateSource =
+  /** the cell carries its own year */
+  | { format: 'ru-abbrev' | 'de-numeric' }
+  /**
+   * it does not, and this is where the year is read from instead: the one line of the
+   * balance box's scope whose whole text is the period the statement covers. Groups
+   * 1..3 are the first day, month and year; 4..6 the last. No `g` and no `y` flag -
+   * this is matched once per line over the whole scope, and a sticky or global regex
+   * keeps `lastIndex` and answers true, false, true for the same line (see `wanted`).
+   */
+  | { format: 'de-day-month-pair'; period: RegExp };
 
 /**
  * How a layout writes a date. A named vocabulary rather than a callback per
@@ -504,22 +594,30 @@ type DateFormat = 'ru-abbrev' | 'de-numeric';
  * in, so a second layout widens this list instead of shipping a parser inside a data
  * literal (row 6c, R1).
  *
- * Groups 1..3 of `shape` are the day, the month and the year, in that order and in
- * every vocabulary - stated once here rather than per entry, because it is what
- * readDate below reads them as.
+ * Groups 1..3 of `shape` are the day, the month and the year, in that order, in every
+ * vocabulary whose cell carries a year - stated once here rather than per entry,
+ * because it is what readDate below reads them as. A `no-year` vocabulary states its
+ * own group order in its own entry, which is where a reader of the entry is standing.
  *
  * `shape` is also what decides whether a line is a transaction at all - one regex
  * rather than two, or the anchor and the parser drift and a line that looks like a
  * row is dropped as furniture. A line that matches the shape and not the month
  * table is a SKIPPED row with a reason, never a dropped one: a month abbreviation
  * this table has wrong would otherwise make that month's transactions vanish with
- * nothing said.
+ * nothing said. The same holds one step further out for a date the period cannot
+ * place: skipped and noted, never guessed.
  */
 type DateVocabulary =
   | { kind: 'named-month'; shape: RegExp; months: Readonly<Record<string, number>> }
-  | { kind: 'numeric'; shape: RegExp };
+  | { kind: 'numeric'; shape: RegExp }
+  | { kind: 'no-year'; shape: RegExp };
 
-const DATE_FORMATS: Record<DateFormat, DateVocabulary> = {
+/**
+ * `satisfies` rather than an annotation, so that indexing this with the two formats
+ * whose cells carry a year yields those two entries and not the union: it is what
+ * makes `readDate` unreachable from a `no-year` template without a branch saying so.
+ */
+const DATE_FORMATS = {
   // "2 июл. 2026г." - the abbreviations are CLDR's ru formatting-context set,
   // which is what the sample's "июл." is, and the year suffix is the generator's
   // own. Never Intl at parse time: a Node built with small-icu has no ru data,
@@ -547,7 +645,17 @@ const DATE_FORMATS: Record<DateFormat, DateVocabulary> = {
   // required: a layout that writes 1.7.2026 is a layout nobody has measured, and
   // the round trip below is what refuses 31.02.2026 rather than rolling it over.
   'de-numeric': { kind: 'numeric', shape: /^(\d{2})\.(\d{2})\.(\d{4})$/u },
-};
+  // "30.06. 30.06." - a booking date and a value date, both without a year, drawn as
+  // two items in two columns and joined by cellAt into one cell. Groups 1 and 2 are
+  // the BOOKING day and month, which is what every date on that layout's statement is
+  // defined on; groups 3 and 4 are the value date and are read by nothing, and they
+  // are in the shape rather than left out of it so that a row printing only one of the
+  // two is not a transaction at all.
+  //
+  // Both digits required in all four, for de-numeric's reason. The whole cell is
+  // matched, which is what stops a wider date column turning a description into a row.
+  'de-day-month-pair': { kind: 'no-year', shape: /^(\d{2})\.(\d{2})\. (\d{2})\.(\d{2})\.$/u },
+} satisfies Record<DateFormat, DateVocabulary>;
 
 /**
  * UTC throughout and never `new Date(string)`: the calendar day goes into the dedup
@@ -556,17 +664,151 @@ const DATE_FORMATS: Record<DateFormat, DateVocabulary> = {
  * (ROADMAP 4.2, and the same reason sheet.ts's cellDate is written in UTC).
  *
  * The round trip is the check that the components are a real date: Date.UTC rolls
- * 31 February over into March rather than refusing it.
+ * 31 February over into March rather than refusing it. One function, so the two
+ * callers - a cell that carries its year and a period line that carries two - cannot
+ * come to disagree about which day-month pairs exist.
  */
-function readDate(format: DateFormat, m: RegExpExecArray): Date | null {
-  const vocabulary = DATE_FORMATS[format];
-  const month =
-    vocabulary.kind === 'named-month' ? vocabulary.months[m[2]] : Number(m[2]);
-  if (month === undefined) return null;
-  const day = Number(m[1]);
-  const year = Number(m[3]);
+function utcDate(day: number, month: number, year: number): Date | null {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCDate() === day && date.getUTCMonth() === month - 1 ? date : null;
+}
+
+function readDate(
+  vocabulary: Exclude<DateVocabulary, { kind: 'no-year' }>,
+  m: RegExpExecArray,
+): Date | null {
+  const month = vocabulary.kind === 'named-month' ? vocabulary.months[m[2]] : Number(m[2]);
+  if (month === undefined) return null;
+  return utcDate(Number(m[1]), month, Number(m[3]));
+}
+
+/** The period a statement covers, off its own period line, and that line's text. */
+interface StatementPeriod {
+  text: string;
+  from: Date;
+  to: Date;
+}
+
+/**
+ * How THIS document's dates are read.
+ *
+ * Built once per document rather than looked up per row, because a cell that carries
+ * no year needs the statement's own period and that is a fact about the document. The
+ * period is bound inside `read`, so a row read against another statement's period is
+ * unwritable rather than merely unlikely - and the alternative, handing readRows a
+ * year to pass down, would make readRows compute the candidate year, which means
+ * readRows knowing which groups of `shape` are the day and the month. That rule is the
+ * one DATE_FORMATS owns, and duplicated at a call site it drifts silently the day a
+ * fifth vocabulary numbers its groups differently, producing dates that are wrong and
+ * reconcile (row 57, D6).
+ */
+interface DateReader {
+  /** what decides whether a line is a transaction at all, as DATE_FORMATS' own is */
+  shape: RegExp;
+  /** the row's date, or why this template could not place it in the calendar */
+  read: (m: RegExpExecArray) => { date: Date } | { date: null; note: string };
+}
+
+const cannotRead = (m: RegExpExecArray): { date: null; note: string } => ({
+  date: null,
+  note: `reads ${quote(m[0])}, which this template cannot read as a date`,
+});
+
+/**
+ * The period the statement covers, off the one line of the scope whose WHOLE text is
+ * one - matched against the line's items joined, and not against a cell.
+ *
+ * Three reasons, and none of them is taste. It asserts the line carries nothing else,
+ * which a cell cannot; it needs no span, so the date node borrows no x-interval from
+ * the balances node; and a period drawn as several runs - which is what a statement
+ * with a space either side of its dash is - reads whole here where a cell narrower
+ * than the line would read the first run alone.
+ *
+ * DISTINCT lines, not lines: a section long enough to span pages may reprint its own
+ * frame, and two prints of one period are one period. Two DIFFERENT periods inside one
+ * scope refuse, and that is the arm that matters - the year is the one thing on this
+ * path that a wrong answer makes silent, since a row given the wrong year reconciles
+ * to the cent and lands in the wrong month (row 57, R-B).
+ */
+function statementPeriod(
+  template: PdfTemplate,
+  period: RegExp,
+  scoped: TextLine[],
+): StatementPeriod {
+  const found = new Map<string, StatementPeriod>();
+  for (const line of scoped) {
+    const m = period.exec(line.items.map((i) => i.text).join(' '));
+    if (!m) continue;
+    const from = utcDate(Number(m[1]), Number(m[2]), Number(m[3]));
+    const to = utcDate(Number(m[4]), Number(m[5]), Number(m[6]));
+    // a line in the shape of a period whose ends are not real days is not a period:
+    // Date.UTC would roll 31 February into March and every row's year would be read
+    // off a range the document never printed
+    if (from && to && from <= to) found.set(m[0], { text: m[0], from, to });
+  }
+  if (found.size !== 1) throw new Error(noStatementPeriod(template.title, found.size));
+  return [...found.values()][0];
+}
+
+/**
+ * The year of a row whose cell carries none: the ONE year in the period's own range
+ * for which the day and month are a real date inside the period. Zero or more than
+ * one is no date at all - a skipped row with a note - and there is no fallback, no
+ * walk back a year and no default to the period's end year.
+ *
+ * The rule that can answer "I do not know" is strictly better than the rule that
+ * always answers, and this is arithmetic rather than a preference: the gate sums
+ * amounts and cannot see a date, so a row given the wrong year reconciles to the cent,
+ * imports, and lands in the wrong month on the Transactions screen, in the analytics
+ * buckets and in the dedup key - a number the user reads being false with every check
+ * green. A skipped row makes the sum short and doesNotAddUp refuses out loud.
+ *
+ * Both ends of the period are INCLUSIVE. A bank books its interest and its fees on the
+ * period's last day by construction, so an exclusive comparison would skip every such
+ * row and refuse the import of documents that are perfectly correct.
+ */
+const inPeriod = (
+  m: RegExpExecArray,
+  period: StatementPeriod,
+): { date: Date } | { date: null; note: string } => {
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const found: Date[] = [];
+  for (let year = period.from.getUTCFullYear(); year <= period.to.getUTCFullYear(); year++) {
+    const date = utcDate(day, month, year);
+    if (date && date >= period.from && date <= period.to) found.push(date);
+  }
+  if (found.length === 1) return { date: found[0] };
+  // its own sentence and not the shape failure's, and a second one for the other arm:
+  // the template CAN read this cell as a date, and telling a reader that a well-formed
+  // "15.03." is unreadable sends them to inspect a column that is fine (feeRefused's
+  // reason, in the same product one seam over)
+  return {
+    date: null,
+    note:
+      found.length === 0
+        ? `reads ${quote(m[0])}, which this statement's period (${period.text}) does not contain`
+        : `reads ${quote(m[0])}, which this statement's period (${period.text}) contains in more than one year`,
+  };
+};
+
+function dateReader(template: PdfTemplate, scoped: TextLine[]): DateReader {
+  const { dates } = template;
+  if (dates.format === 'de-day-month-pair') {
+    const period = statementPeriod(template, dates.period, scoped);
+    return {
+      shape: DATE_FORMATS[dates.format].shape,
+      read: (m) => inPeriod(m, period),
+    };
+  }
+  const vocabulary = DATE_FORMATS[dates.format];
+  return {
+    shape: vocabulary.shape,
+    read: (m) => {
+      const date = readDate(vocabulary, m);
+      return date === null ? cannotRead(m) : { date };
+    },
+  };
 }
 
 // ---------- the sheet this frontend produces ----------
@@ -920,8 +1162,9 @@ function wanted(rows: Exclude<RowExtent, { kind: 'one-line' }>, description: str
 function readRows(
   template: PdfTemplate,
   lines: TextLine[],
+  dates: DateReader,
 ): { rows: Cell[][]; notes: Map<string, string> } {
-  const { shape } = DATE_FORMATS[template.dateFormat];
+  const { shape } = dates;
   const rows: Cell[][] = [];
   const notes = new Map<string, string>();
   let table: OpenTable | null = null;
@@ -984,15 +1227,13 @@ function readRows(
       notes.set(`${i}:${col}`, bounded(text, NOTE_MAX));
     };
 
-    const date = readDate(template.dateFormat, m);
-    if (date === null) {
-      note(DATE, `reads ${quote(cells.date)}, which this template cannot read as a date`);
-    }
+    const date = dates.read(m);
+    if (date.date === null) note(DATE, date.note);
     const amount = table.amount(line);
     if (amount.note) note(AMOUNT, amount.note);
 
     const row: Cell[] = [];
-    row[DATE] = date;
+    row[DATE] = date.date;
     row[AMOUNT] = amount.value;
     row[DESCRIPTION] = cells.description;
     row[CURRENCY] = amount.currency;
@@ -1011,12 +1252,34 @@ interface Balance {
 }
 
 /**
+ * The lines the balance box is read out of, and the lines the period is read out of -
+ * one set, so the two cannot come to disagree about which section of the document is
+ * the statement's own (row 57, R-C).
+ *
+ * Declared by the template and never by code that knows what one bank's sections are
+ * called. A scope that cannot be resolved refuses with a sentence of its own; it is
+ * never silently widened back to the whole document, which would put the parser back
+ * to reading whichever of two identically-labelled blocks came first.
+ */
+function scopeOf(template: PdfTemplate, lines: TextLine[]): TextLine[] {
+  const { balances } = template;
+  if (balances.scope.kind === 'whole-document') return lines;
+  const { opens, closes } = balances.scope;
+  const label = (line: TextLine): string => cellAt(line, balances.label);
+  const from = lines.findIndex((l) => label(l).startsWith(opens));
+  if (from === -1) throw new Error(unplacedBalanceBox(template.title, opens));
+  const rest = lines.slice(from + 1);
+  const to = rest.findIndex((l) => closes.some((c) => label(l).startsWith(c)));
+  return to === -1 ? rest : rest.slice(0, to);
+}
+
+/**
  * What the document says it started and ended with, and what it says each side came
  * to, off the line - or the lines - that state it for the whole statement.
  *
- * Exactly one line per label is required, not the first of several. A layout that
- * repeats a label is a layout nobody has measured, and taking the first is the guess
- * this parser exists not to make.
+ * Exactly one line per label is required WITHIN THE SCOPE, not the first of several.
+ * A layout that repeats a label inside one section is a layout nobody has measured,
+ * and taking the first is the guess this parser exists not to make.
  *
  * There is no header assertion fingerprinting this box the way `matches` fingerprints
  * the transaction table, and the reason is measured rather than economic: in the first
@@ -1029,11 +1292,11 @@ interface Balance {
  * changes the arithmetic and refuses the import; and a pair of rows the parser never
  * saw that cancel into a clean net now changes it too.
  */
-function readBalances(template: PdfTemplate, lines: TextLine[]): StatementBalances {
+function readBalances(template: PdfTemplate, scoped: TextLine[]): StatementBalances {
   const { balances } = template;
 
   const only = (label: string): TextLine => {
-    const found = lines.filter((l) => cellAt(l, balances.label) === label);
+    const found = scoped.filter((l) => cellAt(l, balances.label) === label);
     if (found.length !== 1) throw new Error(noBalanceBox(template.title, label, found.length));
     return found[0];
   };
@@ -1190,12 +1453,29 @@ export async function readPdf(
     throw new Error(name === null ? NOT_RECOGNISED : notRecognisedFrom(name));
   }
 
-  const { rows, notes } = readRows(template, lines);
+  // The scope and the period come first, and only because the rows depend on them: a
+  // layout whose date cells carry no year reads every row's year off the period, and
+  // the period is read out of the scope. Moving them back below readRows to restore
+  // the old order either resolves the scope twice or hands readRows a year it has to
+  // compute itself, which means readRows knowing which groups of the vocabulary's
+  // shape are the day and the month - the one rule DATE_FORMATS owns (row 57, D6).
+  //
+  // What that costs is stated per template rather than in general, because it is not
+  // general. For a `section` template - c24-de alone today - unplacedBalanceBox and
+  // noStatementPeriod now come BEFORE both of readRows' own refusals: a document that
+  // cannot resolve its scope refuses for that even when it also has a table this
+  // template cannot read (unreadableTable) or no transaction line at all
+  // (noTransactionLines). For the four that declare `whole-document` and a vocabulary
+  // carrying its own year, the scope is the whole line list and the period is never
+  // looked for, so neither refusal exists and nothing moves.
+  const scoped = scopeOf(template, lines);
+  const dates = dateReader(template, scoped);
+  const { rows, notes } = readRows(template, lines, dates);
   if (rows.length === 0) throw new Error(noTransactionLines(template.title));
-  // last, because everything above is "this is not the document I know" and the box
-  // is the last thing read - so a document that refuses for one of those reasons goes
-  // on refusing for it
-  const balances = readBalances(template, lines);
+  // the box's VALUES are still read last, so noBalanceBox, unreadableBalance and
+  // mixedBalanceCurrencies go on coming after the table refusals - it is only the
+  // box's SCOPE that moved ahead of them
+  const balances = readBalances(template, scoped);
 
   return {
     sheet: {
@@ -1271,7 +1551,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
         collect: false,
       },
     ],
-    dateFormat: 'ru-abbrev',
+    dates: { format: 'ru-abbrev' },
     amount: {
       // "5,96€", "1 742,18€" - the group separator is an ASCII space, and the
       // symbol carries none, so "5,68 EUR" is a cell in the wrong shape rather
@@ -1315,6 +1595,10 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // "Списания" and "Пополнения" columns come to: -1742.18 and +1953.40 on the
     // statement measured, each to the cent against the parsed rows' own halves.
     balances: {
+      // each of the four labels below occurs exactly once in the whole document,
+      // counted over all its pages - which is what this arm declares and only()
+      // enforces
+      scope: { kind: 'whole-document' },
       kind: 'one-line',
       total: 'Итого',
       // the date column's interval, and deliberately as narrow: the description
@@ -1388,7 +1672,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // tells the two tables apart.
       { header: { description: 'Beschreibung', date: '', amount: '' }, collect: false },
     ],
-    dateFormat: 'de-numeric',
+    dates: { format: 'de-numeric' },
     amount: {
       // "+0,13€", "-1.140,57€" - "." groups thousands, "," is the decimal and the
       // sign is required rather than optional: an unsigned cell is a cell in a shape
@@ -1434,6 +1718,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // ABOVE its label's baseline: 41% of TOLERANCE spent here, on top of the 1.95 the
     // dated rows spend.
     balances: {
+      // each of the four labels occurs exactly once in the whole document, measured
+      // over all its pages
+      scope: { kind: 'whole-document' },
       kind: 'two-lines',
       // the description column, because that is where this layout writes its labels.
       // Unlike revolut-ru's, it cannot be narrowed to a column no transaction
@@ -1542,7 +1829,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // files, which is the shape de-numeric already carries. A second entry with an
     // identical `shape` under a Ukrainian name would be two literals free to drift,
     // and the drift would be silent because both would go on matching.
-    dateFormat: 'de-numeric',
+    dates: { format: 'de-numeric' },
     amount: {
       // "-742.18", "20 000.00", "3 118.40 UAH" - one run each, the group separator
       // an ASCII space and the decimal a dot. The sign is optional because this
@@ -1599,6 +1886,8 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // arithmetically rather than read off the words: negating the outgoing magnitude
     // gives the parsed rows' own outgoing half to the cent.
     balances: {
+      // counted over all four pages, as the comment above this box says
+      scope: { kind: 'whole-document' },
       kind: 'two-lines',
       // The value's x tracks the LABEL's width, not the value's, because the label is
       // laid out first: a 26-character label puts its value at 154.426 and a
@@ -1658,7 +1947,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
         collect: true,
       },
     ],
-    dateFormat: 'de-numeric',
+    dates: { format: 'de-numeric' },
     amount: {
       pattern: /^(-?\d{1,3}(?: \d{3})*\.\d{2})(?: UAH)?$/u,
       decimal: '.',
@@ -1686,6 +1975,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // further right (170.554-197.500 against 133.789-154.786), so [0, 133) / [133,
     // 596) holds for both files without either boundary being tuned to this one.
     balances: {
+      scope: { kind: 'whole-document' },
       kind: 'two-lines',
       label: [0, 133],
       value: [133, 596],
@@ -1696,6 +1986,232 @@ export const TEMPLATES: readonly PdfTemplate[] = [
         signs: 'magnitudes',
         outgoing: 'Amount of expenses for the period:',
         incoming: 'Amount of charges for the period:',
+      },
+    },
+  },
+  /*
+   * The fourth layout (ROADMAP row 57): a C24 Smartkonto statement, 3 pages, 1011.7
+   * characters a page by the count readLines keeps - the trimmed non-blank one, where
+   * the raw item text is 1019.7 - against MIN_CHARS_PER_PAGE's 50.
+   *
+   * What this layout cost the reader, stated because the row exists to measure it: TWO
+   * axes, both authorised in advance. `BalanceScope`, because this document prints the
+   * balance box's four labels twice; and the `no-year` date vocabulary with the period
+   * it reads its year off, because its transaction cells carry no year. A third
+   * widening was authorised and NOT taken - the header line writes four headings where
+   * TableLayout's signed arm knows three, and rather than widen that arm the two date
+   * cells share one span, so `header.date` reads "Buchung Valuta", which is what cellAt
+   * really returns there. Every heading the layout writes is inside a declared span and
+   * compared whole.
+   *
+   * What that costs, and it is a real cost: a row that printed only ONE of its two date
+   * cells does not match the shape, is therefore not a transaction, and - its amount
+   * cell being non-blank - is not appended to the row above either. It is dropped, the
+   * sum comes up short and doesNotAddUp refuses. Loud, but not diagnostic: with
+   * `skipped` at 0 that refusal reads "an operation is probably missing" and names no
+   * line.
+   *
+   * WHAT THIS DOCUMENT CANNOT PROVE, which is the other half of what a template comment
+   * owes. Two transactions, both bank-generated (a tax line and an interest line), both
+   * dated 30.06. in BOTH date columns - so the second date column is present and never
+   * differs, and reading `Buchung` is a choice made on what the statement IS (its
+   * period, its balances and its own "Kontoauszug 06/2026" title are all defined on
+   * booking, and a value date legitimately falls outside the period) rather than on
+   * anything this file shows. No purchase, no foreign currency, no fee, no page break -
+   * 0 of 2 transactions split across one - no amount above 10,02, no thousands
+   * separator anywhere, and a gate exercised on two rows and six cents. And no section
+   * in this file spans a page, so nothing here shows whether a section title repeats at
+   * the top of each of its pages; first-match on `opens` is the choice that does not
+   * need to know.
+   */
+  {
+    id: 'c24-de',
+    // the bank's own legal name off its footer, 13 characters. Not "C24 Smartkonto",
+    // which is 14 and names a product where a title names a layout (row 30, D-G)
+    title: 'C24 Bank GmbH',
+    // Both terms are the bank's own and per-DOCUMENT rather than per-customer: the
+    // legal name and the VAT identifier out of the footer, which every page carries.
+    // Never the holder's name, their address or the IBAN, which is R3's
+    // stop-and-report. Deliberately NOT "Kontoauszug 06/2026" or "BIC: DEFFDEFFXXX":
+    // the month varies in the first, and both are printed by the synthetic document
+    // that pins row 30's by-name refusal for this very bank - so drawing the
+    // fingerprint from them would put half of it inside that fixture. The cost, taken
+    // knowingly: a C24 statement whose footer legal name or VAT id ever changes is
+    // refused BY NAME through the issuer directory's own 'DE 50024024' entry, which is
+    // the good failure and one template edit from working.
+    issuer: ['C24 Bank GmbH', 'Ust.-ID DE 322 469 451'],
+    amounts: 'signed',
+    // Three spans over a page 595.276 wide, and every boundary is a measurement of its
+    // own rather than a reference to another one:
+    //
+    //   date [40, 135)   the two date cells write at 48.354 and 99.378 and nowhere
+    //     else; 135 sits in the 24.7-point gap between the Valuta column's right edge
+    //     (125.745) and the description column's left edge (150.402). 40 is BELOW the
+    //     leftmost thing this document draws (45.354) and that is deliberate, not
+    //     slack: it puts every line the layout writes in the left margin - the four
+    //     summary labels, the section headings, the footer's "06/2026", the whole of
+    //     page 3's legal text - inside the date cell, where a non-empty date cell is
+    //     what stops readRows taking any of them for a continuation. Raise it to 46 and
+    //     the footer's address line becomes one, measured.
+    //   description [135, 250)   the column writes at 150.402 and nowhere else, seven
+    //     items over the document. 250 sits in the 37.2-point gap between the footer
+    //     address's left edge (233.880) and the Ust.-ID line's (271.094), which is what
+    //     this boundary is FOR - see `rows` below. Its cost is real: the column's own
+    //     widest run ends at 287.854, so a description drawn as a SECOND run beginning
+    //     past 250 would be dropped silently, which is the class of loss DEBT.md's item
+    //     (b) already carries. Every description line in this document is one run.
+    //   amount [460, 596)   right-aligned at 546.921, and 460 is much further left than
+    //     the widest amount the document contains (-10,02 €, 33.293 wide, left edge
+    //     516.628) because the column is right-aligned and an item is assigned by its
+    //     LEFT edge: by this font's own measured advances a four-figure "-1.234,56 €"
+    //     begins near 500.9 and a five-figure one near 495.7, so a span drawn for the
+    //     amounts this file happens to print would read an empty amount cell for every
+    //     four-figure movement, skip the row and refuse an ordinary month. 460 also sits
+    //     in the 72.9-point band above the page-1 header's own "Kontostand 84,22 €" run
+    //     at 427.132, which must stay OUT of it.
+    //
+    // The obvious lower bound is the footer's own "Seite N von 3" at 500.003, and it is
+    // not available: a four-figure amount begins within a POINT of it - to the right of
+    // it, by 0.9 - so no boundary separates the two, and one that cleared the footer
+    // would take the five-figure amounts with it. What admitting a span this low costs
+    // is therefore one line, the footer at y=16.704, whose amount cell then reads
+    // "Seite 1 von 3". That line is already held out of the transaction path by a
+    // non-empty date cell ("06/2026" at 45.354), so a non-blank amount cell adds a
+    // second guard rather than removing one.
+    columns: { date: [40, 135], description: [135, 250], amount: [460, 596] },
+    marker: { column: 'description', text: 'Transaktionsinformation' },
+    tables: [
+      // "Buchung" at 48.354 and "Valuta" at 99.378 are two headings in one span, joined
+      // by cellAt exactly as the two date cells under them are - so the fourth column
+      // is NAMED, and a redesign that renames or moves it stops this template matching
+      // rather than reading rows against columns that have shifted.
+      //
+      // One entry is enough, and that is measured rather than assumed: exactly one line
+      // in the whole document carries "Transaktionsinformation" in the description
+      // column, so there is no second marker line for readRows to refuse over and no
+      // analogue of n26-de's `collect: false` summary table.
+      {
+        header: {
+          date: 'Buchung Valuta',
+          description: 'Transaktionsinformation',
+          amount: 'Betrag',
+        },
+        collect: true,
+      },
+    ],
+    // "30.06. 30.06." - no year in either cell, so the year comes off the period line
+    // inside the balance box's scope. Both period lines in this document have the same
+    // x and the same shape ("01.06.2026 - 30.06.2026" on page 1, "01.04.2026 -
+    // 30.06.2026" on page 2), which is exactly the problem the box has, so the scope
+    // serves both and there is no second locator to disagree with the first.
+    //
+    // What the locator counts is DISTINCT MATCHED TEXTS and not lines, which matters
+    // to anyone writing a sixth template here: a section long enough to reprint its
+    // own frame states one period however many times it prints it, and that is the
+    // whole reason the count is not over lines. But the key is the text and not the
+    // range it parses to, so two SPELLINGS of one period - "01.06.2026 - 30.06.2026"
+    // against "01.06.2026-30.06.2026" - count as two and refuse a correct document.
+    // That direction is chosen and not accidental: a loud false refusal over a silent
+    // normalisation of two facts into one, because a wrong year is the only failure on
+    // this path that reconciles to the cent and lands in the wrong month.
+    dates: {
+      format: 'de-day-month-pair',
+      period: /^(\d{2})\.(\d{2})\.(\d{4}) - (\d{2})\.(\d{2})\.(\d{4})$/u,
+    },
+    amount: {
+      // "-0,02 €", "+ 0,08 €", "84,16 €". Three things this pattern has to carry:
+      //
+      // The sign is OPTIONAL and cannot be otherwise. readBalances reads "84,16 €" and
+      // "84,22 €" with this same pattern, so n26-de's required sign would refuse the
+      // balance box. What that costs, said plainly: a dropped "+" is arithmetically
+      // invisible - 0,08 and +0,08 are one number - while a dropped "-" flips a debit
+      // into a credit, and the only thing standing between a narrow amount span and
+      // wrong money is row 035's per-side check.
+      //
+      // The space after the sign is real. A credit's sign is a text run of its own at
+      // 516.024 with its digits at 521.670, and cellAt joins runs with a space, so the
+      // cell arrives as "+ 0,08 €" where the summary line writes "+0,08 €" as one run.
+      // parseAmount strips whitespace before it parses, so the pattern is the only
+      // place this matters - and it still matches the WHOLE cell, which is what stops
+      // "1234,56-" being read as positive.
+      //
+      // The thousands separator is UNMEASURED: no amount in this document reaches
+      // 1.000, and "." is declared from the locale's convention and from n26-de's
+      // measurement of the same one. Every wrong form of that guess is loud - a balance
+      // cell the pattern cannot read is quoted back through unreadableBalance, and a
+      // transaction cell it cannot read is a skipped row that makes the sum short.
+      pattern: /^([+-]? ?\d{1,3}(?:\.\d{3})*,\d{2}) ([^\s\d]+)$/u,
+      decimal: ',',
+      currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
+      example: '-1.234,56 €',
+    },
+    // A transaction is a dated line plus one or two detail lines in the description
+    // column, unlabelled free text - a counterparty name, a "Steuerabrechnung
+    // Zinsgutschrift", an interest period - so this layout cannot name what it keeps
+    // and takes the permissive arm, which obliges an enumeration of what it writes
+    // BELOW its transactions on the transaction page. There are exactly four such
+    // lines, and each is held by something different:
+    //
+    //   "Zusammenfassung" and the four summary lines under it   the DATE cell: their
+    //     labels are at 45.354, inside date's [40, 135), so the cell is not empty. The
+    //     four summary lines also write in the amount column, so blank() refuses them
+    //     a second time.
+    //   the footer's "C24 Bank GmbH" at 273.765                 the DESCRIPTION span,
+    //     and nothing else can hold it - see below.
+    //   the footer's "06/2026 | <address> | Seite N von 3"      the DATE cell again,
+    //     plus a non-blank amount cell.
+    //   the footer's "Ust.-ID DE 322 469 451" at 271.094        the DESCRIPTION span.
+    //
+    // `drop` is EMPTY, and that is the whole point of the description span's 250.
+    // "C24 Bank GmbH" appears twice on page 1: at 150.402 as transaction 1's own first
+    // detail line, and at 273.765 as the page footer, on the same page as the last
+    // transaction and blank in the amount column - a continuation's exact shape. The
+    // two texts are byte-identical and differ only in x, so no rule over the
+    // description TEXT can separate them: a drop list naming "C24 Bank GmbH" takes the
+    // real detail line with the footer, three appended instead of four, which is a
+    // silent truncation of a real description. Only a rule keyed on x can tell them
+    // apart, and the span is that rule. Its cost is the one written above 250.
+    rows: { kind: 'continuations', drop: [] },
+    // The document prints these four labels TWICE - once here for the statement, once
+    // on page 2 for a quarterly Rechnungsabschluss covering 01.04 to 30.06 - and three
+    // of the four numbers agree: Endsaldo 84,22 in both, Kontogutschriften +0,08 in
+    // both, and the page-1 header's own "Kontostand 84,22 €" agrees with both. Only
+    // Startsaldo differs, and that is the one number the rows would have to supply. So
+    // no arithmetic can choose the block and the scope has to.
+    //
+    // "Kontoauszug" and not "Transaktionsübersicht", because the period line sits at
+    // y=636.301 - ABOVE Transaktionsübersicht at 601.500 - and opening the scope at the
+    // section title puts the period line and the balance box inside one line set.
+    //
+    // A page-based scope was measured against this and is worse rather than merely
+    // different: the anchor sits on the page a section STARTS on while Zusammenfassung
+    // moves with the transaction list, so a month with forty transactions puts them on
+    // different pages and a page rule finds nothing and refuses a correct document.
+    balances: {
+      scope: { kind: 'section', opens: 'Kontoauszug', closes: ['Rechnungsabschluss'] },
+      kind: 'two-lines',
+      // Two independent measurements that happen to equal two of `columns` and must
+      // NOT be turned into references to them. This box is not a row of the
+      // transaction table: its labels are at 45.354 where the date column's cells are
+      // at 48.354, and its values right-align at 549.921 where the transaction column
+      // right-aligns at 546.921 - three points apart, measured, which is the proof
+      // they are two columns. Like n26-de's and unlike revolut-ru's, `label` cannot be
+      // narrowed to a column no transaction reaches: a transaction whose date cell read
+      // exactly "Startsaldo" would make the count 2 and refuse the import rather than
+      // being misread.
+      label: [0, 135],
+      value: [460, 596],
+      opening: 'Startsaldo',
+      closing: 'Endsaldo',
+      gross: {
+        kind: 'printed',
+        // "-0,02 €" and "+0,08 €": the sign is in the cell, the same way this layout's
+        // transaction column writes it and the opposite of the two universalbank
+        // entries. The balance cells beside them are UNSIGNED, which is why the pattern
+        // above cannot require one.
+        signs: 'signed',
+        outgoing: 'Kontobelastungen',
+        incoming: 'Kontogutschriften',
       },
     },
   },
@@ -1771,6 +2287,13 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
         { role, label, currency: code },
       ),
     );
+    // the two below only for the templates whose arms can reach them, the way the
+    // gross labels above are read only where they exist: a sentence composed for a
+    // template that can never produce it would bound this set by a fiction
+    if (t.balances.scope.kind === 'section') {
+      all.push(unplacedBalanceBox(t.title, t.balances.scope.opens));
+    }
+    if (t.dates.format === 'de-day-month-pair') all.push(noStatementPeriod(t.title, found));
   }
   return all;
 }
