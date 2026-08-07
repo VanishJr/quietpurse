@@ -34,7 +34,27 @@ const stage = async (accountName: string, label: string) => {
   return res.body.summary as { importId: string; accountId: string; accountExists: boolean };
 };
 
+/** The id arm: the account is picked, so the request carries no name and no currency. */
+const stageInto = async (accountId: string, label: string) => {
+  const res = await agent
+    .post('/api/imports')
+    .field('accountId', accountId)
+    .attach('file', csvFile(label), 'statement.csv');
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return res.body.summary as { importId: string; accountId: string };
+};
+
 const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
+
+/** The account as the API answers for it, hidden ones included. */
+const readAccount = async (id: string) => {
+  const all = (await agent.get('/api/accounts?all=1')).body as {
+    id: string;
+    name: string;
+    currency: string;
+  }[];
+  return all.find((a) => a.id === id);
+};
 
 beforeAll(async () => {
   initAuth(dbInstance());
@@ -107,14 +127,33 @@ describe('POST /api/accounts', () => {
     expect(res.body.error).toBe('unknown field: "hidden"');
   });
 
-  it('refuses a name that is only whitespace, and one with no currency', async () => {
+  it('refuses a name that is only whitespace', async () => {
     const blank = await agent.post('/api/accounts').send({ name: '   ', currency: 'EUR' });
     expect(blank.status).toBe(400);
     expect(blank.body.error).toBe('account name must not be empty');
+  });
 
-    const noCurrency = await agent.post('/api/accounts').send({ name: 'Currencyless' });
-    expect(noCurrency.status).toBe(400);
-    expect(noCurrency.body.error).toBe('currency field required (3-letter ISO code)');
+  /**
+   * Row 65's first half: the currency was required, so the "+ Add" control that asks
+   * for a name alone had to guess one on the server's behalf. It is defaulted here
+   * now, from the same setting the client was reading.
+   */
+  it('defaults the currency to the workspace base currency when none is sent', async () => {
+    const res = await agent.post('/api/accounts').send({ name: 'Currencyless' });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.currency).toBe('EUR');
+    expect((await readAccount(res.body.id))!.currency).toBe('EUR');
+  });
+
+  /**
+   * Optional is not unchecked. The message is the one the upload's door composes too
+   * - one schema at both, so it no longer says "required" at either.
+   */
+  it('still refuses a currency that is not a 3-letter code', async () => {
+    const res = await agent.post('/api/accounts').send({ name: 'Euro Spelled Out', currency: 'euro' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('currency must be a 3-letter ISO code');
   });
 });
 
@@ -195,7 +234,7 @@ describe('PATCH /api/accounts/:id', () => {
     const account = await create('Unchanged');
     const res = await agent.patch(`/api/accounts/${account.id}`).send({});
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('nothing to change: send name, hidden, or both');
+    expect(res.body.error).toBe('nothing to change: send name, hidden, currency, or any of them');
   });
 
   it('answers 404 for an id this workspace does not have', async () => {
@@ -218,6 +257,138 @@ describe('PATCH /api/accounts/:id', () => {
     const res = await agent.patch(`/api/accounts/${account.id}`).send({ name: 'OWN CASE' });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.name).toBe('OWN CASE');
+  });
+});
+
+/**
+ * Row 65's second half, on the wire. The currency an account was created in can be
+ * corrected, and only while the account holds no rows of its own - balance_cents is
+ * the plain sum of amount_cents whatever each row says, so re-denominating a
+ * populated account relabels a total that was never in the new unit and nothing
+ * afterwards can tell that it happened.
+ *
+ * Both halves of that guard answer here, and with different sentences: a committed
+ * import is permanent and a staged one is a discard away. There is no control for
+ * any of it yet (the account menu is row 27's), so these requests are the whole
+ * surface.
+ */
+describe('PATCH /api/accounts/:id {currency}', () => {
+  const HELD =
+    'this account holds transactions, and changing its currency would relabel amounts that were never in it - delete the imports behind this account, which empties it, and the currency can be changed again';
+  const STAGED =
+    'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now - discard that import, change the currency, then upload the statement again';
+
+  const create = async (name: string) => {
+    const res = await agent.post('/api/accounts').send({ name });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    return res.body as { id: string; name: string; currency: string };
+  };
+
+  it('changes it while the account is empty, and upper-cases it on the way in', async () => {
+    const account = await create('Wrong Unit');
+    expect(account.currency).toBe('EUR');
+
+    const res = await agent.patch(`/api/accounts/${account.id}`).send({ currency: 'usd' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.currency).toBe('USD');
+    expect((await readAccount(account.id))!.currency).toBe('USD');
+  });
+
+  it('and while it is hidden - hidden is what is displayed, not what is writable', async () => {
+    const account = await create('Hidden And Empty');
+    expect((await agent.patch(`/api/accounts/${account.id}`).send({ hidden: true })).status).toBe(
+      200,
+    );
+
+    const res = await agent.patch(`/api/accounts/${account.id}`).send({ currency: 'CHF' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect((await readAccount(account.id))!.currency).toBe('CHF');
+  });
+
+  it('refuses once the account holds transactions, and stores nothing', async () => {
+    const staged = await stage('Populated Unit', 'populated');
+    expect((await confirm(staged.importId)).status).toBe(200);
+
+    const res = await agent.patch(`/api/accounts/${staged.accountId}`).send({ currency: 'USD' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe(HELD);
+    expect((await readAccount(staged.accountId))!.currency).toBe('EUR');
+  });
+
+  /**
+   * One statement, one outcome. A rename riding along with a refused currency must
+   * not be applied on its own - a 200 for half of what was asked is exactly what the
+   * single UPDATE exists to make unrepresentable.
+   */
+  it('and takes a name sent in the same body down with it', async () => {
+    const staged = await stage('Partial Unit', 'partial');
+    expect((await confirm(staged.importId)).status).toBe(200);
+
+    const res = await agent
+      .patch(`/api/accounts/${staged.accountId}`)
+      .send({ name: 'Partial Unit Renamed', currency: 'USD' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe(HELD);
+    expect(await readAccount(staged.accountId)).toMatchObject({
+      name: 'Partial Unit',
+      currency: 'EUR',
+    });
+  });
+
+  /**
+   * The guard must NOT be paired with VISIBLE_ACCOUNT(), which every other predicate
+   * in db/index.ts is: that one excludes the transactions OF hidden accounts, so
+   * together they would read a hidden account holding a thousand rows as empty,
+   * re-denominate it at 200, and restore it into a screen of relabelled figures -
+   * unrecoverably, because those rows then refuse the change back.
+   */
+  it('refuses for a hidden account holding transactions too', async () => {
+    const staged = await stage('Hidden And Full', 'hidden and full');
+    expect((await confirm(staged.importId)).status).toBe(200);
+    expect((await agent.patch(`/api/accounts/${staged.accountId}`).send({ hidden: true })).status)
+      .toBe(200);
+
+    const res = await agent.patch(`/api/accounts/${staged.accountId}`).send({ currency: 'USD' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe(HELD);
+    expect((await readAccount(staged.accountId))!.currency).toBe('EUR');
+  });
+
+  /**
+   * The trap S3 exists for, run to the end. An import stamps each of its rows with
+   * the account's currency when the file is READ, and nothing re-resolves that at
+   * confirm - so a correction made while an import waits would stand on the account
+   * and be reverted on its rows, which then refuse every further change. The guard
+   * refuses inside that window instead, and the sentence names the one way through:
+   * discard, correct, upload again.
+   */
+  it('refuses while an import is staged, and the order the sentence names works', async () => {
+    const account = await create('Staged Correction');
+    const staged = await stageInto(account.id, 'staged correction');
+
+    const refused = await agent.patch(`/api/accounts/${account.id}`).send({ currency: 'usd' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe(STAGED);
+    expect((await readAccount(account.id))!.currency).toBe('EUR');
+
+    // transient, not a latch: the staged rows go and the account is correctable again
+    expect((await agent.post(`/api/imports/${staged.importId}/discard`)).status).toBe(200);
+    const corrected = await agent.patch(`/api/accounts/${account.id}`).send({ currency: 'usd' });
+    expect(corrected.status, JSON.stringify(corrected.body)).toBe(200);
+    expect(corrected.body.currency).toBe('USD');
+
+    // and the rows land in the corrected unit, which is what refusing bought
+    const again = await stageInto(account.id, 'staged correction');
+    expect((await confirm(again.importId)).status).toBe(200);
+    const rows = (await agent.get(`/api/transactions?accountId=${account.id}`))
+      .body as { currency: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].currency).toBe('USD');
+
+    // the other half of the guard now, and this one does not go away
+    const permanent = await agent.patch(`/api/accounts/${account.id}`).send({ currency: 'EUR' });
+    expect(permanent.status).toBe(409);
+    expect(permanent.body.error).toBe(HELD);
   });
 });
 

@@ -368,7 +368,9 @@ describe('POST /api/imports', () => {
       .field('currency', 'euro')
       .attach('file', csvFile('x'), 'statement.csv');
     expect(badCurrency.status).toBe(400);
-    expect(badCurrency.body.error).toMatch(/currency field required/);
+    // one schema at both doors, so one sentence: it is optional at the account
+    // doors now (row 65) and still required here, and this wording is true of both
+    expect(badCurrency.body.error).toMatch(/currency must be a 3-letter ISO code/);
 
     const badMapping = await agent
       .post('/api/imports')

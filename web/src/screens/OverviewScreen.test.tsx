@@ -637,10 +637,12 @@ describe('adding an account', () => {
   it('asks for a name and nothing else, then selects what came back', async () => {
     const created = account({ id: 'acc-3', name: 'Cash' });
     let list: Account[] = [ACCOUNTS[0]];
+    let sent: unknown = null;
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/accounts': () => ok(list),
-      'POST /api/accounts': () => {
+      'POST /api/accounts': (init) => {
+        sent = init?.body ? JSON.parse(String(init.body)) : null;
         list = [...list, created];
         return ok(created, 201);
       },
@@ -655,6 +657,9 @@ describe('adding an account', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await panel('Cash');
+    // an equality, so what is asserted is the ABSENCE of a currency key: the client
+    // no longer guesses one, and the server defaults it (row 65)
+    expect(sent).toEqual({ name: 'Cash' });
     expect(await tab('Cash')).toBeInTheDocument();
     expect(screen.getByText(/Nothing has been loaded into Cash/)).toBeInTheDocument();
   });

@@ -66,7 +66,10 @@ interface Props {
   origin: DialogKind;
   /** null for 'add', which has no account yet. */
   account: Account | null;
-  /** What a new account is created in: "+ Add" asks for a name and nothing else. */
+  /**
+   * What a new account will be created in — printed, not sent. "+ Add" asks for a
+   * name and nothing else, and the server reads the same setting this came from.
+   */
   baseCurrency: string;
   onStep: (kind: DialogKind) => void;
   onClose: () => void;
@@ -140,7 +143,7 @@ export function AccountDialog({
     setBusy(true);
     setError(null);
     try {
-      if (kind === 'add') onCreated(await api.createAccount(value, baseCurrency));
+      if (kind === 'add') onCreated(await api.createAccount(value));
       else if (account) onUpdated(await api.renameAccount(account.id, value));
       onClose();
     } catch (err) {

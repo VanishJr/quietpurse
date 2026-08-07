@@ -1278,12 +1278,16 @@ async function mapAndStore(
   // and would outlive a discard permanently - there is no account delete yet. So the
   // name and the currency go on the `imports` row and the account appears at confirm.
   //
-  // Staged as uploadDestination handed it back, not re-uppercased: on the id arm
-  // these ARE the account's own columns, so upsertAccountOn's conflict arm rewrites
-  // the values it already holds and the currency overwrite row 25's §20 accepted
-  // stops being reachable from this path. Uppercasing here would make that arm a
-  // real write, turning a restored 'eur' into 'EUR' on an import that asked for
-  // nothing of the kind.
+  // Staged as uploadDestination handed it back, not re-uppercased. `currency` is no
+  // longer in upsertAccountOn's conflict set at all (row 65), so what this column
+  // decides at confirm is the currency of an account that does not exist yet - the
+  // name arm's create - and it is inert for one that does, on either arm. The
+  // overwrite row 25's §20 accepted is unreachable from every arm now, not just from
+  // the id one. `name` is untouched here for its own reason and keeps it.
+  //
+  // Uppercasing here would still be wrong: on the id arm this IS the account's own
+  // column read back, and normalising it would put a restored 'eur' onto the imports
+  // row as 'EUR' on an import that asked for nothing of the kind.
   const newRows = await countNewKeys(txs);
   await stageImport(importId, txs, skipped, account);
   // Last, and after the staging rather than before it: a failure anywhere above must

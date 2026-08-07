@@ -631,6 +631,119 @@ describe('workspace isolation', () => {
   });
 
   /**
+   * Row 65's guard is two NOT EXISTS clauses of the UPDATE that writes the currency,
+   * and each carries its own workspace filter. db/workspace.ts throws when there is
+   * no workspace CONTEXT and can see nothing about a predicate that forgot one - so
+   * drop `AND transactions.workspace_id = …` from NO_ROWS and the neighbour's rows
+   * decide this workspace's write: an account of ours that holds nothing becomes
+   * permanently uncorrectable, refused on behalf of data we cannot see.
+   *
+   * The neighbour holds both kinds, because the guard has two clauses.
+   */
+  it('a neighbour rows against the same account id do not refuse this workspace', async () => {
+    const shared = crypto.randomUUID();
+    let importId: string | undefined;
+    try {
+      await runWithWorkspace(OTHER, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs Full',
+          currency: 'USD',
+          balance: 0,
+        });
+        await insertTransactions([
+          tx({ accountId: shared, description: 'theirs: in the shared id', date: JAN }),
+        ]);
+        const record = await createImport({
+          fileHash: 'neighbour-rows-block-nothing',
+          sourceType: 'csv',
+          parserVersion: 1,
+        });
+        importId = record.id;
+        await stageImport(
+          record.id,
+          [tx({ accountId: shared, description: 'theirs: staged in the shared id', date: DEC })],
+          0,
+          { id: shared as ResolvedAccountId, name: 'Theirs Full', currency: 'USD' },
+        );
+      });
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Mine Empty',
+          currency: 'EUR',
+          balance: 0,
+        });
+        expect(await updateAccount(shared, { currency: 'CHF' })).toMatchObject({ ok: true });
+        const mine = (await listAccounts(true)).find((a) => a.id === shared);
+        expect(mine!.currency).toBe('CHF');
+      });
+
+      // and the neighbour's own account is untouched by our write
+      await runWithWorkspace(OTHER, async () => {
+        const theirs = (await listAccounts(true)).find((a) => a.id === shared);
+        expect(theirs!.currency).toBe('USD');
+      });
+    } finally {
+      // both accounts, the neighbour's import and its rows go back, so the counts
+      // every case above and below asserts are the ones the fixture set up. Guarded,
+      // because a failure above must not be hidden by a cleanup that throws.
+      await runWithWorkspace(OTHER, async () => {
+        if (importId) await deleteImport(importId);
+      });
+      await dbInstance().execute(
+        sql`DELETE FROM transactions WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND account_id = ${shared}`,
+      );
+      await dbInstance().execute(
+        sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND id = ${shared}`,
+      );
+    }
+  });
+
+  /**
+   * The other half of the same clause, on the accounts row itself: an id only the
+   * neighbour holds must answer 404 here and keep its currency there. The readback
+   * that decides between "not found" and the two refusals is workspace-scoped too,
+   * or this would answer 409 for a row that is nowhere in this workspace.
+   */
+  it('an account of the neighbour cannot be re-denominated from here', async () => {
+    const shared = crypto.randomUUID();
+    try {
+      await runWithWorkspace(OTHER, () =>
+        upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs To Keep',
+          currency: 'USD',
+          balance: 0,
+        }),
+      );
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        expect(await updateAccount(shared, { currency: 'CHF' })).toEqual({
+          ok: false,
+          reason: 'not-found',
+        });
+      });
+
+      await runWithWorkspace(OTHER, async () => {
+        const theirs = (await listAccounts(true)).find((a) => a.id === shared);
+        expect(theirs!.currency).toBe('USD');
+      });
+    } finally {
+      await dbInstance().execute(
+        sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND id = ${shared}`,
+      );
+    }
+  });
+
+  /**
    * A stored document is reached through a key whose first segment is the CURRENT
    * workspace, never one read out of the row - so the second assertion here holds
    * even with the row-level guard bypassed on purpose.

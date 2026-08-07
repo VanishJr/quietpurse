@@ -36,10 +36,14 @@ import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
 
-async function upload(accountName: string, csv: string): Promise<ImportSummary> {
+async function upload(
+  accountName: string,
+  csv: string,
+  currency = 'EUR',
+): Promise<ImportSummary> {
   const result = await importStatement({
     accountName,
-    currency: 'EUR',
+    currency,
     bytes: Buffer.from(csv, 'utf8'),
   });
   if (result.outcome !== 'awaiting_confirmation') {
@@ -372,12 +376,13 @@ describe('an upload that picks its account by id', () => {
   });
 
   /**
-   * The case row 25's §20 accepted and this row removes. On the name arm the user
-   * types a currency, it goes on the import row, and upsertAccountOn's conflict set
-   * writes `currency = excluded.currency` over the account's own - so creating
-   * "Savings" as EUR and then uploading a USD statement named Savings left the
-   * account USD, answered 200. Picked by id there is no currency in the request to
-   * overwrite it with: the conflict arm rewrites the value it already holds.
+   * The case row 25's §20 accepted, closed here from the id side: there is no
+   * currency in the request to overwrite the account's with, because the column the
+   * import records is read off the account's own row.
+   *
+   * Row 65 closed it from the other side as well - `currency` left upsertAccountOn's
+   * conflict set, so no arm rewrites an existing account's currency at all. The name
+   * arm's half of that is the case below.
    */
   it("leaves the account's currency alone when the statement states another", async () => {
     const created = await createAccount({ name: 'Savings', currency: 'EUR' });
@@ -436,6 +441,36 @@ describe('an upload that picks its account by id', () => {
     if (again.outcome !== 'duplicate') return;
     expect(again.accountId).toBe(targetId);
     expect(again.accountIds).toEqual([targetId]);
+  });
+});
+
+/**
+ * The other arm of the same guarantee (ROADMAP row 65). The name arm is the one that
+ * hands a typed currency to an account it never read - uploadDestination returns the
+ * request's own currency, and branch (a) of the id resolution then joins an account
+ * that already exists - so uploading under an existing account's name used to
+ * re-denominate it at confirm, at 200 and with nothing said.
+ *
+ * Held by the statement rather than by a branch: `currency` is not in
+ * upsertAccountOn's conflict set, so there is no arm left for a later change to drop.
+ */
+describe('an upload that names an account that already exists', () => {
+  it("does not re-denominate it, whatever currency the request stated", async () => {
+    const created = await createAccount({ name: 'Named Bank', currency: 'EUR' });
+    const id = created.ok ? created.account.id : '';
+
+    const summary = await upload('Named Bank', csvFile('2026-04-06,-46.00,Named'), 'USD');
+    expect(summary.accountId).toBe(id);
+    expect(summary.accountExists).toBe(true);
+    // what the FILE was uploaded as, which is allowed to disagree with the account
+    // now: the column decides the currency of an account the confirm CREATES, and is
+    // inert for one that is already there
+    expect((await recordedAccount(summary.importId)).currency).toBe('USD');
+
+    expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, inserted: 1 });
+    expect((await getAccount(id))!.currency).toBe('EUR');
+    // and the rows keep the unit they were read in - nothing is reconverted
+    expect((await listTransactions({ accountId: id }))[0].currency).toBe('USD');
   });
 });
 

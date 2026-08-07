@@ -237,19 +237,59 @@ const accountNameSchema = z
   .max(ACCOUNT_NAME_MAX, { error: `account name must be at most ${ACCOUNT_NAME_MAX} characters` })
   .min(1, { error: 'account name must not be empty' });
 
+/**
+ * One schema at both doors it guards, for accountNameSchema's reason. Its message
+ * no longer says "required": the field is optional at the account doors now (row
+ * 65) and a sentence that is true at one door and false at the other is worse than
+ * one that describes the value at both.
+ */
 const currencyCode = z
-  .string({ error: 'currency field required (3-letter ISO code)' })
+  .string({ error: 'currency must be a 3-letter ISO code' })
   .trim()
-  .regex(/^[A-Za-z]{3}$/, { error: 'currency field required (3-letter ISO code)' });
+  .regex(/^[A-Za-z]{3}$/, { error: 'currency must be a 3-letter ISO code' });
+
+/**
+ * The account doors normalise, in one place covering both of them - a second
+ * .toUpperCase() to remember is a second one to forget, and an account stored as
+ * 'usd' lists every one of its own transactions as foreign to it on Overview.
+ * The upload's door keeps the untransformed schema because it guards only the name
+ * arm's typed currency - the id arm refuses the field outright, before any schema -
+ * and uploadDestination upper-cases that arm's value itself, so transforming here
+ * would normalise the same value twice. The raw case statement.ts argues for is the
+ * id arm's account.currency, read back off the row, which passes no schema at all.
+ */
+const accountCurrency = currencyCode.transform((c) => c.toUpperCase());
 
 // strict, for the reason mappingSchema is: a stripped unknown key is a field the
 // user meant to send, silently not applied, answered 200
-const newAccountSchema = z.strictObject({ name: accountNameSchema, currency: currencyCode });
+const newAccountSchema = z.strictObject({
+  name: accountNameSchema,
+  currency: accountCurrency.optional(),
+});
 
 const accountPatchSchema = z.strictObject({
   name: accountNameSchema.optional(),
   hidden: z.boolean({ error: 'hidden must be true or false' }).optional(),
+  currency: accountCurrency.optional(),
 });
+
+/**
+ * The currency may be corrected only while the account is empty, and the sentence
+ * has to carry the way out because there is no control for it: deleting the
+ * account's imports takes their transactions with them (transactions.import_id
+ * cascades), which empties it and makes it correctable again.
+ */
+const HAS_TRANSACTIONS =
+  'this account holds transactions, and changing its currency would relabel amounts that were never in it - delete the imports behind this account, which empties it, and the currency can be changed again';
+
+/**
+ * The other half of the same rule, and a different sentence because the advice
+ * differs: holding transactions is permanent, an outstanding import is one click.
+ * Confirming is not offered - its rows were prepared in the currency being replaced,
+ * and once they land the account can no longer be corrected at all.
+ */
+const STAGED_IMPORT =
+  'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now - discard that import, change the currency, then upload the statement again';
 
 /** The first zod issue as a sentence, unknown keys named rather than counted. */
 const badRequest = (error: z.ZodError): string => {
@@ -286,7 +326,14 @@ app.post('/api/accounts', async (req, res) => {
   }
   const result = await createAccount({
     name: parsed.data.name,
-    currency: parsed.data.currency.toUpperCase(),
+    // absent means the workspace's own unit, never a guess the client made on the
+    // server's behalf (row 65). This is the one path into accounts.currency that
+    // currencyCode does not see: the value is validated where it is written -
+    // appsettings.ts refuses anything but three letters and uppercases, config.ts
+    // uppercases the env seed - so the asymmetry is deliberate rather than missed.
+    // POST {name, currency: 'euro'} is a 400; POST {name} against a settings row a
+    // restored backup filled with junk is a 201.
+    currency: parsed.data.currency ?? (await currentBaseCurrency()).toUpperCase(),
   });
   if (!result.ok) {
     res.status(409).json({ error: nameTaken(result.taken, parsed.data.name) });
@@ -295,20 +342,33 @@ app.post('/api/accounts', async (req, res) => {
   res.status(201).json(result.account);
 });
 
-/** Rename an account, remove it from the app, or bring it back. */
+/**
+ * Rename an account, remove it from the app, bring it back, or correct the currency
+ * it was created in - the last only while it holds no rows, which is the whole of
+ * what row 65 opened. There is no control for it yet, deliberately: the account menu
+ * is row 27's and a step added now is a step rewritten twice.
+ */
 app.patch('/api/accounts/:id', async (req, res) => {
   const parsed = accountPatchSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: badRequest(parsed.error) });
     return;
   }
-  const { name, hidden } = parsed.data;
+  const { name, hidden, currency } = parsed.data;
   // the wire's half of what the patch type holds at the call site: a body that asks
   // for nothing is refused, never answered 200 for a write that did not happen
   const patch =
-    name !== undefined ? { name, hidden } : hidden !== undefined ? { hidden } : undefined;
+    name !== undefined
+      ? { name, hidden, currency }
+      : hidden !== undefined
+        ? { hidden, currency }
+        : currency !== undefined
+          ? { currency }
+          : undefined;
   if (!patch) {
-    res.status(400).json({ error: 'nothing to change: send name, hidden, or both' });
+    res
+      .status(400)
+      .json({ error: 'nothing to change: send name, hidden, currency, or any of them' });
     return;
   }
   const result = await updateAccount(req.params.id, patch);
@@ -316,12 +376,31 @@ app.patch('/api/accounts/:id', async (req, res) => {
     res.json(result.account);
     return;
   }
-  // only a patch that carried a name can meet accounts_name_unique, and narrowing on
-  // it here is what keeps the refusal from having to invent a requested name - the
-  // sentence has no arm that quotes an account called ""
-  if (result.reason === 'name-taken' && name !== undefined) {
-    res.status(409).json({ error: nameTaken(result.taken, name) });
-    return;
+  // one switch over the union rather than a chain of ifs, for confirmConflict's
+  // reason: a refusal added to AccountWrite is a compile error here instead of
+  // falling through to "account not found", for an account on the user's screen
+  switch (result.reason) {
+    case 'name-taken':
+      // only a patch that carried a name can meet accounts_name_unique, and
+      // narrowing on it here is what keeps the refusal from having to invent a
+      // requested name - the sentence has no arm that quotes an account called ""
+      if (name !== undefined) {
+        res.status(409).json({ error: nameTaken(result.taken, name) });
+        return;
+      }
+      break;
+    case 'has-transactions':
+      res.status(409).json({ error: HAS_TRANSACTIONS });
+      return;
+    case 'staged-import':
+      res.status(409).json({ error: STAGED_IMPORT });
+      return;
+    case 'not-found':
+      break;
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
   }
   res.status(404).json({ error: 'account not found' });
 });
