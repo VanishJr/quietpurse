@@ -458,12 +458,11 @@ export const api = {
     request<Account[]>(`/api/accounts${includeHidden ? '?all=1' : ''}`),
 
   /**
-   * An empty account, named. The endpoint also requires a currency, which the "+ Add"
-   * control does not ask for — the caller passes the workspace's base currency, and
-   * `REDESIGN-BACK-DEBT.md` carries the row that makes the server default it.
+   * An empty account, named. The currency is the server's: it defaults the account to
+   * the workspace's base currency, and there is nowhere in this signature to put a
+   * guess — which is the whole of how no client makes one.
    */
-  createAccount: (name: string, currency: string) =>
-    request<Account>('/api/accounts', json('POST', { name, currency })),
+  createAccount: (name: string) => request<Account>('/api/accounts', json('POST', { name })),
 
   renameAccount: (id: string, name: string) =>
     request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { name })),

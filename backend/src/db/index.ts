@@ -207,6 +207,39 @@ const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
 const VISIBLE_ACCOUNT = (): SQL =>
   sql`account_id NOT IN (SELECT id FROM accounts WHERE hidden AND workspace_id = ${currentWorkspaceId()})`;
 
+/**
+ * A row of this account's own, in either table - the two reasons its currency must
+ * not move. `transactions` is what balance_cents sums
+ * (recalcAccountBalanceFromTransactionsOn) whatever each row's own currency says,
+ * so re-denominating an account holding them relabels a total that was never in
+ * the new unit. `staged_transactions` rows were stamped with the account's currency
+ * when the file was read (statement.ts's rowCurrency) and land unchanged at
+ * confirm, so a correction made while an import is outstanding survives on the
+ * account and is reverted on its rows.
+ *
+ * Neither carries VISIBLE_ACCOUNT(), unlike every other predicate here, and that is
+ * not an omission: it excludes the transactions OF hidden accounts, so pairing it
+ * would read a hidden account holding a thousand rows as empty.
+ */
+const HOLDS_TRANSACTIONS = (accountId: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM transactions
+      WHERE transactions.account_id = ${accountId} AND transactions.${WS()})`;
+
+const HOLDS_STAGED_ROWS = (accountId: string): SQL =>
+  sql`EXISTS (SELECT 1 FROM staged_transactions
+      WHERE staged_transactions.account_id = ${accountId} AND staged_transactions.${WS()})`;
+
+/**
+ * Clauses of the UPDATE that writes the currency rather than a count before it -
+ * confirmImport's note is the pattern. Counting first and writing after is a window
+ * an import commits inside, and the loser is a silent re-denomination.
+ *
+ * Not a latch: both tables empty again and the account is correctable again, which
+ * is what makes discarding an import and deleting one the ways out.
+ */
+const NO_ROWS = (accountId: string): SQL =>
+  sql`NOT ${HOLDS_TRANSACTIONS(accountId)} AND NOT ${HOLDS_STAGED_ROWS(accountId)}`;
+
 // ---------- settings (key/value, source of truth, see appsettings.ts) ----------
 
 export async function getSetting(key: string): Promise<string | undefined> {
@@ -300,8 +333,19 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
       // the user called "Revolut" would rename it. It is also what keeps this
       // statement clear of accounts_name_unique: the conflict arm never touches the
       // indexed column.
+      //
+      // `currency` is out of it for a reason of the same kind (row 65). It is the
+      // account's own now - updateAccount writes it, and only while the account
+      // holds no rows - and imports.account_currency is what a FILE was uploaded
+      // as, not what the account is. Left in the set, the confirm would write that
+      // snapshot back and revert a correction made while the import waited, at 200
+      // and with nothing said; and every arm that hands a typed currency to an
+      // account it never read (uploadDestination's name arm) would re-denominate
+      // it. Out of the set there is no application branch to drop later.
+      //
+      // The INSERT above keeps it: the name arm's account is created here, and it
+      // has to be denominated in something.
       set: {
-        currency: sql`excluded.currency`,
         balanceCents: sql`excluded.balance_cents`,
         iban: sql`excluded.iban`,
       },
@@ -518,10 +562,18 @@ export type AccountWrite =
    * the type says so rather than defaulting `hidden` and printing a wrong sentence.
    */
   | { ok: false; reason: 'name-taken'; taken: Account | undefined }
-  | { ok: false; reason: 'not-found' };
+  | { ok: false; reason: 'not-found' }
+  /** NO_ROWS refused the currency: the account's balance is a sum of these. */
+  | { ok: false; reason: 'has-transactions' }
+  /** NO_ROWS refused the currency: an outstanding import already stamped its rows. */
+  | { ok: false; reason: 'staged-import' };
 
-/** A create has no row to miss, so the route never has to answer for one. */
-export type AccountCreate = Exclude<AccountWrite, { reason: 'not-found' }>;
+/**
+ * A create has no row to miss and no rows to hold. An allow-list rather than a
+ * subtraction: a refusal added above is then an outcome POST is never made to
+ * answer for, without anyone having to remember to widen an Exclude.
+ */
+export type AccountCreate = Extract<AccountWrite, { ok: true } | { reason: 'name-taken' }>;
 
 /** An empty account, with nothing in it and no import behind it. */
 export async function createAccount(input: {
@@ -549,16 +601,39 @@ export async function createAccount(input: {
 }
 
 /**
- * Rename an account, remove it from the app, or bring it back - one UPDATE, because
- * two functions writing the same row is how the next change updates one of them. The
- * union is what refuses a patch that changes nothing: `{}` is assignable to neither
- * arm, so a caller cannot construct one.
+ * Rename an account, remove it from the app, bring it back, or correct the currency
+ * it was created in - one UPDATE, because two functions writing the same row is how
+ * the next change updates one of them. The union is what refuses a patch that
+ * changes nothing: `{}` is assignable to none of the three arms, so a caller cannot
+ * construct one.
  *
  * `id` is never written here and must not be: the dedup index is
  * (workspace_id, account_id, dedup_key) and transfer_rules.account_id has no foreign
  * key, so moving an id un-deduplicates one and orphans the other, silently.
  */
-export type AccountPatch = { name: string; hidden?: boolean } | { name?: string; hidden: boolean };
+export type AccountPatch =
+  | { name: string; hidden?: boolean; currency?: string }
+  | { name?: string; hidden: boolean; currency?: string }
+  | { name?: string; hidden?: boolean; currency: string };
+
+/**
+ * Which clause of NO_ROWS refused the write, or undefined when there is no such
+ * account. Asked only after the UPDATE matched nothing, so it decides a sentence
+ * and never a write.
+ *
+ * A patch that raced the confirm's cleanup - the rows gone from both tables between
+ * the UPDATE and this read - lands on the staged arm, which of the two is the one
+ * that says "try again" rather than "delete something".
+ */
+async function currencyRefusal(
+  id: string,
+): Promise<'has-transactions' | 'staged-import' | undefined> {
+  const rows = await rowsOf<{ blocked: boolean }>(
+    sql`SELECT ${HOLDS_TRANSACTIONS(id)} AS blocked FROM accounts WHERE id = ${id} AND ${WS()}`,
+  );
+  if (!rows[0]) return undefined;
+  return rows[0].blocked ? 'has-transactions' : 'staged-import';
+}
 
 export async function updateAccount(id: string, patch: AccountPatch): Promise<AccountWrite> {
   try {
@@ -567,12 +642,28 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
       .set({
         ...(patch.name === undefined ? {} : { name: patch.name }),
         ...(patch.hidden === undefined ? {} : { hidden: patch.hidden }),
+        ...(patch.currency === undefined ? {} : { currency: patch.currency }),
       })
-      .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)))
+      .where(
+        and(
+          eq(s.accounts.workspaceId, currentWorkspaceId()),
+          eq(s.accounts.id, id),
+          // and() drops undefined, so a rename or a hide keeps exactly the WHERE it
+          // has always had - which is what leaves a populated account renameable
+          patch.currency === undefined ? undefined : NO_ROWS(id),
+        ),
+      )
       .returning();
-    return rows[0]
-      ? { ok: true, account: rowToAccount(rows[0]) }
-      : { ok: false, reason: 'not-found' };
+    if (rows[0]) return { ok: true, account: rowToAccount(rows[0]) };
+    // Zero rows is ambiguous exactly when a guard was on, and NO_ROWS is the ONLY
+    // guarded clause in the WHERE above - which is why this readback is conditional
+    // on the same field. A clause added later must be read back here too, or its
+    // refusal tells a user their account does not exist while they are looking at it.
+    if (patch.currency !== undefined) {
+      const refused = await currencyRefusal(id);
+      if (refused) return { ok: false, reason: refused };
+    }
+    return { ok: false, reason: 'not-found' };
   } catch (e) {
     if (!isUniqueViolation(e, 'accounts_name_unique')) throw e;
     return {
