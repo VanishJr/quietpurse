@@ -1300,8 +1300,28 @@ app.post('/api/imports/:id/discard', async (req, res) => {
   res.json({ discarded: true, importId: req.params.id });
 });
 
-app.get('/api/imports', async (_req, res) => {
-  res.json({ imports: await listImports() });
+/**
+ * The page and, beside it, totals over the whole filtered set - so a client can say
+ * how many are not listed instead of counting what it was sent.
+ *
+ * Presence then shape, deliberately not q(): q() maps both '' and a repeated
+ * parameter to undefined, and undefined here means the whole workspace. A caller
+ * writing `?accountId=${account?.id ?? ''}` would then be answered with every import
+ * this workspace has and print it as one account's. Same test and same sentence as
+ * the upload route above. An id that matches no account is not an error: another
+ * workspace's id has to stay indistinguishable from a nonexistent one.
+ */
+app.get('/api/imports', async (req, res) => {
+  if (req.query.accountId !== undefined) {
+    const accountId = req.query.accountId;
+    if (typeof accountId !== 'string' || accountId.length === 0) {
+      res.status(400).json({ error: 'accountId must be sent once, as a single value' });
+      return;
+    }
+    res.json(await listImports({ accountId }));
+    return;
+  }
+  res.json(await listImports());
 });
 
 /** Removes the import AND the transactions it wrote - the count is in the answer. */

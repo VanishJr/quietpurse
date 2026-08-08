@@ -291,12 +291,12 @@ async function lastFailure(before: string[]): Promise<{
   documentAvailable: boolean;
   sourceType: ImportSourceType;
 }> {
-  const fresh = (await listImports()).filter((i) => !before.includes(i.id));
+  const fresh = (await listImports()).imports.filter((i) => !before.includes(i.id));
   expect(fresh).toHaveLength(1);
   return fresh[0];
 }
 
-const idsNow = async (): Promise<string[]> => (await listImports()).map((i) => i.id);
+const idsNow = async (): Promise<string[]> => (await listImports()).imports.map((i) => i.id);
 
 describe('pdf: bytes to rows', () => {
   it('reads the rows of a statement in the layout it knows', async () => {
@@ -316,7 +316,7 @@ describe('pdf: bytes to rows', () => {
       // exactly between the two - 1200,00 - 1140,24 = 59,76
       balances: { opening: 1200, closing: 59.76, currency: 'EUR' },
     });
-    const imports = await listImports();
+    const imports = (await listImports()).imports;
     const record = imports.find((i) => i.id === staged.summary.importId)!;
     expect(record.sourceType).toBe('pdf');
     expect(record.parserVersion).toBe(PDF_PARSER_VERSION);
@@ -1778,7 +1778,7 @@ describe('pdf: the third layout', () => {
       bytes: buildSignedContainer(buildPdf(ukStatement('wrapped'))),
     });
     expect(imported.inserted).toBe(3);
-    const record = (await listImports()).find((i) => i.id === imported.importId)!;
+    const record = (await listImports()).imports.find((i) => i.id === imported.importId)!;
     expect(record.sourceType).toBe('pdf');
   });
 
@@ -3027,7 +3027,7 @@ describe('pdf: a statement inside a signed container', () => {
     });
 
     expect(imported.inserted).toBe(3);
-    const record = (await listImports()).find((i) => i.id === imported.importId)!;
+    const record = (await listImports()).imports.find((i) => i.id === imported.importId)!;
     expect(record.sourceType).toBe('pdf');
     expect(record.parserVersion).toBe(PDF_PARSER_VERSION);
   });
@@ -3058,15 +3058,15 @@ describe('pdf: the caps', () => {
     const oversized = Buffer.alloc(11 * 1024 * 1024);
     Buffer.from('%PDF-1.4\n').copy(oversized);
     expect(sniff(oversized)).toBe('pdf');
-    const before = (await listImports()).length;
+    const before = (await listImports()).imports.length;
     const attempt = () =>
       importStatement({ accountName: 'Fat Pdf Bank', currency: 'EUR', bytes: oversized });
 
     await expect(attempt()).rejects.toThrow(/the PDF is larger than 10 MB/);
-    expect(await listImports()).toHaveLength(before);
+    expect((await listImports()).imports).toHaveLength(before);
     // nothing recorded the hash, so this is a second refusal and not a duplicate
     await expect(attempt()).rejects.toThrow(/the PDF is larger than 10 MB/);
-    expect(await listImports()).toHaveLength(before);
+    expect((await listImports()).imports).toHaveLength(before);
   });
 
   /**

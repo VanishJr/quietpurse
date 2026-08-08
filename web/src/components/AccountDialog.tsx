@@ -13,7 +13,7 @@
  */
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { Account, ImportRecord } from '../types';
+import { Account } from '../types';
 import { Sheet } from './Sheet';
 
 /**
@@ -32,8 +32,9 @@ interface Preview {
   transactions: number;
   /**
    * Where the transaction count came from. `rows` is the account's own transactions,
-   * counted directly. `imports` is the sum over its imports, which is what a hidden
-   * account has to be counted by: the transactions endpoint answers nothing for one.
+   * counted directly. `imports` is the server's total over this account's imports,
+   * which is what a hidden account has to be counted by: the transactions endpoint
+   * answers nothing for one.
    */
   countedFrom: 'rows' | 'imports';
   /**
@@ -42,7 +43,7 @@ interface Preview {
    * bounded, and that bound has its own sentence below.
    */
   truncated: boolean;
-  /** Uploaded statements this server still holds bytes for. */
+  /** Uploaded statements this server can still READ, which is not whether bytes exist. */
   files: number;
   imports: number;
 }
@@ -110,22 +111,22 @@ export function AccountDialog({
     setPreviewError(null);
     setPreview(null);
     try {
-      const { imports } = await api.imports();
       // on the id, never on the name: a rename leaves an import row's accountName
-      // behind, and matching on it would attribute the file to the old name
-      const mine = imports.filter((r: ImportRecord) => r.accountId === account.id);
-      const owned = mine.reduce((n, r) => n + r.transactions, 0);
+      // behind, and matching on it would attribute the file to the old name. The
+      // filtering and the counting are both the server's - these three numbers are
+      // over the whole history, not over the page it would have sent
+      const { totals } = await api.imports(account.id);
       // a hidden account's transactions are filtered out of the endpoint, so asking
       // it would answer 0 for an account that has thousands
       const rows = account.hidden
         ? null
         : await api.transactions({ accountId: account.id, limit: COUNT_LIMIT });
       setPreview({
-        transactions: rows ? rows.length : owned,
+        transactions: rows ? rows.length : totals.transactions,
         countedFrom: rows ? 'rows' : 'imports',
         truncated: rows !== null && rows.length === COUNT_LIMIT,
-        files: mine.filter((r) => r.documentAvailable).length,
-        imports: mine.length,
+        files: totals.documents,
+        imports: totals.imports,
       });
     } catch (e) {
       setPreviewError((e as Error).message);
@@ -372,12 +373,6 @@ export function AccountDialog({
               That count came back exactly at the limit this dialog asks for, so it is the
               limit and not the answer. There are at least that many, and how many more is
               not something this screen can find out.
-            </p>
-          )}
-          {preview && (
-            <p className="hint">
-              Counted over the imports this workspace lists. The API sends the most recent
-              ones and no total, so an import older than that is not in these numbers.
             </p>
           )}
           {!preview && !previewError && <p className="hint">Counting what would go…</p>}

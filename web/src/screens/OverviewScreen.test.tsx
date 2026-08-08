@@ -1,8 +1,23 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
-import { ACCOUNTS, APP_SETTINGS, importRecord, PRESETS, USER } from '../test/fixtures';
-import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
+import {
+  ACCOUNTS,
+  APP_SETTINGS,
+  importRecord,
+  importsResponse,
+  PRESETS,
+  USER,
+} from '../test/fixtures';
+import {
+  fail,
+  mockFetch,
+  ok,
+  renderThemed,
+  requests,
+  requestUrls,
+  Routes,
+} from '../test/harness';
 import { Account, Transaction } from '../types';
 import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
 
@@ -579,7 +594,12 @@ describe('the account menu', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/imports': () =>
-        ok({ imports: [importRecord(), importRecord({ id: 'imp-2', documentAvailable: false })] }),
+        ok(
+          importsResponse([
+            importRecord(),
+            importRecord({ id: 'imp-2', documentAvailable: false }),
+          ]),
+        ),
     });
     const menu = await openMenu();
 
@@ -599,7 +619,7 @@ describe('the account menu', () => {
     let calls = 0;
     mount({
       ...OVERVIEW_ROUTES,
-      'GET /api/imports': () => ok({ imports: [importRecord()] }),
+      'GET /api/imports': () => ok(importsResponse()),
       // the dashboard's two reads, then the dialog's count — which comes back exactly
       // as long as it asked for. The rows are never read, only counted, so they are
       // not built: what is under test is the length.
@@ -617,19 +637,22 @@ describe('the account menu', () => {
     expect(screen.getByText(/it is the limit and not the answer/)).toBeInTheDocument();
   });
 
+  /**
+   * The per-account view is per-account, and after row 66 that is the server's job:
+   * the assertion is what the screen ASKED for, not what it kept. Asserting the
+   * render instead would be a tautology — a mock answering one row proving that one
+   * row appears — and the client re-filtering is what ImportHistory's own suite
+   * refuses.
+   */
   it('opens the imports of this account and not of the workspace', async () => {
-    mount({
-      ...OVERVIEW_ROUTES,
-      'GET /api/imports': () =>
-        ok({ imports: [importRecord(), importRecord({ id: 'imp-2', accountId: 'acc-2' })] }),
-    });
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok(importsResponse()) });
     const menu = await openMenu();
 
     fireEvent.click(within(menu).getByText('Import history'));
 
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
-    // the other account's import is not this account's history
-    expect(screen.getAllByText('statement.csv')).toHaveLength(1);
+    expect(requestUrls()).toContain('GET /api/imports?accountId=acc-1');
+    expect(requestUrls()).not.toContain('GET /api/imports');
   });
 });
 

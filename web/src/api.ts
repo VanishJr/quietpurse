@@ -6,7 +6,7 @@ import {
   CategoryRule,
   CsvImportResult,
   ImportConfirmed,
-  ImportRecord,
+  ImportList,
   Independence,
   IncomeSource,
   IncomeSourceDef,
@@ -616,11 +616,22 @@ export const api = {
     request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),
 
   /**
-   * The import history. The backend caps the list and sends neither a total nor a
-   * cursor, so this is the most recent imports and the client cannot know how many
-   * are behind them.
+   * The import history: one account's when an id is given, the workspace's otherwise.
+   * The page is still capped at a hundred, and `totals` counts the whole filtered
+   * set — so how many are not listed is something the caller reads rather than guesses.
+   *
+   * An id of '' is SENT rather than dropped, against the URLSearchParams idiom
+   * `transactions` uses above: the server refuses it, and a caller writing
+   * `?accountId=${account?.id ?? ''}` has to meet that refusal. Dropping it here
+   * would answer with every import in the workspace and let a panel print them as
+   * one account's.
    */
-  imports: () => request<{ imports: ImportRecord[] }>('/api/imports'),
+  imports: (accountId?: string) =>
+    request<ImportList>(
+      accountId === undefined
+        ? '/api/imports'
+        : `/api/imports?accountId=${encodeURIComponent(accountId)}`,
+    ),
 
   /**
    * Removes the import and the transactions it FIRST wrote — a row an earlier

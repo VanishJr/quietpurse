@@ -5,8 +5,10 @@ import {
   BudgetsResponse,
   CsvImportResult,
   ImportConfirmed,
+  ImportList,
   ImportRecord,
   ImportSummary,
+  ImportTotals,
   Independence,
   IncomeSourceDef,
   RecurringSummary,
@@ -176,7 +178,26 @@ export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord =>
   ...patch,
 });
 
-export const IMPORTS = { imports: [importRecord()] };
+/**
+ * GET /api/imports. The default totals are DERIVED from the records, so the whole
+ * page is the default case and a short page is something a test says on purpose.
+ * Deriving a total from a page is exactly what the client may never do — here it is
+ * what makes a mismatch a statement rather than a typo.
+ */
+export const importsResponse = (
+  records: ImportRecord[] = [importRecord()],
+  totals: Partial<ImportTotals> = {},
+): ImportList => ({
+  imports: records,
+  totals: {
+    imports: records.length,
+    documents: records.filter((r) => r.documentAvailable).length,
+    transactions: records.reduce((n, r) => n + r.transactions, 0),
+    ...totals,
+  },
+});
+
+export const IMPORTS = importsResponse();
 
 export const DUPLICATE: CsvImportResult = {
   outcome: 'duplicate',

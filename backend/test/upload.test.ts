@@ -743,6 +743,144 @@ describe('the routes around it', () => {
   });
 });
 
+/**
+ * GET /api/imports over the wire (ROADMAP row 66). The totals matter here rather
+ * than at the data layer for one reason: they cross JSON.stringify. SUM() over
+ * bigint is numeric and both drivers hand numeric over as a string, so an
+ * unconverted total is the number 7 on PGlite and the string "7" in the Postgres CI
+ * job - which the client's `=== 1` plural tests would silently stop matching. The
+ * toEqual against numeric literals below is what makes the two jobs disagree loudly.
+ */
+describe('GET /api/imports: the filter and the totals', () => {
+  /** Distinct amounts across files as well as within one: equal rows deduplicate. */
+  let mark = 0;
+  const rows = (label: string, n: number): Buffer => {
+    mark += 1;
+    return Buffer.from(
+      [
+        'date,amount,description',
+        ...Array.from(
+          { length: n },
+          (_, i) => `2026-07-01,-${mark * 100 + i + 1}.00,${label} ${i + 1}`,
+        ),
+      ].join('\n'),
+      'utf8',
+    );
+  };
+
+  /** An upload into `accountId`, confirmed - so its rows and its import are real data. */
+  const importInto = async (accountId: string, label: string, n: number): Promise<string> => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', accountId)
+      .attach('file', rows(label, n), `${label}.csv`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const { importId } = res.body.summary;
+    expect((await confirm(importId)).status).toBe(200);
+    return importId as string;
+  };
+
+  const makeAccount = async (name: string): Promise<string> => {
+    const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    return res.body.id as string;
+  };
+
+  it('filters the page and counts the filtered set, not the workspace', async () => {
+    const mine = await makeAccount('Totals Mine');
+    const other = await makeAccount('Totals Other');
+    const stripped = await importInto(mine, 'totals-mine-a', 4);
+    await importInto(mine, 'totals-mine-b', 3);
+    await importInto(other, 'totals-other', 9);
+    // one of mine keeps its bytes and stops claiming a readable document, so
+    // totals.documents cannot just be totals.imports wearing another name
+    expect((await agent.delete(`/api/imports/${stripped}/document`)).status).toBe(200);
+
+    const res = await agent.get(`/api/imports?accountId=${encodeURIComponent(mine)}`);
+    expect(res.status).toBe(200);
+    // numeric literals on purpose: "7" passes nothing here
+    expect(res.body.totals).toEqual({ imports: 2, documents: 1, transactions: 7 });
+    expect(res.body.imports.map((r: { accountId: string }) => r.accountId)).toEqual([mine, mine]);
+    // and the page is whole, so the total is the sum of what it carries
+    expect(
+      res.body.imports.reduce((n: number, r: { transactions: number }) => n + r.transactions, 0),
+    ).toBe(7);
+    expect(res.body.imports.filter((r: { documentAvailable: boolean }) => r.documentAvailable))
+      .toHaveLength(1);
+
+    // the other account's nine are in the workspace's answer and in neither of mine
+    const all = await agent.get('/api/imports');
+    expect(all.status).toBe(200);
+    expect(all.body.totals.imports).toBeGreaterThan(2);
+    expect(all.body.totals.transactions).toBeGreaterThanOrEqual(16);
+  });
+
+  /**
+   * The page is built by a hand-written alias list handed to rowsOf<T>, which
+   * asserts the shape rather than deriving it: a dropped alias typechecks, and the
+   * field it filled becomes undefined. This is the only layer where that is visible
+   * - rowToImport builds an object literal, so the key survives an undefined value
+   * everywhere until JSON.stringify drops it here.
+   */
+  it('sends all fifteen fields of an import, none of them lost on the way out', async () => {
+    const mine = await makeAccount('Totals Fields');
+    await importInto(mine, 'totals-fields', 2);
+
+    const res = await agent.get(`/api/imports?accountId=${encodeURIComponent(mine)}`);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body.imports[0]).sort()).toEqual([
+      'accountId',
+      'accountName',
+      'documentAvailable',
+      'errorDetail',
+      'fileHash',
+      'id',
+      'originalFilename',
+      'parserVersion',
+      'rowsAccepted',
+      'rowsRejected',
+      'sourceType',
+      'status',
+      'transactions',
+      'uploadedAt',
+      'uploadedBy',
+    ]);
+  });
+
+  it('an accountId that matches no account is an empty answer, not an error', async () => {
+    const res = await agent.get('/api/imports?accountId=not-an-account');
+    expect(res.status).toBe(200);
+    expect(res.body.imports).toEqual([]);
+    expect(res.body.totals).toEqual({ imports: 0, documents: 0, transactions: 0 });
+  });
+
+  it('an empty accountId is refused rather than read as the whole workspace', async () => {
+    const res = await agent.get('/api/imports?accountId=');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('accountId must be sent once, as a single value');
+  });
+
+  it('a repeated accountId is refused rather than one of the two being picked', async () => {
+    const res = await agent.get('/api/imports?accountId=a&accountId=b');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('accountId must be sent once, as a single value');
+  });
+
+  /**
+   * Recorded, not endorsed. Express 5's DEFAULT `simple` query parser - which is what
+   * a bare express() gets, and app.ts sets no other - puts the brackets in the KEY, so
+   * nothing called `accountId` arrives and this reads as the whole workspace. Switching
+   * to the `extended` parser turns `accountId[]=x` into an array, and this test goes red
+   * instead of the filter silently widening to every import in the workspace.
+   */
+  it('bracket syntax is not an accountId under the simple query parser', async () => {
+    const res = await agent.get('/api/imports?accountId[]=x');
+    expect(res.status).toBe(200);
+    const all = await agent.get('/api/imports');
+    expect(res.body.totals).toEqual(all.body.totals);
+  });
+});
+
 // ---------- the workspace context and how the body arrives ----------
 
 const BOUNDARY = '----fintoChunkedBoundary';

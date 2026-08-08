@@ -468,15 +468,60 @@ describe('workspace isolation', () => {
    */
   it('imports are invisible and undeletable from another workspace', async () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-      expect((await listImports()).map((i) => i.id)).toEqual([myImportId]);
+      expect((await listImports()).imports.map((i) => i.id)).toEqual([myImportId]);
       expect((await findCommittedImportByHash(SHARED_FILE_HASH))!.id).toBe(myImportId);
       expect(await deleteImport(theirImportId)).toBeUndefined();
     });
     await runWithWorkspace(OTHER, async () => {
-      expect((await listImports()).map((i) => i.id)).toEqual([theirImportId]);
+      expect((await listImports()).imports.map((i) => i.id)).toEqual([theirImportId]);
       expect((await findCommittedImportByHash(SHARED_FILE_HASH))!.id).toBe(theirImportId);
       expect(await deleteImport(myImportId)).toBeUndefined();
     });
+  });
+
+  /**
+   * Row 66's filter, crossed: the account id is the neighbour's, and it is a real
+   * one. The answer has to be the answer a nonexistent id gets - an empty page and
+   * three zeroes - because anything that distinguished the two would turn this
+   * endpoint into an oracle for which account ids exist on the server.
+   */
+  it('another workspace account id filters to an empty page and zero totals', async () => {
+    const theirAccount = 'csv:theirs-history' as ResolvedAccountId;
+    let attributed = '';
+    try {
+      attributed = await runWithWorkspace(OTHER, async () => {
+        const record = await createImport({
+          fileHash: 'cross-workspace-account-filter',
+          sourceType: 'csv',
+          parserVersion: 1,
+        });
+        // no rows: the attribution is what this case is about, and stageImport
+        // writes account_id whether or not anything was staged
+        await stageImport(record.id, [], 0, {
+          id: theirAccount,
+          name: 'Theirs History',
+          currency: 'EUR',
+        });
+        return record.id;
+      });
+
+      await runWithWorkspace(OTHER, async () => {
+        const theirs = await listImports({ accountId: theirAccount });
+        expect(theirs.imports.map((i) => i.id)).toEqual([attributed]);
+        expect(theirs.totals.imports).toBe(1);
+      });
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        const mine = await listImports({ accountId: theirAccount });
+        expect(mine.imports).toEqual([]);
+        expect(mine.totals).toEqual({ imports: 0, documents: 0, transactions: 0 });
+        // indistinguishable from an id no workspace on this server has ever held
+        expect(await listImports({ accountId: 'csv:no-such-account-anywhere' })).toEqual(mine);
+      });
+    } finally {
+      // the cases below count this workspace's imports exactly
+      if (attributed) await runWithWorkspace(OTHER, () => deleteImport(attributed));
+    }
   });
 
   /**
@@ -511,7 +556,7 @@ describe('workspace isolation', () => {
 
     // still exactly as it was left: awaiting confirmation, its rows still staged
     await runWithWorkspace(OTHER, async () => {
-      expect((await listImports()).find((i) => i.id === staged)!.status).toBe(
+      expect((await listImports()).imports.find((i) => i.id === staged)!.status).toBe(
         'awaiting_confirmation',
       );
       const confirmed = await confirmImport(staged);
