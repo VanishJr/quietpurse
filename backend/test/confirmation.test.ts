@@ -89,7 +89,8 @@ async function stagedFeeCents(importId: string): Promise<(number | null)[]> {
   return res.rows.map((r) => r.fee_cents);
 }
 
-const importRow = async (id: string) => (await listImports(500)).find((i) => i.id === id);
+const importRow = async (id: string) =>
+  (await listImports({ limit: 500 })).imports.find((i) => i.id === id);
 
 const blobExists = (importId: string): Promise<boolean> =>
   fs

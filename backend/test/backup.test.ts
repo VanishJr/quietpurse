@@ -98,7 +98,7 @@ describe('backup and restore (JSON)', () => {
 
     await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
 
-    const restored = (await listImports()).find((i) => i.id === record.id)!;
+    const restored = (await listImports()).imports.find((i) => i.id === record.id)!;
     expect(restored).toMatchObject({
       fileHash: 'backup-hash',
       originalFilename: 'statement.csv',
@@ -290,7 +290,7 @@ describe('backup and restore (JSON)', () => {
 
     await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
 
-    const restored = (await listImports()).find((i) => i.id === imported.importId)!;
+    const restored = (await listImports()).imports.find((i) => i.id === imported.importId)!;
     expect(restored.accountId).toBe(imported.accountId);
     expect(restored.accountName).toBe('Account Id Backup Bank');
   });

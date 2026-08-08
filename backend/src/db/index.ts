@@ -1237,28 +1237,83 @@ export async function failImport(id: string, message: string): Promise<void> {
   });
 }
 
+/** Counts over the whole filtered set, never over the page (see listImports). */
+export interface ImportTotals {
+  imports: number;
+  /** those with a READABLE document - the predicate behind ImportRecord.documentAvailable */
+  documents: number;
+  /**
+   * Transactions those imports own (transactions.import_id, "first wrote"), which
+   * is NOT "this account's transactions": a row no import owns is in neither.
+   */
+  transactions: number;
+}
+
+export interface ImportList {
+  imports: ImportRecord[];
+  totals: ImportTotals;
+}
+
+/** COUNT is a number on PGlite; int8 and numeric arrive as strings on node-postgres. */
+type Counted = string | number;
+
+type ImportListRow = ImportRow & {
+  ownTx: Counted;
+  totalImports: Counted;
+  totalDocuments: Counted;
+  totalTransactions: Counted;
+};
+
 /**
  * Newest first, each with how many transactions it still owns - which is not
- * rows_accepted: a row an earlier import already wrote belongs to that one.
+ * rows_accepted: a row an earlier import already wrote belongs to that one - plus
+ * totals over the whole filtered set.
+ *
+ * Page and totals come out of ONE statement: window functions run after WHERE and
+ * before LIMIT, so there is no interval in which a concurrent upload or delete can
+ * move a total without moving the page printed beside it. Two statements would not
+ * be fixed by db.transaction() either - READ COMMITTED takes a fresh snapshot per
+ * statement.
  */
-export async function listImports(limit = 100): Promise<ImportRecord[]> {
-  const w = currentWorkspaceId();
-  const rows = await getDb()
-    .select()
-    .from(s.imports)
-    .where(eq(s.imports.workspaceId, w))
-    .orderBy(sql`${s.imports.uploadedAt} DESC`, sql`${s.imports.id} DESC`)
-    .limit(limit > 0 ? limit : 100);
-  // counted separately rather than as a correlated subquery: inside a select
-  // field, drizzle renders a column reference unqualified, and the correlation
-  // quietly binds to the subquery's own table instead
-  const counts = await getDb()
-    .select({ importId: s.transactions.importId, n: sql<string>`COUNT(*)` })
-    .from(s.transactions)
-    .where(and(eq(s.transactions.workspaceId, w), isNotNull(s.transactions.importId)))
-    .groupBy(s.transactions.importId);
-  const owned = new Map(counts.map((c) => [c.importId, Number(c.n)]));
-  return rows.map((r) => rowToImport({ ...r, transactions: owned.get(r.id) ?? 0 }));
+export async function listImports(
+  opts: { accountId?: string; limit?: number } = {},
+): Promise<ImportList> {
+  const where: SQL[] = [WS()];
+  // on presence, never on truthiness: '' is a filter that matches nothing, and must
+  // not widen to the whole workspace at this layer either
+  if (opts.accountId !== undefined) where.push(sql`account_id = ${opts.accountId}`);
+  const limit = opts.limit && opts.limit > 0 ? opts.limit : 100;
+  const rows = await rowsOf<ImportListRow>(sql`
+    WITH f AS (
+      SELECT workspace_id AS "workspaceId", id, file_hash AS "fileHash",
+             source_type AS "sourceType", original_filename AS "originalFilename",
+             account_name AS "accountName", account_currency AS "accountCurrency",
+             account_id AS "accountId", uploaded_by AS "uploadedBy",
+             uploaded_at AS "uploadedAt", parser_version AS "parserVersion", status,
+             rows_accepted AS "rowsAccepted", rows_rejected AS "rowsRejected",
+             error_detail AS "errorDetail",
+             document_key_version AS "documentKeyVersion",
+             (SELECT COUNT(*) FROM transactions t
+               WHERE t.workspace_id = imports.workspace_id AND t.import_id = imports.id)
+               AS "ownTx"
+      FROM imports WHERE ${sql.join(where, sql` AND `)})
+    SELECT f.*,
+           COUNT(*) OVER () AS "totalImports",
+           COUNT(*) FILTER (WHERE "documentKeyVersion" IS NOT NULL) OVER () AS "totalDocuments",
+           SUM("ownTx") OVER () AS "totalTransactions"
+    FROM f ORDER BY "uploadedAt" DESC, id DESC LIMIT ${limit}`);
+  const first = rows[0];
+  // no row at all is an empty filtered set, not a page that fell off the end: there
+  // is no offset and no cursor here, so the first page is the only page there is to
+  // miss. Whatever adds one has to take the totals from somewhere other than row 0.
+  const totals: ImportTotals = first
+    ? {
+        imports: Number(first.totalImports),
+        documents: Number(first.totalDocuments),
+        transactions: Number(first.totalTransactions),
+      }
+    : { imports: 0, documents: 0, transactions: 0 };
+  return { imports: rows.map((r) => rowToImport({ ...r, transactions: Number(r.ownTx) })), totals };
 }
 
 /**

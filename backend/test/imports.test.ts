@@ -13,6 +13,10 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
+  type ResolvedAccountId,
+  clearImportDocument,
+  confirmImport,
+  createImport,
   dbInstance,
   deleteImport,
   findAccountByName,
@@ -21,7 +25,9 @@ import {
   insertTransactions,
   listImports,
   listTransactions,
+  recordImportDocument,
   runWithWorkspace,
+  stageImport,
 } from '../src/db';
 import { DOCUMENT_STORE_REFUSED, getDocument } from '../src/documents';
 import { importAndConfirm } from './helpers';
@@ -82,7 +88,7 @@ describe('imports: the file layer', () => {
     expect(await getAccount(second.accountId)).toBeDefined();
 
     // and one import row, not two
-    const mine = (await listImports()).filter((i) => i.id === first.importId);
+    const mine = (await listImports()).imports.filter((i) => i.id === first.importId);
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ status: 'committed', rowsAccepted: 2, rowsRejected: 0 });
     expect(mine[0].transactions).toBe(2);
@@ -119,7 +125,7 @@ describe('imports: the file layer', () => {
     await expect(importFile('Retry Bank', csv)).rejects.toThrow(
       /could not find date\/amount\/description columns/,
     );
-    const failed = (await listImports()).filter((i) => i.status === 'failed');
+    const failed = (await listImports()).imports.filter((i) => i.status === 'failed');
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toMatch(/could not find date\/amount\/description columns/);
     expect(failed[0].transactions).toBe(0);
@@ -167,8 +173,8 @@ describe('imports: the file layer', () => {
     const left = await listTransactions({ accountId: march.accountId });
     expect(left.map((t) => t.description)).toEqual(['April one']);
     expect(await countFor(other.accountId)).toBe(1);
-    expect((await listImports()).map((i) => i.id)).toContain(april.importId);
-    expect((await listImports()).map((i) => i.id)).not.toContain(march.importId);
+    expect((await listImports()).imports.map((i) => i.id)).toContain(april.importId);
+    expect((await listImports()).imports.map((i) => i.id)).not.toContain(march.importId);
     // the account survives its import, with the balance recomputed
     expect((await getAccount(march.accountId))!.balance).toBe(-20);
   });
@@ -197,7 +203,7 @@ describe('imports: the file layer', () => {
       /could not find date\/amount\/description columns/,
     );
 
-    const failed = (await listImports()).find((i) => i.errorDetail?.includes('col a'))!;
+    const failed = (await listImports()).imports.find((i) => i.errorDetail?.includes('col a'))!;
     expect(failed.status).toBe('failed');
     const ref = await getImportDocumentRef(failed.id);
     expect(await getDocument(ref!)).toEqual(Buffer.from(csv, 'utf8'));
@@ -271,7 +277,7 @@ describe('imports: the file layer', () => {
           /[A-Za-z]:\\|\/tmp\/|EEXIST|ENOTDIR|EACCES/,
         );
 
-        const rows = await listImports();
+        const rows = (await listImports()).imports;
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({ status: 'failed', errorDetail: DOCUMENT_STORE_REFUSED });
         expect(rows[0].transactions).toBe(0);
@@ -401,5 +407,174 @@ describe('imports: the file layer', () => {
       'c:2026-07-01|-350|EUR|1',
       'mono:9f3c',
     ]);
+  });
+});
+
+/**
+ * ROADMAP row 66: the page is capped, the totals are not. What is under test is that
+ * the three totals describe the whole FILTERED set and the page describes the first
+ * `limit` of it, so a panel can say how many are not listed instead of counting what
+ * it was sent.
+ *
+ * Every case runs in a workspace of its own. vitest runs this suite in one process,
+ * files in order and with no truncation between them, so 101 imports left in the test
+ * workspace would be in every later file's unfiltered listImports() for the rest of
+ * the run.
+ */
+describe('listImports: the filter and the totals', () => {
+  let seq = 0;
+
+  /** Distinct amounts, so nothing an import stages is deduplicated against a sibling. */
+  const stagedRows = (accountId: string, n: number, mark: number): NewTransaction[] =>
+    Array.from({ length: n }, (_, i) => ({
+      accountId,
+      provider: 'upload' as const,
+      amount: -(mark * 100 + i + 1),
+      currency: 'EUR',
+      date: '2026-09-01T00:00:00.000Z',
+      description: `totals row ${mark}.${i}`,
+      category: 'other',
+      fee: null,
+    }));
+
+  /**
+   * A committed import attributed to an account, owning `n` transactions - the two
+   * calls the product path makes, so nothing here fabricates a state an upload
+   * cannot produce.
+   */
+  async function importInto(accountId: string, name: string, n: number): Promise<string> {
+    seq += 1;
+    const mark = seq;
+    const record = await createImport({
+      fileHash: `totals-${mark}`,
+      sourceType: 'csv',
+      parserVersion: 1,
+    });
+    await stageImport(record.id, stagedRows(accountId, n, mark), 0, {
+      id: accountId as ResolvedAccountId,
+      name,
+      currency: 'EUR',
+    });
+    const confirmed = await confirmImport(record.id);
+    expect(confirmed, `confirming ${record.id}`).toMatchObject({ confirmed: true });
+    // the pointer only; no bytes are written, and documentAvailable is about the
+    // pointer (010 D5)
+    await recordImportDocument(record.id, 1);
+    return record.id;
+  }
+
+  const inFreshWorkspace = async (id: string, body: () => Promise<void>): Promise<void> => {
+    await createWorkspace(dbInstance(), id);
+    await runWithWorkspace(id, body);
+  };
+
+  it('counts the filtered set and pages the same set, with the other account left out', async () => {
+    await inFreshWorkspace('import-totals-filter', async () => {
+      const mine = 'csv:totals-mine';
+      const theirs = 'csv:totals-theirs';
+      const stripped = await importInto(mine, 'Totals Mine', 4);
+      await importInto(mine, 'Totals Mine', 3);
+      await importInto(theirs, 'Totals Theirs', 9);
+      // one of mine stops claiming a readable document, so totals.documents cannot
+      // be totals.imports under another name
+      await clearImportDocument(stripped);
+
+      const { imports, totals } = await listImports({ accountId: mine });
+
+      expect(imports.map((r) => r.accountId)).toEqual([mine, mine]);
+      expect(totals.imports).toBe(2);
+      expect(totals.documents).toBe(1);
+      // literal, not expect.anything(): SUM() over bigint is numeric, and both
+      // drivers hand numeric over as a string - "7" fails here and must
+      expect(totals.transactions).toBe(7);
+
+      // the page is whole, so each total is an identity over what it carries
+      expect(imports.reduce((n, r) => n + r.transactions, 0)).toBe(totals.transactions);
+      expect(imports.filter((r) => r.documentAvailable)).toHaveLength(totals.documents);
+      expect(imports).toHaveLength(totals.imports);
+
+      // and the workspace's own answer still has the other account's nine in it
+      const all = await listImports();
+      expect(all.totals).toEqual({ imports: 3, documents: 2, transactions: 16 });
+    });
+  });
+
+  /**
+   * The combination the delete panel actually meets: an account with more imports
+   * than the page returns. It is a different mistake from the cap case below - a
+   * COUNT(*) OVER () written outside the filtered set passes that one and fails this.
+   */
+  it('a filtered page shorter than its filtered set still counts the whole of it', async () => {
+    await inFreshWorkspace('import-totals-overflow', async () => {
+      const mine = 'csv:overflow-mine';
+      const theirs = 'csv:overflow-theirs';
+      for (let i = 0; i < 7; i += 1) {
+        const id = await importInto(mine, 'Overflow Mine', 1);
+        if (i >= 4) await clearImportDocument(id);
+      }
+      for (let i = 0; i < 3; i += 1) await importInto(theirs, 'Overflow Theirs', 2);
+
+      const { imports, totals } = await listImports({ accountId: mine, limit: 5 });
+
+      expect(imports).toHaveLength(5);
+      expect(totals).toEqual({ imports: 7, documents: 4, transactions: 7 });
+      // the page cannot answer any of the three: it carries five rows and five
+      // transactions, and the panel prints seven
+      expect(imports.reduce((n, r) => n + r.transactions, 0)).toBe(5);
+    });
+  });
+
+  it('the page stops at 100 and the total does not', async () => {
+    await inFreshWorkspace('import-totals-cap', async () => {
+      for (let i = 0; i < 101; i += 1) {
+        await createImport({ fileHash: `cap-${i}`, sourceType: 'csv', parserVersion: 1 });
+      }
+
+      const { imports, totals } = await listImports();
+
+      expect(imports).toHaveLength(100);
+      expect(totals.imports).toBe(101);
+      // these never reached the parse, so they own nothing and claim no document
+      expect(totals).toEqual({ imports: 101, documents: 0, transactions: 0 });
+    });
+  });
+
+  /**
+   * COUNT(*) OVER () returns no ROW when the filtered set is empty, so the zeroes
+   * come from an absent row rather than from a page of length 0 - and an id that
+   * matches nothing is not an error: another workspace's id has to stay
+   * indistinguishable from a nonexistent one.
+   */
+  it('an accountId that matches nothing is an empty page and three zeroes', async () => {
+    await inFreshWorkspace('import-totals-unknown', async () => {
+      await importInto('csv:unknown-neighbour', 'Unknown Neighbour', 2);
+
+      expect(await listImports({ accountId: 'no-such-account' })).toEqual({
+        imports: [],
+        totals: { imports: 0, documents: 0, transactions: 0 },
+      });
+      // '' filters and matches nothing here too: it never widens to the workspace
+      expect((await listImports({ accountId: '' })).totals.imports).toBe(0);
+    });
+  });
+
+  /**
+   * The statement's alias list is a hand-written mirror of the row and rowsOf<T>
+   * asserts the shape rather than deriving it, so a dropped or misspelled alias
+   * typechecks and leaves that field undefined. On the VALUES rather than on the
+   * keys, because rowToImport builds an object literal: the key is there whatever
+   * the row held. null is legitimate and stays legal - undefined is the symptom,
+   * and a column added later inherits this without anyone extending a list.
+   */
+  it('no field of a listed import is undefined - every alias reached the mapper', async () => {
+    await inFreshWorkspace('import-totals-aliases', async () => {
+      await importInto('csv:aliases-mine', 'Aliases Mine', 2);
+
+      const [record] = (await listImports()).imports;
+      expect(Object.entries(record).filter(([, v]) => v === undefined)).toEqual([]);
+      // a value each from the two halves of the statement: the plain aliases, and
+      // the correlated count the window functions sum
+      expect(record).toMatchObject({ status: 'committed', parserVersion: 1, transactions: 2 });
+    });
   });
 });

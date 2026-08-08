@@ -1,8 +1,16 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { importRecord, IMPORTS } from '../test/fixtures';
-import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { ImportStatus } from '../types';
+import { importRecord, importsResponse, IMPORTS } from '../test/fixtures';
+import {
+  fail,
+  mockFetch,
+  ok,
+  renderThemed,
+  requests,
+  requestUrls,
+  Routes,
+} from '../test/harness';
+import { Account, ImportStatus } from '../types';
 import { ImportHistory } from './ImportHistory';
 
 /**
@@ -29,8 +37,8 @@ describe('the list', () => {
   it('renders a row per import, with the counts each field carries', async () => {
     mockFetch({
       'GET /api/imports': () =>
-        ok({
-          imports: [
+        ok(
+          importsResponse([
             importRecord(),
             importRecord({
               id: 'imp-2',
@@ -41,8 +49,8 @@ describe('the list', () => {
               rowsRejected: 2,
               transactions: 10,
             }),
-          ],
-        }),
+          ]),
+        ),
     });
     mount();
 
@@ -70,7 +78,7 @@ describe('the list', () => {
         reads += 1;
         return reads === 1
           ? fail(500, { error: 'the import log is unreachable' })
-          : ok({ imports: [importRecord()] });
+          : ok(importsResponse());
       },
     });
     mount();
@@ -86,7 +94,7 @@ describe('the list', () => {
   });
 
   it('renders the empty state for a history that loaded and is empty', async () => {
-    mockFetch({ 'GET /api/imports': () => ok({ imports: [] }) });
+    mockFetch({ 'GET /api/imports': () => ok(importsResponse([])) });
     mount();
 
     expect(await screen.findByText(/Nothing has been imported yet/)).toBeInTheDocument();
@@ -96,7 +104,7 @@ describe('the list', () => {
   it('renders an unknown status slug as-is', async () => {
     mockFetch({
       'GET /api/imports': () =>
-        ok({ imports: [importRecord({ status: 'reparsing' as ImportStatus })] }),
+        ok(importsResponse([importRecord({ status: 'reparsing' as ImportStatus })])),
     });
     mount();
 
@@ -110,7 +118,7 @@ describe('the list', () => {
     expect(detail).toHaveLength(500);
     mockFetch({
       'GET /api/imports': () =>
-        ok({ imports: [importRecord({ status: 'failed', errorDetail: detail, transactions: 0 })] }),
+        ok(importsResponse([importRecord({ status: 'failed', errorDetail: detail, transactions: 0 })])),
     });
     mount();
 
@@ -121,11 +129,11 @@ describe('the list', () => {
   it('tells an awaiting_confirmation row how to get its summary back, and offers no Confirm', async () => {
     mockFetch({
       'GET /api/imports': () =>
-        ok({
-          imports: [
+        ok(
+          importsResponse([
             importRecord({ status: 'awaiting_confirmation', rowsAccepted: 12, transactions: 0 }),
-          ],
-        }),
+          ]),
+        ),
     });
     mount();
 
@@ -138,7 +146,7 @@ describe('the list', () => {
   it('reports a committed import that owns nothing as deduplication, not as a failure', async () => {
     mockFetch({
       'GET /api/imports': () =>
-        ok({ imports: [importRecord({ rowsAccepted: 12, transactions: 0 })] }),
+        ok(importsResponse([importRecord({ rowsAccepted: 12, transactions: 0 })])),
     });
     mount();
 
@@ -155,7 +163,7 @@ describe('the list', () => {
 
   it('says a document cannot be read, offers no Download, and still offers Delete file', async () => {
     mockFetch({
-      'GET /api/imports': () => ok({ imports: [importRecord({ documentAvailable: false })] }),
+      'GET /api/imports': () => ok(importsResponse([importRecord({ documentAvailable: false })])),
     });
     mount();
 
@@ -215,9 +223,12 @@ describe('downloading the stored statement', () => {
     const refusal = 'this import has no document this server can read';
     mockFetch({
       'GET /api/imports': () =>
-        ok({
-          imports: [importRecord(), importRecord({ id: 'imp-2', originalFilename: 'second.csv' })],
-        }),
+        ok(
+          importsResponse([
+            importRecord(),
+            importRecord({ id: 'imp-2', originalFilename: 'second.csv' }),
+          ]),
+        ),
       'GET /api/imports/imp-2/document': () => fail(404, { error: refusal }),
     });
     mount();
@@ -250,7 +261,7 @@ describe('deleting an import', () => {
     mockFetch({
       'GET /api/imports': () => {
         reads += 1;
-        return reads === 1 ? ok({ imports: [importRecord()] }) : ok({ imports: [] });
+        return reads === 1 ? ok(importsResponse()) : ok(importsResponse([]));
       },
       'DELETE /api/imports/imp-1': () => ok({ deleted: true, transactions: 12 }),
     });
@@ -274,8 +285,8 @@ describe('deleting an import', () => {
       'GET /api/imports': () => {
         reads += 1;
         return reads === 1
-          ? ok({ imports: [importRecord({ rowsAccepted: 12, transactions: 0 })] })
-          : ok({ imports: [] });
+          ? ok(importsResponse([importRecord({ rowsAccepted: 12, transactions: 0 })]))
+          : ok(importsResponse([]));
       },
       'DELETE /api/imports/imp-1': () => ok({ deleted: true, transactions: 0 }),
     });
@@ -353,5 +364,100 @@ describe('deleting the stored statement', () => {
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
     expect(countOf('GET /api/imports')).toBe(2);
     expect(onChanged).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ROADMAP row 66: the server filters and totals, and this screen prints what it was
+ * sent. Two of the three cases below are about code that is NOT here any more — the
+ * client-side filter, and a caveat that used to be unconditional — and both would
+ * pass silently if they were written after the change rather than before it.
+ */
+describe('one account, filtered by the server', () => {
+  const ACCOUNT: Account = {
+    id: 'acc-1',
+    provider: 'upload',
+    name: 'Sparkasse Giro',
+    currency: 'EUR',
+    balance: 1234.5,
+  };
+
+  const mountFor = (account?: Account) =>
+    renderThemed(<ImportHistory onBack={vi.fn()} onChanged={vi.fn()} account={account} />);
+
+  it('asks the server for one account, and for the workspace when there is none', async () => {
+    mockFetch(BASE);
+    mountFor(ACCOUNT);
+    await screen.findByText('statement.csv');
+
+    expect(requestUrls()).toContain('GET /api/imports?accountId=acc-1');
+  });
+
+  it('sends no accountId at all for the workspace-wide history', async () => {
+    mockFetch(BASE);
+    mountFor();
+    await screen.findByText('statement.csv');
+
+    // not `?accountId=undefined`, which the server would refuse to match and this
+    // screen would render as an empty history for a workspace full of imports
+    expect(requestUrls()).toContain('GET /api/imports');
+  });
+
+  /**
+   * The server is the filter. A row for another account rendering unchanged is what
+   * says the client kept none of its own: a second filter here would hide a server
+   * that ignored the parameter, leaving the totals as the only symptom.
+   */
+  it('renders what the server sent, including a row for another account', async () => {
+    mockFetch({
+      'GET /api/imports': () =>
+        ok(
+          importsResponse([
+            importRecord(),
+            importRecord({ id: 'imp-2', accountId: 'acc-2', originalFilename: 'other.csv' }),
+          ]),
+        ),
+    });
+    mountFor(ACCOUNT);
+
+    expect(await screen.findByText('statement.csv')).toBeInTheDocument();
+    expect(screen.getByText('other.csv')).toBeInTheDocument();
+  });
+
+  it('says how many are not listed when the page is short of the total', async () => {
+    mockFetch({
+      'GET /api/imports': () =>
+        ok(
+          importsResponse([importRecord(), importRecord({ id: 'imp-2' })], {
+            imports: 137,
+            documents: 90,
+            transactions: 4021,
+          }),
+        ),
+    });
+    mountFor(ACCOUNT);
+
+    expect(
+      await screen.findByText(
+        'Newest first — the most recent 2 of 137. 135 older imports are not listed.',
+      ),
+    ).toBeInTheDocument();
+    // and the page it was sent is still the page it renders
+    expect(screen.getAllByText('statement.csv')).toHaveLength(2);
+  });
+
+  it('states the order and withholds nothing when the page is the whole of it', async () => {
+    // importsResponse derives its totals from the records, so this is the whole page
+    mockFetch(BASE);
+    mountFor(ACCOUNT);
+    await screen.findByText('statement.csv');
+
+    // on the clause and not on the paragraph: the line prints on both arms, so
+    // asserting the paragraph is absent would pass on any wording at all
+    expect(screen.getByText('Newest first.')).toBeInTheDocument();
+    // the withheld count is what this arm may not carry, and the sentence row 66
+    // replaced said it unconditionally
+    expect(screen.queryByText(/not listed/)).toBeNull();
+    expect(screen.queryByText(/older ones may not be listed/)).toBeNull();
   });
 });

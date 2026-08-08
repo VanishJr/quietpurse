@@ -24,6 +24,7 @@ import {
   getImportDocumentInfo,
   getSetting,
   listAccounts,
+  listImports,
   listIncomeSources,
   recordImportDocument,
   resolveUploadAccount,
@@ -53,6 +54,11 @@ describe('workspace scoping', () => {
       // read the row before touching a byte of it
       await expect(clearImportDocument('scope-import')).rejects.toThrow(/no workspace context/);
       await expect(getImportDocumentInfo('scope-import')).rejects.toThrow(/no workspace context/);
+      // the history read, and it is a raw statement rather than a builder chain: its
+      // workspace clause is a string in a template, so nothing but this notices it
+      // going missing - and unscoped it would count every workspace's imports into
+      // one workspace's totals
+      await expect(listImports({})).rejects.toThrow(/no workspace context/);
       // the confirmation lifecycle, all three of them writes: staging rows, and two
       // conditional UPDATEs that would otherwise match whatever row holds that id
       await expect(

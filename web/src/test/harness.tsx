@@ -43,6 +43,7 @@ export type Routes = Record<string, Handler>;
 
 let routes: Routes = {};
 let seen: string[] = [];
+let seenUrls: string[] = [];
 let unstubbed: string[] = [];
 
 export const ok = (body: unknown, status = 200): Response =>
@@ -57,21 +58,25 @@ export const fail = (status: number, body: unknown = { error: `HTTP ${status}` }
     headers: { 'Content-Type': 'application/json' },
   });
 
+const urlOf = (input: RequestInfo | URL): string =>
+  typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+
 /** The query string is discarded, so /api/accounts?all=1 and /api/accounts are one key. */
 const keyOf = (input: RequestInfo | URL, init?: RequestInit): string => {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? 'GET').toUpperCase();
-  return `${method} ${new URL(url, 'http://localhost').pathname}`;
+  return `${method} ${new URL(urlOf(input), 'http://localhost').pathname}`;
 };
 
 /** Installed by setup.ts in beforeEach, so no test can reach the network by forgetting. */
 export function resetFetch(): void {
   routes = {};
   seen = [];
+  seenUrls = [];
   unstubbed = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const key = keyOf(input, init);
     seen.push(key);
+    seenUrls.push(`${(init?.method ?? 'GET').toUpperCase()} ${urlOf(input)}`);
     const handler = routes[key];
     if (!handler) {
       unstubbed.push(key);
@@ -88,6 +93,14 @@ export function mockFetch(table: Routes): void {
 
 /** Every request the test made, matched or not, in order. */
 export const requests = (): string[] => [...seen];
+
+/**
+ * The same list with the query string kept — the only place a parameter the client
+ * SENT can be asserted, since keyOf drops it and a handler is called with no URL.
+ * Beside requests() rather than instead of it: putting the query into the key would
+ * break every route declared in the suite.
+ */
+export const requestUrls = (): string[] => [...seenUrls];
 
 /** Reads and clears, so a throw in the guard cannot leak into the next test. */
 export function takeUnstubbed(): string[] {

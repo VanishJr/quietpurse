@@ -1,6 +1,6 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_SETTINGS, RECURRING, USER } from '../test/fixtures';
+import { APP_SETTINGS, importsResponse, RECURRING, USER } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { AccountScreen } from './AccountScreen';
 
@@ -407,7 +407,7 @@ describe('the data export', () => {
 
 describe('the workspace import history', () => {
   it('opens every account, and comes back', async () => {
-    mockFetch({ ...BASE, 'GET /api/imports': () => ok({ imports: [] }) });
+    mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
     mount();
     await screen.findByRole('heading', { name: 'Your data' });
 

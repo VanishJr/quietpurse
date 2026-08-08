@@ -3,7 +3,7 @@ import { api } from '../api';
 import { safeFilename, saveBlob } from '../download';
 import { fmtDate } from '../format';
 import { importStatusLabel, importStatusNote } from '../imports';
-import { Account, ImportRecord } from '../types';
+import { Account, ImportList, ImportRecord } from '../types';
 
 interface Props {
   /** Required: a mount with no way back strands the user here. */
@@ -15,9 +15,9 @@ interface Props {
   onChanged: () => void;
   /**
    * One account's imports rather than the workspace's, which is what the ⋮ on a tab
-   * opens. Filtered on the id and never on `accountName`: a rename moves the account
-   * and leaves the name recorded on the row behind, so matching by name would drop
-   * every file uploaded before the rename.
+   * opens. The id goes to the server and the filtering happens there, on the id and
+   * never on `accountName`: a rename moves the account and leaves the name recorded
+   * on the row behind, so matching by name would drop every file uploaded before it.
    */
   account?: Account;
 }
@@ -66,6 +66,19 @@ const ownedClause = (n: number): string =>
   n === 1 ? '1 transaction that belongs' : `${n} transactions that belong`;
 
 /**
+ * The order always holds, so it is always stated. What this page left out is
+ * appended to it only when it left something out, from the server's own count: a
+ * withheld count printed unconditionally is one the reader learns to skip, and
+ * after row 66 it would be false on most histories.
+ */
+const orderingLine = (list: ImportList): string => {
+  const n = list.totals.imports - list.imports.length;
+  if (n <= 0) return 'Newest first.';
+  const older = n === 1 ? 'One older import is' : `${n} older imports are`;
+  return `Newest first — the most recent ${list.imports.length} of ${list.totals.imports}. ${older} not listed.`;
+};
+
+/**
  * What has been uploaded, and the two things that can be removed: the statement file
  * on its own, or the import and the rows it wrote (ROADMAP 4.5, 5.1, 6.1).
  *
@@ -74,8 +87,13 @@ const ownedClause = (n: number): string =>
  * exists to prevent (007 D5).
  */
 export function ImportHistory({ onBack, onChanged, account }: Props) {
-  /** null = never loaded. A failed read must never render as "nothing imported yet". */
-  const [imports, setImports] = useState<ImportRecord[] | null>(null);
+  /**
+   * null = never loaded. A failed read must never render as "nothing imported yet".
+   * One state and not two: the page and its totals are one answer about one moment,
+   * and a screen that could update them apart could print a count over a list it no
+   * longer describes.
+   */
+  const [list, setList] = useState<ImportList | null>(null);
   /** The list's own refusal: when it did not arrive there is no row to attach one to. */
   const [error, setError] = useState<string | null>(null);
   const [rowError, setRowError] = useState<RowError | null>(null);
@@ -89,13 +107,13 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
     setRowError(null);
     setConfirm(null);
     try {
-      setImports((await api.imports()).imports);
+      setList(await api.imports(account?.id));
     } catch (e) {
-      // `imports` is left as it was: a reload that fails after a delete that worked
+      // `list` is left as it was: a reload that fails after a delete that worked
       // must not blank a list that did load
       setError((e as Error).message);
     }
-  }, []);
+  }, [account?.id]);
 
   useEffect(() => {
     load();
@@ -164,12 +182,10 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
     }
   };
 
-  /**
-   * `imports` stays whole and the filter is applied here: a per-account view is a
-   * narrower reading of the same list, and re-fetching it per account would be one
-   * request per tab for an endpoint that answers the workspace either way.
-   */
-  const shown = account ? imports?.filter((r) => r.accountId === account.id) : imports;
+  // no filter here on purpose: the server was asked for one account and answered
+  // one account's. A second filter would hide a server that ignored the parameter,
+  // leaving the totals as the only symptom
+  const shown = list?.imports;
 
   return (
     <section>
@@ -179,7 +195,7 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
       <h1 className="title">Import history</h1>
       {account && <p className="sheet-meta acct-full-name">{account.name}</p>}
 
-      <p className="hint">The most recent imports, newest first — older ones may not be listed.</p>
+      {list && <p className="hint">{orderingLine(list)}</p>}
       <p className="hint">
         The statement file you uploaded is kept. "Delete file" removes it and leaves the
         import and its transactions alone.
@@ -190,7 +206,7 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
           Error: {error}
           {/* without the read there is no list at all, so a page reload would
               otherwise be the only way back to one */}
-          {imports === null && (
+          {list === null && (
             <>
               {' · '}
               <button className="btn-link" type="button" disabled={busy} onClick={load}>

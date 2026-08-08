@@ -306,7 +306,7 @@ describe('xlsx: finding the statement', () => {
     await expect(importFile('Odd Columns Bank', book)).rejects.toThrow(
       /could not find a header row in any sheet of the workbook \(looked at: Sheet1\).*- the closest row \(sheet "Sheet1", row 1\) does not match: could not find date\/amount\/description columns in the header: when, how much, what/,
     );
-    const failed = (await listImports()).filter((i) =>
+    const failed = (await listImports()).imports.filter((i) =>
       /could not find a header row/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
@@ -352,7 +352,7 @@ describe('xlsx: finding the statement', () => {
     expect(thrown.message).not.toMatch(/looked at|the columns must include/);
 
     // the loader had to open the file to find this out, so it does leave a failed row
-    const failed = (await listImports()).filter((i) =>
+    const failed = (await listImports()).imports.filter((i) =>
       /no visible sheet/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
@@ -393,11 +393,11 @@ describe('xlsx: finding the statement', () => {
     ]);
     // by the ids this file adds, not by the sentence: the empty-workbook case below
     // is answered with the same string on purpose, and the truncation is per file
-    const before = (await listImports()).map((i) => i.id);
+    const before = (await listImports()).imports.map((i) => i.id);
     await expect(importFile('Ods Bank', notAWorkbook)).rejects.toThrow(
       /zip archive but not an Excel workbook/,
     );
-    const added = (await listImports()).filter((i) => !before.includes(i.id));
+    const added = (await listImports()).imports.filter((i) => !before.includes(i.id));
     expect(added).toHaveLength(1);
     expect(added[0].errorDetail).toMatch(/zip archive/);
   });
@@ -410,7 +410,7 @@ describe('xlsx: finding the statement', () => {
    */
   it('a workbook with no worksheets is refused as a zip, not as sheets to unhide', async () => {
     const book = await xlsx(() => {});
-    const before = (await listImports()).map((i) => i.id);
+    const before = (await listImports()).imports.map((i) => i.id);
 
     const thrown = await importFile('Empty Workbook Bank', book).catch((e) => e as Error);
     expect(thrown.message).toBe(
@@ -418,7 +418,7 @@ describe('xlsx: finding the statement', () => {
     );
     expect(thrown.message).not.toMatch(/unhide|looked at/);
 
-    const added = (await listImports()).filter((i) => !before.includes(i.id));
+    const added = (await listImports()).imports.filter((i) => !before.includes(i.id));
     expect(added).toHaveLength(1);
     expect(added[0]).toMatchObject({ status: 'failed', errorDetail: thrown.message });
   });
@@ -493,7 +493,7 @@ describe('the row guard', () => {
     // no committed import claims the hash, so the same bytes are parsed again
     await expect(attempt()).rejects.toThrow(/50001 data rows/);
 
-    const refused = (await listImports()).filter((i) => /data rows/.test(i.errorDetail ?? ''));
+    const refused = (await listImports()).imports.filter((i) => /data rows/.test(i.errorDetail ?? ''));
     expect(refused).toHaveLength(2);
     expect(refused.every((i) => i.status === 'failed' && i.transactions === 0)).toBe(true);
   });
@@ -588,7 +588,7 @@ describe('the row guard', () => {
     // no committed import claims the hash, so the same bytes are read again
     await expect(attempt()).rejects.toThrow(/skipped as too large to read/);
 
-    const refused = (await listImports()).filter((i) =>
+    const refused = (await listImports()).imports.filter((i) =>
       /too large to read/.test(i.errorDetail ?? ''),
     );
     expect(refused).toHaveLength(2);
@@ -619,7 +619,7 @@ describe('the row guard', () => {
     );
 
     // nothing was cut on the way into the database, which is the whole point
-    const failed = (await listImports()).filter((i) =>
+    const failed = (await listImports()).imports.filter((i) =>
       /Spalte-sehr-ausfuehrlich-0/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
@@ -646,7 +646,7 @@ describe('the row guard', () => {
       ' - skipped as too large to read: Kontoauszug 01-2026 (600000 rows)',
     );
 
-    const failed = (await listImports()).filter((i) =>
+    const failed = (await listImports()).imports.filter((i) =>
       /Kontoauszug 01-2026/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
@@ -705,7 +705,7 @@ describe('the row guard', () => {
     expect(thrown.message).toContain(`could not parse the date "${longCell}"`);
     expect(thrown.message).not.toContain('too large to read');
 
-    const failed = (await listImports()).filter((i) =>
+    const failed = (await listImports()).imports.filter((i) =>
       /Ruecklastschrift/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
@@ -904,13 +904,13 @@ describe('xlsx: the sheets that were not used', () => {
       spare(wb);
     });
 
-    const before = (await listImports()).map((i) => i.id);
+    const before = (await listImports()).imports.map((i) => i.id);
     const thrown = await importFile('Many Sheets Nothing Parsed Bank', unreadable).catch(
       (e) => e as Error,
     );
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain('more were not imported');
-    const failed = (await listImports()).filter((i) => !before.includes(i.id));
+    const failed = (await listImports()).imports.filter((i) => !before.includes(i.id));
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toBe(thrown.message);
   });
@@ -967,7 +967,7 @@ describe('xlsx: the sheets that were not used', () => {
       }
     });
 
-    const before = (await listImports()).map((i) => i.id);
+    const before = (await listImports()).imports.map((i) => i.id);
     const thrown = await importFile('Jahresdatei Bank', book).catch((e) => e as Error);
 
     // the whole of it, both clauses: the row's reason first because it is the half
@@ -978,7 +978,7 @@ describe('xlsx: the sheets that were not used', () => {
     );
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
 
-    const failed = (await listImports()).filter((i) => !before.includes(i.id));
+    const failed = (await listImports()).imports.filter((i) => !before.includes(i.id));
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toBe(thrown.message);
   });
@@ -995,14 +995,14 @@ describe('the workbook size cap', () => {
   it('a workbook past the cap is refused before an import row exists', async () => {
     const oversized = Buffer.alloc(11 * 1024 * 1024);
     Buffer.from([0x50, 0x4b, 0x03, 0x04]).copy(oversized);
-    const before = (await listImports()).length;
+    const before = (await listImports()).imports.length;
     const attempt = () => importFile('Fat Workbook Bank', oversized);
 
     await expect(attempt()).rejects.toThrow(/the workbook is larger than 10 MB/);
-    expect(await listImports()).toHaveLength(before);
+    expect((await listImports()).imports).toHaveLength(before);
     // nothing recorded the hash, so this is a second refusal and not a duplicate
     await expect(attempt()).rejects.toThrow(/the workbook is larger than 10 MB/);
-    expect(await listImports()).toHaveLength(before);
+    expect((await listImports()).imports).toHaveLength(before);
   });
 
   /**

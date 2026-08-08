@@ -320,6 +320,28 @@ export interface ImportRecord {
   documentAvailable: boolean;
 }
 
+/** Mirror of ImportTotals in backend/src/db/index.ts. */
+export interface ImportTotals {
+  imports: number;
+  /** those with a readable document — the predicate behind ImportRecord.documentAvailable */
+  documents: number;
+  /**
+   * Transactions those imports own, which is NOT "this account's transactions": a
+   * row no import owns is in neither number, and nothing here may rename it into one.
+   */
+  transactions: number;
+}
+
+/**
+ * The answer of GET /api/imports — mirror of ImportList in backend/src/db/index.ts.
+ * `totals` counts the whole filtered set and `imports` is at most the first hundred
+ * of it, so the two disagreeing is the endpoint working.
+ */
+export interface ImportList {
+  imports: ImportRecord[];
+  totals: ImportTotals;
+}
+
 // ---------- recurring payments ----------
 
 export interface RecurringGroup {
