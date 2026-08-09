@@ -18,6 +18,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app, attachmentDisposition } from '../src/app';
 import { initAuth } from '../src/auth';
 import {
+  clearImportDocument,
   createImport,
   dbInstance,
   recordImportDocument,
@@ -326,6 +327,59 @@ describe('DELETE /api/imports/:id/document', () => {
  * The emitted value is asserted, not the status code - a 200 says nothing about
  * what the header contains.
  */
+/**
+ * ROADMAP 6.1: an account delete is the second path that removes stored documents,
+ * and the only one that removes several at once. The bytes go for EVERY import it
+ * destroys whatever the pointer said - document_key_version records whether a
+ * document can be READ, never whether bytes are on disk, and the rows most likely
+ * to still have some are exactly the ones whose pointer is NULL.
+ */
+describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
+  const statement = (amount: string, label: string): Buffer =>
+    Buffer.from(['date,amount,description', `2026-03-01,${amount},${label}`].join('\n'), 'utf8');
+
+  const commitInto = async (accountName: string, bytes: Buffer) => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountName', accountName)
+      .field('currency', 'EUR')
+      .field('preset', 'generic')
+      .attach('file', bytes, 'statement.csv');
+    expect(res.status, `upload failed: ${JSON.stringify(res.body)}`).toBe(200);
+    const { importId, accountId } = res.body.summary as { importId: string; accountId: string };
+    const confirmed = await agent.post(`/api/imports/${importId}/confirm`);
+    expect(confirmed.status, `confirm failed: ${JSON.stringify(confirmed.body)}`).toBe(200);
+    return { importId, accountId };
+  };
+
+  it('removes the bytes of a readable document and of one whose pointer is gone', async () => {
+    const readable = await commitInto('Blob Account', statement('-21.00', 'blob one'));
+    const pointerless = await commitInto('Blob Account', statement('-22.00', 'blob two'));
+    expect(pointerless.accountId).toBe(readable.accountId);
+
+    // the pointer alone, leaving the bytes where they are: what a restored backup
+    // produces (restoreBackup strips the column), and the row a delete filtered on
+    // the pointer would leave a bank statement on disk for
+    await runWithWorkspace(workspaceId, () => clearImportDocument(pointerless.importId));
+    expect((await importRow(pointerless.importId))!.documentAvailable).toBe(false);
+    expect(await blobExists(readable.importId)).toBe(true);
+    expect(await blobExists(pointerless.importId)).toBe(true);
+
+    const res = await agent.delete(`/api/accounts/${readable.accountId}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // two imports destroyed and one document counted - the number the panel showed
+    // the user - while the bytes go for both
+    expect(res.body).toEqual({ deleted: true, transactions: 2, imports: 2, documents: 1 });
+
+    expect(await blobExists(readable.importId)).toBe(false);
+    expect(await blobExists(pointerless.importId)).toBe(false);
+    expect((await agent.get(`/api/imports/${readable.importId}/document`)).status).toBe(404);
+    expect((await agent.get(`/api/imports/${pointerless.importId}/document`)).status).toBe(404);
+    expect(await importRow(readable.importId)).toBeUndefined();
+    expect(await importRow(pointerless.importId)).toBeUndefined();
+  });
+});
+
 describe('the Content-Disposition a user-chosen filename produces', () => {
   const csv = { keyVersion: 1, originalFilename: null, sourceType: 'csv' } as const;
   const withName = (originalFilename: string) => ({ ...csv, originalFilename });

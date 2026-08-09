@@ -30,6 +30,7 @@ import {
   dbInstance,
   listUserWorkspaceIds,
   runWithWorkspace,
+  deleteAccount,
   deleteCategoryRule,
   deleteImport,
   exportBackup,
@@ -291,6 +292,15 @@ const HAS_TRANSACTIONS =
 const STAGED_IMPORT =
   'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now - discard that import, change the currency, then upload the statement again';
 
+/**
+ * The same state refusing a different write, and it offers both ways out where the
+ * sentence above offers only discard: confirming into an account that is about to
+ * be deleted is harmless, where for a currency correction it defeats the correction.
+ * A reader who compares the two learns something true.
+ */
+const DELETE_STAGED_IMPORT =
+  'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account';
+
 /** The first zod issue as a sentence, unknown keys named rather than counted. */
 const badRequest = (error: z.ZodError): string => {
   const issue = error.issues[0];
@@ -394,6 +404,52 @@ app.patch('/api/accounts/:id', async (req, res) => {
       return;
     case 'staged-import':
       res.status(409).json({ error: STAGED_IMPORT });
+      return;
+    case 'not-found':
+      break;
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+  res.status(404).json({ error: 'account not found' });
+});
+
+/**
+ * Removes the account for good, with its transactions, its imports, their staged
+ * rows and their stored statements - the counts in the answer are what was
+ * destroyed, taken from the deletes themselves. Distinct from hiding, which is the
+ * PATCH above and is reversible (ROADMAP 5.1, 6.1).
+ *
+ * A hidden account is deletable: hiding is what people do before deleting. What is
+ * refused is an import waiting to be confirmed - without that refusal this delete
+ * takes the import too, and the summary card still on the user's screen answers
+ * "import not found" when they press Confirm (see deleteAccount).
+ *
+ * The counts answer for THIS delete and not for the preview the client showed: for
+ * a hidden account the panel counts transactions by summing over the account's
+ * imports, which is a different fact from "rows with this account_id" - a row an
+ * earlier import already wrote belongs to that earlier import. The two legitimately
+ * differ.
+ */
+app.delete('/api/accounts/:id', async (req, res) => {
+  const result = await deleteAccount(req.params.id);
+  if (result.ok) {
+    const { transactions, imports, documents, transferRules } = result.deleted;
+    logger.info(
+      `account ${req.params.id} deleted: ${transactions} transactions, ${imports} imports, ${documents} documents, ${transferRules} transfer rules removed`,
+    );
+    // transfer pairing changes when a whole leg disappears, and allTransactions()
+    // deliberately included this account's rows (see VISIBLE_ACCOUNT in db/index.ts)
+    await reclassifyAll();
+    res.json({ deleted: true, transactions, imports, documents });
+    return;
+  }
+  // one switch over the union, as the PATCH above: a refusal added to AccountDelete
+  // is a compile error here instead of falling through to "account not found"
+  switch (result.reason) {
+    case 'staged-import':
+      res.status(409).json({ error: DELETE_STAGED_IMPORT });
       return;
     case 'not-found':
       break;
