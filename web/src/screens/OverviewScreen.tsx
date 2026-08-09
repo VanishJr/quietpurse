@@ -3,9 +3,28 @@
  *
  * The screen used to be a list of every account with a balance beside each. It is now
  * a rail of tabs — one tab per account — and everything below it is about the selected
- * one: its balance, its month, its chart, its last transactions. The list answered
- * "what do I have"; the rail answers "how is this one doing", which is the question
- * somebody who has just uploaded a statement actually has.
+ * one: its balance, its month, its spending, its chart, its last transactions. The
+ * list answered "what do I have"; the rail answers "how is this one doing", which is
+ * the question somebody who has just uploaded a statement actually has.
+ *
+ * ---------------------------------------------------------------------------
+ * The shape the design draws
+ *
+ * A navy hero that continues the navigation bar above it — today's date, the greeting,
+ * the rail — with rounded corners where it ends, and the first row of cards pulled up
+ * over that edge so the two overlap. Then two columns: the balance and the spending
+ * donut down the left, income-against-expenses and the last transactions down the
+ * right.
+ *
+ * The left one is a column of its own inside the grid rather than two of its cells,
+ * and it spans both rows. That is what lets the navy card run past the foot of the
+ * transactions table, the way the design draws it: cells of a shared row are all one
+ * height, so as two cells the donut could only ever end exactly where the table did.
+ * A narrow window is the same four blocks in that order down one column — balance,
+ * spending, income against expenses, transactions.
+ *
+ * The hero is full-bleed and the body is not, so neither is inside a padded wrapper —
+ * each carries its own `.shell`, which is the column every screen is laid out in.
  *
  * ---------------------------------------------------------------------------
  * Where the numbers come from
@@ -14,7 +33,9 @@
  * `/api/summary/months` take a date range and sum the whole workspace. So this screen
  * fetches the account's own transactions and `accounts.ts` does the arithmetic the
  * server would have done — see the header there, and the row in
- * `REDESIGN-BACK-DEBT.md` that deletes it.
+ * `REDESIGN-BACK-DEBT.md` that deletes it. The donut is the same story one level
+ * further in: `categorySpend` over the newest month of the window already fetched, so
+ * it costs no request of its own.
  *
  * Two requests per account, and the second depends on the first. The recent list also
  * says when this account's newest transaction is, and the chart window is anchored on
@@ -27,28 +48,33 @@
  *
  * Recurring payments, the app settings, the export and the workspace-wide import
  * history are about the workspace and not about any one account. They are on the
- * Account screen, in order. This screen is one account and nothing else.
+ * Account screen, in order. The theme button and the avatar went to the navigation
+ * bar, which is where the design puts them and where they are reachable from all five
+ * screens rather than from this one. This screen is one account and nothing else.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, SessionUser } from '../api';
 import {
+  categorySpend,
   foreignCurrencies,
+  latestMonth,
   LONGEST_WINDOW,
   monthlyTotals,
   MonthWindow,
   monthOf,
+  percentChange,
+  priorMonth,
   shiftMonth,
 } from '../accounts';
+import { AccountBalance } from '../components/AccountBalance';
 import { AccountDialog, DialogKind } from '../components/AccountDialog';
-import { AccountMonths } from '../components/AccountMonths';
-import { AccountSummary } from '../components/AccountSummary';
+import { AccountFlows } from '../components/AccountFlows';
 import { AccountTabs } from '../components/AccountTabs';
 import { CsvImport } from '../components/CsvImport';
 import { ImportHistory } from '../components/ImportHistory';
 import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactions';
-import { fmtMoney } from '../format';
-import { initialOf } from '../identity';
-import { ThemeMode, useTheme } from '../theme';
+import { SpendingByCategory } from '../components/SpendingByCategory';
+import { fmtMoney, fmtWeekday } from '../format';
 import { Account, Transaction } from '../types';
 
 /** The window the chart opens on: long enough to be a trend, short enough to be full. */
@@ -61,15 +87,6 @@ const DEFAULT_WINDOW: MonthWindow = 6;
  * incomplete rather than drawn as a total.
  */
 export const WINDOW_TX_LIMIT = 5_000;
-
-/** Theme button cycle: system → light → dark. */
-const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
-  system: 'light',
-  light: 'dark',
-  dark: 'system',
-};
-const MODE_GLYPH: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };
-const MODE_NAME: Record<ThemeMode, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
 
 /**
  * What one account's dashboard is drawn from. Carries the id it was fetched for, which
@@ -89,6 +106,9 @@ interface AccountData {
 /** Which panel has taken the screen over. They are pages, not dialogs. */
 type Panel = { kind: 'import' } | { kind: 'history'; account?: Account } | null;
 
+/** What the navigation is told about that, which is the kind and not the account. */
+export type PanelKind = NonNullable<Panel>['kind'];
+
 /**
  * Which step of the account panel is open, and for which account ('add' has none).
  * `origin` is the step it was opened at and does not move as the steps do — it is what
@@ -107,22 +127,40 @@ const openAt = (kind: DialogKind, account: Account | null): Dialog => ({
 
 interface Props {
   user: SessionUser;
-  /** Bumped by the sidebar's Import; each new value opens the import panel once. */
+  /** Bumped by the navigation's Import; each new value opens the import panel once. */
   importAsk: number;
+  /**
+   * Bumped by the navigation's Overview; each new value closes whatever panel is open.
+   *
+   * The bar cannot do this by moving `tab`, because a panel of this screen IS the
+   * Overview as far as `tab` is concerned — so the click that asked to come back to
+   * the dashboard changed nothing and the import page stayed up.
+   */
+  overviewAsk: number;
   /** Opens the Transactions screen with this account's filter already applied. */
   onOpenTransactions: (accountId: string) => void;
-  /** The avatar's destination: identity and the settings live on that screen. */
-  onOpenAccount: () => void;
+  /** Opens the Analytics screen — the spending card over the whole workspace. */
+  onOpenAnalytics: () => void;
+  /**
+   * Which panel has taken this screen over, reported upwards as it changes.
+   *
+   * The navigation owns two things that are wrong while one is open, and neither is
+   * knowable from `tab` alone: Import is a section in the bar, so with the import
+   * panel up the bar was marking Overview as the page while the reader was plainly on
+   * Import; and the bar's band is only continued by this screen's hero, which a panel
+   * replaces, so `is-merged` left the bar with no shadow and nothing under it.
+   */
+  onPanelChange: (kind: PanelKind | null) => void;
 }
 
 export function OverviewScreen({
   user,
   importAsk,
+  overviewAsk,
   onOpenTransactions,
-  onOpenAccount,
+  onOpenAnalytics,
+  onPanelChange,
 }: Props) {
-  const { mode, setMode } = useTheme();
-
   /**
    * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
    * is how a failed request came to render as "you have no accounts".
@@ -142,6 +180,13 @@ export function OverviewScreen({
   const [data, setData] = useState<AccountData | null>(null);
   /** The dashboard's own refusal: the rail above it loaded and is still true. */
   const [dataError, setDataError] = useState<string | null>(null);
+
+  /**
+   * Taken once, at mount. Read on every render it would be a different Date object per
+   * frame for a line that changes at most at midnight — and a session left open across
+   * one is not a reason to re-render the screen.
+   */
+  const [today] = useState(() => new Date());
 
   const load = useCallback(async () => {
     try {
@@ -163,10 +208,19 @@ export function OverviewScreen({
     load();
   }, [load]);
 
-  // the sidebar asked for the import panel; 0 is the initial value and asks nothing
+  // the navigation asked for the import panel; 0 is the initial value and asks nothing
   useEffect(() => {
     if (importAsk > 0) setPanel({ kind: 'import' });
   }, [importAsk]);
+
+  // ...and asked for the dashboard back. 0 is the initial value and asks nothing.
+  useEffect(() => {
+    if (overviewAsk > 0) setPanel(null);
+  }, [overviewAsk]);
+
+  useEffect(() => {
+    onPanelChange(panel?.kind ?? null);
+  }, [panel, onPanelChange]);
 
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.hidden), [accounts]);
@@ -259,6 +313,44 @@ export function OverviewScreen({
     [mine, selected],
   );
 
+  /** The newest month the account has anything in — what every figure is about. */
+  const month = latestMonth(months);
+  const prior = priorMonth(months);
+
+  /**
+   * The month a comparison may be drawn from, or null when none may be — and the ONE
+   * place that is decided. Both cards that draw a percentage are handed this rather
+   * than the raw month and a `truncated` flag to re-apply the rule against: the
+   * balance card was making the same decision a second time, in its own words.
+   *
+   * No comparison at all off a truncated window. The fetch is ordered newest first, so
+   * a response at its limit lost the far end: `prior` is then whichever month survived
+   * second, which may be a part of one, and the balance's derived opening figure is
+   * short by whatever was dropped. An arrow and a percentage read as more certain
+   * than the figure they came from — the same reason `percentChange` answers null on a
+   * base of zero rather than printing an infinity.
+   */
+  const comparable = mine?.truncated ? null : month;
+  const deltas = {
+    income: comparable && prior ? percentChange(comparable.income, prior.income) : null,
+    expense: comparable && prior ? percentChange(comparable.expense, prior.expense) : null,
+  };
+
+  /**
+   * The newest month's rows, by category. Off the window already in hand, so it is
+   * arithmetic rather than a request — and off the newest month specifically, which is
+   * the one end of that window a truncated fetch cannot have cut: the endpoint orders
+   * `date DESC`, so what a cap drops is the oldest.
+   */
+  const monthKey = month?.month ?? null;
+  const spend = useMemo(
+    () =>
+      mine && monthKey
+        ? categorySpend(mine.window.filter((t) => monthOf(t.date) === monthKey))
+        : [],
+    [mine, monthKey],
+  );
+
   if (panel?.kind === 'import') {
     return (
       <div className="screen-inner">
@@ -283,184 +375,196 @@ export function OverviewScreen({
   }
 
   return (
-    <div className="screen-inner">
-      <header className="welcome">
-        <div>
+    <div className="ov">
+      {/* `ov-band` is the same gradient the navigation bar carries, and both are the
+          full width of the window — so the two read as one band that ends here */}
+      <div className="ov-hero ov-band">
+        <div className="shell">
+          <p className="ov-date">{fmtWeekday(today)}</p>
           <h1 className="welcome-title">Welcome, {user.name || user.email}!</h1>
-          <p className="welcome-sub">{user.email}</p>
-        </div>
-        <div className="welcome-actions">
-          <button
-            className="icon-btn"
-            onClick={() => setMode(NEXT_MODE[mode])}
-            aria-label={`Theme: ${MODE_NAME[mode]}. Click to change`}
-          >
-            <span aria-hidden="true">{MODE_GLYPH[mode]}</span>
-          </button>
-          {/* the letter, not a photograph; it goes where the address and the settings are */}
-          <button className="avatar" onClick={onOpenAccount} aria-label={`Account: ${user.email}`}>
-            <span aria-hidden="true">{initialOf(user)}</span>
-          </button>
-        </div>
-      </header>
 
-      {/* above the content, not below it: a refusal read after the list is a refusal
-          the reader has already acted on */}
-      {error && <p className="error">Error: {error}</p>}
-
-      {onRail.length > 0 && (
-        <>
-          <AccountTabs
-            accounts={onRail}
-            selectedId={selected?.id ?? null}
-            onSelect={setSelectedId}
-            onAdd={() => setDialog(openAt('add', null))}
-          />
-          {hidden.length > 0 && (
-            <button className="btn-link" onClick={() => setShowHidden((v) => !v)}>
-              {showHidden
-                ? 'Hide removed accounts again'
-                : `Show ${hidden.length} hidden account${hidden.length === 1 ? '' : 's'}`}
-            </button>
+          {onRail.length > 0 && (
+            <AccountTabs
+              accounts={onRail}
+              selectedId={selected?.id ?? null}
+              onSelect={setSelectedId}
+              onAdd={() => setDialog(openAt('add', null))}
+              hiddenCount={hidden.length}
+              showHidden={showHidden}
+              onToggleHidden={() => setShowHidden((v) => !v)}
+            />
           )}
-        </>
-      )}
-
-      {/* the whole reason this screen exists for a new user: nothing has been uploaded,
-          and the way to upload is the biggest thing on the page */}
-      {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
-        <div className="acct-blank">
-          <h2 className="acct-blank-title">Nothing here yet — start with a statement</h2>
-          <p className="acct-blank-text">
-            Export a statement from your bank in whatever format it offers — .csv, .xlsx or
-            .pdf — and drop it in. Finto reads the transactions out of it and makes an
-            account for them, named after the file. You can rename it afterwards.
-          </p>
-          <div className="acct-blank-actions">
-            <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
-              ⭳ Import a statement
-            </button>
-            <button
-              className="btn-ghost"
-              onClick={() => setDialog(openAt('add', null))}
-              disabled={baseCurrency === null}
-            >
-              Create an empty account
-            </button>
-          </div>
-          <p className="hint">
-            An empty account is for money that has no statement — cash, or a card you enter
-            by hand.
-          </p>
         </div>
-      )}
+      </div>
 
-      {accounts !== null && onRail.length === 0 && hidden.length > 0 && (
-        <p className="edit-hint">
-          Every account you have is hidden.{' '}
-          <button className="btn-link" onClick={() => setShowHidden(true)}>
-            Show {hidden.length === 1 ? 'it' : 'them'}
-          </button>
-        </p>
-      )}
+      <div className="shell ov-body">
+        {/* Above the content, not below it: a refusal read after the list is a refusal
+            the reader has already acted on.
 
-      {dataError && <p className="error">Error: {dataError}</p>}
+            `ov-notice` is what makes that survivable. This body is pulled 64px up over
+            the hero, so whatever is first in it is drawn ON the navy — and `--ink-bad`
+            there is 2.6:1. Every message here is first in one of the three states that
+            draws one, so each carries the cards' own paper under it rather than being
+            read off the band. */}
+        {error && <p className="error ov-notice">Error: {error}</p>}
 
-      {selected && mine && (
-        <div className="acct-panel" role="region" aria-label={selected.name}>
-          {selected.hidden ? (
-            /* The ⋮ lives on the balance card, and a hidden account has no balance card
-               to put it on — so this panel carries the same control under the same
-               accessible name. Without it the only route back out of Hidden is a PATCH
-               by hand: the sentence here used to name a menu that was not on the page. */
-            <div className="acct-blank">
-              <h2 className="acct-blank-title">{selected.name} is hidden</h2>
-              <p className="acct-blank-text">
-                Its transactions are out of every figure the app computes — including the
-                ones this screen would draw. Nothing has been deleted, and unhiding it
-                brings all of them back.
-              </p>
-              <div className="acct-blank-actions">
-                <button
-                  className="btn"
-                  onClick={() => setDialog(openAt('hide', selected))}
-                >
-                  Unhide this account
-                </button>
-                <button
-                  className="btn-ghost"
-                  onClick={() => setDialog(openAt('menu', selected))}
-                  aria-haspopup="dialog"
-                  aria-label={`Account menu: ${selected.name}`}
-                >
-                  Account menu
-                </button>
-              </div>
+        {/* the whole reason this screen exists for a new user: nothing has been uploaded,
+            and the way to upload is the biggest thing on the page */}
+        {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
+          <div className="acct-blank">
+            <h2 className="acct-blank-title">Nothing here yet — start with a statement</h2>
+            <p className="acct-blank-text">
+              Export a statement from your bank in whatever format it offers — .csv, .xlsx or
+              .pdf — and drop it in. Finto reads the transactions out of it and makes an
+              account for them, named after the file. You can rename it afterwards.
+            </p>
+            <div className="acct-blank-actions">
+              <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
+                ⭳ Import a statement
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => setDialog(openAt('add', null))}
+                disabled={baseCurrency === null}
+              >
+                Create an empty account
+              </button>
             </div>
-          ) : (
-            <>
-              <AccountSummary
-                account={selected}
-                months={months}
-                foreign={foreign}
-                truncated={mine.truncated}
-                onOpenMenu={() => setDialog(openAt('menu', selected))}
-              />
+            <p className="hint">
+              An empty account is for money that has no statement — cash, or a card you enter
+              by hand.
+            </p>
+          </div>
+        )}
 
-              {months.length > 0 ? (
-                <AccountMonths
-                  months={months}
-                  window={window_}
-                  onWindow={setWindow}
-                  currency={selected.currency}
-                  truncated={mine.truncated}
-                />
-              ) : (
-                <div className="acct-blank">
-                  <h2 className="acct-blank-title">
-                    Nothing has been loaded into {selected.name}
-                  </h2>
-                  <p className="acct-blank-text">
-                    The account is here, and it is empty — which is why its balance is{' '}
-                    {fmtMoney(0, selected.currency)}. Import a statement into it and the
-                    figures, the chart and the list below fill in.
-                  </p>
-                  <div className="acct-blank-actions">
-                    <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
-                      ⭳ Import a statement
-                    </button>
-                  </div>
+        {accounts !== null && onRail.length === 0 && hidden.length > 0 && (
+          <p className="edit-hint ov-notice">
+            Every account you have is hidden.{' '}
+            <button className="btn-link" onClick={() => setShowHidden(true)}>
+              Show {hidden.length === 1 ? 'it' : 'them'}
+            </button>
+          </p>
+        )}
+
+        {dataError && <p className="error ov-notice">Error: {dataError}</p>}
+
+        {selected && mine && (
+          <div className="acct-panel" role="region" aria-label={selected.name}>
+            {selected.hidden ? (
+              /* The ⋮ lives on the balance card, and a hidden account has no balance card
+                 to put it on — so this panel carries the same control under the same
+                 accessible name. Without it the only route back out of Hidden is a PATCH
+                 by hand: the sentence here used to name a menu that was not on the page. */
+              <div className="acct-blank">
+                <h2 className="acct-blank-title">{selected.name} is hidden</h2>
+                <p className="acct-blank-text">
+                  Its transactions are out of every figure the app computes — including the
+                  ones this screen would draw. Nothing has been deleted, and unhiding it
+                  brings all of them back.
+                </p>
+                <div className="acct-blank-actions">
+                  <button className="btn" onClick={() => setDialog(openAt('hide', selected))}>
+                    Unhide this account
+                  </button>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => setDialog(openAt('menu', selected))}
+                    aria-haspopup="dialog"
+                    aria-label={`Account menu: ${selected.name}`}
+                  >
+                    Account menu
+                  </button>
                 </div>
-              )}
+              </div>
+            ) : (
+              <div className="ov-grid">
+                {/* One column and not two cells: the design's navy card runs from
+                    under the balance to below the transactions table, which two cells
+                    of a shared row cannot do — a row is one height and both its cells
+                    get it. The balance takes what it needs off the top of this column
+                    and the donut takes the rest, so the card is as tall as the two
+                    cells beside it put together. */}
+                <div className="ov-col">
+                  <AccountBalance
+                    account={selected}
+                    comparable={comparable}
+                    onOpenMenu={() => setDialog(openAt('menu', selected))}
+                  />
 
-              {mine.recent.length > 0 && (
-                <RecentTransactions
-                  account={selected}
-                  transactions={mine.recent}
-                  onSeeAll={() => onOpenTransactions(selected.id)}
-                />
-              )}
-            </>
-          )}
-        </div>
-      )}
+                  {month && (
+                    <SpendingByCategory
+                      spend={spend}
+                      month={month.month}
+                      total={month.expense}
+                      currency={selected.currency}
+                      onSeeAll={onOpenAnalytics}
+                    />
+                  )}
+                </div>
 
-      {dialog && (
-        <AccountDialog
-          kind={dialog.kind}
-          origin={dialog.origin}
-          account={dialog.account}
-          baseCurrency={baseCurrency ?? ''}
-          onStep={(kind) => setDialog({ ...dialog, kind })}
-          onClose={() => setDialog(null)}
-          onOpenHistory={(account) => {
-            setDialog(null);
-            setPanel({ kind: 'history', account });
-          }}
-          onCreated={afterCreate}
-          onUpdated={applyAccount}
-        />
-      )}
+                {month ? (
+                  <AccountFlows
+                    account={selected}
+                    months={months}
+                    month={month}
+                    prior={prior}
+                    window={window_}
+                    onWindow={setWindow}
+                    foreign={foreign}
+                    truncated={mine.truncated}
+                    deltas={deltas}
+                  />
+                ) : (
+                  <div className="acct-blank ov-blank">
+                    <h2 className="acct-blank-title">
+                      Nothing has been loaded into {selected.name}
+                    </h2>
+                    <p className="acct-blank-text">
+                      {/* the account's own balance and not a literal zero: the balance
+                          card is directly above this sentence, and a sentence that
+                          names a figure the card beside it disagrees with is worse
+                          than one that names none */}
+                      The account is here, and it is empty — which is why its balance is{' '}
+                      {fmtMoney(selected.balance, selected.currency)}. Import a statement
+                      into it and the figures, the chart and the transactions fill in.
+                    </p>
+                    <div className="acct-blank-actions">
+                      <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
+                        ⭳ Import a statement
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {mine.recent.length > 0 && (
+                  <RecentTransactions
+                    account={selected}
+                    transactions={mine.recent}
+                    onSeeAll={() => onOpenTransactions(selected.id)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {dialog && (
+          <AccountDialog
+            kind={dialog.kind}
+            origin={dialog.origin}
+            account={dialog.account}
+            baseCurrency={baseCurrency ?? ''}
+            onStep={(kind) => setDialog({ ...dialog, kind })}
+            onClose={() => setDialog(null)}
+            onOpenHistory={(account) => {
+              setDialog(null);
+              setPanel({ kind: 'history', account });
+            }}
+            onCreated={afterCreate}
+            onUpdated={applyAccount}
+          />
+        )}
+      </div>
     </div>
   );
 }

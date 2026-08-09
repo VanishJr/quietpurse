@@ -7,6 +7,7 @@ import {
   fmtMonthKey,
   fmtMonthTick,
   fmtShort,
+  fmtWeekday,
   isoDay,
   truncateMiddle,
 } from './format';
@@ -88,6 +89,13 @@ describe('dates', () => {
 
   it('fmtMonthTick drops the year, which the range label above the chart carries', () => {
     expect(fmtMonthTick('2026-07')).toBe('Jul');
+  });
+
+  it('fmtWeekday names the day, which is what the greeting sits under', () => {
+    // a real instant and read with local getters on purpose: this is today where the
+    // reader is, not a calendar date off a statement
+    expect(fmtWeekday(new Date(2026, 7, 7, 13, 30))).toBe('Friday, 7 Aug 2026');
+    expect(fmtWeekday(new Date(2026, 0, 1))).toBe('Thursday, 1 Jan 2026');
   });
 });
 

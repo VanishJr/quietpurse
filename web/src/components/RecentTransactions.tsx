@@ -63,7 +63,9 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
   return (
     <section className="tx-recent" aria-label={`Recent transactions in ${account.name}`}>
       <div className="header">
-        <h2 className="block-title">Last {RECENT_LIMIT} transactions</h2>
+        {/* the design's own heading, and it does not count them: the rows are right
+            there, and "Last 7" was a second place RECENT_LIMIT had to be kept true */}
+        <h2 className="block-title">Recent transactions</h2>
         <button className="btn-link" onClick={onSeeAll}>
           All transactions →
         </button>
@@ -72,73 +74,74 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
       {transactions.length === 0 ? (
         <p className="empty">No transactions in this account yet.</p>
       ) : (
-        <div className="acct-card tx-card">
-        <table className="tx-table">
-          {/*
-            The widths are here rather than in the cells because the table is
-            `table-layout: fixed`, which takes them from this row and nowhere else.
-            Fixed is what makes the description ellipsise: under auto layout the column
-            grows to whatever the longest description is — and a bank writes
-            "Платеж от JANE DOE Реквизиты: Sent from N26 Отправитель: …" into that
-            field — so the table ended up wider than the card and Amount fell off the
-            right-hand edge. `text-overflow` needs a cell that is not free to grow.
-          */}
-          <thead>
-            <tr>
-              <th scope="col" className="tx-col-date">
-                Date
-              </th>
-              <th scope="col">Description</th>
-              <th scope="col" className="tx-col-cat">
-                Category
-              </th>
-              <th scope="col" className="tx-num tx-col-amount">
-                Amount
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((t) => (
-              <tr key={t.id}>
-                <td className="tx-date">
-                  <span className="tx-cell">{fmtDate(t.date)}</span>
-                </td>
-                <td className="tx-desc">
-                  <span className="tx-cell tx-desc-cell">
-                    <span className="tx-mark" style={{ background: categoryColor(t.category) }}>
-                      {initialOf(t)}
-                    </span>
-                    <span className="tx-desc-body">
-                      <span className={`tx-title${t.transfer ? ' muted-strike' : ''}`}>
-                        {t.description || '(no description)'}
-                      </span>
-                      {/* what the reference draws as Status, and this app actually knows */}
-                      {(t.transfer || t.refund || t.oneOff) && (
-                        <span className="tx-flags">
-                          {t.transfer && <span className="badge">transfer</span>}
-                          {t.refund && <span className="badge">refund</span>}
-                          {t.oneOff && <span className="badge">one-off</span>}
-                        </span>
-                      )}
-                    </span>
-                  </span>
-                </td>
-                <td className="tx-cat">
-                  <span className="tx-cell tx-cat-cell">
-                    <span className="dot" style={{ background: categoryColor(t.category) }} />
-                    <span className="tx-cat-name">{categoryLabel(t.category)}</span>
-                  </span>
-                </td>
-                <td className={`tx-num tx-amount${t.amount > 0 ? ' is-income' : ''}`}>
-                  <span className="tx-cell">
-                    {t.amount > 0 ? '+' : ''}
-                    {fmtMoney(t.amount, t.currency)}
-                  </span>
-                </td>
+        <div className="tx-card">
+          <table className="tx-table">
+            {/*
+              The widths are here rather than in the cells because the table is
+              `table-layout: fixed`, which takes them from this row and nowhere else.
+              Fixed is what makes the description ellipsise: under auto layout the
+              column grows to whatever the longest description is — and a bank writes
+              "Платеж от JANE DOE Реквизиты: Sent from N26 Отправитель: …" into
+              that field — so the table ended up wider than the card and Amount fell
+              off the right-hand edge. `text-overflow` needs a cell that is not free
+              to grow.
+            */}
+            <thead>
+              <tr>
+                <th scope="col" className="tx-col-date">
+                  Date
+                </th>
+                <th scope="col">Description</th>
+                <th scope="col" className="tx-col-cat">
+                  Category
+                </th>
+                <th scope="col" className="tx-num tx-col-amount">
+                  Amount
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {transactions.map((t) => (
+                <tr key={t.id}>
+                  <td className="tx-date">
+                    <span className="tx-cell">{fmtDate(t.date)}</span>
+                  </td>
+                  <td className="tx-desc">
+                    <span className="tx-cell tx-desc-cell">
+                      <span className="tx-mark" style={{ background: categoryColor(t.category) }}>
+                        {initialOf(t)}
+                      </span>
+                      <span className="tx-desc-body">
+                        <span className={`tx-title${t.transfer ? ' muted-strike' : ''}`}>
+                          {t.description || '(no description)'}
+                        </span>
+                        {/* what the reference draws as Status, and this app actually knows */}
+                        {(t.transfer || t.refund || t.oneOff) && (
+                          <span className="tx-flags">
+                            {t.transfer && <span className="badge">transfer</span>}
+                            {t.refund && <span className="badge">refund</span>}
+                            {t.oneOff && <span className="badge">one-off</span>}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                  </td>
+                  <td className="tx-cat">
+                    <span className="tx-cell tx-cat-cell">
+                      <span className="dot" style={{ background: categoryColor(t.category) }} />
+                      <span className="tx-cat-name">{categoryLabel(t.category)}</span>
+                    </span>
+                  </td>
+                  <td className={`tx-num tx-amount${t.amount > 0 ? ' is-income' : ''}`}>
+                    <span className="tx-cell">
+                      {t.amount > 0 ? '+' : ''}
+                      {fmtMoney(t.amount, t.currency)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </section>

@@ -5,7 +5,11 @@
  *
  * Layout targets two shapes:
  *   narrow (<900px)  — one column, bottom tab bar, same as the phone app;
- *   wide   (>=900px) — sidebar nav, centered content, multi-column blocks.
+ *   wide   (>=900px) — the design's top bar, and multi-column blocks under it.
+ *
+ * The sidebar this file used to describe is gone: the navigation is a full-bleed band
+ * across the top in both shapes now, which is why `.screens` no longer has a rounded
+ * left edge and why `.screen` carries no gutter of its own.
  */
 
 /* ---------- base ---------- */
@@ -57,14 +61,94 @@ textarea {
   border-radius: 4px;
 }
 
+/*
+ * ...except on the navy, where that ring is invisible. In light mode `--ink-accent` is
+ * #0a213f and the band's right-hand stop is #0a213f — the same colour, so the outline
+ * measured 1:1 against the ground it was drawn on. Everything interactive in the
+ * design's top bar and on the account rail sits there: five section pills, the theme
+ * button, the avatar, the tabs, the paging arrows, the hidden-accounts switch and
+ * "Add more". A keyboard had no way to tell where it was in the whole upper third of
+ * the page.
+ *
+ * `--c-on-ground-1` is the ramp tokens.css already publishes for marks on this ground,
+ * and it is what every label up there is already drawn in.
+ */
+.ov-band :focus-visible {
+  outline-color: var(--c-on-ground-1);
+}
+
+/* ---------- what the mock has that a flat colour cannot say ---------- */
+
+/*
+ * Three things `theme.tsx` cannot publish, because none of them is a colour: the band
+ * behind the navigation is a gradient, the current section is a gradient, and the band
+ * casts a shadow onto the page.
+ *
+ * The light values are measured off the Figma frame (`2103:847`) rather than guessed —
+ * the band runs flat `#010710` for the first 46% of the window and then climbs to
+ * `#0a213f` at the right edge, which is why the stop is where it is and not at 0%. The
+ * dark ones are this app's own, chosen to keep the same relationship: the band is
+ * lighter than the page it sits on, and the current pill lighter than the band.
+ */
+:root {
+  --ov-band-from: #010710;
+  --ov-band-to: #0a213f;
+  --ov-band-shadow: 0 6px 22px rgba(1, 7, 16, 0.2);
+  /*
+   * What lifts a card off the page. Two layers and not one: the tight pair is the
+   * contact edge, which is what keeps the card from looking as if it floats, and the
+   * wide pair is the lift itself. Both are the band's own near-black rather than a
+   * neutral grey, so a shadow on this page is the same colour as the shadow the band
+   * above already casts on it.
+   */
+  --ov-card-shadow: 0 1px 2px rgba(1, 7, 16, 0.05), 0 8px 24px rgba(1, 7, 16, 0.08);
+  /* the current section: light at its top-right corner, and the mock's own two ends */
+  --ov-pill-from: #20262d;
+  --ov-pill-to: #010710;
+  /* the table's header bar. The spending card's own fill is NOT here — it is
+     `--ink-panel`, published by theme.tsx, because Recharts has to be handed that one
+     as a string for the donut's sector separators and two copies would drift. */
+  --ov-bar: #010710;
+}
+
+:root[data-theme='dark'] {
+  --ov-band-from: #10161f;
+  --ov-band-to: #25344c;
+  --ov-band-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  /* darker and heavier: a 5%-black shadow under a card that is itself lighter than the
+     page it sits on says nothing at all */
+  --ov-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.42);
+  /* inverted, because on this ground a darker pill would be a hole rather than a tab */
+  --ov-pill-from: #46587a;
+  --ov-pill-to: #223047;
+  --ov-bar: #25344c;
+}
+
+/* One declaration, used by the bar and by the Overview's hero, so the two are one
+   uninterrupted band: the gradient runs left to right, and both elements are the full
+   width of the window, so their stops land on the same pixels. */
+.ov-band {
+  background: linear-gradient(
+    90deg,
+    var(--ov-band-from) 0%,
+    var(--ov-band-from) 46%,
+    var(--ov-band-to) 100%
+  );
+  color: var(--c-on-ground-1);
+}
+
 /* ---------- app shell ---------- */
 
+/*
+ * The page and not the navy it used to be: with the sidebar gone there is no ground
+ * for a panel to be laid on, and the only place this fill is ever seen is the blank
+ * `<div className="app" />` App.tsx paints while the session is still in flight.
+ */
 .app {
   display: flex;
   flex-direction: column;
   height: 100%;
-  /* the ground the content panel is laid on; only its edges show on a wide window */
-  background: var(--ink-brand);
+  background: var(--ink-page);
 }
 
 .screens {
@@ -74,39 +158,113 @@ textarea {
   background: var(--ink-page);
 }
 
-/* Screens stay mounted so filters and loaded data survive tab switches. */
+/*
+ * Screens stay mounted so filters and loaded data survive tab switches.
+ *
+ * No padding of its own: the Overview's hero runs edge to edge and the body inside it
+ * does not, so the column is a wrapper the content chooses (`.shell`) rather than a
+ * gutter the scroll container imposes on everything in it.
+ */
 .screen {
   position: absolute;
   inset: 0;
   overflow-y: auto;
-  padding: 0 16px;
 }
 
 .screen[hidden] {
   display: none;
 }
 
+/*
+ * Two columns, because two things want different measures.
+ *
+ * `.shell` is the Overview's, and it is the frame's: the mock puts 77px of margin on a
+ * 1920 canvas and gives the content the other 1765, which is 4% a side. So it is 4vw
+ * clamped at both ends rather than a fixed measure — at 1920 that lands on the frame's
+ * own numbers, and it stays sane on a laptop. The cap is a sanity limit for a monitor
+ * the mock says nothing about.
+ *
+ * `.screen-inner` is every other screen's, and it stays at the measure it had. Those
+ * screens are one column of prose, tables and forms; the reason the Overview may run
+ * that wide is that it is four cards in a grid, and a 1700px line of body text is not
+ * a thing this app should grow.
+ */
+.shell {
+  width: 100%;
+  max-width: 2100px;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 4vw, 77px);
+}
+
+.screen-inner {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 16px 32px;
+}
+
 /* ---------- navigation ---------- */
 
 /*
- * One element, two shapes: the bottom bar of the phone app, and the navy sidebar of
- * the design on a wide window. It carries the brand fill in both, so the text on it
- * is `--c-on-ground-*` from tokens.css — the ramp that file already defines for text
- * on a dark ground — rather than the theme's, which flips with the scheme.
+ * The design's top bar: the wordmark at the left, the sections centred, the theme
+ * button and the avatar at the right. Full-bleed, and the Overview's hero continues it
+ * downwards in the same gradient — see `.ov-band`.
+ *
+ * It stacks above `.screens` because that panel paints an opaque page colour and would
+ * otherwise clip the shadow. Which is also why the shadow is dropped on the Overview:
+ * there the band does not end here, it ends at the foot of the hero, and a shadow cast
+ * from this edge would be a dark stripe across the middle of it. `SignedIn` says which
+ * of the two is the case — it is the one thing on the page that knows, and the scroll
+ * position is part of what it has to know: the hero is under this bar only at the top
+ * of that screen, and further down the page the shadow is needed again.
+ */
+.topbar {
+  flex: none;
+  position: relative;
+  z-index: 1;
+  box-shadow: var(--ov-band-shadow);
+}
+
+.topbar.is-merged {
+  box-shadow: none;
+}
+
+/*
+ * Three columns so the middle one is centred in the WINDOW rather than in what is left
+ * over: with the sides at 1fr each, the nav sits on the centre line whatever the
+ * wordmark and the avatar happen to measure. On a phone the nav is out of flow (it is
+ * the bottom bar there) and the middle column collapses to nothing, which leaves the
+ * same rule laying out a mark and two buttons.
+ */
+.topbar-inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  height: 58px;
+}
+
+.nav-mark {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.topbar-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
+ * One element, two shapes: the pills in the bar above on a wide window, and the bottom
+ * bar of the phone app on a narrow one. It carries the brand fill in both, so the text
+ * on it is `--c-on-ground-*` from tokens.css — the ramp that file already defines for
+ * text on a dark ground — rather than the theme's, which flips with the scheme.
  */
 .tabbar {
   display: flex;
-  background: var(--ink-brand);
-  color: var(--c-on-ground-1);
-  /* iOS home indicator; 0 on everything else */
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-
-/* the wordmark and the Import action are the sidebar's; five across a phone is four
-   too many */
-.nav-mark,
-.nav-foot {
-  display: none;
 }
 
 .nav-list {
@@ -131,6 +289,33 @@ textarea {
   font-weight: 600;
 }
 
+/* the phone bar is fixed to the foot of the window rather than rendered a second time
+   there; `.screen` keeps a foot of its own so the last row is not under it */
+@media (max-width: 899px) {
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-raised);
+    background: var(--ink-brand);
+    border-top: 1px solid var(--c-hairline);
+    /* iOS home indicator; 0 on everything else */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .screen {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* four across is what fits; Import is an action rather than a section, and the
+     Account screen carries a control for it. The Overview carries one too, but only in
+     its blank states — so on a phone with accounts in it that is the single route. */
+  .nav-import {
+    display: none;
+  }
+}
+
 /* ---------- shared primitives ---------- */
 
 .title {
@@ -140,7 +325,7 @@ textarea {
 }
 
 .block-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   margin: 16px 0 6px;
 }
@@ -607,16 +792,66 @@ textarea {
   clip-path: inset(50%);
 }
 
-/* ---------- the screen's own header ---------- */
+/* ---------- the Overview's hero ---------- */
 
-.welcome {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 26px 0 18px;
-  border-bottom: 1px solid var(--ink-grid);
-  margin-bottom: 18px;
+/*
+ * The navy the greeting and the rail sit on. It is the same fill as the bar above it
+ * and directly under it, so the two read as one band that ends where this one rounds
+ * off — and the first row of cards is pulled back up over that edge by `.ov-body`,
+ * which is the overlap the design draws.
+ *
+ * The foot is therefore the overlap plus the gap the cards want above them; change one
+ * and the other has to move with it.
+ */
+/*
+ * The measurements are the frame's, divided by the 4:3 it is drawn at — the mock is
+ * 1920 wide and the app lays out at about 1440, so 34px here is the frame's 45. They
+ * are a set: the foot is the overlap plus the gap the cards want above them, and
+ * `.ov-body` pulls back exactly the overlap. Move one and the row of cards moves.
+ */
+.ov-hero {
+  border-radius: 0 0 var(--r-panel) var(--r-panel);
+  padding-top: 34px;
+  padding-bottom: 90px;
+  box-shadow: var(--ov-band-shadow);
+}
+
+.ov-body {
+  /*
+   * Over the hero's foot, not level with it — and by more than a third of the card
+   * now. The mock's balance card starts 57px above the edge of a band drawn at 1280,
+   * which is 64 at the 1440 the app lays out at; this was 44, and the row of cards
+   * read as sitting under the band rather than on it. The 26px between the rail and
+   * the top of the cards is what did not change: the foot above is this plus that.
+   */
+  margin-top: -64px;
+  padding-bottom: 40px;
+  position: relative;
+}
+
+.ov-date {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--c-on-ground-3);
+}
+
+/*
+ * A message at the top of `.ov-body`, on paper of its own.
+ *
+ * The body is pulled 64px up over the hero, so its first child is drawn on the navy —
+ * and every message this screen has is first in one of the three states that draws
+ * one. `--ink-bad` on the band's near-black measures 2.6:1 and `--ink-muted` is worse,
+ * so a refusal was the least readable thing on the page. It takes a card's own fill
+ * rather than a colour override, because the fix has to hold wherever in the overlap
+ * the message lands.
+ */
+.ov-notice {
+  position: relative;
+  margin: 0 0 14px;
+  padding: 14px 18px;
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  box-shadow: var(--ov-card-shadow);
 }
 
 .welcome-title {
@@ -627,47 +862,39 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.welcome-sub {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: var(--ink-muted);
-  overflow-wrap: anywhere;
-}
-
-.welcome-actions {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--r-pill);
-  border: 1px solid var(--ink-border);
-  background: var(--ink-surface);
-  color: var(--ink-secondary);
-  font-size: 15px;
-  line-height: 1;
-}
-
-.icon-btn:hover {
-  color: var(--ink-primary);
-}
-
-/* the initial, where a product with photographs would put a photograph */
+/*
+ * The theme button, which only the top bar draws — so it is coloured for the navy it
+ * sits on rather than for a surface: `--c-paper-hi` and `--ink-brand` are the design's
+ * white disc with a dark glyph in it, and both hold in either scheme because `brand`
+ * is a dark navy in both.
+ */
+/* the two discs at the right of the bar: one shape, declared once */
+.icon-btn,
 .avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   flex: none;
   border-radius: var(--r-pill);
+}
+
+.icon-btn {
+  border: none;
+  background: var(--c-paper-hi);
+  color: var(--ink-brand);
+  font-size: 15px;
+  line-height: 1;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--c-paper);
+}
+
+/* the initial, where a product with photographs would put a photograph */
+.avatar {
   background: var(--ink-accent);
   color: var(--ink-onAccent);
   font-size: 13px;
@@ -675,76 +902,142 @@ textarea {
   user-select: none;
 }
 
-/* ---------- the account rail ---------- */
-
-.acct-strip {
-  margin: 4px 0 10px;
+/* on the bar it is on the navy, where the light theme's accent IS that navy: a disc
+   the same colour as its ground is not a disc */
+.topbar .avatar {
+  background: var(--c-wash-3);
+  color: var(--c-on-ground-1);
+  box-shadow: inset 0 0 0 1px var(--c-hairline-control);
 }
 
-/* the design's pill: a white track holding the tabs, with a round arrow at each end
-   when there is more than one line of accounts */
-.acct-rail {
+.topbar .avatar[aria-current='page'] {
+  background: var(--c-paper-hi);
+  color: var(--ink-brand);
+  box-shadow: none;
+}
+
+/* ---------- the account rail, on the hero ---------- */
+
+/* one line: the names with their arrows at the left of it, and the two controls that
+   act on the rail itself holding the right edge */
+.acct-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px;
-  border: 1px solid var(--ink-border);
+  gap: 10px;
+  margin-top: 34px;
+}
+
+/*
+ * The arrows belong to the names. They were siblings of a `flex: 1` track, which is
+ * what put "›" at the far right of the band with "Add more" beside it — a control for
+ * the list, the whole width of the window away from the list. The group is what holds
+ * the three together; `.rail-actions` takes the right edge on its own margin.
+ */
+.rail-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.rail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  margin-left: auto;
+}
+
+/*
+ * The rail's two round controls. One shape because they are one kind of thing — a
+ * control over what is on the rail rather than over an account on it — and one
+ * declaration because they were two copies of that shape, which is how the switch came
+ * to have a transition and the arrows not to.
+ *
+ * Each keeps only what genuinely differs below: the arrows are a glyph and a disabled
+ * end-of-list state, the switch has a pressed one.
+ */
+.rail-arrow,
+.rail-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
   border-radius: var(--r-pill);
-  background: var(--ink-surface);
+  background: var(--c-wash-1);
+  color: var(--c-on-ground-1);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.rail-arrow:hover:not(:disabled),
+.rail-toggle:hover {
+  background: var(--c-wash-2);
 }
 
 .rail-arrow {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r-pill);
-  background: var(--ink-page);
-  color: var(--ink-secondary);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1;
-}
-
-.rail-arrow:hover:not(:disabled) {
-  color: var(--ink-primary);
 }
 
 .rail-arrow:disabled {
   opacity: 0.35;
 }
 
-/* minmax(0,1fr) rather than 1fr: a grid track sized 1fr will not go below its
-   content, so one long name would push the other two tabs out of the rail instead
-   of being cut */
+/*
+ * It scrolls rather than wrapping: three names of up to TAB_NAME_BUDGET characters do
+ * not fit 320px, and a rail that becomes two lines moves everything under it.
+ *
+ * The mask is what stops the last name reading as broken rather than as cut. The track
+ * no longer stretches, so the padding is what the fade lands on when the names fit —
+ * the two are the same 14px on purpose, and the padding scrolls with the content, so
+ * at the end of a scroll there is again nothing under the fade but empty track.
+ */
 .rail-tabs {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding-right: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
 }
 
+.rail-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The mock draws all three names in white and marks none of them, which is the one
+   place it is a sketch rather than a design — so the quietest of the on-ground ramp is
+   not used here: `--c-on-ground-2` is close to the frame and still leaves the current
+   one a step to be brighter than. */
 .rail-tab {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: var(--r-pill);
-  font-size: 14px;
-  color: var(--ink-secondary);
-  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+  flex: none;
+  padding: 4px 0 6px;
+  font-size: 17px;
+  color: var(--c-on-ground-2);
+  border-bottom: 2px solid transparent;
+  transition: color var(--dur-1) var(--ease-out);
 }
 
 .rail-tab:hover {
-  background: var(--ink-page);
-  color: var(--ink-primary);
+  color: var(--c-on-ground-1);
 }
 
+/* three markers and not one: the rule is what survives a reader who cannot tell the
+   two whites apart, and 15px of weight on its own is a difference nobody sees */
 .rail-tab[aria-current='true'] {
-  background: var(--ink-brand);
-  color: var(--ink-onBrand);
+  color: var(--c-on-ground-1);
   font-weight: 600;
+  border-bottom-color: var(--c-on-ground-1);
 }
 
 .rail-tab-name {
@@ -754,51 +1047,155 @@ textarea {
   white-space: nowrap;
 }
 
+/* `.badge` is grey-on-grey, which is for a card; this one is on the navy */
 .rail-tab-badge {
   font-size: 9px;
   flex: none;
+  background: var(--c-wash-2);
+  color: var(--c-on-ground-1);
 }
 
-.acct-strip-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
+.rail-add {
+  flex: none;
+  padding: 4px 0 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--c-on-ground-1);
 }
 
-.acct-strip-label {
-  font-size: 12px;
-  color: var(--ink-muted);
+.rail-add:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
-/* ---------- the three cards ---------- */
+/*
+ * The hidden accounts, as a disc with no word on it — the shape is shared with the
+ * paging arrows above; this is only what the switch adds to it.
+ *
+ * Pressed is a filled disc AND a struck-through glyph. The slash is the marker that
+ * survives a scheme with no colour in it; the fill is what makes the state legible at
+ * a glance, and it is the top bar's own white-disc-with-a-dark-glyph.
+ */
+.rail-toggle[aria-pressed='true'] {
+  background: var(--c-paper-hi);
+  color: var(--ink-brand);
+}
+
+.rail-toggle[aria-pressed='true']:hover {
+  background: var(--c-paper);
+}
+
+/* ---------- the four cells ---------- */
 
 .acct-panel {
-  margin-top: 4px;
+  margin-top: 0;
 }
 
-.acct-figure-row {
+/*
+ * Balance over spending, income-against-expenses over the transactions: the design's
+ * two columns on a wide window, and the same four blocks in that reading order down
+ * one on a phone.
+ *
+ * Three children and not four. The left pair is a `.ov-col` of its own, placed by hand
+ * in the wide block below — see the reason there: the navy card has to be able to end
+ * past the foot of the table beside it, and two cells of one grid row are one height.
+ */
+.ov-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.fig {
+.ov-col {
   display: flex;
   flex-direction: column;
+  gap: 14px;
   min-width: 0;
-  padding: 18px 20px;
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-xl);
-  background: var(--ink-surface);
 }
 
-/* the balance, which is the one the design fills */
-.fig-brand {
-  border-color: transparent;
-  background: var(--ink-brand);
-  color: var(--ink-onBrand);
+/*
+ * No border, and a shadow instead of one.
+ *
+ * The mock's cards are a fill against the page and nothing else — the edge sampled off
+ * the frame goes white to #f4f4f4 in one pixel — so this is a departure from it, asked
+ * for: a hairline round each of four cards is four rectangles drawn on a page that
+ * already separates them, but a shadow separates them without drawing anything.
+ */
+.ov-card,
+.tx-card {
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  box-shadow: var(--ov-card-shadow);
+}
+
+.ov-card {
+  min-width: 0;
+  padding: 24px 28px;
+}
+
+/* The design draws it short, and the figure in it is three lines whatever the chart
+   beside it measures. It takes only what it needs off the top of `.ov-col`, which is a
+   flex column — so this is `flex: none` rather than the `align-self: start` it was
+   under the grid, where the same words meant a height and here would mean a width. */
+.ov-balance {
+  flex: none;
+}
+
+.bal-value {
+  margin: 14px 0 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  /* `accent` and not `brand`: the two are the same navy in light mode, and in dark
+     mode brand is a fill that would be unreadable as text on the surface */
+  color: var(--ink-accent);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- income against expenses ---------- */
+
+/*
+ * Named areas rather than source order, because the two disagree on purpose: the chart
+ * is FIRST in the DOM so the card's own `<h2>` arrives before the two figures that
+ * belong under it, and SECOND in the paint, which is where the design draws it. See
+ * the note in AccountFlows.tsx — nothing in the figures is focusable, so the tab order
+ * is the same either way.
+ */
+.flows-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    'figures'
+    'chart';
+  gap: 18px;
+}
+
+.flows-figures {
+  grid-area: figures;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.flow + .flow {
+  border-top: 1px solid var(--ink-grid);
+  padding-top: 16px;
+}
+
+.flows-chart {
+  grid-area: chart;
+  min-width: 0;
+}
+
+.flows-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flows-title {
+  margin: 0;
 }
 
 .fig-head {
@@ -810,7 +1207,7 @@ textarea {
 
 .fig-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
 }
 
@@ -837,20 +1234,18 @@ textarea {
   color: var(--ink-muted);
 }
 
-.fig-brand .fig-label {
-  color: var(--c-on-ground-2);
-}
-
+/* The mock sets both of these in the same navy as the balance, and neither in green:
+   what tells income from spending here is the sign in front of it. Green is kept for
+   what it means everywhere else in the app — a direction, on the deltas underneath and
+   on an amount in the table — and printing a figure in it as well made "green" mean
+   two things on one card. */
 .fig-value {
   margin: 8px 0 0;
-  font-size: 26px;
+  font-size: 34px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  color: var(--ink-accent);
   overflow-wrap: anywhere;
-}
-
-.fig-value.is-income {
-  color: var(--ink-good);
 }
 
 .fig-delta {
@@ -858,7 +1253,7 @@ textarea {
   align-items: baseline;
   gap: 5px;
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .fig-arrow {
@@ -874,35 +1269,17 @@ textarea {
   color: var(--ink-bad);
 }
 
-/* The two above are chosen against the surface; the balance card is a navy fill, and
-   on it they measure 2.89:1 and 2.65:1 against the 4.5:1 this 12px text needs. Same
-   override as .fig-label and .fig-delta-note already carry, on the one coloured
-   element the fill was missed on. */
-.fig-brand .fig-delta.is-good {
-  color: var(--ink-goodOnBrand);
-}
-
-.fig-brand .fig-delta.is-bad {
-  color: var(--ink-badOnBrand);
-}
-
 /* the direction is the coloured part; what it is measured against is not */
 .fig-delta-note {
   color: var(--ink-muted);
 }
 
-.fig-brand .fig-delta-note {
-  color: var(--c-on-ground-2);
-}
-
-/* ---------- by month ---------- */
-
-.acct-months {
-  margin-top: 24px;
-}
+/* ---------- the chart inside the flows card ---------- */
 
 .acct-range {
-  font-size: 13px;
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ink-secondary);
 }
@@ -910,7 +1287,7 @@ textarea {
 .acct-legend {
   display: flex;
   gap: 16px;
-  margin: 6px 0 2px;
+  margin: 10px 0 0;
   font-size: 12px;
   color: var(--ink-secondary);
 }
@@ -921,16 +1298,127 @@ textarea {
   gap: 6px;
 }
 
-.acct-card {
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-xl);
-  background: var(--ink-surface);
-  padding: 18px 20px;
-  margin-top: 10px;
+/* the design's legend key is a square, where a category's is a disc: two shapes for
+   two different questions — which series, and which category */
+.swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
 }
 
 .acct-chart {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
+}
+
+/* ---------- spending by category ---------- */
+
+/*
+ * The navy card of the design, and the only fill on the page. It takes the whole of
+ * what `.ov-col` has left under the balance — which is the chart and the table beside
+ * it put together, so it ends below the last row of transactions the way the mock
+ * draws it. The ring takes the slack of that and the legend holds the foot: a donut
+ * pinned to the top of a tall card with a gap under it reads as something that failed
+ * to load.
+ */
+.ov-spend {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--ink-panel);
+  color: var(--c-on-ground-1);
+}
+
+.ov-spend-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.ov-spend-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--c-on-ground-2);
+  line-height: 1.5;
+}
+
+.ov-donut {
+  position: relative;
+  flex: 1;
+  min-height: 140px;
+}
+
+/* the total in the middle of the ring is `.donut-value` / `.donut-currency`, shared
+   with the Analytics screen's donut; the only thing that differs on this card is the
+   ground, and that is the one rule below */
+.ov-donut .donut-currency {
+  color: var(--c-on-ground-2);
+}
+
+.ov-spend-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ov-spend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--c-hairline);
+  font-size: 13px;
+}
+
+.ov-spend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-spend-pct {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The way out of the card, at the foot of it. `.btn-link` is the accent, which on this
+ * navy is the one place in the app that colour is unreadable — so it takes the ground's
+ * own white, the way everything else on this card does, and the underline arrives on
+ * hover rather than standing there permanently under three words.
+ *
+ * `margin-top: auto` is for the month that spent nothing: there is no ring to take the
+ * slack then, and a link floating in the middle of a tall navy rectangle is not a foot.
+ */
+.ov-spend-more {
+  align-self: flex-start;
+  margin-top: auto;
+  padding-bottom: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-on-ground-1);
+  text-decoration: none;
+}
+
+.ov-spend-more:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* the tail has no colour of its own, because it is not one category */
+.dot-rest {
+  background: var(--c-wash-3);
+}
+
+.ov-spend-row.is-rest {
+  color: var(--c-on-ground-2);
 }
 
 /* ---------- the two empty states ---------- */
@@ -942,6 +1430,28 @@ textarea {
   padding: 32px 20px;
   margin: 16px 0;
   text-align: center;
+}
+
+/*
+ * ...except where it is the top of the body, which is where the 16px is not a gap but
+ * a leak. `.ov-body` is pulled 64px up over the hero and has no padding or border of
+ * its own, so a top margin on its first child collapses out through it and nets against
+ * that pull: the overlap became 48px and this card sat 16px below the row of cards it
+ * stands in for. Both states that put one at the top are named — the empty workspace,
+ * and a hidden account, whose `.acct-panel` is a bare wrapper the margin collapses
+ * straight through as well.
+ *
+ * Same bug the rail's hidden-accounts control had while it was a `.btn-link` in the
+ * body; see the comment on it in AccountTabs.tsx. Not the third state: `.ov-blank` is a
+ * grid item, and grid items do not collapse their margins.
+ *
+ * `:first-child` and not the states themselves, because it is being first that does it:
+ * with a refusal above it — those carry `.ov-notice`, whose own top margin is 0 — the
+ * 16px is back to being the gap under that message, which is what it should be.
+ */
+.ov-body > .acct-blank:first-child,
+.ov-body > .acct-panel:first-child > .acct-blank:first-child {
+  margin-top: 0;
 }
 
 .acct-blank-title {
@@ -1027,11 +1537,33 @@ textarea {
 
 /* ---------- recent transactions ---------- */
 
+/* a cell of `.ov-grid` and not a block in a column: its own heading sits above the
+   card rather than inside it, which is what the design draws */
 .tx-recent {
-  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-/* the reference's white panel, with the dark header bar sitting inside it */
+/* the heading of a cell, not of a section in a column: no top margin, so it starts on
+   the same line as the title of the card beside it */
+.tx-recent .header {
+  padding: 0 2px;
+}
+
+.tx-recent .block-title {
+  margin: 0;
+}
+
+/*
+ * The reference's white panel, with the dark header bar sitting inside it. The fourth
+ * widget, and the one whose heading sits OUTSIDE it, on the page — so the card surface
+ * is here rather than on the `.tx-recent` section around it.
+ *
+ * It used to carry `.acct-card` as well, which set the same surface and then a padding
+ * and a margin this rule overrode in full: a class that existed only to be half
+ * undone. The shared half is declared with `.ov-card` above; this is the rest of it.
+ */
 .tx-card {
   padding: 10px 12px;
   margin-top: 8px;
@@ -1055,17 +1587,31 @@ textarea {
   font-size: 14px;
 }
 
+/*
+ * Percentages, not pixels. The frame divides its header bar 22.6 / 35.6 / 26.1 / 15.6,
+ * and the card holding it is now a share of the window rather than a fixed measure —
+ * so three fixed columns meant Description swallowed every pixel the window grew by,
+ * and one description sat alone in 700px while Amount kept 148.
+ */
 .tx-col-date {
-  width: 116px;
+  width: 22%;
 }
 
 .tx-col-cat {
-  width: 168px;
+  width: 26%;
 }
 
-/* wide enough for a grouped amount and a currency code: "−1,234,567.89 EUR" */
+/*
+ * The one column allowed to break the frame's ratios, and it says so in one value
+ * rather than hiding it in a `min-width` under a comment claiming percentages.
+ *
+ * 148px is what "−1,234,567.89 EUR" needs. 16% only delivers that past about 1500px of
+ * window, so below that the floor wins and Amount takes a bigger share than the frame
+ * draws — up to 27% at 900px. That is the trade made on purpose: the description is
+ * the column with slack and it ellipsises, where a clipped amount is a wrong number.
+ */
 .tx-col-amount {
-  width: 148px;
+  width: max(16%, 148px);
 }
 
 /*
@@ -1088,14 +1634,12 @@ textarea {
 /* the reference's dark header bar, which inverts in dark mode rather than washing
    out — that is the point of taking it off the theme's own two ends */
 .tx-table thead th {
-  background: var(--ink-brand);
-  color: var(--ink-onBrand);
-  font-size: 11px;
+  background: var(--ov-bar);
+  color: var(--c-on-ground-1);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   text-align: left;
-  padding: 11px 14px;
+  padding: 13px 16px;
   white-space: nowrap;
 }
 
@@ -1302,16 +1846,23 @@ textarea {
     grid-area: amount;
   }
 
-  .acct-figure-row {
-    grid-template-columns: minmax(0, 1fr);
+  .rail-tab {
+    font-size: 14px;
   }
 
-  .rail-tab {
-    padding: 9px 8px;
-    font-size: 12px;
+  .rail-tabs {
+    gap: 16px;
   }
 
   .fig-value {
+    font-size: 22px;
+  }
+
+  .bal-value {
+    font-size: 26px;
+  }
+
+  .welcome-title {
     font-size: 22px;
   }
 }
@@ -1387,13 +1938,18 @@ textarea {
   pointer-events: none;
 }
 
+/* The middle of a donut, on both screens that draw one. It was 18/13 here and 19/12 on
+   the Overview's card — two sizes for one job, which is the drift tokens.css exists to
+   stop; one set, and the Overview overrides only the colour, because only its ground
+   differs. */
 .donut-value {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .donut-currency {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ink-muted);
 }
 
@@ -1559,66 +2115,40 @@ details > summary::marker {
 /* ---------- wide screens ---------- */
 
 @media (min-width: 900px) {
-  /* row-reverse, so the sidebar is on the left while staying last in the DOM: the
-     screens are what a keyboard and a screen reader should reach first */
-  .app {
-    flex-direction: row-reverse;
-  }
-
-  /* the content panel the design lays on the navy ground */
-  .screens {
-    border-radius: var(--r-panel) 0 0 var(--r-panel);
-    overflow: hidden;
-  }
-
-  .screen {
-    padding: 0 40px;
-  }
-
-  /* content stays readable instead of stretching across the whole monitor */
   .screen-inner {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding-bottom: 40px;
+    padding: 0 40px 40px;
   }
 
-  /* bottom tabs become the sidebar */
-  .tabbar {
-    flex-direction: column;
-    width: 232px;
-    flex: none;
-    padding: 26px 0 20px;
+  .topbar-inner {
+    height: 74px;
   }
 
   .nav-mark {
-    display: block;
-    padding: 0 24px 30px;
     font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
   }
 
+  /* the design's row of pills, centred in the bar */
   .nav-list {
     flex: none;
-    flex-direction: column;
     gap: 2px;
-  }
-
-  .nav-foot {
-    display: block;
-    margin-top: auto;
-    padding-top: 16px;
   }
 
   .nav-item {
     flex: none;
     flex-direction: row;
     align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 11px 24px;
-    font-size: 15px;
+    gap: 0;
+    padding: 9px 18px;
+    border-radius: var(--r-pill);
+    font-size: 14px;
     color: var(--c-on-ground-2);
+    transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+  }
+
+  /* the pills are words, which is what the design draws; the icons are the phone bar's,
+     where a label at 11px needs the help */
+  .nav-item svg {
+    display: none;
   }
 
   .nav-item:hover {
@@ -1626,16 +2156,73 @@ details > summary::marker {
     background: var(--c-wash-1);
   }
 
-  /* the marker beside the current item, which colour alone is not */
-  .nav-item[aria-current='page']::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 7px;
-    bottom: 7px;
-    width: 3px;
-    border-radius: 0 3px 3px 0;
-    background: currentColor;
+  /*
+   * The mock's pill, which is NOT the white one this was built as: it is a raised
+   * dark tablet, lit from its top-right corner, on a band that is darker still. Every
+   * label stays white — the pill is the whole marker, and it is a filled shape rather
+   * than a colour, so it survives a scheme that drops colour.
+   */
+  .nav-item[aria-current='page'] {
+    background: linear-gradient(215deg, var(--ov-pill-from) 0%, var(--ov-pill-to) 100%);
+    color: var(--c-on-ground-1);
+    font-weight: 600;
+  }
+
+  .nav-item[aria-current='page']:hover {
+    background: linear-gradient(215deg, var(--ov-pill-from) 0%, var(--ov-pill-to) 100%);
+  }
+
+  /*
+   * The frame's own proportions rather than a fixed left column: 448 and 1239 either
+   * side of a 78px gutter, over a 1765 content column, is 25.37% / 4.42% / 70.21%. In
+   * percentages they hold at any width, which a 316px column did not — it was a
+   * quarter of the frame at 1440 and a sixth of it at 2100.
+   */
+  .ov-grid {
+    --ov-row-gap: clamp(16px, 4vw, 78px);
+
+    grid-template-columns: 25.37% minmax(0, 1fr);
+    column-gap: 4.42%;
+    row-gap: var(--ov-row-gap);
+  }
+
+  /*
+   * The left column spans both rows, and every cell to the right of it is placed by
+   * hand — auto-placement would drop the transactions under the balance the moment the
+   * left pair became one child.
+   *
+   * This is what makes the navy card taller than the table, which is what the design
+   * draws and what a shared row cannot give: the column is as tall as the chart, the
+   * gap and the table together, the balance takes what it needs off the top of it, and
+   * the donut has the rest. Its own gap is the grid's, so the three cards down the two
+   * columns sit on the same rhythm.
+   */
+  .ov-col {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    gap: var(--ov-row-gap);
+  }
+
+  .ov-grid > .ov-flows,
+  .ov-grid > .ov-blank {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .ov-grid > .tx-recent {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .flows-split {
+    grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
+    grid-template-areas: 'figures chart';
+    gap: 3%;
+  }
+
+  .flows-figures {
+    border-right: 1px solid var(--ink-grid);
+    padding-right: 3%;
   }
 
   /* the analytics donut and its legend sit side by side */
