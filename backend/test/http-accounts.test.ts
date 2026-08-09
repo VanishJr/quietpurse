@@ -393,6 +393,185 @@ describe('PATCH /api/accounts/:id {currency}', () => {
 });
 
 /**
+ * Row 11a: DELETE, which is not the PATCH above with `hidden` set. Hiding is
+ * reversible and keeps every row; this destroys the account, its transactions, its
+ * imports, their staged rows and their stored statements, and answers with the
+ * counts of what it actually removed (ROADMAP 5.1, 6.1).
+ */
+describe('DELETE /api/accounts/:id', () => {
+  const STAGED =
+    'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account';
+
+  const create = async (name: string) => {
+    const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    return res.body as { id: string; name: string };
+  };
+
+  const csvRows = (...rows: string[]): Buffer =>
+    Buffer.from(['date,amount,description', ...rows].join('\n'), 'utf8');
+
+  /** The id arm again, with the bytes chosen rather than derived from a label. */
+  const stageBytes = async (accountId: string, bytes: Buffer) => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', accountId)
+      .attach('file', bytes, 'statement.csv');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return res.body as {
+      outcome: string;
+      summary?: { importId: string };
+    };
+  };
+
+  const commit = async (accountId: string, bytes: Buffer): Promise<string> => {
+    const staged = await stageBytes(accountId, bytes);
+    const importId = staged.summary!.importId;
+    expect((await confirm(importId)).status, `confirming ${importId}`).toBe(200);
+    return importId;
+  };
+
+  const rowsIn = async (accountId: string) =>
+    (await agent.get(`/api/transactions?accountId=${accountId}`)).body as {
+      description: string;
+      transfer: boolean;
+    }[];
+
+  /**
+   * Trap 5 and Trap 6 together: numeric literals after JSON.stringify catch a count
+   * that arrived as a string from node-postgres, and the key set catches a field that
+   * arrived undefined through rowsVia - toEqual alone treats an absent key and an
+   * undefined one as the same thing. The three numbers are deliberately different:
+   * equal ones would let a dropped `document_key_version` pass as a correct answer.
+   */
+  it('answers with what it destroyed, and with nothing else', async () => {
+    const account = await create('Destroyed Counts');
+    await commit(account.id, csvRows('2026-07-01,-71.00,Counted one', '2026-07-02,-72.00,Counted two'));
+    const second = await commit(account.id, csvRows('2026-07-03,-73.00,Counted three'));
+    // one statement the user already deleted: `documents` counts the imports that
+    // still claim a readable one, which is the number the panel showed them
+    expect((await agent.delete(`/api/imports/${second}/document`)).status).toBe(200);
+
+    const res = await agent.delete(`/api/accounts/${account.id}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const body = JSON.parse(JSON.stringify(res.body)) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['deleted', 'documents', 'imports', 'transactions']);
+    expect(body).toEqual({ deleted: true, transactions: 3, imports: 2, documents: 1 });
+
+    expect(await readAccount(account.id)).toBeUndefined();
+    expect(await rowsIn(account.id)).toHaveLength(0);
+  });
+
+  it('answers 404 for an id this workspace does not have, and for one just deleted', async () => {
+    const unknown = await agent.delete('/api/accounts/no-such-account');
+    expect(unknown.status).toBe(404);
+    expect(unknown.body.error).toBe('account not found');
+
+    const account = await create('Deleted Twice Http');
+    expect((await agent.delete(`/api/accounts/${account.id}`)).status).toBe(200);
+
+    const again = await agent.delete(`/api/accounts/${account.id}`);
+    expect(again.status).toBe(404);
+    expect(again.body.error).toBe('account not found');
+  });
+
+  /**
+   * Settled decision 2 on the wire. The state is momentary and one click from over
+   * in either direction, and the sentence says so - where the currency correction's
+   * near-identical refusal offers only discard, because confirming defeats that one
+   * and is harmless here.
+   *
+   * One test, two holders: the clause is on the imports statement AND on the
+   * accounts one, and dropping either turns this 200. Without the first the imports
+   * go, the cascade takes the staged rows and the last guard finds nothing left to
+   * refuse; without the second the account goes while its imports stay behind it.
+   */
+  it('answers 409 while an import waits to be confirmed, and names both ways out', async () => {
+    const account = await create('Waiting Http');
+    const staged = await stageInto(account.id, 'waiting');
+
+    const refused = await agent.delete(`/api/accounts/${account.id}`);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(refused.body.error).toBe(STAGED);
+    expect(await readAccount(account.id)).toBeDefined();
+
+    // the way out the sentence names first, walked: confirm, then delete
+    expect((await confirm(staged.importId)).status).toBe(200);
+    const res = await agent.delete(`/api/accounts/${account.id}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({ deleted: true, transactions: 1, imports: 1, documents: 1 });
+    expect(await readAccount(account.id)).toBeUndefined();
+  });
+
+  /** Trap 7: the accounts people delete are the ones they hid first. */
+  it('deletes an account that was removed from the app', async () => {
+    const account = await create('Hidden Then Deleted Http');
+    await commit(account.id, csvRows('2026-07-04,-74.00,Hidden and full'));
+    expect((await agent.patch(`/api/accounts/${account.id}`).send({ hidden: true })).status).toBe(200);
+
+    const res = await agent.delete(`/api/accounts/${account.id}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({ deleted: true, transactions: 1, imports: 1, documents: 1 });
+    expect(await readAccount(account.id)).toBeUndefined();
+  });
+
+  /**
+   * Trap 9 and the name, which are the same class of thing: imports_file_hash_unique
+   * is partial on `committed` and accounts_name_unique is not partial at all, so
+   * destroying the account has to free both. A delete that left either held would
+   * make the statement permanently un-importable and the name permanently unusable,
+   * with nothing on any screen holding them.
+   */
+  it('frees the account name and the file hash of every import it destroyed', async () => {
+    const account = await create('Reusable Http');
+    const bytes = csvRows('2026-07-05,-75.00,Re-uploadable');
+    await commit(account.id, bytes);
+
+    // while it is committed those bytes import nothing
+    const duplicate = await stageBytes(account.id, bytes);
+    expect(duplicate.outcome).toBe('duplicate');
+
+    expect((await agent.delete(`/api/accounts/${account.id}`)).status).toBe(200);
+
+    const again = await create('Reusable Http');
+    expect(again.id).not.toBe(account.id);
+    const staged = await stageBytes(again.id, bytes);
+    expect(staged.outcome).toBe('awaiting_confirmation');
+    expect((await confirm(staged.summary!.importId)).status).toBe(200);
+    expect(await rowsIn(again.id)).toHaveLength(1);
+  });
+
+  /**
+   * The consequence ROADMAP row 11 states in its own words: delete an account and
+   * its transfers "re-read as income and expense across the whole history,
+   * retroactively". The surviving leg's monthly figures move, legitimately and with
+   * nothing on screen saying so - which is 011b's sentence to decide and this row's
+   * to leave possible.
+   *
+   * Asserted as the EFFECT and not as the call: `reclassifyAll` appears nowhere else
+   * in this suite, so "the route calls it" is held by nothing at all. Removing the
+   * line from the route turns the last assertion here red.
+   */
+  it('leaves the surviving leg of a transfer no longer a transfer', async () => {
+    const out = await create('Transfer Out');
+    const into = await create('Transfer In');
+    await commit(out.id, csvRows('2026-08-01,-77.77,Moved between my own'));
+    await commit(into.id, csvRows('2026-08-01,77.77,Moved between my own'));
+
+    const paired = await rowsIn(into.id);
+    expect(paired).toHaveLength(1);
+    expect(paired[0].transfer).toBe(true);
+    expect((await rowsIn(out.id))[0].transfer).toBe(true);
+
+    expect((await agent.delete(`/api/accounts/${out.id}`)).status).toBe(200);
+
+    const survivor = await rowsIn(into.id);
+    expect(survivor).toHaveLength(1);
+    expect(survivor[0].transfer).toBe(false);
+  });
+});
+
+/**
  * The refusal this row adds, end to end. It is reachable through the API alone: stage
  * an import for a name no account holds, create that account, and the id the import
  * was staged for no longer has a name it can use.

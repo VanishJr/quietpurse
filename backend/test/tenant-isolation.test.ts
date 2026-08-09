@@ -29,6 +29,7 @@ import {
   createImport,
   discardImport,
   dbInstance,
+  deleteAccount,
   deleteImport,
   exportBackup,
   findCommittedImportByHash,
@@ -785,6 +786,73 @@ describe('workspace isolation', () => {
         sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
             AND id = ${shared}`,
       );
+    }
+  });
+
+  /**
+   * The most destructive statement set in the data layer, crossed (ROADMAP row 11).
+   * Five statements over five tables, none of which has a foreign key to `accounts`
+   * to lean on: a single-column WHERE id = ? in any one of them would destroy the
+   * neighbour's rows behind an answer that says nothing happened. So each of the
+   * neighbour's tables is asserted on its own rather than through one count, and the
+   * refusal here has to be the one an id nowhere on the server gets.
+   */
+  it('an account of the neighbour cannot be deleted from here', async () => {
+    const shared = crypto.randomUUID();
+    let importId = '';
+    try {
+      await runWithWorkspace(OTHER, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs To Delete',
+          currency: 'USD',
+          balance: 0,
+        });
+        const record = await createImport({
+          fileHash: 'neighbour-account-delete',
+          sourceType: 'csv',
+          parserVersion: 1,
+        });
+        importId = record.id;
+        await stageImport(record.id, [], 0, {
+          id: shared as ResolvedAccountId,
+          name: 'Theirs To Delete',
+          currency: 'USD',
+        });
+        await markImportCommitted(record.id, 1, 0);
+        await insertTransactions(
+          [
+            tx({
+              accountId: shared,
+              amount: -31,
+              date: '2026-10-10T12:00:00.000Z',
+              description: 'theirs: not yours to delete',
+            }),
+          ],
+          record.id,
+        );
+        await addTransferRule('theirs only', shared);
+      });
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        expect(await deleteAccount(shared)).toEqual({ ok: false, reason: 'not-found' });
+      });
+
+      await runWithWorkspace(OTHER, async () => {
+        expect((await listAccounts(true)).map((a) => a.id)).toContain(shared);
+        expect(
+          (await listTransactions({ limit: 100 })).filter((t) => t.accountId === shared),
+        ).toHaveLength(1);
+        expect((await listImports({ accountId: shared })).imports.map((i) => i.id)).toEqual([
+          importId,
+        ]);
+        expect((await listTransferRules()).filter((r) => r.accountId === shared)).toHaveLength(1);
+      });
+    } finally {
+      // the cases below count what each workspace can see, and this is the one that
+      // adds an account, an import, a transaction and a rule to the neighbour
+      await runWithWorkspace(OTHER, () => deleteAccount(shared));
     }
   });
 
