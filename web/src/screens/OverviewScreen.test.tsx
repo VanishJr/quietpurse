@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../test/harness';
 import { fmtWeekday } from '../format';
 import { ThemeProvider } from '../theme';
-import { Account, Transaction } from '../types';
+import { Account, AccountDeleted, Transaction } from '../types';
 import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
 
 /**
@@ -792,10 +792,12 @@ describe('the account menu', () => {
     expect(await screen.findByText('4 transactions')).toBeInTheDocument();
     expect(screen.getByText('2 imports')).toBeInTheDocument();
     expect(screen.getByText('1 uploaded file')).toBeInTheDocument();
-    // and the honest part: this server has no endpoint for it, said before the click
-    // rather than after it
-    expect(screen.getByText(/no endpoint that deletes an account/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Delete permanently/ })).not.toBeInTheDocument();
+    // the wall this replaced said the server had no endpoint for it. It has one now,
+    // and the control is here — behind the account's name rather than behind nothing
+    expect(screen.queryByText(/no endpoint that deletes an account/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeDisabled();
+    // the one consequence to another account, said where it is still actionable
+    expect(screen.getByText(/stops counting as a transfer/)).toBeInTheDocument();
   });
 
   it('will not print a count that is really the limit', async () => {
@@ -836,6 +838,214 @@ describe('the account menu', () => {
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
     expect(requestUrls()).toContain('GET /api/imports?accountId=acc-1');
     expect(requestUrls()).not.toContain('GET /api/imports');
+  });
+});
+
+describe('deleting an account', () => {
+  /** The route's own answer, declared with the client's type so a fourth key is a tsc error. */
+  const DESTROYED: AccountDeleted = { deleted: true, transactions: 12, imports: 3, documents: 2 };
+
+  /**
+   * A preview that could not have produced any of the numbers above, and vice versa.
+   * Every figure in the sentence is therefore evidence about where it was read.
+   */
+  const PREVIEW = importsResponse([importRecord()], {
+    imports: 137,
+    documents: 90,
+    transactions: 4021,
+  });
+
+  const openDelete = async (name: string) => {
+    fireEvent.click(await screen.findByRole('button', { name: `Account menu: ${name}` }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByText('Delete'));
+  };
+
+  const confirmDelete = async (name: string) => {
+    fireEvent.change(await screen.findByLabelText(/to confirm/), { target: { value: name } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
+  };
+
+  it('drops the account from the rail and names what the server destroyed', async () => {
+    const other = account({ id: 'acc-3', name: 'Cash' });
+    let list: Account[] = [ACCOUNTS[0], other];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      'GET /api/imports': () => ok(PREVIEW),
+      'DELETE /api/accounts/acc-1': () => {
+        list = [other];
+        return ok(DESTROYED);
+      },
+    });
+    await panel('Sparkasse Giro');
+
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+
+    const notice = await screen.findByText(/Sparkasse Giro was deleted/);
+    // the response's three numbers and none of the preview's: the panel hands over the
+    // parsed body, and the preview it counted from never crosses that callback
+    expect(notice).toHaveTextContent('12 transactions, 3 imports and 2 uploaded files');
+    expect(notice).not.toHaveTextContent('137');
+    expect(notice).not.toHaveTextContent('90');
+    expect(notice).not.toHaveTextContent('4021');
+    // Sheet restores focus to nothing when it closes, so the sentence is the only thing
+    // that reports the most destructive action in the app. `closest` and not a document
+    // query: AccountTabs renders a polite region on this same screen, and a document
+    // query would pass with the notice sitting outside every one of them.
+    expect(notice.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(await tab('Cash')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sparkasse Giro' })).toBeNull();
+  });
+
+  /**
+   * The money-shaped one. Deleting a whole account breaks every transfer pair one of
+   * whose legs was in it, so the SURVIVING account's figures move — and nothing on the
+   * screen would say so.
+   */
+  it('re-reads the surviving account, whose transfers the delete un-paired', async () => {
+    const A = account({ id: 'acc-1', name: 'Sparkasse Giro' });
+    const B = account({ id: 'acc-2', name: 'Savings' });
+    const PAIRED = [
+      txn('2026-08-03T00:00:00.000Z', -120, { description: 'Rewe', category: 'food' }),
+      txn('2026-08-02T00:00:00.000Z', -300, { description: 'To savings', transfer: true }),
+    ];
+    // the same two rows after the server re-classified them: the surviving leg has no
+    // partner left, so it stops being a transfer and starts counting as spending
+    const REPAIRED = PAIRED.map((t) => ({ ...t, transfer: false }));
+    let gone = false;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(gone ? [A] : [A, B]),
+      'GET /api/transactions': () => ok(gone ? REPAIRED : PAIRED),
+      'GET /api/imports': () => ok(importsResponse([])),
+      'DELETE /api/accounts/acc-2': () => {
+        gone = true;
+        return ok(DESTROYED);
+      },
+    });
+    const august = () => within(screen.getByRole('row', { name: /Aug 2026/ }));
+
+    await panel('Sparkasse Giro');
+    // 120 and not 420: the 300 is a transfer while the account it went to exists
+    expect(august().getByText('120 EUR')).toBeInTheDocument();
+
+    fireEvent.click(await tab('Savings'));
+    await openDelete('Savings');
+    await confirmDelete('Savings');
+    await screen.findByText(/Savings was deleted/);
+
+    await waitFor(() => expect(august().getByText('420 EUR')).toBeInTheDocument());
+    // and the list is the server's, not the old one with a row filtered out of it
+    expect(requests().filter((r) => r === 'GET /api/accounts')).toHaveLength(2);
+  });
+
+  it('leaves the empty state behind when the last account goes', async () => {
+    let list: Account[] = [ACCOUNTS[0]];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      'GET /api/imports': () => ok(importsResponse()),
+      'DELETE /api/accounts/acc-1': () => {
+        list = [];
+        return ok(DESTROYED);
+      },
+    });
+    await panel('Sparkasse Giro');
+
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+
+    // the screen a new user gets, rather than a rail with nothing under it
+    expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Sparkasse Giro was deleted/)).toBeInTheDocument();
+  });
+
+  /** The other arm of the sentence, and the only one whose numbers are not printed. */
+  it('says an empty account held nothing rather than counting three zeros', async () => {
+    let list: Account[] = [ACCOUNTS[0]];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      'GET /api/imports': () => ok(importsResponse()),
+      'DELETE /api/accounts/acc-1': () => {
+        list = [];
+        return ok({
+          deleted: true,
+          transactions: 0,
+          imports: 0,
+          documents: 0,
+        } satisfies AccountDeleted);
+      },
+    });
+    await panel('Sparkasse Giro');
+
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+
+    expect(
+      await screen.findByText(
+        /Sparkasse Giro was deleted\. It held no transactions, no imports and no uploaded files\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('deletes a hidden account through the panel that is its only menu', async () => {
+    let list: Account[] = ACCOUNTS;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      // no GET /api/transactions for the preview: a hidden account's rows are filtered
+      // out of that endpoint, so the panel counts from the import totals instead
+      'GET /api/imports': () => ok(PREVIEW),
+      'DELETE /api/accounts/acc-2': () => {
+        list = [ACCOUNTS[0]];
+        return ok({
+          deleted: true,
+          transactions: 1,
+          imports: 1,
+          documents: 1,
+        } satisfies AccountDeleted);
+      },
+    });
+    await panel('Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB'));
+    await openDelete('Old DKB');
+    await confirmDelete('Old DKB');
+
+    // each count singular on its own, so a mixed sentence still reads
+    expect(
+      await screen.findByText(/Old DKB was deleted — 1 transaction, 1 import and 1 uploaded file/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /hidden account/ })).toBeNull();
+  });
+
+  it('clears the sentence when the next account’s panel opens', async () => {
+    const other = account({ id: 'acc-3', name: 'Cash' });
+    let list: Account[] = [ACCOUNTS[0], other];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(list),
+      'GET /api/imports': () => ok(PREVIEW),
+      'DELETE /api/accounts/acc-1': () => {
+        list = [other];
+        return ok(DESTROYED);
+      },
+    });
+    await panel('Sparkasse Giro');
+
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+    await screen.findByText(/Sparkasse Giro was deleted/);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Account menu: Cash' }));
+
+    // a sentence about the account that is gone, standing over the panel of one that
+    // is not, is a sentence about the wrong account
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText(/Sparkasse Giro was deleted/)).toBeNull();
   });
 });
 

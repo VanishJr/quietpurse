@@ -1837,6 +1837,20 @@ async function rowsVia<T>(d: Executor, q: SQL): Promise<T[]> {
 }
 
 /**
+ * execCount on a caller-supplied executor. Needed where the count a caller reports
+ * must be the affected-row count of the statement that did the deleting, inside the
+ * transaction that did it - execCount reaches for the pool, which is a second
+ * connection and a second snapshot.
+ */
+async function execCountVia(d: Executor, q: SQL): Promise<number> {
+  const res = (await d.execute(q)) as unknown as {
+    rowCount?: number | null;
+    affectedRows?: number;
+  };
+  return Number(res.rowCount ?? res.affectedRows ?? 0);
+}
+
+/**
  * The (account, group prefix) pairs whose computed ordinals are about to lose
  * rows. Called before the delete, while those rows still exist. A statement of a
  * few thousand rows produces nearly as many groups, so everything downstream of
@@ -2012,6 +2026,258 @@ export async function deleteImport(
     await recalcAccountBalanceFromTransactions(accountId);
   }
   return { removed, accountIds };
+}
+
+/** Rolls the delete back when this workspace has no account of that id. */
+class NoSuchAccount extends Error {}
+
+/** Rolls the delete back when the account still holds an outstanding import's rows. */
+class AccountHoldsStagedRows extends Error {}
+
+/** What deleteAccount destroyed, counted by the statements that destroyed it. */
+export interface DeletedByAccount {
+  transactions: number;
+  imports: number;
+  /** of those imports, the ones claiming a READABLE document - see deleteAccount */
+  documents: number;
+  transferRules: number;
+}
+
+/**
+ * An allow-list rather than a subtraction, for AccountCreate's reason: a refusal
+ * added to AccountWrite is then an outcome DELETE is never silently made to answer
+ * for.
+ */
+export type AccountDelete =
+  | { ok: true; deleted: DeletedByAccount }
+  | Extract<AccountWrite, { reason: 'not-found' } | { reason: 'staged-import' }>;
+
+/**
+ * Every exported table carrying BOTH an account and a workspace - exactly the
+ * tables a deleted account leaves rows in. Derived from the schema module rather
+ * than remembered, so a new one is a compile error at ACCOUNT_CASCADE instead of a
+ * table nobody's delete reaches. There is no foreign key from any of them to
+ * `accounts` and there must not be (resolveUploadAccountId mints an id for an
+ * account that does not exist yet), so this is the whole of the enumeration.
+ *
+ * Both conditions are load-bearing: `auth_account` has an accountId and a userId
+ * and no workspaceId, and it is better-auth's, not an account of the user's.
+ */
+type AccountScoped = {
+  [K in keyof typeof s]: (typeof s)[K] extends { accountId: unknown; workspaceId: unknown }
+    ? K
+    : never;
+}[keyof typeof s];
+
+/** The answer for a table whose rows go with their import's, by foreign key. */
+const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
+
+/**
+ * What deleteAccount does to each of them, and `satisfies` rather than an
+ * annotation: a missing key and an excess key are both compile errors, while each
+ * statement keeps its own type at the call site. What it does NOT prove is that an
+ * entry is executed - the body consumes these by name, in an order that is not
+ * interchangeable - so a fifth table added here and never called would compile.
+ * ACCOUNT_CASCADE_TABLES is the other half of that, and the docstring is the rest.
+ */
+const ACCOUNT_CASCADE = {
+  transactions: (id: string): SQL =>
+    sql`DELETE FROM transactions WHERE ${WS()} AND account_id = ${id}`,
+  imports: (id: string): SQL =>
+    sql`DELETE FROM imports WHERE ${WS()} AND account_id = ${id}
+        AND NOT ${HOLDS_STAGED_ROWS(id)} RETURNING id, document_key_version`,
+  stagedTransactions: CASCADES_FROM_IMPORTS,
+  transferRules: (id: string): SQL =>
+    sql`DELETE FROM transfer_rules WHERE ${WS()} AND account_id = ${id}`,
+} satisfies Record<AccountScoped, ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS>;
+
+/** The census as data, so a table added to it is a test failure as well as a type. */
+export const ACCOUNT_CASCADE_TABLES = Object.keys(ACCOUNT_CASCADE);
+
+/**
+ * Deletes an account and everything attributed to it: its transactions, its
+ * imports (and, by the foreign key on staged_transactions.import_id, whatever they
+ * had staged), its transfer rules, and the stored source document of every import
+ * destroyed. **This is the second sanctioned path that deletes a user's
+ * transactions and the second that deletes stored documents** (ROADMAP 4.4, 4.5) -
+ * deleteImport above is the first, and anything else that ever needs to must be as
+ * visible as these two.
+ *
+ * Transactions are removed on account_id and NOT through the import cascade alone:
+ * a row whose import_id is NULL - a restored backup, or the deleted bank providers
+ * - is matched by no other clause, and left behind it is a transaction whose
+ * account does not exist, in no summary and reachable by nothing.
+ *
+ * What it deliberately does not reach: an import whose account_id is NULL. An
+ * upload that died before staging holds a real bank statement and belongs to no
+ * account (resolveUploadAccountId resolves the destination before createImport, and
+ * stageImport writes the column only after the parse), so there is no honest way to
+ * attribute it here. Its bytes stay on disk and its row stays in the workspace-wide
+ * history; see DEBT.md.
+ *
+ * Refused while the account holds staged rows, which is settled row 11 decision 2
+ * and not the same case as holding committed imports: an account worth deleting is
+ * precisely one that holds those. The guard is a clause of the two statements it
+ * protects rather than a count taken before them, and it is on BOTH because the
+ * imports delete cascades the staged rows away - read only on the `accounts`
+ * statement it would be answering a question whose evidence it had just destroyed,
+ * and could never fire.
+ *
+ * What it prevents, measured rather than assumed: without the clause this delete
+ * takes the outstanding import with everything else, and the summary card still on
+ * the user's screen answers "import not found" when they press Confirm. The
+ * resurrection Trap 1 names - confirmImport upserting the account back, with its
+ * rows, behind a 200 - needs an import this delete does NOT match, and there is
+ * one: an upload still parsing, whose account_id is NULL until stageImport writes
+ * it. It reaches the resurrection serially, with no concurrency anywhere - create
+ * the account, create the import, delete the account, then stage and confirm, and
+ * the account is back holding the statement. Neither this guard nor the lock below
+ * closes that window. See DEBT.md.
+ *
+ * The FOR UPDATE read at the top takes the same row lock confirmImport takes
+ * (see its `.for('update')` on `accounts`), and that is what the lock is for: with
+ * a plain read a confirm can commit BETWEEN the imports delete and the accounts
+ * delete - its rows landing in an account this has already emptied, its import row
+ * inserted after this swept them, its cleanup leaving no staged rows for the last
+ * guard to see - and the account is then deleted with orphaned transactions and a
+ * surviving import behind it. With the lock a confirm commits entirely before or
+ * entirely after. **Nothing in the suite covers that**: PGlite is single-connection
+ * (test/pglite.ts), so no test here can hold this transaction open while a second
+ * one commits, and this paragraph is the whole of what holds it.
+ *
+ * The ordinals of the dedup groups need no repair, because dedupGroup includes the
+ * account id: deleting the whole of one account removes whole 1..n groups rather
+ * than punching holes in them. That premise has exactly one violator - an `imports`
+ * row attributed to this account owning rows in ANOTHER one, which restoreBackup
+ * can insert because nothing validates the two against each other - and it is
+ * probed for, repaired, and logged rather than refused, on deleteImport's reasoning:
+ * the rows' provenance is being destroyed, so the rows go, and an account nobody can
+ * delete over a state nobody can see is Article 17 blocked by a corrupt backup.
+ *
+ * `documents` counts the destroyed imports that claimed a READABLE document
+ * (document_key_version IS NOT NULL - the predicate behind ImportTotals.documents,
+ * so the number a user was shown and the number they are told was destroyed are one
+ * fact). The blobs themselves are removed for EVERY destroyed import whatever its
+ * pointer said, exactly as deleteImport does and for the reason its comment gives.
+ * The two are not in conflict: the pointer records what can be read, never what is
+ * on disk.
+ */
+export async function deleteAccount(id: string): Promise<AccountDelete> {
+  const deleted: DeletedByAccount = {
+    transactions: 0,
+    imports: 0,
+    documents: 0,
+    transferRules: 0,
+  };
+  let gone: { id: string; document_key_version: number | null }[] = [];
+  let strayAccountIds: string[] = [];
+  let strayImportIds: string[] = [];
+  try {
+    await getDb().transaction(async (tx) => {
+      const [held] = await rowsVia<{ id: string }>(
+        tx,
+        sql`SELECT id FROM accounts WHERE ${WS()} AND id = ${id} FOR UPDATE`,
+      );
+      if (!held) throw new NoSuchAccount();
+
+      deleted.transactions = await execCountVia(tx, ACCOUNT_CASCADE.transactions(id));
+
+      // after the delete above, so every row this can still see is another
+      // account's by construction. Empty in every state a product path produces -
+      // confirmImport refuses a staged set whose rows disagree with the import's
+      // account - and a semi-join over this account's imports (idx_tx_import at
+      // best, a transactions scan if the planner prefers one) is what proves that
+      // instead of assuming it
+      const strays = await rowsVia<{ import_id: string; account_id: string }>(
+        tx,
+        sql`SELECT DISTINCT t.import_id, t.account_id FROM transactions t
+            WHERE t.${WS()} AND t.account_id <> ${id}
+              AND t.import_id IN (
+                SELECT i.id FROM imports i WHERE i.${WS()} AND i.account_id = ${id})`,
+      );
+      const groups = new Map<string, { accountId: string; prefix: string }>();
+      if (strays.length > 0) {
+        strayImportIds = [...new Set(strays.map((r) => r.import_id))];
+        strayAccountIds = [...new Set(strays.map((r) => r.account_id))];
+        // called while those rows still exist, which is what computedGroupsOf's
+        // docstring requires, and deduped across imports the way it dedupes within one
+        for (const importId of strayImportIds) {
+          for (const g of await computedGroupsOf(tx, importId)) {
+            groups.set(`${g.accountId}|${g.prefix}`, g);
+          }
+        }
+      }
+
+      gone = await rowsVia<{ id: string; document_key_version: number | null }>(
+        tx,
+        ACCOUNT_CASCADE.imports(id),
+      );
+      deleted.imports = gone.length;
+      deleted.documents = gone.filter((r) => r.document_key_version !== null).length;
+
+      // the checked premise, never insurance: renumberGroups moves rows through a
+      // parking namespace and can trip the unique index against a concurrent
+      // import, so an unnecessary call is a new way for a delete to fail
+      if (groups.size > 0) await renumberGroups(tx, [...groups.values()]);
+
+      deleted.transferRules = await execCountVia(tx, ACCOUNT_CASCADE.transferRules(id));
+
+      const [removed] = await rowsVia<{ id: string }>(
+        tx,
+        sql`DELETE FROM accounts WHERE ${WS()} AND id = ${id}
+            AND NOT ${HOLDS_STAGED_ROWS(id)} RETURNING id`,
+      );
+      // unambiguous, unlike updateAccount's read-back: the row lock is held from the
+      // top of this transaction, so the row cannot have gone missing under us and
+      // zero rows here can only be the guard
+      if (!removed) throw new AccountHoldsStagedRows();
+    });
+  } catch (e) {
+    if (e instanceof NoSuchAccount) return { ok: false, reason: 'not-found' };
+    if (e instanceof AccountHoldsStagedRows) return { ok: false, reason: 'staged-import' };
+    throw e;
+  }
+
+  // The rows are gone; the blobs go second, for deleteImport's reasons, and from
+  // the set the DELETE returned rather than one selected before it - an upload
+  // landing between a select and the delete would leave a blob nothing can reach
+  // again. A failure is logged and not raised: the rows really are deleted.
+  for (const row of gone) {
+    try {
+      await deleteDocument(row.id);
+    } catch (e) {
+      logDb.error(
+        { err: e },
+        `import ${row.id} was deleted with account ${id}, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
+      );
+    }
+    if (row.document_key_version !== null && !knowsKeyVersion(row.document_key_version)) {
+      logDb.error(
+        `import ${row.id} was deleted with account ${id}, but its document was written under key layout ${row.document_key_version}, which this server cannot address - remove it by hand`,
+      );
+    }
+  }
+
+  // The database was already inconsistent before this call, and repairing it in
+  // silence is how it stays that way. Written here rather than beside the probe
+  // that found the rows: the probe runs inside the transaction and ahead of both
+  // guarded statements, so a delete refused at the guard would have announced a
+  // repair that then rolled back. Past the catch, the rows really are gone.
+  if (strayAccountIds.length > 0) {
+    logDb.warn(
+      `account ${id} holds imports (${strayImportIds.join(', ')}) that own rows in ${strayAccountIds.join(', ')} - deleting the account takes those rows too`,
+    );
+  }
+
+  // Nothing is owed for `id` itself: the balance is the sum of an account's own
+  // transactions, so no other account moves when these go, and the account's own
+  // row no longer exists - recalculating it would update nothing and log that
+  // something happened. These are the accounts the stray probe named, which lost
+  // rows to the imports cascade above.
+  for (const accountId of strayAccountIds) {
+    await recalcAccountBalanceFromTransactions(accountId);
+  }
+  return { ok: true, deleted };
 }
 
 // ---------- classification (transfers / refunds / categories) ----------

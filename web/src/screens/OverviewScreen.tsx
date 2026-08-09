@@ -75,7 +75,7 @@ import { ImportHistory } from '../components/ImportHistory';
 import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactions';
 import { SpendingByCategory } from '../components/SpendingByCategory';
 import { fmtMoney, fmtWeekday } from '../format';
-import { Account, Transaction } from '../types';
+import { Account, AccountDeleted, Transaction } from '../types';
 
 /** The window the chart opens on: long enough to be a trend, short enough to be full. */
 const DEFAULT_WINDOW: MonthWindow = 6;
@@ -125,6 +125,23 @@ const openAt = (kind: DialogKind, account: Account | null): Dialog => ({
   account,
 });
 
+/** Singular at one, each count on its own, so a mixed sentence still reads. */
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What the delete destroyed, in the server's own numbers and never the preview's —
+ * for a hidden account the two legitimately differ, and the one worth printing is the
+ * count of rows that actually went. "uploaded file" is the noun the preview's third
+ * bullet uses, and deliberately: the two numbers are a claim about the same fact, so a
+ * reader who compares them is entitled to find them equal.
+ */
+const destroyedSentence = (name: string, d: AccountDeleted): string =>
+  d.transactions === 0 && d.imports === 0 && d.documents === 0
+    ? `${name} was deleted. It held no transactions, no imports and no uploaded files.`
+    : `${name} was deleted — ${count(d.transactions, 'transaction', 'transactions')}, ` +
+      `${count(d.imports, 'import', 'imports')} and ` +
+      `${count(d.documents, 'uploaded file', 'uploaded files')} went with it.`;
+
 interface Props {
   user: SessionUser;
   /** Bumped by the navigation's Import; each new value opens the import panel once. */
@@ -168,6 +185,8 @@ export function OverviewScreen({
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What the last delete destroyed. Not a refusal, and not the dashboard's. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   /** Hidden accounts are off the rail until asked for; restoring them has to stay reachable. */
@@ -303,6 +322,28 @@ export function OverviewScreen({
     load();
   };
 
+  const afterDelete = (deleted: Account, destroyed: AccountDeleted) => {
+    setDialog(null);
+    // before the reload and outside its failure: the account is gone whether or not the
+    // list comes back, and a screen that says nothing sends the reader to press again
+    setNotice(destroyedSentence(deleted.name, destroyed));
+    // the whole list, never a splice: it is the server's answer instead of a guess at
+    // it, it is the shape afterCreate already uses, and the delete's own path is the
+    // wrong place to be clever — the deleted account is the selected one today, so a
+    // splice happens to work, and nothing in the code says it will stay that way.
+    // Deleting an account also un-pairs every transfer whose other leg was in it, so
+    // the SURVIVING account's income and expenses move and its rows have to be re-read.
+    load();
+  };
+
+  // Trap: a sentence about the account that is gone must not stand above the panel of
+  // the next one. An effect rather than a line in each setDialog caller, because a
+  // caller written later cannot forget an effect. `afterDelete` sets dialog to null in
+  // the same batch, so this sees null and does not eat the sentence it was just given.
+  useEffect(() => {
+    if (dialog) setNotice(null);
+  }, [dialog]);
+
   const mine = data?.accountId === selected?.id ? data : null;
   const months = useMemo(
     () => (mine ? monthlyTotals(mine.window, window_) : []),
@@ -407,6 +448,18 @@ export function OverviewScreen({
             draws one, so each carries the cards' own paper under it rather than being
             read off the band. */}
         {error && <p className="error ov-notice">Error: {error}</p>}
+
+        {/* the wrapper is always here and only the sentence is conditional: a live region
+            that arrives in the same commit as its text announces nothing. It is needed at
+            all because Sheet does not restore focus on close, so after a delete focus is
+            on <body> and there is nothing else to say the account went.
+
+            `ov-notice` on the sentence and not on the wrapper: the wrapper is in the DOM
+            even with nothing to say, and a card's fill and padding on an empty element
+            would be a blank white box sitting on the navy. */}
+        <div aria-live="polite">
+          {notice && <p className="hint ov-notice">{notice}</p>}
+        </div>
 
         {/* the whole reason this screen exists for a new user: nothing has been uploaded,
             and the way to upload is the biggest thing on the page */}
@@ -562,6 +615,7 @@ export function OverviewScreen({
             }}
             onCreated={afterCreate}
             onUpdated={applyAccount}
+            onDeleted={afterDelete}
           />
         )}
       </div>

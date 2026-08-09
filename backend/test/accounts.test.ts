@@ -13,17 +13,26 @@
  * not close - two uploads of a new name overlapping before either stages - is not
  * reproducible here. Its outcome is the confirm-time collision asserted below.
  */
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import {
+  ACCOUNT_CASCADE_TABLES,
   ACCOUNT_NAME_MAX,
+  type ResolvedAccountId,
+  addTransferRule,
+  clearImportDocument,
   confirmImport,
   createAccount,
+  createImport,
   dbInstance,
+  deleteAccount,
   findAccountByName,
   getAccount,
+  insertTransactions,
   listTransactions,
+  recalcAccountBalanceFromTransactions,
   resolveUploadAccountId,
+  stageImport,
   updateAccount,
 } from '../src/db';
 import {
@@ -32,6 +41,8 @@ import {
   ImportSummary,
   importStatement,
 } from '../src/providers/statement';
+import { NewTransaction } from '../src/types';
+import { markImportCommitted } from './helpers';
 import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
@@ -538,6 +549,282 @@ describe('a name taken between the upload and the confirm', () => {
       inserted: 1,
     });
     expect(await listTransactions({ accountId: blockerId })).toHaveLength(1);
+  });
+});
+
+/**
+ * Row 11a: the delete that is not a hide. Asserted per table with raw counts rather
+ * than through the functions that read them - listTransactions and listImports both
+ * filter, and a delete that left rows behind an account nothing displays would pass
+ * every one of them.
+ */
+const countOf = async (q: SQL): Promise<number> => {
+  const res = (await dbInstance().execute(q)) as unknown as { rows: { n: string | number }[] };
+  return Number(res.rows[0].n);
+};
+
+const rowsOfAccount = (accountId: string): Promise<number> =>
+  countOf(sql`SELECT COUNT(*) AS n FROM transactions
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+
+const importsOfAccount = (accountId: string): Promise<number> =>
+  countOf(sql`SELECT COUNT(*) AS n FROM imports
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+
+const stagedOfAccount = (accountId: string): Promise<number> =>
+  countOf(sql`SELECT COUNT(*) AS n FROM staged_transactions
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+
+const rulesOfAccount = (accountId: string): Promise<number> =>
+  countOf(sql`SELECT COUNT(*) AS n FROM transfer_rules
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+
+const stagedOfImport = (importId: string): Promise<number> =>
+  countOf(sql`SELECT COUNT(*) AS n FROM staged_transactions
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${importId}`);
+
+const balanceOf = (accountId: string): Promise<number> =>
+  countOf(sql`SELECT balance_cents AS n FROM accounts
+              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${accountId}`);
+
+/** One row, always in the same dedup group: one account, one day, one amount. */
+const stagedRow = (accountId: string): NewTransaction => ({
+  accountId,
+  provider: 'upload',
+  amount: -5,
+  currency: 'EUR',
+  date: '2026-06-15T00:00:00.000Z',
+  description: 'attributed elsewhere',
+  category: 'other',
+  fee: null,
+});
+
+const newAccount = async (name: string): Promise<string> => {
+  const created = await createAccount({ name, currency: 'EUR' });
+  expect(created, `creating ${name}`).toMatchObject({ ok: true });
+  return created.ok ? created.account.id : '';
+};
+
+/**
+ * An import attributed to an account with nothing staged under it - the fixture
+ * shape tenant-isolation.test.ts already uses, and the only way to write
+ * imports.account_id without going through a real file.
+ */
+async function importFor(accountId: string, fileHash: string): Promise<string> {
+  const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
+  await stageImport(record.id, [], 0, {
+    id: accountId as ResolvedAccountId,
+    name: fileHash,
+    currency: 'EUR',
+  });
+  await markImportCommitted(record.id, 0, 0);
+  return record.id;
+}
+
+describe('deleting an account', () => {
+  /** One of everything the cascade has to reach, and no two counts alike. */
+  async function populate(name: string): Promise<string> {
+    const id = await newAccount(name);
+    const first = await uploadTo(
+      id,
+      csvFile(`2026-06-01,-61.00,${name} one`, `2026-06-02,-62.00,${name} two`),
+    );
+    expect(await confirmImport(first.importId)).toMatchObject({ confirmed: true, inserted: 2 });
+    const second = await uploadTo(id, csvFile(`2026-06-03,-63.00,${name} three`));
+    expect(await confirmImport(second.importId)).toMatchObject({ confirmed: true, inserted: 1 });
+    // one of the two no longer claims a readable document, so `documents` and
+    // `imports` are different numbers - equal ones would hide a column that arrived
+    // undefined through rowsVia and read as "no pointer"
+    await clearImportDocument(second.importId);
+    await addTransferRule(`${name} transfer`, id);
+    return id;
+  }
+
+  it('removes its transactions, imports, transfer rules and the account row', async () => {
+    const id = await populate('Doomed');
+    expect(await rowsOfAccount(id)).toBe(3);
+    expect(await importsOfAccount(id)).toBe(2);
+    expect(await rulesOfAccount(id)).toBe(1);
+
+    expect(await deleteAccount(id)).toEqual({
+      ok: true,
+      deleted: { transactions: 3, imports: 2, documents: 1, transferRules: 1 },
+    });
+
+    expect(await rowsOfAccount(id)).toBe(0);
+    expect(await importsOfAccount(id)).toBe(0);
+    expect(await stagedOfAccount(id)).toBe(0);
+    expect(await rulesOfAccount(id)).toBe(0);
+    expect(await getAccount(id)).toBeUndefined();
+  });
+
+  /**
+   * The staged rows go by the foreign key on (workspace_id, import_id) and not by a
+   * statement of this delete's own - which is the entry ACCOUNT_CASCADE answers with
+   * CASCADES_FROM_IMPORTS. Reachable only through rows the account does not own:
+   * staged rows carrying its OWN id refuse the delete instead (the case below).
+   *
+   * What it pins is not only that: the import destroyed here is awaiting_confirmation,
+   * which settled decision 2 says must be refused, and it is destroyed behind ok: true
+   * because the guard reads staged rows by account_id while the delete removes imports
+   * by attribution. This asserts the cascade, not that outcome - see DEBT.md, "The
+   * account delete's guard and its cascade disagree on a key".
+   */
+  it('takes the staged rows of every import it destroys', async () => {
+    const owner = await newAccount('Staged Owner');
+    const elsewhere = await newAccount('Staged Elsewhere');
+    const record = await createImport({
+      fileHash: 'staged-under-another-account',
+      sourceType: 'csv',
+      parserVersion: 1,
+    });
+    await stageImport(record.id, [stagedRow(elsewhere)], 0, {
+      id: owner as ResolvedAccountId,
+      name: 'Staged Owner',
+      currency: 'EUR',
+    });
+    expect(await stagedOfImport(record.id)).toBe(1);
+
+    expect(await deleteAccount(owner)).toMatchObject({ ok: true, deleted: { imports: 1 } });
+    expect(await stagedOfImport(record.id)).toBe(0);
+  });
+
+  it('leaves another account in the same workspace exactly as it was', async () => {
+    const doomed = await populate('Neighbour Doomed');
+    const kept = await populate('Neighbour Kept');
+    const balance = await balanceOf(kept);
+    expect(balance).toBe(-18600);
+
+    expect(await deleteAccount(doomed)).toMatchObject({ ok: true });
+
+    expect(await rowsOfAccount(kept)).toBe(3);
+    expect(await importsOfAccount(kept)).toBe(2);
+    expect(await rulesOfAccount(kept)).toBe(1);
+    expect(await balanceOf(kept)).toBe(balance);
+  });
+
+  /** Trap 7: hiding is what people do before deleting, so the two must compose. */
+  it('deletes a hidden account, which is what hiding is usually the first half of', async () => {
+    const id = await populate('Hidden Then Deleted');
+    expect(await updateAccount(id, { hidden: true })).toMatchObject({ ok: true });
+
+    expect(await deleteAccount(id)).toMatchObject({
+      ok: true,
+      deleted: { transactions: 3, imports: 2 },
+    });
+    expect(await getAccount(id)).toBeUndefined();
+  });
+
+  /**
+   * accounts_name_unique is unconditional - (workspace_id, lower(name)), nothing
+   * partial about it - so a delete that left the row behind would make the name
+   * permanently unusable with nothing on any screen holding it.
+   */
+  it('frees the name it held', async () => {
+    const id = await populate('Reusable Name');
+    expect(await deleteAccount(id)).toMatchObject({ ok: true });
+
+    const again = await createAccount({ name: 'reusable name', currency: 'USD' });
+    expect(again).toMatchObject({ ok: true });
+    expect(again.ok ? again.account.id : '').not.toBe(id);
+  });
+
+  it('answers not-found for an id this workspace does not have, twice over', async () => {
+    expect(await deleteAccount('no-such-account')).toEqual({ ok: false, reason: 'not-found' });
+
+    const id = await populate('Deleted Twice');
+    expect(await deleteAccount(id)).toMatchObject({ ok: true });
+    expect(await deleteAccount(id)).toEqual({ ok: false, reason: 'not-found' });
+  });
+
+  /**
+   * Settled decision 2. Committed imports do NOT refuse - an account worth deleting
+   * is precisely one that holds those, which is the case above - and this state is
+   * different in kind: it is momentary and one click from over in either direction.
+   *
+   * Without the clause the delete takes the outstanding import too, and the summary
+   * the user is looking at answers "import not found" on Confirm. Measured, not
+   * assumed: with the clause removed this assertion reads
+   * `{ ok: true, deleted: { imports: 3, transactions: 3, ... } }`.
+   */
+  it('refuses while an import for it is awaiting confirmation, and deletes once it is gone', async () => {
+    const id = await populate('Awaiting Confirmation');
+    const staged = await uploadTo(id, csvFile('2026-06-04,-64.00,Still waiting'));
+
+    expect(await deleteAccount(id)).toEqual({ ok: false, reason: 'staged-import' });
+    // nothing of the account went with the refusal: the guard is a clause of the
+    // statements themselves, so a refused delete rolls the whole cascade back
+    expect(await rowsOfAccount(id)).toBe(3);
+    expect(await importsOfAccount(id)).toBe(3);
+    expect(await rulesOfAccount(id)).toBe(1);
+    expect(await getAccount(id)).toBeDefined();
+
+    // transient, not a latch - and confirming is a way out as well as discarding,
+    // which is what the route's sentence offers
+    expect(await confirmImport(staged.importId)).toMatchObject({ confirmed: true });
+    expect(await deleteAccount(id)).toMatchObject({
+      ok: true,
+      deleted: { transactions: 4, imports: 3 },
+    });
+  });
+
+  /**
+   * Trap 2's second direction. restoreBackup inserts `imports` and `transactions`
+   * straight from a user-supplied file and sanitizeRow checks column names and types
+   * only, so an import attributed to one account owning another account's rows is
+   * constructible and nothing in the repository refuses it. The rows go with the
+   * provenance being destroyed (deleteImport's semantics), and what is left in the
+   * surviving account is repaired: the ordinals go back to a dense 1..n and the
+   * balance is recomputed. Refusing instead would make an account undeletable over
+   * a state its owner can neither see nor repair.
+   */
+  it("takes rows an import claims for another account, and repairs what is left there", async () => {
+    const doomed = await newAccount('Stray Owner');
+    const victim = await newAccount('Stray Victim');
+    const strayImport = await importFor(doomed, 'stray-attributed');
+    const ownImport = await importFor(victim, 'victim-own');
+
+    // ordinal 1 of the group, owned by an import belonging to the doomed account
+    expect(await insertTransactions([stagedRow(victim)], strayImport)).toBe(1);
+    // and ordinals 2 and 3, owned by the victim's own import: a batch is numbered
+    // from 1 and the index rejects the collision
+    expect(
+      await insertTransactions(
+        [stagedRow(victim), stagedRow(victim), stagedRow(victim)],
+        ownImport,
+      ),
+    ).toBe(2);
+    await recalcAccountBalanceFromTransactions(victim);
+    expect(await balanceOf(victim)).toBe(-1500);
+
+    // the count on the wire is the doomed account's OWN rows - it has none. What the
+    // cascade took from the victim is in the log, not in this number
+    expect(await deleteAccount(doomed)).toEqual({
+      ok: true,
+      deleted: { transactions: 0, imports: 1, documents: 0, transferRules: 0 },
+    });
+
+    expect(await rowsOfAccount(victim)).toBe(2);
+    expect(await balanceOf(victim)).toBe(-1000);
+    // the ordinals are dense again, asserted by the property a hole breaks: with the
+    // group at {2,3} a re-import of the two rows that are still there claims 1 and 2,
+    // finds 1 free, and inserts a duplicate (ROADMAP 4.4)
+    expect(await insertTransactions([stagedRow(victim), stagedRow(victim)], ownImport)).toBe(0);
+    expect(await rowsOfAccount(victim)).toBe(2);
+  });
+
+  /**
+   * The compile-time census has a hole `satisfies` cannot close - it proves an entry
+   * exists, not that it is executed - so a fifth account-scoped table must also make
+   * a test fail, not only the type checker. Four names, spelled out.
+   */
+  it('accounts for every account-scoped table in the schema', () => {
+    expect([...ACCOUNT_CASCADE_TABLES].sort()).toEqual([
+      'imports',
+      'stagedTransactions',
+      'transactions',
+      'transferRules',
+    ]);
   });
 });
 

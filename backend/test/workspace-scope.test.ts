@@ -19,6 +19,7 @@ import {
   createAccount,
   currentWorkspaceId,
   dbInstance,
+  deleteAccount,
   discardImport,
   findAccountByName,
   getImportDocumentInfo,
@@ -84,6 +85,10 @@ describe('workspace scoping', () => {
       await expect(updateAccount('scope-account', { name: 'Scope' })).rejects.toThrow(
         /no workspace context/,
       );
+      // the destructive one, and the worst thing in this file to get wrong: five
+      // statements over five tables, each of which unscoped would match whatever
+      // rows anywhere on the server carry that account id
+      await expect(deleteAccount('scope-account')).rejects.toThrow(/no workspace context/);
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
       setWorkspaceFallback(TEST_WORKSPACE_ID);

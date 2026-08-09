@@ -1,9 +1,9 @@
-import { screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { importRecord, importsResponse } from '../test/fixtures';
-import { mockFetch, ok, renderThemed, requestUrls, Routes } from '../test/harness';
-import { Account } from '../types';
-import { AccountDialog } from './AccountDialog';
+import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
+import { Account, AccountDeleted } from '../types';
+import { AccountDialog, COUNT_LIMIT } from './AccountDialog';
 
 /**
  * The delete panel, mounted on its own. Reaching its hidden-account branch through
@@ -11,8 +11,10 @@ import { AccountDialog } from './AccountDialog';
  * only place `totals.transactions` is ever printed — the precedent for mounting a
  * component directly rather than through its screen is BudgetsBlock.test.tsx.
  *
- * The through-the-screen delete preview stays in OverviewScreen.test.tsx: what is
- * asserted here is which numbers the panel prints, not that the ⋮ opens it.
+ * What is asserted here is what the panel does: which numbers it prints, what it
+ * offers and when, and what it hands back. What happens to the screen afterwards —
+ * the rail, the reload, the sentence — is OverviewScreen.test.tsx's, and that split
+ * is the design under test rather than a convenience.
  */
 
 const ACCOUNT: Account = {
@@ -33,7 +35,20 @@ const TRUNCATED = importsResponse(
   { imports: 137, documents: 90, transactions: 4021 },
 );
 
-const mount = (account: Account, routes: Routes) => {
+/**
+ * The answer of the delete route, declared with the client's own type: a fourth key
+ * or a missing one is a tsc failure here rather than a sentence composed from
+ * undefined. None of these three numbers could have come from the preview above.
+ */
+const DESTROYED: AccountDeleted = { deleted: true, transactions: 12, imports: 3, documents: 2 };
+
+interface Spies {
+  onClose?: () => void;
+  onOpenHistory?: (account: Account) => void;
+  onDeleted?: (account: Account, destroyed: AccountDeleted) => void;
+}
+
+const mount = (account: Account, routes: Routes, spies: Spies = {}) => {
   mockFetch(routes);
   return renderThemed(
     <AccountDialog
@@ -42,13 +57,18 @@ const mount = (account: Account, routes: Routes) => {
       account={account}
       baseCurrency="EUR"
       onStep={vi.fn()}
-      onClose={vi.fn()}
-      onOpenHistory={vi.fn()}
+      onClose={spies.onClose ?? vi.fn()}
+      onOpenHistory={spies.onOpenHistory ?? vi.fn()}
       onCreated={vi.fn()}
       onUpdated={vi.fn()}
+      onDeleted={spies.onDeleted ?? vi.fn()}
     />,
   );
 };
+
+/** The whole gate: the counts have to be on screen before this exists at all. */
+const confirmField = () => screen.findByLabelText(/to confirm/);
+const destroyButton = () => screen.getByRole('button', { name: 'Delete permanently' });
 
 describe('the delete preview', () => {
   it('prints the totals of the whole history, not of the page it was sent', async () => {
@@ -101,5 +121,126 @@ describe('the delete preview', () => {
     await screen.findByText('137 imports');
 
     expect(screen.queryByText(/an import older than that is not in these numbers/)).toBeNull();
+  });
+});
+
+describe('the delete itself', () => {
+  const PREVIEWED: Routes = {
+    'GET /api/imports': () => ok(TRUNCATED),
+    'GET /api/transactions': () => ok([]),
+  };
+
+  /**
+   * Settled decision 2, first sentence: while the counts are unread the panel says so
+   * and offers nothing. Rendered rather than disabled — nothing on screen would
+   * explain a dead control here, and the counts are what the decision is made on.
+   */
+  it('offers nothing to click while the counts are still being read', async () => {
+    mount(ACCOUNT, { 'GET /api/imports': () => new Promise<Response>(() => {}) });
+
+    expect(await screen.findByText('Counting what would go…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete permanently' })).toBeNull();
+    expect(screen.queryByLabelText(/to confirm/)).toBeNull();
+  });
+
+  /**
+   * And the cost of that rule, stated rather than argued away: an account whose
+   * imports cannot be read cannot be deleted from here, and the Retry is the way out.
+   */
+  it('keeps the Retry and still offers nothing when the counts could not be read', async () => {
+    mount(ACCOUNT, { 'GET /api/imports': () => fail(500, { error: 'imports are down' }) });
+
+    expect(await screen.findByText(/imports are down/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete permanently' })).toBeNull();
+    expect(screen.queryByLabelText(/to confirm/)).toBeNull();
+  });
+
+  /** A floor is a readable count. What the rule refuses is a panel that knows nothing. */
+  it('still offers the delete when the count came back at the limit', async () => {
+    mount(ACCOUNT, {
+      'GET /api/imports': () => ok(importsResponse()),
+      'GET /api/transactions': () => ok(new Array(COUNT_LIMIT).fill(null)),
+    });
+
+    expect(await screen.findByText(`at least ${COUNT_LIMIT} transactions`)).toBeInTheDocument();
+    expect(destroyButton()).toBeInTheDocument();
+  });
+
+  it('hands the screen the account and the server’s own counts, and does not close', async () => {
+    const onDeleted = vi.fn();
+    const onClose = vi.fn();
+    mount(
+      ACCOUNT,
+      { ...PREVIEWED, 'DELETE /api/accounts/acc-1': () => ok(DESTROYED) },
+      { onDeleted, onClose },
+    );
+
+    fireEvent.change(await confirmField(), { target: { value: 'Sparkasse Giro' } });
+    fireEvent.click(destroyButton());
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+    expect(onDeleted).toHaveBeenCalledWith(ACCOUNT, DESTROYED);
+    // the aftermath is the screen's, and this is what makes an Escape mid-flight
+    // harmless: there is nothing left in the unmounted panel to do
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  /**
+   * accounts_name_unique is on (workspace_id, lower(name)), so the server already
+   * treats two spellings as one name and a client demanding the capitals back would
+   * refuse a name it calls identical.
+   */
+  it('takes the name in any case, padded, as the server matches it', async () => {
+    const onDeleted = vi.fn();
+    mount(
+      ACCOUNT,
+      { ...PREVIEWED, 'DELETE /api/accounts/acc-1': () => ok(DESTROYED) },
+      { onDeleted },
+    );
+
+    fireEvent.change(await confirmField(), { target: { value: '  sparkasse giro  ' } });
+    expect(destroyButton()).toBeEnabled();
+    fireEvent.click(destroyButton());
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+  });
+
+  it('will not arm on a name that is nearly right', async () => {
+    // no DELETE route on purpose: one sent from here is both a failed assertion below
+    // and an unstubbed request the afterEach guard names
+    mount(ACCOUNT, PREVIEWED);
+
+    fireEvent.change(await confirmField(), { target: { value: 'Sparkasse Gir' } });
+
+    expect(destroyButton()).toBeDisabled();
+    fireEvent.click(destroyButton());
+    expect(requests()).not.toContain('DELETE /api/accounts/acc-1');
+  });
+
+  /**
+   * The refusal is printed and never classified: request() throws a bare Error and
+   * the status is gone with it, so a branch could only match the backend's wording
+   * across two packages nothing ties together. Import history is the real way out of
+   * this one — deleting the staged import from there unblocks the account — and it is
+   * on the panel whether or not a refusal has been given.
+   */
+  it('prints the server’s refusal and still offers the way out of it', async () => {
+    mount(ACCOUNT, {
+      ...PREVIEWED,
+      'DELETE /api/accounts/acc-1': () =>
+        fail(409, {
+          error:
+            'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account',
+        }),
+    });
+
+    fireEvent.change(await confirmField(), { target: { value: 'Sparkasse Giro' } });
+    fireEvent.click(destroyButton());
+
+    expect(
+      await screen.findByText(/confirm it or discard it, then delete the account/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open import history' })).toBeInTheDocument();
   });
 });

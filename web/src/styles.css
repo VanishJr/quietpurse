@@ -383,6 +383,13 @@ textarea {
   opacity: 0.5;
 }
 
+/* The only destructive primary in the app: everything but the two colours comes from
+   .btn, so it stays the same pill in the same row. 5.9:1 light, 6.7:1 dark. */
+.btn-destroy {
+  background: var(--ink-bad);
+  color: var(--ink-onBad);
+}
+
 .btn-sm {
   padding: 9px 16px;
   font-size: 13px;
@@ -742,8 +749,12 @@ textarea {
   cursor: default;
 }
 
+/* wrapping rather than shrinking: the delete step puts three buttons in this row, and
+   on a 390px phone they need 434px — without this the labels wrap inside the pills and
+   the destructive one becomes a squat two-line box among two others */
 .btn-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 12px;
   margin-top: 16px;
@@ -1423,35 +1434,30 @@ textarea {
 
 /* ---------- the two empty states ---------- */
 
+/*
+ * No top margin, in any of the three states that draw one, and that is the whole rule
+ * rather than an exception to it.
+ *
+ * In `.ov-body` a top margin here is not a gap but a leak: that body is pulled 64px up
+ * over the hero and has no padding or border of its own, so the margin collapses out
+ * through it and nets against the pull. The overlap became 48px and this card sat 16px
+ * below the row of cards it stands in for. Same bug the rail's hidden-accounts control
+ * had while it was a `.btn-link` in the body; see the comment on it in AccountTabs.tsx.
+ *
+ * In `.ov-grid` it does not collapse — grid items do not — and it was worse for it: the
+ * grid already spaces its children by `gap`, so 16px on top of that put `.ov-blank`
+ * lower than the balance card it shares a row with.
+ *
+ * Whatever needs a gap above one of these has a bottom margin of its own. `.ov-notice`
+ * carries 14px, which is what separates a message from the card under it.
+ */
 .acct-blank {
   border: 1px dashed var(--ink-grid);
   border-radius: var(--r-xl);
   background: var(--ink-surface);
   padding: 32px 20px;
-  margin: 16px 0;
+  margin: 0 0 16px;
   text-align: center;
-}
-
-/*
- * ...except where it is the top of the body, which is where the 16px is not a gap but
- * a leak. `.ov-body` is pulled 64px up over the hero and has no padding or border of
- * its own, so a top margin on its first child collapses out through it and nets against
- * that pull: the overlap became 48px and this card sat 16px below the row of cards it
- * stands in for. Both states that put one at the top are named — the empty workspace,
- * and a hidden account, whose `.acct-panel` is a bare wrapper the margin collapses
- * straight through as well.
- *
- * Same bug the rail's hidden-accounts control had while it was a `.btn-link` in the
- * body; see the comment on it in AccountTabs.tsx. Not the third state: `.ov-blank` is a
- * grid item, and grid items do not collapse their margins.
- *
- * `:first-child` and not the states themselves, because it is being first that does it:
- * with a refusal above it — those carry `.ov-notice`, whose own top margin is 0 — the
- * 16px is back to being the gap under that message, which is what it should be.
- */
-.ov-body > .acct-blank:first-child,
-.ov-body > .acct-panel:first-child > .acct-blank:first-child {
-  margin-top: 0;
 }
 
 .acct-blank-title {
@@ -1526,13 +1532,6 @@ textarea {
   font-size: 14px;
   color: var(--ink-primary);
   line-height: 1.6;
-}
-
-/* the server cannot do this yet, and the panel says so where the button would be */
-.acct-wall {
-  border-left: 3px solid var(--ink-accent);
-  padding-left: 12px;
-  margin-top: 16px;
 }
 
 /* ---------- recent transactions ---------- */
