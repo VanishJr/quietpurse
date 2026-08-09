@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   balanceChange,
+  categorySpend,
   foreignCurrencies,
   latestMonth,
   LONGEST_WINDOW,
@@ -198,6 +199,64 @@ describe('the comparisons on the three cards', () => {
       expense: 0,
       net: -300,
     });
+  });
+});
+
+describe('categorySpend', () => {
+  it('answers where the money went, biggest first', () => {
+    expect(
+      categorySpend([
+        tx({ date: '2026-08-01', amount: -20, category: 'food' }),
+        tx({ date: '2026-08-02', amount: -100, category: 'housing' }),
+        tx({ date: '2026-08-03', amount: -50, category: 'food' }),
+      ]),
+    ).toEqual([
+      { category: 'housing', total: 100 },
+      { category: 'food', total: 70 },
+    ]);
+  });
+
+  it('follows the same two rules as the totals it breaks down', () => {
+    // a transfer between the user's own accounts is not spending, and income is not
+    // spending either — so neither is a row here at all
+    expect(
+      categorySpend([
+        tx({ date: '2026-08-01', amount: -300, transfer: true, category: 'transfers' }),
+        tx({ date: '2026-08-02', amount: 900, category: 'salary' }),
+        tx({ date: '2026-08-03', amount: -40, category: 'food' }),
+      ]),
+    ).toEqual([{ category: 'food', total: 40 }]);
+  });
+
+  it('lets a refund push its category negative rather than dropping it', () => {
+    // the purchase it reverses was in an earlier month, so this month really did spend
+    // less than nothing on shopping — and the rows have to add up to the expense total
+    // the card beside them prints
+    expect(
+      categorySpend([
+        tx({ date: '2026-08-01', amount: 60, refund: true, category: 'shopping' }),
+        tx({ date: '2026-08-02', amount: -25, category: 'food' }),
+      ]),
+    ).toEqual([
+      { category: 'food', total: 25 },
+      { category: 'shopping', total: -60 },
+    ]);
+  });
+
+  it('drops a category that nets to exactly zero, which is neither a sector nor a row', () => {
+    expect(
+      categorySpend([
+        tx({ date: '2026-08-01', amount: -30, category: 'shopping' }),
+        tx({ date: '2026-08-02', amount: 30, refund: true, category: 'shopping' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('adds in cents, for the reason every other sum here does', () => {
+    const rows = Array.from({ length: 10 }, (_, i) =>
+      tx({ date: `2026-08-0${(i % 9) + 1}`, amount: -0.1, category: 'food' }),
+    );
+    expect(categorySpend(rows)).toEqual([{ category: 'food', total: 1 }]);
   });
 });
 

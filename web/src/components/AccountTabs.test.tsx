@@ -33,6 +33,11 @@ const strip = (accounts: Account[], selectedId: string) => (
     selectedId={selectedId}
     onSelect={vi.fn()}
     onAdd={vi.fn()}
+    // nothing hidden: what this file is about is the paging, and the switch that
+    // reveals the hidden ones is asserted where the list it changes is decided
+    hiddenCount={0}
+    showHidden={false}
+    onToggleHidden={vi.fn()}
   />
 );
 

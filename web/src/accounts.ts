@@ -78,8 +78,12 @@ export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
  * So every sum below is accumulated in cents and divided once at the end, and every
  * comparison is made in cents. Nothing here is allowed to add two doubles that came
  * from integers and keep the residue.
+ *
+ * Exported because the rule does not stop at this module: anything that adds or
+ * subtracts the figures below — `SpendingByCategory` takes a remainder off them — is
+ * adding the same doubles and has to do it the same way.
  */
-const toCents = (amount: number): number => Math.round(amount * 100);
+export const toCents = (amount: number): number => Math.round(amount * 100);
 
 /** YYYY-MM shifted by whole months; `delta` may be negative. */
 export function shiftMonth(month: string, delta: number): string {
@@ -161,6 +165,42 @@ export function monthlyTotals(txs: Transaction[], window: number): MonthTotal[] 
     month,
     ...totals(seen.get(month) ?? []),
   }));
+}
+
+/** One category's share of what a period spent, in the account's own currency. */
+export interface CategoryTotal {
+  /** The backend slug. `categories.ts` holds the name a person reads. */
+  category: string;
+  total: number;
+}
+
+/**
+ * What a set of transactions spent, by category, biggest first.
+ *
+ * The same two rules as `totals` and for the same reason — they are the SQL's:
+ * transfers between the user's own accounts are not spending, and a refund subtracts
+ * from the category it landed in rather than adding to income. Income rows are left
+ * out entirely; this answers one question and it is where the money went.
+ *
+ * A category can therefore come back negative — a refund this month for a purchase
+ * last month — and that is the honest figure. It is returned rather than dropped,
+ * because the rows have to add up to the expense total the card beside them prints;
+ * what cannot be drawn as a sector is the drawing's problem, not the arithmetic's.
+ *
+ * A category that nets to exactly zero is dropped: it is neither a sector nor a line
+ * anybody can read.
+ */
+export function categorySpend(txs: Transaction[]): CategoryTotal[] {
+  const cents = new Map<string, number>();
+  for (const t of txs) {
+    if (t.transfer) continue;
+    const c = toCents(t.amount);
+    if (c < 0 || t.refund) cents.set(t.category, (cents.get(t.category) ?? 0) - c);
+  }
+  return [...cents]
+    .filter(([, total]) => total !== 0)
+    .map(([category, total]) => ({ category, total: total / 100 }))
+    .sort((a, b) => b.total - a.total);
 }
 
 /**

@@ -49,6 +49,22 @@ export function fmtMonth(d: Date): string {
   return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+const DAYS = [
+  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+];
+
+/**
+ * "Friday, 7 Aug 2026" — the line over the greeting.
+ *
+ * A real instant and not a calendar day, so `getDay`/`getDate` are the local ones on
+ * purpose: this is today where the reader is, not a date off a statement. Everything
+ * that formats a YYYY-MM-DD goes through `fmtDay` instead, for the reason written
+ * there.
+ */
+export function fmtWeekday(d: Date): string {
+  return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 /**
  * A YYYY-MM as "Jul 2026". Split on the string, never through `new Date('2026-07')`,
  * for the reason `fmtDay` gives: that is UTC midnight, and it reads back as June for
