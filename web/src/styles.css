@@ -198,6 +198,13 @@ textarea {
   opacity: 0.5;
 }
 
+/* The only destructive primary in the app: everything but the two colours comes from
+   .btn, so it stays the same pill in the same row. 5.9:1 light, 6.7:1 dark. */
+.btn-destroy {
+  background: var(--ink-bad);
+  color: var(--ink-onBad);
+}
+
 .btn-sm {
   padding: 9px 16px;
   font-size: 13px;
@@ -557,8 +564,12 @@ textarea {
   cursor: default;
 }
 
+/* wrapping rather than shrinking: the delete step puts three buttons in this row, and
+   on a 390px phone they need 434px — without this the labels wrap inside the pills and
+   the destructive one becomes a squat two-line box among two others */
 .btn-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 12px;
   margin-top: 16px;
@@ -1016,13 +1027,6 @@ textarea {
   font-size: 14px;
   color: var(--ink-primary);
   line-height: 1.6;
-}
-
-/* the server cannot do this yet, and the panel says so where the button would be */
-.acct-wall {
-  border-left: 3px solid var(--ink-accent);
-  padding-left: 12px;
-  margin-top: 16px;
 }
 
 /* ---------- recent transactions ---------- */

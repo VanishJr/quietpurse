@@ -123,6 +123,25 @@ describe('api.accounts()', () => {
   });
 });
 
+describe('api.deleteAccount()', () => {
+  /**
+   * The id is a path segment, and an account id is not guaranteed to be url-safe —
+   * an unencoded one would address a route that does not exist, or a different one.
+   */
+  it('sends DELETE to the account, with the id encoded', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response('{"deleted":true,"transactions":0,"imports":0,"documents":0}'),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await api.deleteAccount('acc 1');
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/accounts/acc%201');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+});
+
 describe('401 handling', () => {
   it('throws UnauthorizedError and notifies listeners once', async () => {
     respondWith('', 401, false);

@@ -13,7 +13,7 @@
  */
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { Account } from '../types';
+import { Account, AccountDeleted } from '../types';
 import { Sheet } from './Sheet';
 
 /**
@@ -79,6 +79,14 @@ interface Props {
   onCreated: (account: Account) => void;
   /** A rename or a hide came back; the screen has a newer row for this account. */
   onUpdated: (account: Account) => void;
+  /**
+   * The account is gone, and these are the server's own counts of what went with it.
+   * The screen closes this panel, re-reads the list and composes the sentence — the
+   * preview is local to this component and deliberately does not cross this callback,
+   * which is what makes "the numbers on screen came off the wire" true by construction
+   * rather than by care.
+   */
+  onDeleted: (account: Account, destroyed: AccountDeleted) => void;
 }
 
 export function AccountDialog({
@@ -91,8 +99,11 @@ export function AccountDialog({
   onOpenHistory,
   onCreated,
   onUpdated,
+  onDeleted,
 }: Props) {
   const [name, setName] = useState('');
+  /** The account's name, typed back, which is the whole of the delete's gate. */
+  const [confirmName, setConfirmName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -100,10 +111,12 @@ export function AccountDialog({
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   // the field starts at the name being changed, and a refusal from the step before
-  // is not about the step now on screen
+  // is not about the step now on screen. The typed confirmation clears with them:
+  // menu → delete → Back → delete would otherwise arrive with the gate already open
   useEffect(() => {
     setError(null);
     setName(kind === 'rename' ? (account?.name ?? '') : '');
+    setConfirmName('');
   }, [kind, account]);
 
   const loadPreview = useCallback(async () => {
@@ -164,6 +177,32 @@ export function AccountDialog({
       onUpdated(await api.setAccountHidden(account.id, hidden));
       onClose();
     } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Case-insensitively, and trimmed on both sides: `accounts_name_unique` is on
+   * (workspace_id, lower(name)), so a client demanding the capitals back would refuse
+   * a name the server calls identical to the one on the tab.
+   */
+  const confirmed =
+    !!account && confirmName.trim().toLowerCase() === account.name.trim().toLowerCase();
+
+  const runDelete = async () => {
+    if (!account || busy || !confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // the account and the server's counts, and nothing of the preview: what was
+      // destroyed is a different fact from what was previewed, and the screen that
+      // writes the sentence can only reach the first
+      onDeleted(account, await api.deleteAccount(account.id));
+    } catch (err) {
+      // printed, never classified: request() throws a bare Error and the status is
+      // gone by here, so a branch would have to match the server's wording
       setError((err as Error).message);
     } finally {
       setBusy(false);
@@ -328,6 +367,14 @@ export function AccountDialog({
             This is not <em>Hide</em>. Deleting <strong>{account.name}</strong> destroys its
             data, and nothing here or in a backup taken afterwards can bring it back.
           </p>
+          {/* the consequence to a DIFFERENT account, and the only place the product ever
+              says it. "can", not "will": the preview reads import totals, which carry
+              nothing about transfers, so there is nothing here to condition on */}
+          <p className="hint">
+            Money you moved between this account and another stops counting as a transfer
+            once this side of it is gone, so another account's monthly income and expenses
+            can change.
+          </p>
 
           {previewError && (
             <p className="error">
@@ -378,27 +425,52 @@ export function AccountDialog({
           {!preview && !previewError && <p className="hint">Counting what would go…</p>}
 
           {/*
-            The refusal is standing rather than fired on the button, which is where the
-            auth screens put theirs. A destructive control that answers "nothing
-            happened" after the click is worse than one that never offered: the reader
-            has already decided by then. And unlike password recovery there is something
-            real to do instead, so the panel offers that instead of a dead button.
+            Rendered with the counts rather than disabled beside them: while the preview
+            is unread or unreadable there is nothing on screen that would explain a dead
+            control, and the Retry above is the actionable thing. The gate below it is
+            the opposite case and is disabled rather than absent — its label names the
+            exact string to type, so the reason is already on screen, and a button that
+            appeared as you typed would move the row under the cursor.
           */}
-          <p className="body-text acct-wall">
-            This server has no endpoint that deletes an account, so Finto cannot do it from
-            here. <strong>Import history does the same work today:</strong> deleting an
-            import removes the transactions it wrote and the file it came from, and an
-            account with no imports left holds nothing. Hide the empty account afterwards
-            and it is gone from the app.
-          </p>
+          {preview && (
+            <>
+              <label className="setting-label" htmlFor="acct-delete-confirm">
+                Type <strong>{account.name}</strong> to confirm
+              </label>
+              {/* no autoFocus, unlike the rename field beside it: this input mounts when
+                  two fetches come back, so focus would jump here an unpredictable number
+                  of seconds after the panel opened and throw the reader off the counts
+                  they are meant to be reading */}
+              <input
+                id="acct-delete-confirm"
+                className="input"
+                value={confirmName}
+                onChange={(e) => setConfirmName(e.target.value)}
+              />
+            </>
+          )}
+
+          {error && <p className="error">Error: {error}</p>}
 
           <div className="btn-row">
-            <button className="btn-ghost" onClick={leave}>
+            <button className="btn-ghost" disabled={busy} onClick={leave}>
               {leaveLabel}
             </button>
-            <button className="btn" onClick={() => onOpenHistory(account)}>
+            {/* the way out of the refusal the server can give this button, and it is on
+                the panel whether or not one has been given: deleting the staged import
+                from that screen is what unblocks the account */}
+            <button className="btn-ghost" disabled={busy} onClick={() => onOpenHistory(account)}>
               Open import history
             </button>
+            {preview && (
+              <button
+                className="btn btn-destroy"
+                disabled={busy || !confirmed}
+                onClick={runDelete}
+              >
+                Delete permanently
+              </button>
+            )}
           </div>
         </>
       )}
