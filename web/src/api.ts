@@ -1,5 +1,6 @@
 import {
   Account,
+  AccountDeleted,
   AppSettings,
   BaselineResponse,
   BudgetsResponse,
@@ -470,6 +471,14 @@ export const api = {
   /** Remove an account from the app or bring it back. */
   setAccountHidden: (id: string, hidden: boolean) =>
     request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { hidden })),
+
+  /**
+   * Destroys the account, its transactions, its imports and their stored statements.
+   * The counts are the delete's own and not the preview's; transfer rules go too and
+   * are not in the answer (app.ts).
+   */
+  deleteAccount: (id: string) =>
+    request<AccountDeleted>(`/api/accounts/${encodeURIComponent(id)}`, json('DELETE')),
 
   transactions: (query: TxQuery) => {
     const qs = new URLSearchParams();

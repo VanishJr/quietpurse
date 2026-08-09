@@ -35,6 +35,14 @@ export interface Ink {
   bad: string;
   /** text on an accent fill */
   onAccent: string;
+  /**
+   * Text on a `bad` fill — the destructive button, which is the only one. White
+   * clears light mode's #c02626 at 5.9:1 but reaches only 2.8:1 on dark mode's
+   * #f2726f, so the two schemes need different foregrounds and a borrowed
+   * `onAccent` would be right only by the coincidence that both palettes put their
+   * saturated colours on the same side of the surface.
+   */
+  onBad: string;
   /** modal backdrop */
   backdrop: string;
   /**
@@ -86,6 +94,8 @@ export const lightInk: Ink = {
   good: '#0f7a3d',
   bad: '#c02626',
   onAccent: '#ffffff',
+  /* on #c02626: 5.9:1 */
+  onBad: '#ffffff',
   backdrop: 'rgba(11,18,32,0.40)',
   brand: '#12233f',
   brandSoft: '#5b7290',
@@ -111,6 +121,8 @@ export const darkInk: Ink = {
   good: '#4ec98a',
   bad: '#f2726f',
   onAccent: '#0d1117',
+  /* on #f2726f: 6.7:1, where white is 2.8:1 */
+  onBad: '#0d1117',
   backdrop: 'rgba(0,0,0,0.6)',
   /* Lighter than the page here, where in light mode it is darker: a fill has to be
      distinguishable from the surface behind it, and which direction that is depends

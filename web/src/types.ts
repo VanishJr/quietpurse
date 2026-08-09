@@ -36,6 +36,19 @@ export interface Account {
   hidden?: boolean;
 }
 
+/**
+ * The answer of DELETE /api/accounts/:id. The three numbers are what the delete
+ * itself destroyed, which for a hidden account is legitimately not what the panel's
+ * preview counted: the preview sums the account's imports, the delete counts rows
+ * carrying the account id. Transfer rules go too and are not on the wire.
+ */
+export interface AccountDeleted {
+  deleted: true;
+  transactions: number;
+  imports: number;
+  documents: number;
+}
+
 /** "Every transaction like this is a transfer": a rule by description + account. */
 export interface TransferRule {
   id: number;
