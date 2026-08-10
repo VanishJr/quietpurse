@@ -162,6 +162,27 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                 </tr>
               ))}
             </tbody>
+            {/*
+              The figure in the middle of the ring, which is the biggest thing on this
+              card and was the one thing on it nobody could read: `.donut-center` is
+              inside the `aria-hidden` container, because it is painted over a drawing
+              that has to be hidden as one piece, and the table that stands in for that
+              drawing had every category in it and no total.
+
+              A row here rather than a second copy of the figure outside the ring: the
+              rows above are what the total is a total OF, and a table that carries both
+              says the relationship as well as the number. It is `total` and not the sum
+              of the rows on purpose — see the header: this is the Expenses figure off
+              the card to the right, and the two disagree exactly when a refund makes a
+              category negative. Of the two, the one a reader can check against the card
+              beside it is the one that has to be printed.
+            */}
+            <tfoot>
+              <tr>
+                <th scope="row">Total</th>
+                <td>{fmtMoney(total, currency)}</td>
+              </tr>
+            </tfoot>
           </table>
         </>
       )}
@@ -172,7 +193,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
           is outside the branch above so that a month which spent nothing still has
           one. */}
       <button className="btn-link ov-spend-more" onClick={onSeeAll}>
-        All analytics →
+        All analytics <span aria-hidden="true">→</span>
       </button>
     </section>
   );

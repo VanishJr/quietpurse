@@ -84,6 +84,24 @@ describe('which page the strip shows', () => {
     expect(label()).toHaveTextContent('1 of 2');
   });
 
+  it('keeps the paging region in the DOM while there is nothing to page', () => {
+    // it was rendered under `pages > 1`, which is the one arrangement that cannot work:
+    // the region and its first sentence arrived in the same commit, so there was never a
+    // region present for that sentence to be a change TO — and paging, the one thing on
+    // this rail a screen reader cannot otherwise tell happened, announced nothing
+    render(strip([ALPHA], ALPHA.id));
+
+    const region = document.querySelector('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    expect(region).toBeEmptyDOMElement();
+  });
+
+  it('fills that region in once a second page exists', () => {
+    render(strip([ALPHA, BRAVO, CHARLIE, ZULU], ALPHA.id));
+
+    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('1 of 2');
+  });
+
   it('keeps the page when the list moves the selection within it', () => {
     // an account hidden ahead of the selection shifts its index without moving it off
     // the page being read, and undoing a deliberate page for that would be the same

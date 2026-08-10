@@ -138,7 +138,11 @@ export function AccountTabs({
               aria-current={a.id === selectedId ? 'true' : undefined}
               // the cut name is on screen; both of these carry the whole one
               title={a.name}
-              aria-label={a.name}
+              // ...and the label has to carry the badge as well, because it REPLACES the
+              // content of the button rather than adding to it: with the name alone, the
+              // one tab on the rail that is only there because the reader asked for the
+              // hidden ones sounded exactly like the accounts that were never off it
+              aria-label={a.hidden ? `${a.name} (hidden)` : a.name}
             >
               <span className="rail-tab-name">{truncateMiddle(a.name, TAB_NAME_BUDGET)}</span>
               {a.hidden && <span className="badge rail-tab-badge">hidden</span>}
@@ -160,12 +164,20 @@ export function AccountTabs({
 
       <span className="visually-hidden">
         {accounts.length === 1 ? '1 account' : `${accounts.length} accounts`}
-        {pages > 1 && (
-          <span aria-live="polite">
-            {' · '}
-            {current + 1} of {pages}
-          </span>
-        )}
+        {/* The region is unconditional and only its text is not. It used to be rendered
+            under `pages > 1`, which is the one arrangement that cannot work: the element
+            and the sentence inside it arrived in the same commit, so there was never a
+            region present for the sentence to be a change TO, and paging — the one thing
+            on this rail a screen reader cannot otherwise tell happened — announced
+            nothing at all. */}
+        <span aria-live="polite">
+          {pages > 1 && (
+            <>
+              {' · '}
+              {current + 1} of {pages}
+            </>
+          )}
+        </span>
       </span>
 
       <div className="rail-actions">
