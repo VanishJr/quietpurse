@@ -38,6 +38,10 @@ beforeEach(() => {
   // theme.tsx reads finto.theme at mount, and jsdom keeps localStorage across the
   // tests in a file: a test that pins a theme must not pin it for the ones after.
   localStorage.clear();
+  // ...and the same for the URL, which is where the screen, the account and the panel
+  // live now (url.ts). jsdom keeps one Location per file, so without this a test that
+  // clicks Transactions mounts every test after it on the Transactions screen.
+  window.history.replaceState(null, '', '/');
 });
 
 afterEach(() => {

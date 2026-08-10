@@ -19,8 +19,8 @@ import {
   Routes,
 } from '../test/harness';
 import { fmtWeekday } from '../format';
-import { ThemeProvider } from '../theme';
 import { Account, AccountDeleted, Transaction } from '../types';
+import { setUrl } from '../url';
 import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
 
 /**
@@ -73,26 +73,32 @@ const OVERVIEW_ROUTES: Routes = {
 
 const onOpenTransactions = vi.fn();
 const onOpenAnalytics = vi.fn();
-const onPanelChange = vi.fn();
 
-const screenAt = (importAsk: number, overviewAsk: number) => (
+const theScreen = (
   <OverviewScreen
     user={USER}
-    importAsk={importAsk}
-    overviewAsk={overviewAsk}
     onOpenTransactions={onOpenTransactions}
     onOpenAnalytics={onOpenAnalytics}
-    onPanelChange={onPanelChange}
   />
 );
 
-const mount = (routes: Routes = OVERVIEW_ROUTES, importAsk = 0) => {
+/**
+ * `at` is the URL the screen is arriving on, which is how the navigation asks it for
+ * anything now: `?panel=import` was a counter prop, and `?account=` was a setter the
+ * rail called. setup.ts puts the URL back to `/` between tests, so what is passed here
+ * is the whole of what a test arrives with.
+ */
+const mount = (routes: Routes = OVERVIEW_ROUTES, at = '/') => {
   onOpenTransactions.mockClear();
   onOpenAnalytics.mockClear();
-  onPanelChange.mockClear();
+  window.history.replaceState(null, '', at);
   mockFetch(routes);
-  return renderThemed(screenAt(importAsk, 0));
+  return renderThemed(theScreen);
 };
+
+/** What the URL says now, for the assertions that are about the URL. */
+const param = (key: string): string | null =>
+  new URLSearchParams(window.location.search).get(key);
 
 /** The anchor for the rail: no tab exists until /api/accounts came back. */
 const tab = (name: string) => screen.findByRole('button', { name });
@@ -137,40 +143,86 @@ describe('the hero', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens the import panel when the navigation asks for it', async () => {
-    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, 1);
+  it('opens the import panel for a URL that names it', async () => {
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
 
     expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
   });
 
-  it('tells the navigation which panel it is on, so the bar can mark it', async () => {
-    // the bar cannot see this: Import is a section up there and a panel down here, and
-    // without being told it marked Overview as the page over a full window of Import
-    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, 1);
+  it('drops the panel from the URL on the way out, which is what the bar reads', async () => {
+    // the bar cannot see this any other way: Import is a section up there and a panel
+    // down here, so without it the bar marked Overview as the page over a full window
+    // of Import. It was a callback, and a callback fired from a passive effect — one
+    // frame late, every time — where this is the same fact in a place both can read.
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
     await screen.findByRole('heading', { name: 'Import a statement' });
-
-    expect(onPanelChange).toHaveBeenLastCalledWith('import');
 
     fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
 
     await panel('Sparkasse Giro');
-    expect(onPanelChange).toHaveBeenLastCalledWith(null);
+    expect(param('panel')).toBeNull();
   });
 
-  it('gives the dashboard back when the navigation asks for Overview', async () => {
-    // the bar cannot do this by moving `tab`: the import panel IS this screen as far
+  it('gives the dashboard back when the navigation drops the panel', async () => {
+    // the bar could not do this by moving `tab`: the import panel IS this screen as far
     // as `tab` is concerned, so the click that asked to leave it changed nothing and
-    // Import could be entered and never left
-    const { rerender } = mount(
-      { ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) },
-      1,
-    );
+    // Import could be entered and never left. It took a counter of its own to fix, and
+    // now it is the same write every other destination in the bar makes.
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
     await screen.findByRole('heading', { name: 'Import a statement' });
 
-    rerender(<ThemeProvider>{screenAt(1, 1)}</ThemeProvider>);
+    act(() => setUrl({ panel: null }));
 
     expect(await panel('Sparkasse Giro')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the URL', () => {
+  it('opens on the account it names rather than on the first one', async () => {
+    // the point of the whole parameter: a link to an account is a link to that account
+    // in somebody else's window, and a reload is a link to yourself
+    mount(OVERVIEW_ROUTES, '/?account=acc-1');
+
+    expect(await panel('Balance of Sparkasse Giro')).toBeInTheDocument();
+  });
+
+  it('falls back to the first account when the URL names one that is not there', async () => {
+    // deleted, hidden, or somebody else's workspace — all the same case, and none of
+    // them is a reason to paint a rail with no tab marked and nothing underneath it
+    mount(OVERVIEW_ROUTES, '/?account=acc-does-not-exist');
+
+    expect(await panel('Balance of Sparkasse Giro')).toBeInTheDocument();
+  });
+
+  it('names the account on the rail once one is chosen', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+    // nothing was chosen, so nothing is claimed: `?screen=overview` with no account is
+    // a true URL, and writing today's first account into it hands out a link that goes
+    // stale on the next upload
+    expect(param('account')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB (hidden)'));
+
+    expect(param('account')).toBe('acc-2');
+  });
+
+  it('answers Back by putting the account it was on back on screen', async () => {
+    mount();
+    await panel('Balance of Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+    fireEvent.click(await tab('Old DKB (hidden)'));
+    expect(param('account')).toBe('acc-2');
+
+    // what the browser's own control does to this screen, and nothing here answered it
+    // before: every one of these was a `useState` the window had no way to reach
+    act(() => window.history.back());
+
+    await waitFor(() => expect(param('account')).toBeNull());
+    expect(await panel('Balance of Sparkasse Giro')).toBeInTheDocument();
   });
 });
 
@@ -179,7 +231,7 @@ describe('the tab rail', () => {
     mount();
 
     expect(await tab('Sparkasse Giro')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Old DKB' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Old DKB/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Show 1 hidden account/ })).toBeInTheDocument();
   });
 
@@ -189,7 +241,23 @@ describe('the tab rail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
 
-    expect(await tab('Old DKB')).toBeInTheDocument();
+    expect(await tab('Old DKB (hidden)')).toBeInTheDocument();
+  });
+
+  it('carries the hidden badge in the tab’s own name and not only in its markup', async () => {
+    // `aria-label` REPLACES the content of the button rather than adding to it, so the
+    // badge inside was in the tree and out of the name: the one tab that is on the rail
+    // only because the reader asked for the hidden ones sounded exactly like the two
+    // that were never off it
+    mount();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
+
+    const hidden = await tab('Old DKB (hidden)');
+    expect(hidden).toHaveTextContent('hidden');
+    // and the account that is not hidden is not renamed on the way past
+    expect(screen.getByRole('button', { name: 'Sparkasse Giro' })).toBeInTheDocument();
   });
 
   it('cuts a long name in the middle and keeps the whole one reachable', async () => {
@@ -408,14 +476,33 @@ describe('spending by category', () => {
     expect(within(card).getByText(/Nothing was spent out of this account/)).toBeInTheDocument();
     // the way out of the card is not part of the breakdown, and a month that spent
     // nothing is exactly when somebody goes looking at a wider range
-    expect(within(card).getByRole('button', { name: 'All analytics →' })).toBeInTheDocument();
+    const more = within(card).getByRole('button', { name: 'All analytics' });
+    // the arrow is a picture of the verb and is read as a word — it stays on screen and
+    // stays out of the name, which is what the name above being the bare phrase asserts
+    expect(more).toHaveTextContent('→');
+  });
+
+  it('gives the figure in the middle of the ring to the table beside it', async () => {
+    // `.donut-center` is inside the container the donut is hidden by — it is painted over
+    // a drawing that has to be hidden as one piece — so the biggest number on the card
+    // was the one thing on it a screen reader was never given. The table that stands in
+    // for the ring had all twelve categories and no total.
+    mount();
+
+    const card = await panel('Spending by category, Aug 2026');
+    const table = within(card).getByRole('table', { name: /Spending by category/ });
+    const total = within(table).getByRole('rowheader', { name: 'Total' }).closest('tr');
+    expect(total).toHaveTextContent('120 EUR');
+    // and it is the same figure the ring prints, which is the Expenses figure off the
+    // card beside it rather than the sum of the sectors — see the header of the component
+    expect(within(card).getByText('120')).toBeInTheDocument();
   });
 
   it('opens the Analytics screen from the foot of the card', async () => {
     mount();
     const card = await panel('Spending by category, Aug 2026');
 
-    fireEvent.click(within(card).getByRole('button', { name: 'All analytics →' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'All analytics' }));
 
     expect(onOpenAnalytics).toHaveBeenCalled();
   });
@@ -579,9 +666,27 @@ describe('the recent transactions', () => {
     mount();
     await panel('Recent transactions in Sparkasse Giro');
 
-    fireEvent.click(screen.getByRole('button', { name: 'All transactions →' }));
+    const all = screen.getByRole('button', { name: 'All transactions' });
+    // the name is the bare phrase; the arrow is still painted on it
+    expect(all).toHaveTextContent('→');
+
+    fireEvent.click(all);
 
     expect(onOpenTransactions).toHaveBeenCalledWith('acc-1');
+  });
+
+  it('keeps the disc and the category dot out of what is read aloud', async () => {
+    // the disc carries the first letter of the description that is printed immediately
+    // to its right, and the dot carries the colour of the category named in the very
+    // next span: both identify a row at a glance and neither says anything a reader of
+    // the cell is not already told
+    mount();
+    const list = await panel('Recent transactions in Sparkasse Giro');
+
+    const row = within(list).getByText('ACME payroll').closest('tr');
+    expect(row).not.toBeNull();
+    expect(row!.querySelector('.tx-mark')).toHaveAttribute('aria-hidden', 'true');
+    expect(row!.querySelector('.dot')).toHaveAttribute('aria-hidden', 'true');
   });
 });
 
@@ -610,6 +715,28 @@ describe('the empty states', () => {
     expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
   });
 
+  /**
+   * Both refusals appear only once a request has come back — which is a moment nothing
+   * about the page moving marks, and on this screen there is nothing else on the page to
+   * be found by looking. `closest` and not a document query: AccountTabs renders a polite
+   * region on this same screen, so a document query would pass with the sentence sitting
+   * outside every one of them.
+   */
+  it('puts the rail’s refusal in a live region', async () => {
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/accounts': () => fail(500) });
+
+    const error = await screen.findByText(/^Error:/);
+    expect(error.closest('[aria-live="polite"]')).not.toBeNull();
+  });
+
+  it('puts the dashboard’s own refusal in one too, under the rail that loaded', async () => {
+    mount({ ...OVERVIEW_ROUTES, 'GET /api/transactions': () => fail(500) });
+    await tab('Sparkasse Giro');
+
+    const error = await screen.findByText(/^Error:/);
+    expect(error.closest('[aria-live="polite"]')).not.toBeNull();
+  });
+
   it('says the account is empty rather than that the app is, when it is', async () => {
     mount({
       ...OVERVIEW_ROUTES,
@@ -630,7 +757,7 @@ describe('the empty states', () => {
     await panel('Sparkasse Giro');
 
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
-    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await tab('Old DKB (hidden)'));
 
     // the ⋮ is on the balance card, and a hidden account draws no balance card — so
     // this panel carries the same control under the same name. Without it the panel's
@@ -647,7 +774,7 @@ describe('the empty states', () => {
     await panel('Sparkasse Giro');
 
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
-    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await tab('Old DKB (hidden)'));
     fireEvent.click(await screen.findByRole('button', { name: 'Unhide this account' }));
 
     // the step was opened AT, not stepped into, so there is nothing behind it — and the
@@ -666,7 +793,7 @@ describe('the empty states', () => {
     await panel('Sparkasse Giro');
 
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
-    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await tab('Old DKB (hidden)'));
     fireEvent.click(await screen.findByRole('button', { name: 'Unhide this account' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Unhide' }));
 
@@ -1011,7 +1138,7 @@ describe('deleting an account', () => {
     await panel('Sparkasse Giro');
 
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
-    fireEvent.click(await tab('Old DKB'));
+    fireEvent.click(await tab('Old DKB (hidden)'));
     await openDelete('Old DKB');
     await confirmDelete('Old DKB');
 
