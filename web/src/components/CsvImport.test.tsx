@@ -15,14 +15,31 @@ import { CsvImport } from './CsvImport';
  */
 
 /**
+ * The account this screen creates before it uploads. It echoes the name it was sent,
+ * because the picker and the summary card both render that name back and a fixed one
+ * would have every test asserting against a string it did not type.
+ */
+const createdAccount = (init?: RequestInit): Response => {
+  const { name } = JSON.parse(String(init?.body ?? '{}')) as { name: string };
+  return ok({ id: 'acc-9', provider: 'upload', name, currency: 'EUR', balance: 0 }, 201);
+};
+
+/**
  * The account list is EMPTY here, and that costs something worth writing down: with
  * no accounts the picker does not render at all and every test mounting through
- * `BASE` runs the *create* arm. So none of them covers the picker — its whole
- * coverage is the last describe in this file, which serves a populated list.
+ * `BASE` runs the *create* arm. So none of them covers the picker — its coverage is
+ * the last two describes in this file, both of which serve a populated list in part
+ * (four of the seven cases in the last one), plus the confirm case that lands rows
+ * in an account this screen did not create.
+ *
+ * Which is also why the create route is here and not in the tests that are about it:
+ * since row 26b the create arm WRITES, so every one of these makes two requests where
+ * it used to make one, and `acc-9` is the id the summary fixture already names.
  */
 const BASE: Routes = {
   'GET /api/imports/presets': () => ok(PRESETS),
   'GET /api/accounts': () => ok([]),
+  'POST /api/accounts': createdAccount,
 };
 
 /**
@@ -37,9 +54,20 @@ const PICKABLE: Account[] = [
 
 const ACCOUNT_ROUTES: Routes = { ...BASE, 'GET /api/accounts': () => ok(PICKABLE) };
 
-const mount = (onImported = vi.fn()) => ({
+const mount = (
+  onImported = vi.fn(),
+  { onAccountCreated = vi.fn(), baseCurrency = 'EUR' as string | null } = {},
+) => ({
   onImported,
-  ...renderThemed(<CsvImport onBack={vi.fn()} onImported={onImported} />),
+  onAccountCreated,
+  ...renderThemed(
+    <CsvImport
+      onBack={vi.fn()}
+      onImported={onImported}
+      onAccountCreated={onAccountCreated}
+      baseCurrency={baseCurrency}
+    />,
+  ),
 });
 
 const chooseFile = (container: HTMLElement, name = 'statement.csv'): void => {
@@ -53,6 +81,8 @@ const chooseFile = (container: HTMLElement, name = 'statement.csv'): void => {
  * Pick a file, name the account, press Import. The name is typed rather than left to
  * the file: the prefill that used to fill it in is gone (it is how a database
  * acquired an account called "account-statement_2026-07-01…_ru_a1b2c3 — копия").
+ *
+ * On `BASE` this creates the account as well as uploading — one press, two requests.
  */
 async function upload(container: HTMLElement): Promise<void> {
   chooseFile(container);
@@ -63,6 +93,17 @@ async function upload(container: HTMLElement): Promise<void> {
   await screen.findByText(/click to choose another/);
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 }
+
+/**
+ * Choose "+ New account", type a name, choose a file. Import is not pressed. Needs a
+ * populated list, since it is the picker that offers the way into the create arm.
+ */
+const fillCreateArm = async (container: HTMLElement, name: string): Promise<void> => {
+  fireEvent.click(await screen.findByRole('button', { name: '+ New account' }));
+  fireEvent.change(screen.getByPlaceholderText('Sparkasse Giro'), { target: { value: name } });
+  chooseFile(container);
+  await screen.findByText(/click to choose another/);
+};
 
 const countOf = (key: string): number => requests().filter((r) => r === key).length;
 
@@ -138,11 +179,28 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Read 12 of 14 rows/)).toHaveTextContent(
       /nothing imported yet/,
     );
-    expect(screen.getByText(/a new account "statement"/)).toBeInTheDocument();
+    // the account was created by the press that uploaded, so it exists by the time the
+    // summary names it — the fixture's default arm since row 26b
+    expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
 
     expect(screen.queryByText(/are already in the database/)).not.toBeInTheDocument();
     expect(screen.queryByText(/rows couldn't be read/)).not.toBeInTheDocument();
     expect(screen.queryByText(/An earlier upload of this same file/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The other arm, asked for by name because nothing this client does produces it any
+   * more: every upload it builds carries an id for an account it has already created,
+   * so `accountExists` comes back true. It stays reachable over HTTP through the name
+   * arm of POST /api/imports, which 026b left alive and 026c retires (D7) — and this
+   * is the case that says so out loud rather than letting the arm rot unread.
+   */
+  it('still names an account that does not exist yet, for the arm HTTP can still reach', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult({ accountExists: false })) });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/a new account "statement"/)).toBeInTheDocument();
   });
 
   it('adds the overlap, skipped and superseded sentences when those fields are set', async () => {
@@ -426,7 +484,7 @@ describe('confirm', () => {
       'POST /api/imports': () => ok(summaryResult()),
       'POST /api/imports/imp-1/confirm': () => ok(CONFIRMED),
     });
-    const { container, onImported } = mount();
+    const { container, onImported, onAccountCreated } = mount();
     await upload(container);
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
 
@@ -435,6 +493,69 @@ describe('confirm', () => {
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(1);
     expect(onImported).toHaveBeenCalledTimes(1);
+    // two events, not one: the account was created by the upload press, the rows
+    // landed by this one, and each fires its own callback exactly once
+    expect(onAccountCreated).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The created-account sentence goes when rows land in it, and stays gone. Gating it
+   * on `confirmed` instead of clearing `created` passes the assertion above and fails
+   * here: newInput() clears `confirmed` for the next file, and the sentence comes back
+   * saying an account that now holds the rows the user imported "exists whether or not
+   * these rows land". A gate bound to a value that moves.
+   */
+  it('does not resurrect the created-account notice when a second file is chosen', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/confirm': () => ok(CONFIRMED),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    expect(screen.queryByText(/was created when you pressed Import/)).not.toBeInTheDocument();
+
+    chooseFile(container, 'next-month.csv');
+    await screen.findByText(/next-month\.csv/);
+    expect(screen.queryByText(/was created when you pressed Import/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * And it goes only when the rows landed in THAT account. The user creates "Foo",
+   * the upload behind it fails, and they then import into an account they picked
+   * instead: "Foo" is still standing empty, so the sentence saying it exists has to
+   * survive the confirm that has nothing to do with it.
+   *
+   * The second upload answers a summary for `acc-1` on purpose. With the fixture's
+   * default id this confirms into the created account, takes the gate's true branch,
+   * and passes with the gate deleted — the vacuum this suite could not otherwise see.
+   */
+  it('keeps the created-account notice when the rows land in a different account', async () => {
+    let uploads = 0;
+    mockFetch({
+      ...ACCOUNT_ROUTES,
+      'POST /api/imports': () =>
+        ++uploads === 1
+          ? fail(500)
+          : ok(summaryResult({ accountId: 'acc-1', accountName: 'Sparkasse Giro' })),
+      'POST /api/imports/imp-1/confirm': () => ok(CONFIRMED),
+    });
+    const { container } = mount();
+    await fillCreateArm(container, 'Foo');
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/^Error:/);
+    expect(screen.getByText(/"Foo" was created when you pressed Import/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sparkasse Giro' }));
+    chooseFile(container, 'sparkasse-2026-07.csv');
+    await screen.findByText(/sparkasse-2026-07\.csv/);
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    expect(screen.getByText(/"Foo" was created when you pressed Import/)).toBeInTheDocument();
   });
 });
 
@@ -457,6 +578,10 @@ describe('discard', () => {
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
     expect(onImported).not.toHaveBeenCalled();
+    // nothing was imported, and something WAS written: the account this press created
+    // outlives the import it was created for, and the discard notice above says the
+    // opposite on its own
+    expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
   });
 });
 
@@ -472,6 +597,8 @@ describe('a file that is already in', () => {
 
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
+    // the easiest of the three no-rows-landed endings to miss, because nothing threw
+    expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
   });
 });
 
@@ -556,32 +683,17 @@ describe('the account picker', () => {
     // both arms at once is a 400, so a client that sent them would be refused
     expect(captured.sent!.get('accountName')).toBeNull();
     expect(captured.sent!.get('currency')).toBeNull();
-  });
-
-  it('sends a name and a currency and no id when a new account is chosen', async () => {
-    const captured = captureUpload(ACCOUNT_ROUTES);
-    const { container } = mount();
-    fireEvent.click(await screen.findByRole('button', { name: '+ New account' }));
-    fireEvent.change(screen.getByPlaceholderText('Sparkasse Giro'), {
-      target: { value: 'Third Bank' },
-    });
-    fireEvent.change(screen.getByLabelText('Account currency'), { target: { value: 'USD' } });
-    chooseFile(container);
-    await screen.findByText(/click to choose another/);
-    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await screen.findByText(/Read 12 of 14 rows/);
-
-    expect(captured.sent!.get('accountName')).toBe('Third Bank');
-    expect(captured.sent!.get('currency')).toBe('USD');
-    expect(captured.sent!.get('accountId')).toBeNull();
+    // an account that exists is not created again on the way past it
+    expect(countOf('POST /api/accounts')).toBe(0);
   });
 
   /**
    * The list is how a user reaches an account that already exists. A screen that
    * quietly offered only "create a new one" when it failed to load would manufacture
-   * a second account for a bank the user already has, and there is no delete to undo
-   * that — so the failure blocks the import instead of falling through to the create
-   * arm. Held by `accounts === null`, not by a boolean a handler could reset.
+   * a second account for a bank the user already has — and since row 26b pressing
+   * Import is what writes it, so the duplicate would be real before the file was
+   * read. The failure blocks the import instead of falling through to the create arm,
+   * held by `accounts === null` and not by a boolean a handler could reset.
    */
   it('blocks the import when the accounts could not be loaded, and says so', async () => {
     mockFetch({ ...BASE, 'GET /api/accounts': () => fail(500) });
@@ -624,5 +736,159 @@ describe('the account picker', () => {
 
     expect(name).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
+  });
+});
+
+/**
+ * The create arm creates (ROADMAP row 26b). POST /api/accounts is the only way this
+ * product makes an account, and every upload this client builds carries an id — so
+ * the account exists before the file is read, and a file the backend refuses leaves
+ * one standing. What that costs is covered here: the write is announced, it happens
+ * once however many times Import is pressed, and a refused create never uploads.
+ *
+ * jsdom cannot say which account the rows reached, so the subject of most of these is
+ * the request stream: what was posted, in what order, and how many times.
+ */
+describe('the account the create arm makes', () => {
+  /** The hidden holder's refusal — the one a user cannot explain from the picker. */
+  const HIDDEN_HOLDER =
+    'an account called "Old DKB" already has that name, and it has been removed from the app - restore it, or pick another name';
+
+  /** Both bodies this press sends: the create's JSON and the upload's FormData. */
+  const captureBoth = (table: Routes) => {
+    const captured: { created: unknown; sent: FormData | null } = { created: null, sent: null };
+    mockFetch({
+      ...table,
+      'POST /api/accounts': (init) => {
+        captured.created = JSON.parse(String(init?.body ?? '{}'));
+        return createdAccount(init);
+      },
+      'POST /api/imports': (init) => {
+        captured.sent = (init?.body as FormData) ?? null;
+        return ok(summaryResult());
+      },
+    });
+    return captured;
+  };
+
+  it('creates the account with the trimmed name and nothing else, then uploads into it', async () => {
+    const captured = captureBoth(ACCOUNT_ROUTES);
+    const { container } = mount();
+    await fillCreateArm(container, '  Third Bank  ');
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/Read 12 of 14 rows/);
+
+    // the whole body and not one field of it: this pins the trim and the ABSENCE of a
+    // currency in one assertion, which is all of row 65 as this client sees it
+    expect(captured.created).toEqual({ name: 'Third Bank' });
+    expect(captured.sent!.get('accountId')).toBe('acc-9');
+    // uploadForm lives outside the component, so neither of these is a binding it
+    // could reach — this is the assertion that says the compile-time fact is true
+    expect(captured.sent!.get('accountName')).toBeNull();
+    expect(captured.sent!.get('currency')).toBeNull();
+  });
+
+  it("prints the server's refusal of the name and sends no upload behind it", async () => {
+    mockFetch({ ...ACCOUNT_ROUTES, 'POST /api/accounts': () => fail(409, { error: HIDDEN_HOLDER }) });
+    const { container } = mount();
+    await fillCreateArm(container, 'Old DKB');
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+
+    // the server's own sentence, never a class this screen derived from a status: the
+    // holder is hidden and so is in no picker, which nothing here could have said
+    expect(await screen.findByText(/^Error:/)).toHaveTextContent(HIDDEN_HOLDER);
+    expect(countOf('POST /api/imports')).toBe(0);
+    // and the arm is still filled in, because the name is the only thing to fix
+    expect(screen.getByPlaceholderText('Sparkasse Giro')).toHaveValue('Old DKB');
+    expect(screen.queryByText(/was created when you pressed Import/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The hazard this ordering exists for: create, upload fails on the file, the user
+   * fixes the file and presses Import again — and a second POST /api/accounts with
+   * the same name is a 409, the app refusing the user on behalf of an account it
+   * created for them one press ago. Held by writing the account into state before the
+   * upload is awaited, so the second press is already on the picker arm.
+   */
+  it('creates the account once across a failed upload and the press that follows it', async () => {
+    let uploads = 0;
+    mockFetch({
+      ...ACCOUNT_ROUTES,
+      'POST /api/imports': () => (++uploads === 1 ? fail(500) : ok(summaryResult())),
+    });
+    const { container } = mount();
+    await fillCreateArm(container, 'Third Bank');
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/^Error:/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/Read 12 of 14 rows/);
+
+    expect(countOf('POST /api/accounts')).toBe(1);
+    expect(countOf('POST /api/imports')).toBe(2);
+  });
+
+  it('says the account was created when the upload behind it failed', async () => {
+    mockFetch({ ...ACCOUNT_ROUTES, 'POST /api/imports': () => fail(500) });
+    const { container, onAccountCreated } = mount();
+    await fillCreateArm(container, 'Third Bank');
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+
+    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
+    // the write the user did not press a button called "Create" for, named
+    expect(
+      screen.getByText(/"Third Bank" was created when you pressed Import/),
+    ).toBeInTheDocument();
+    // and the caller is told here, on the one path where telling it is the whole
+    // mechanism: no confirm follows to fire onImported, and onBack reloads nothing,
+    // so an account announced to nobody is on the server and on no screen
+    expect(onAccountCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it('tells the caller, and puts the account in the picker with it pressed', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container, onAccountCreated } = mount();
+    await upload(container);
+    await screen.findByText(/Read 12 of 14 rows/);
+
+    // Back does not reload the caller, so nothing else would put this account on the
+    // rail: it would exist on the server and appear on no screen
+    expect(onAccountCreated).toHaveBeenCalledTimes(1);
+    // in the LIST the picker is derived from, not only in the key that is pressed —
+    // a key with no row renders a picker with nothing selected and Import disabled
+    expect(screen.getByRole('button', { name: 'statement' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('offers no currency, and says which one the account will hold', async () => {
+    mockFetch(BASE);
+    mount();
+    await screen.findByPlaceholderText('Sparkasse Giro');
+
+    expect(screen.queryByLabelText('Account currency')).toBeNull();
+    expect(screen.getByText(/It will hold amounts in EUR/)).toBeInTheDocument();
+  });
+
+  /**
+   * The base currency comes from a fetch whose failure Overview swallows, so it can be
+   * null on a working screen. The sentence goes rather than rendering "amounts in ." —
+   * and nothing is disabled over it: this is the only way data enters the product.
+   */
+  it('leaves the currency sentence out when there is no base currency, and imports anyway', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container } = mount(vi.fn(), { baseCurrency: null });
+    const name = await screen.findByPlaceholderText('Sparkasse Giro');
+    fireEvent.change(name, { target: { value: 'Third Bank' } });
+    chooseFile(container);
+    await screen.findByText(/click to choose another/);
+
+    expect(screen.queryByText(/It will hold amounts in/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await screen.findByText(/Read 12 of 14 rows/);
+    expect(countOf('POST /api/accounts')).toBe(1);
   });
 });

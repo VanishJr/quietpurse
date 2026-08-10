@@ -7,6 +7,7 @@ import {
   importRecord,
   importsResponse,
   PRESETS,
+  summaryResult,
   USER,
 } from '../test/fixtures';
 import {
@@ -705,6 +706,47 @@ describe('the empty states', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Import a statement/ }));
     expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
+    // the list is empty, so the import panel opens straight onto its create arm — and
+    // this sentence is the only thing that fails if baseCurrency stops crossing the
+    // mount, which it has to because that screen creates the account itself now
+    expect(
+      screen.getByText(new RegExp(`It will hold amounts in ${APP_SETTINGS.baseCurrency}`)),
+    ).toBeInTheDocument();
+  });
+
+  it('reloads the accounts when the import screen creates one', async () => {
+    const { container } = mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok([]),
+      'GET /api/imports/presets': () => ok(PRESETS),
+      'POST /api/accounts': () => ok(account({ id: 'acc-9', name: 'Girokonto' }), 201),
+      'POST /api/imports': () => ok(summaryResult()),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import a statement/ }));
+    // the list is empty, so the panel opens straight onto its create arm
+    fireEvent.change(await screen.findByPlaceholderText('Sparkasse Giro'), {
+      target: { value: 'Girokonto' },
+    });
+    // hidden and unlabelled, so no RTL query reaches it
+    fireEvent.change(container.querySelector('input[type=file]') as HTMLInputElement, {
+      target: {
+        files: [new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' })],
+      },
+    });
+    await screen.findByText(/click to choose another/);
+
+    // the reload is the observable, and the request count is how it is read: the panel
+    // replaces this screen while it is open, so the rail the created account has to
+    // reach is not mounted here to be asserted about. Nothing else on this path asks
+    // for the list again — the create arm appends its account to its own copy — so the
+    // second GET is onAccountCreated and nothing else.
+    const accountLoads = () => requests().filter((r) => r === 'GET /api/accounts').length;
+    const before = accountLoads();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+
+    await waitFor(() => expect(accountLoads()).toBe(before + 1));
   });
 
   it('does not claim the accounts are empty when the request for them failed', async () => {
