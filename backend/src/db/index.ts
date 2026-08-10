@@ -22,7 +22,7 @@
  */
 import crypto from 'crypto';
 import path from 'path';
-import { and, asc, eq, getTableColumns, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -290,9 +290,13 @@ export async function upsertAccount(a: Account): Promise<void> {
 }
 
 /**
- * The body, on a caller-supplied executor. The confirm step needs the account to
- * appear in the same transaction as the rows that join it (see confirmImport), and
- * a nested getDb().transaction() would take a second pooled connection.
+ * The body, on a caller-supplied executor - and nothing supplies a transaction any
+ * more. The confirm was the caller that needed one, so that the account appeared in
+ * the same transaction as the rows joining it, and row 26b took that call away.
+ * restoreBackup never called this at all: it inserts accounts plainly, inside its
+ * own transaction. What is left is upsertAccount above, which passes the pool, and
+ * every caller of that is under backend/test. The split is kept for a future
+ * transactional writer, not for one that exists.
  */
 export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
   await d
@@ -308,43 +312,35 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
     })
     .onConflictDoUpdate({
       target: [s.accounts.workspaceId, s.accounts.id],
-      // `hidden` is deliberately not in the set below, and for the reason it always
-      // was: an import must never silently un-hide an account the user removed.
-      // What is no longer a consequence of that is landing rows in one - both gates
-      // ahead of here refuse first (row 26a). The upload resolves its destination
-      // and throws before any `imports` row is written, and the confirm re-reads the
-      // account under FOR UPDATE and rolls back.
+      // Reached from backend/test alone now: with the confirm's call gone no src/
+      // path executes this arm, so everything below is a shape kept correct rather
+      // than a guarantee a production write depends on.
       //
-      // That covers a holder that EXISTS when the confirm's guard reads it, which is
-      // what the lock is over. It does not cover one that does not: an id no accounts
-      // row answers to locks nothing, so a row inserted hidden between that read and
-      // this statement is reached here - the create path, a second import branch (b)
-      // handed the same minted id, and a PATCH {hidden:true}, all inside one window.
-      // Narrow, and nothing in the suite can go red on it (PGlite is
-      // single-connection), so this sentence is the whole of what holds it.
+      // `hidden` is deliberately not in the set below, and for the reason it always
+      // was: nothing here may silently un-hide an account the user removed. Landing
+      // rows in a hidden account is no longer a consequence of that at all - row 26b
+      // took the confirm's call to this function away, the upload resolves its
+      // destination and throws before any `imports` row is written, and the confirm
+      // re-reads the account under FOR UPDATE and rolls back.
       //
       // The dedup keys of the rows already in a hidden account are row 11's - a real
       // account delete, taking the transactions and their imports.
       //
       // `name` is out of it too, and for a different reason: the account's name is
-      // now the user's to change (updateAccount) and the id is what an import is
-      // recorded against, so writing imports.account_name back over it would revert
-      // every rename on the next upload - and uploading "revolut" into an account
-      // the user called "Revolut" would rename it. It is also what keeps this
+      // the user's to change (updateAccount) and the id is what an import is
+      // recorded against, so writing a remembered name back over it would revert
+      // every rename made since the backup was taken. It is also what keeps this
       // statement clear of accounts_name_unique: the conflict arm never touches the
       // indexed column.
       //
       // `currency` is out of it for a reason of the same kind (row 65). It is the
       // account's own now - updateAccount writes it, and only while the account
-      // holds no rows - and imports.account_currency is what a FILE was uploaded
-      // as, not what the account is. Left in the set, the confirm would write that
-      // snapshot back and revert a correction made while the import waited, at 200
-      // and with nothing said; and every arm that hands a typed currency to an
-      // account it never read (uploadDestination's name arm) would re-denominate
-      // it. Out of the set there is no application branch to drop later.
+      // holds no rows - so writing a remembered one back would revert a correction
+      // at 200 and with nothing said. Out of the set there is no application branch
+      // to drop later.
       //
-      // The INSERT above keeps it: the name arm's account is created here, and it
-      // has to be denominated in something.
+      // The INSERT above keeps both: an account created here has to have a name and
+      // be denominated in something.
       set: {
         balanceCents: sql`excluded.balance_cents`,
         iban: sql`excluded.iban`,
@@ -447,12 +443,11 @@ declare const resolved: unique symbol;
  * deriving it differently put a statement's rows in an account its own summary did
  * not name.
  *
- * There are exactly two producers and they are the same kind of thing:
- * resolveUploadAccountId, for an upload that names its account, and
- * resolveUploadAccount, for one that picks it by id. Each reads the id out of this
- * workspace's own rows or mints it here; neither brands a string that arrived off
- * the wire unread. Row 26b deletes the first with the name arm, and this goes back
- * to being one place.
+ * There is exactly one producer: resolveUploadAccount, for an upload that picks its
+ * account by id. It reads the id out of this workspace's own rows and never brands a
+ * string that arrived off the wire unread. Row 26b deleted the second one
+ * (resolveUploadAccountId, which minted an id for an account that did not exist yet)
+ * along with the name arm.
  *
  * Phantom, and it stops at the data layer: nothing that crosses the wire carries it
  * (ImportRecord.accountId, ImportSummary.accountId and Account.id stay plain
@@ -474,13 +469,13 @@ export type UploadAccount =
 
 /**
  * The account an upload picked, proved to be here and not removed. It answers the
- * whole StagedAccount rather than the id, so the name and the currency an id-arm
- * import records are the account's OWN (ROADMAP 26(b), 26(d)) by the return type
- * instead of by the caller remembering to read the row a second time.
+ * whole StagedAccount rather than the id, so the name and the currency an import
+ * records are the account's OWN (ROADMAP 26(b), 26(d)) by the return type instead
+ * of by the caller remembering to read the row a second time.
  *
  * The id handed back is the one this read out of the row, never the string that was
- * passed in: that is what makes branding it here the same guarantee
- * resolveUploadAccountId gives.
+ * passed in: that is the whole of what the brand promises, and this is now the only
+ * place that promises it.
  */
 export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
   const rows = await getDb()
@@ -494,61 +489,6 @@ export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
     ok: true,
     account: { id: row.id as ResolvedAccountId, name: row.name, currency: row.currency },
   };
-}
-
-/**
- * Where an upload's rows are going, decided once. The upload and the confirm are two
- * requests apart and must agree on one account, and the id is opaque - one bank
- * uploaded as CSV one month and as PDF the next lands in one account, because both
- * uploads resolve the same name to the same account.
- *
- * (a) before (b) is load-bearing, not tidiness. When a confirm is refused because
- * something took the name (see ConfirmOutcome 'account-name-taken'), the outstanding
- * import is still awaiting_confirmation and still carries the id that collided - so
- * (b) would match it, mint nothing, and collide again on every retry, making the
- * refusal's own advice ("upload the file again") a promise the server breaks. With
- * (a) first the account holding the name is found and the rows land there.
- */
-export async function resolveUploadAccountId(name: string): Promise<ResolvedAccountId> {
-  const existing = await findAccountByName(name);
-  if (existing) return existing.id as ResolvedAccountId;
-  // (b) An outstanding import of the same name already minted an id: two statements
-  // for one NEW bank must land in one account, and neither has created it yet. That
-  // last clause is checked, not assumed - the account may have been created and then
-  // renamed since, and (a) having just missed means it now answers to a DIFFERENT
-  // name, so returning its id here would attach this upload to an account it did not
-  // name and merge two banks' history behind a 200. The check is inside the query so
-  // the ordering below still picks the oldest ELIGIBLE import: read after LIMIT 1
-  // instead and three uploads of one name mint a third id, splitting the two that
-  // branch (b) exists to keep together.
-  //
-  // The window this closes is upload-to-upload once the first has staged. The one it
-  // does NOT close is upload-to-staging: a row is not awaiting_confirmation until
-  // stageImport, and the whole parse sits between here and there - seconds for a PDF.
-  // Two uploads of one new name overlapping in that window both mint, and the second
-  // confirm meets accounts_name_unique. That is a 409 that imports nothing and names
-  // the way out, not a lock, and no reader should take it for one.
-  const outstanding = await getDb()
-    .select({ accountId: s.imports.accountId })
-    .from(s.imports)
-    .where(
-      and(
-        eq(s.imports.workspaceId, currentWorkspaceId()),
-        eq(s.imports.status, 'awaiting_confirmation'),
-        isNotNull(s.imports.accountId),
-        sql`lower(${s.imports.accountName}) = lower(${name})`,
-        sql`not exists (select 1 from ${s.accounts} a
-              where a.workspace_id = ${currentWorkspaceId()} and a.id = ${s.imports.accountId})`,
-      ),
-    )
-    // oldest first: the earliest outstanding import is the one most likely to be
-    // confirmed first and therefore to become the account, so the answer here agrees
-    // with the account that will exist. The id tiebreak is supersedeStagedImports'.
-    .orderBy(asc(s.imports.uploadedAt), asc(s.imports.id))
-    .limit(1);
-  const minted = outstanding[0]?.accountId;
-  if (minted) return minted as ResolvedAccountId;
-  return crypto.randomUUID() as ResolvedAccountId;
 }
 
 /** The longest account name the app accepts, at every door that writes one. */
@@ -1535,6 +1475,9 @@ class NotAwaitingConfirmation extends Error {}
 /** Rolls the confirm back when the account its rows go to has been removed. */
 class AccountRemoved extends Error {}
 
+/** Rolls the confirm back when that account no longer exists at all. */
+class AccountMissing extends Error {}
+
 /**
  * A guard inside the confirm refused it: the staged set is not what the import says
  * it is, the account it was staged for is not recorded, or the rows and that record
@@ -1584,18 +1527,12 @@ export type ConfirmOutcome =
   /** another import of the same bytes won the race to `committed` */
   | { confirmed: false; reason: 'file-committed'; heldBy: string }
   /**
-   * The account staged for this import does not exist yet and another one has since
-   * taken its name. Nothing was imported: landing the rows in whoever holds the name
-   * would merge two banks' history, and there is no account delete to undo it.
-   * `accountName` is what the import recorded; `taken` is the holder if it is still
-   * there to be read.
+   * The account these rows go to was deleted between the upload and the confirm.
+   * Nothing was imported. No payload, for the reason account-hidden carries none:
+   * the caller picked this account and the screen names it. Not 'account-hidden' -
+   * that sentence says "restore it", and a deleted account cannot be restored.
    */
-  | {
-      confirmed: false;
-      reason: 'account-name-taken';
-      accountName: string;
-      taken: Account | undefined;
-    }
+  | { confirmed: false; reason: 'account-missing' }
   /**
    * The account these rows go to was removed from the app between the upload and
    * the confirm. Nothing was imported: a hidden account's transactions are kept out
@@ -1627,9 +1564,6 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
   const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
   let accountId = '';
-  // read back out here after a rollback: the transaction undoes the database, not a
-  // JS binding, and the name is what the refusal below is composed from
-  let accountName = '';
   let inserted = 0;
   let rowsAccepted = 0;
   let rowsRejected = 0;
@@ -1656,13 +1590,16 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       if (!row) throw new NotAwaitingConfirmation();
       // the columns are nullable because every import from before the confirmation
       // step is. Confirming one anyway means inventing the account it goes to, and
-      // reporting that as a success
+      // reporting that as a success. accountName and accountCurrency are CHECKED and
+      // not read - row 26b took away the create that consumed them, so nothing below
+      // reads either - and they stay checked because a row missing them is a row
+      // from before this step, which must not become confirmable just because the
+      // reader that used them went away
       if (row.accountName === null || row.accountCurrency === null || row.accountId === null) {
         throw new ImportNotConfirmable(
           `import ${id} is awaiting confirmation but records no account name, currency or id`,
         );
       }
-      accountName = row.accountName;
       const staged = await tx
         .select()
         .from(s.stagedTransactions)
@@ -1697,8 +1634,8 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       }
       // The second gate on row 26a's defect. The account was there and visible when
       // the file was uploaded; the user removed it while the summary sat on screen.
-      // A missing row is NOT an error - the name arm's common case is an account
-      // this upsert is about to create.
+      // Nothing creates one here any more (row 26b), so a missing row is a refusal
+      // and not the common case it used to be.
       //
       // FOR UPDATE, and it is load-bearing rather than decoration: under READ
       // COMMITTED a plain read here can be overtaken by a
@@ -1709,19 +1646,22 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       // then sees hidden = true. Deleting `.for('update')` leaves every test in the
       // suite green: PGlite is single-connection, so nothing here can hold this
       // transaction open while a second one commits.
-      const [holder] = await tx
-        .select({ hidden: s.accounts.hidden })
-        .from(s.accounts)
-        .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
-        .for('update');
-      if (holder?.hidden) throw new AccountRemoved();
-      await upsertAccountOn(tx, {
-        id: accountId,
-        provider: 'upload',
-        name: row.accountName,
-        currency: row.accountCurrency,
-        balance: 0,
-      });
+      //
+      // `.at(0)` rather than a destructure so that deleting the throw below is a
+      // compile error. This tsconfig has no noUncheckedIndexedAccess, and `strict`
+      // does not imply it: NO index form is guarded - `rows[0]` is exactly as silent
+      // as `const [holder] =` - so both would type non-optional and the resurrection
+      // would come back unannounced. `.at(0)`'s `T | undefined` comes from
+      // lib.es2022 instead, which no config here can turn off.
+      const holder = (
+        await tx
+          .select({ hidden: s.accounts.hidden })
+          .from(s.accounts)
+          .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
+          .for('update')
+      ).at(0);
+      if (!holder) throw new AccountMissing();
+      if (holder.hidden) throw new AccountRemoved();
       inserted = await insertTransactionsOn(tx, staged.map(stagedToNew), baseCurrency, id);
       await tx
         .delete(s.stagedTransactions)
@@ -1746,6 +1686,11 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
     // staged rows intact, so restoring the account and pressing Confirm again is the
     // whole way out - which is what the refusal tells the user to do
     if (e instanceof AccountRemoved) return { confirmed: false, reason: 'account-hidden' };
+    // the same rollback, and the way out is the other one: the account is not coming
+    // back - ids are minted server-side, so the import's own id answers to nothing
+    // and every retry refuses identically. Discard is the only exit and the sentence
+    // says so rather than saying "try again"
+    if (e instanceof AccountMissing) return { confirmed: false, reason: 'account-missing' };
     // two uploads of one file overlapping in time both reach awaiting_confirmation
     // (the partial index only blocks `committed`, ROADMAP 4.3), so the second
     // confirm meets the index rather than the status check. Its rows are identical
@@ -1755,19 +1700,6 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       const state = await importStateOf(id);
       const held = state && (await findCommittedImportByHash(state.fileHash));
       if (held) return { confirmed: false, reason: 'file-committed', heldBy: held.id };
-    }
-    // the id staged for this import was minted for an account that did not exist,
-    // and by now something else holds the name - a create, a rename, or another
-    // import that confirmed first. The rollback has already put the import back to
-    // awaiting_confirmation and taken the insert with it, so nothing landed and the
-    // bytes stay re-uploadable
-    if (isUniqueViolation(e, 'accounts_name_unique')) {
-      return {
-        confirmed: false,
-        reason: 'account-name-taken',
-        accountName,
-        taken: await findAccountByName(accountName),
-      };
     }
     throw e;
   }
@@ -2057,8 +1989,10 @@ export type AccountDelete =
  * tables a deleted account leaves rows in. Derived from the schema module rather
  * than remembered, so a new one is a compile error at ACCOUNT_CASCADE instead of a
  * table nobody's delete reaches. There is no foreign key from any of them to
- * `accounts` and there must not be (resolveUploadAccountId mints an id for an
- * account that does not exist yet), so this is the whole of the enumeration.
+ * `accounts`, so this is the whole of the enumeration. What used to forbid one -
+ * resolveUploadAccountId minting an id for an account that did not exist yet - went
+ * with row 26b; nothing mints an unbacked id now, and whether `imports.account_id`
+ * should gain a key is an open question and not this row's.
  *
  * Both conditions are load-bearing: `auth_account` has an accountId and a userId
  * and no workspaceId, and it is better-auth's, not an account of the user's.
@@ -2110,7 +2044,7 @@ export const ACCOUNT_CASCADE_TABLES = Object.keys(ACCOUNT_CASCADE);
  *
  * What it deliberately does not reach: an import whose account_id is NULL. An
  * upload that died before staging holds a real bank statement and belongs to no
- * account (resolveUploadAccountId resolves the destination before createImport, and
+ * account (resolveUploadAccount resolves the destination before createImport, and
  * stageImport writes the column only after the parse), so there is no honest way to
  * attribute it here. Its bytes stay on disk and its row stays in the workspace-wide
  * history; see DEBT.md.

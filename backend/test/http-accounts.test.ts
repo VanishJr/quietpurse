@@ -11,6 +11,7 @@
  * with it armed a request that never entered a workspace context would answer from
  * the test workspace instead of throwing.
  */
+import { sql } from 'drizzle-orm';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
@@ -23,18 +24,20 @@ let agent: request.Agent;
 const csvFile = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
 
-/** Upload a statement and answer with the import awaiting confirmation. */
-const stage = async (accountName: string, label: string) => {
-  const res = await agent
-    .post('/api/imports')
-    .field('accountName', accountName)
-    .field('currency', 'EUR')
-    .attach('file', csvFile(label), 'statement.csv');
-  expect(res.status, JSON.stringify(res.body)).toBe(200);
-  return res.body.summary as { importId: string; accountId: string; accountExists: boolean };
+/**
+ * An empty account over the door that creates one. Since row 26b it is the only door
+ * that does, so every account this file uploads into comes through here.
+ */
+const makeAccount = async (name: string): Promise<string> => {
+  const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body.id as string;
 };
 
-/** The id arm: the account is picked, so the request carries no name and no currency. */
+/** An account of that name, and a statement staged into it. */
+const stage = async (name: string, label: string) => stageInto(await makeAccount(name), label);
+
+/** The account is picked, so the request carries no name and no currency. */
 const stageInto = async (accountId: string, label: string) => {
   const res = await agent
     .post('/api/imports')
@@ -147,8 +150,9 @@ describe('POST /api/accounts', () => {
   });
 
   /**
-   * Optional is not unchecked. The message is the one the upload's door composes too
-   * - one schema at both, so it no longer says "required" at either.
+   * Optional is not unchecked, and the sentence no longer says "required". The upload
+   * used to compose this one too; since row 26b it takes no currency at all, so this
+   * schema is left with the two account doors.
    */
   it('still refuses a currency that is not a 3-letter code', async () => {
     const res = await agent.post('/api/accounts').send({ name: 'Euro Spelled Out', currency: 'euro' });
@@ -157,7 +161,7 @@ describe('POST /api/accounts', () => {
   });
 });
 
-describe('the account name bound is one number at every door', () => {
+describe('the account name bound is one number at both doors that write one', () => {
   // built FROM the constant rather than beside it: a literal 61 here goes on passing
   // over a bound that has moved, which is the whole failure the single constant
   // exists to prevent
@@ -165,7 +169,7 @@ describe('the account name bound is one number at every door', () => {
   const longest = 'y'.repeat(ACCOUNT_NAME_MAX);
   const sentence = `account name must be at most ${ACCOUNT_NAME_MAX} characters`;
 
-  it('refuses an over-long name on create, on rename, and on upload', async () => {
+  it('refuses an over-long name on create and on rename', async () => {
     const created = await agent.post('/api/accounts').send({ name: tooLong, currency: 'EUR' });
     expect(created.status).toBe(400);
     expect(created.body.error).toBe(sentence);
@@ -176,29 +180,25 @@ describe('the account name bound is one number at every door', () => {
     const renamed = await agent.patch(`/api/accounts/${ok.body.id}`).send({ name: tooLong });
     expect(renamed.status).toBe(400);
     expect(renamed.body.error).toBe(sentence);
-
-    const uploaded = await agent
-      .post('/api/imports')
-      .field('accountName', tooLong)
-      .field('currency', 'EUR')
-      .attach('file', csvFile('too long a name'), 'statement.csv');
-    expect(uploaded.status).toBe(400);
-    expect(uploaded.body.error).toBe(sentence);
   });
 
   /**
    * The failure decision 10 names: a name an account already has that its own rename
    * endpoint would refuse. It is reachable only if the doors bound different strings,
-   * which is what one schema - trimming before it bounds - prevents.
+   * which is what one schema - trimming before it bounds - prevents. The upload was
+   * the third door until row 26b; the two that remain are the two that write a name.
    */
-  it('and a name accepted at upload can be sent back to the rename endpoint', async () => {
-    const padded = `  ${longest}  `;
-    const staged = await stage(padded, 'padded name');
-    expect((await confirm(staged.importId)).status).toBe(200);
+  it('and a name accepted on create can be sent back to the rename endpoint', async () => {
+    // its own filler, because the case above already holds `longest`
+    const atTheBound = 'z'.repeat(ACCOUNT_NAME_MAX);
+    const padded = `  ${atTheBound}  `;
+    const created = await agent.post('/api/accounts').send({ name: padded, currency: 'EUR' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.name).toBe(atTheBound);
 
-    const renamed = await agent.patch(`/api/accounts/${staged.accountId}`).send({ name: padded });
+    const renamed = await agent.patch(`/api/accounts/${created.body.id}`).send({ name: padded });
     expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
-    expect(renamed.body.name).toBe(longest);
+    expect(renamed.body.name).toBe(atTheBound);
   });
 });
 
@@ -572,62 +572,6 @@ describe('DELETE /api/accounts/:id', () => {
 });
 
 /**
- * The refusal this row adds, end to end. It is reachable through the API alone: stage
- * an import for a name no account holds, create that account, and the id the import
- * was staged for no longer has a name it can use.
- */
-describe('a confirm whose account name was taken while it waited', () => {
-  it('answers 409, imports nothing, and confirms once the name is free', async () => {
-    const staged = await stage('Contested Http', 'contested');
-    expect(staged.accountExists).toBe(false);
-
-    const blocker = await agent
-      .post('/api/accounts')
-      .send({ name: 'Contested Http', currency: 'EUR' });
-    expect(blocker.status).toBe(201);
-    expect(blocker.body.id).not.toBe(staged.accountId);
-
-    const refused = await confirm(staged.importId);
-    expect(refused.status).toBe(409);
-    expect(refused.body.error).toBe(
-      'nothing was imported: another account already uses the name "Contested Http", and this import was staged for a different one. Upload the file again and its rows will join that account',
-    );
-    // nothing landed: no account under the staged id, and the blocker is still empty
-    const accounts = (await agent.get('/api/accounts?all=1')).body as { id: string }[];
-    expect(accounts.map((a) => a.id)).not.toContain(staged.accountId);
-    expect(
-      (await agent.get(`/api/transactions?accountId=${blocker.body.id}`)).body,
-    ).toHaveLength(0);
-
-    await agent.patch(`/api/accounts/${blocker.body.id}`).send({ name: 'Contested Http Old' });
-    const confirmed = await confirm(staged.importId);
-    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
-    expect(confirmed.body).toMatchObject({ accountId: staged.accountId, inserted: 1 });
-  });
-
-  /**
-   * The same refusal when the account holding the name is hidden. The plain sentence
-   * tells the user to upload the file again, and following it would land every row in
-   * an account nothing displays, answered 200 - so this one names the state and the
-   * way out of it instead.
-   */
-  it('and names the holder as removed when it is hidden', async () => {
-    const staged = await stage('Hidden Contest', 'hidden contest');
-    const blocker = await agent
-      .post('/api/accounts')
-      .send({ name: 'Hidden Contest', currency: 'EUR' });
-    expect((await agent.patch(`/api/accounts/${blocker.body.id}`).send({ hidden: true })).status)
-      .toBe(200);
-
-    const refused = await confirm(staged.importId);
-    expect(refused.status).toBe(409);
-    expect(refused.body.error).toBe(
-      'nothing was imported: another account already uses the name "Hidden Contest", and that account has been removed from the app - restore it or rename it, then upload the file again',
-    );
-  });
-});
-
-/**
  * Row 26a's confirm gate on the wire. This is the two-tab case at HTTP scale: the
  * upload proved the account was there, the account was removed in another tab, and
  * Confirm is pressed on a summary card that is still on screen. The status is what
@@ -664,5 +608,40 @@ describe('a confirm whose account was removed while it waited', () => {
     const confirmed = await confirm(staged.importId);
     expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
     expect(confirmed.body).toMatchObject({ accountId: staged.accountId, inserted: 1 });
+  });
+});
+
+/**
+ * The sibling above's harder half (row 26b): the account was not hidden, it was
+ * deleted, and no request the user can make brings it back - ids are minted
+ * server-side. So the sentence may not say "try again", which is what disqualified
+ * reusing account-hidden's, and this is the only place that sentence is asserted at
+ * all: the exhaustive switch behind it holds that a member has a case, never that the
+ * case says anything true.
+ *
+ * The state cannot be set up through this API and that is the guard working, not a
+ * gap: DELETE /api/accounts/:id refuses while the import waits, asserted above. The
+ * real window is the delete landing during the parse, and the statement below is what
+ * that leaves behind.
+ */
+describe('a confirm whose account was deleted while it waited', () => {
+  it('answers 409, and the sentence sends the user to Discard', async () => {
+    const id = await makeAccount('Deleted Mid Confirm');
+    const staged = await stageInto(id, 'deleted mid confirm');
+
+    await dbInstance().execute(sql`DELETE FROM accounts WHERE id = ${id}`);
+
+    const refused = await confirm(staged.importId);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe(
+      'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account',
+    );
+    expect(refused.body.error).toMatch(/Discard/);
+    expect(refused.body.error).not.toMatch(/try again|press Confirm again|restore it/);
+
+    // and it stays refused, so the sentence is not sending the user in a circle -
+    // then the way out it names, walked
+    expect((await confirm(staged.importId)).status).toBe(409);
+    expect((await agent.post(`/api/imports/${staged.importId}/discard`)).status).toBe(200);
   });
 });

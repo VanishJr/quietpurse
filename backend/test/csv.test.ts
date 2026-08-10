@@ -13,7 +13,7 @@ import {
   parseCsvDate,
 } from '../src/providers/csv';
 import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
-import { importAndConfirm } from './helpers';
+import { accountFor, importAndConfirm } from './helpers';
 import {
   CURRENCY_CODE_MAX,
   ImportSummary,
@@ -135,8 +135,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
   it('sparkasse preset: parses, categorizes, and does not duplicate files', async () => {
     const r1 = await importAndConfirm({
-      accountName: 'Sparkasse Giro',
-      currency: 'EUR',
+      accountId: await accountFor('Sparkasse Giro'),
       preset: 'sparkasse',
       bytes: Buffer.from(sparkasse, 'utf8'),
     });
@@ -154,8 +153,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     // re-uploading the same file is caught by its hash before any parsing
     // happens at all (ROADMAP 4.3); see imports.test.ts for that layer
     const r2 = await importAndConfirm({
-      accountName: 'Sparkasse Giro',
-      currency: 'EUR',
+      accountId: await accountFor('Sparkasse Giro'),
       preset: 'sparkasse',
       bytes: Buffer.from(sparkasse, 'utf8'),
     });
@@ -183,8 +181,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
       'CARD_PAYMENT,Current,2026-02-03 10:00:00,,Pending Stuff,-5.00,0,EUR,PENDING,95',
     ].join('\n');
     const r = await importAndConfirm({
-      accountName: 'Revolut',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut'),
       preset: 'revolut',
       bytes: Buffer.from(revolut, 'utf8'),
     });
@@ -212,16 +209,14 @@ describe('a CSV statement: pipeline and deduplication', () => {
       ['date,amount,description', ...keys.map((k) => rows[k])].join('\n');
 
     const first = await importAndConfirm({
-      accountName: 'Overlap Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Overlap Bank'),
       bytes: Buffer.from(file('mar05', 'mar20', 'mar28'), 'utf8'),
     });
     expect(first.inserted).toBe(3);
 
     // Mar 15 - Apr 15: repeats Mar 20 and Mar 28, adds two April rows
     const second = await importAndConfirm({
-      accountName: 'Overlap Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Overlap Bank'),
       bytes: Buffer.from(file('mar20', 'mar28', 'apr02', 'apr10'), 'utf8'),
     });
     expect(second.inserted).toBe(2);
@@ -235,16 +230,14 @@ describe('a CSV statement: pipeline and deduplication', () => {
       ['date,amount,description', `2026-05-04,-23.45,${description}`].join('\n');
 
     const first = await importAndConfirm({
-      accountName: 'Reparse Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Reparse Bank'),
       bytes: Buffer.from(statement('REWE SAGT DANKE'), 'utf8'),
     });
     expect(first.inserted).toBe(1);
 
     // the same statement through an improved parser: one more field extracted
     const second = await importAndConfirm({
-      accountName: 'Reparse Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Reparse Bank'),
       bytes: Buffer.from(statement('REWE SAGT DANKE 12345'), 'utf8'),
     });
     expect(second.inserted).toBe(0);
@@ -257,8 +250,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   it('generic: column auto-detection; an unreadable file gives a clear error', async () => {
     const generic = ['Date,Amount,Description', '2026-03-01,-10,Something'].join('\n');
     const r = await importAndConfirm({
-      accountName: 'Bank X',
-      currency: 'USD',
+      accountId: await accountFor('Bank X', 'USD'),
       bytes: Buffer.from(generic, 'utf8'),
     });
     expect(r.inserted).toBe(1);
@@ -267,8 +259,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
     await expect(
       importStatement({
-        accountName: 'Bad',
-        currency: 'EUR',
+        accountId: await accountFor('Bad'),
         bytes: Buffer.from('foo,bar\n1,2', 'utf8'),
       }),
     ).rejects.toThrow(/could not find date\/amount\/description columns/);
@@ -284,8 +275,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   it('nothing parsed: the CSV message is the row reason and nothing else', async () => {
     const unreadable = ['date,amount,description', 'not a date,not a number,broken'].join('\n');
     const thrown = await importStatement({
-      accountName: 'Unreadable Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Unreadable Bank'),
       bytes: Buffer.from(unreadable, 'utf8'),
     }).catch((e) => e as Error);
 
@@ -325,8 +315,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut RU',
-      currency: 'USD',
+      accountId: await accountFor('Revolut RU', 'USD'),
       preset: 'revolut',
       bytes: Buffer.from(ru, 'utf8'),
     });
@@ -371,8 +360,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut Reverted',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Reverted'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     });
@@ -396,8 +384,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const thrown = await importStatement({
-      accountName: 'Revolut Unknown Status',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Unknown Status'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     }).catch((e) => e as Error);
@@ -424,8 +411,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut Crowded Problems',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Crowded Problems'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     });
@@ -443,8 +429,7 @@ describe('a bank export in a language the preset also accepts', () => {
     const file = ['Дата,Сумма операции,Назначение', '2026-06-01,-1.00,тест'].join('\n');
 
     const thrown = await importStatement({
-      accountName: 'Revolut Unlisted Language',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Unlisted Language'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     }).catch((e) => e as Error);
@@ -471,8 +456,7 @@ describe('a bank export in a language the preset also accepts', () => {
     const file = ['Дата выполнения,Сумма,Описание', '2026-06-01,-1.00,тест'].join('\n');
 
     const thrown = await importStatement({
-      accountName: 'Revolut Prototype Preset',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Prototype Preset'),
       preset: 'toString',
       bytes: Buffer.from(file, 'utf8'),
     }).catch((e) => e as Error);
@@ -500,13 +484,9 @@ describe('a bank export in a language the preset also accepts', () => {
       'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Перевод на счёт,100.00,0.50,EUR,ВЫПОЛНЕНО,195.30',
       'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает обработки,-9.99,0.00,EUR,В ОБРАБОТКЕ,',
     ].join('\n');
+    const accountId = await accountFor('Revolut Named Reader');
     const upload = (preset?: string) =>
-      importStatement({
-        accountName: 'Revolut Named Reader',
-        currency: 'EUR',
-        preset,
-        bytes: Buffer.from(ru, 'utf8'),
-      });
+      importStatement({ accountId, preset, bytes: Buffer.from(ru, 'utf8') });
 
     const named = await upload('revolut');
     const auto = await upload();
@@ -568,13 +548,9 @@ describe('the summary names the columns the parser settled on', () => {
   ].join('\n');
 
   it("names the file's own header cells, and they differ by reader", async () => {
+    const accountId = await accountFor('Two Date Columns');
     const upload = (preset?: string) =>
-      importStatement({
-        accountName: 'Two Date Columns',
-        currency: 'EUR',
-        preset,
-        bytes: Buffer.from(TWO_DATES, 'utf8'),
-      });
+      importStatement({ accountId, preset, bytes: Buffer.from(TWO_DATES, 'utf8') });
 
     const named = await upload('sparkasse');
     const auto = await upload();
@@ -614,13 +590,9 @@ describe('the summary names the columns the parser settled on', () => {
       '2026-04-01,-5.00,Card payment,Kiosk am Bahnhof',
       '2026-04-02,-6.00,Card payment,Baecker Mueller',
     ].join('\n');
+    const accountId = await accountFor('Mapping Sent With The Upload');
     const upload = (mapping?: Partial<CsvMapping>) =>
-      importStatement({
-        accountName: 'Mapping Sent With The Upload',
-        currency: 'EUR',
-        mapping,
-        bytes: Buffer.from(file, 'utf8'),
-      });
+      importStatement({ accountId, mapping, bytes: Buffer.from(file, 'utf8') });
 
     const sent = await upload({ description: 'note' });
     const auto = await upload();
@@ -668,10 +640,9 @@ describe('a fee the statement states beside the amount', () => {
   const withoutFee = (description: string, amount: string, day = '01'): string =>
     `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},EUR,COMPLETED`;
 
-  const importRevolut = (accountName: string, ...rows: string[]) =>
+  const importRevolut = async (name: string, ...rows: string[]) =>
     importAndConfirm({
-      accountName,
-      currency: 'EUR',
+      accountId: await accountFor(name),
       preset: 'revolut',
       bytes: Buffer.from(rows.join('\n'), 'utf8'),
     });
@@ -822,8 +793,7 @@ describe('a fee the statement states beside the amount', () => {
     ]);
 
     const r = await importAndConfirm({
-      accountName: 'Fee Workbook',
-      currency: 'EUR',
+      accountId: await accountFor('Fee Workbook'),
       preset: 'revolut',
       bytes: Buffer.from(await wb.xlsx.writeBuffer()),
     });
@@ -849,8 +819,7 @@ describe('a fee the statement states beside the amount', () => {
     expect(first.inserted).toBe(1);
 
     const second = await importAndConfirm({
-      accountName: 'Fee Two Statements',
-      currency: 'EUR',
+      accountId: await accountFor('Fee Two Statements'),
       preset: 'revolut',
       bytes: Buffer.from([WITHOUT_FEE, withoutFee('One Payment', '-10.00', '11')].join('\n'), 'utf8'),
     });
@@ -904,24 +873,23 @@ describe("the statement's own running balance, on the sheet path", () => {
       r.balance ?? '',
     ].join(',');
 
-  const upload = (accountName: string, header: string, rows: Row[]) =>
+  const upload = async (name: string, header: string, rows: Row[]) =>
     importStatement({
-      accountName,
-      currency: 'EUR',
+      accountId: await accountFor(name),
       preset: 'revolut',
       bytes: Buffer.from([header, ...rows.map(line)].join('\n'), 'utf8'),
     });
 
-  const summaryOf = async (accountName: string, ...rows: Row[]) => {
-    const result = await upload(accountName, HEADER, rows);
+  const summaryOf = async (name: string, ...rows: Row[]) => {
+    const result = await upload(name, HEADER, rows);
     if (result.outcome !== 'awaiting_confirmation') {
       throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
     }
     return result.summary;
   };
 
-  const refusalOf = async (accountName: string, ...rows: Row[]): Promise<string> => {
-    const thrown = await summaryOf(accountName, ...rows).then(
+  const refusalOf = async (name: string, ...rows: Row[]): Promise<string> => {
+    const thrown = await summaryOf(name, ...rows).then(
       () => null,
       (e: Error) => e,
     );
@@ -1365,8 +1333,7 @@ describe("the statement's own running balance, on the sheet path", () => {
 
     it('reconciles off numeric balance cells', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book card', -5.68, 66.72, 3),
@@ -1391,8 +1358,7 @@ describe("the statement's own running balance, on the sheet path", () => {
      */
     it('counts a single-row product beside a multi-row one as checked once', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook Two Series',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook Two Series'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book savings', 130, 445, 2, 'Savings'),
@@ -1417,8 +1383,7 @@ describe("the statement's own running balance, on the sheet path", () => {
      */
     it('claims nothing for a workbook every run of which is one row', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook No Interior',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook No Interior'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book savings', 130, 445, 2, 'Savings'),
@@ -1436,8 +1401,7 @@ describe("the statement's own running balance, on the sheet path", () => {
 
     it('and refuses the same workbook with a row taken out', async () => {
       const thrown = await importStatement({
-        accountName: 'Balance Workbook Broken',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook Broken'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book card', -5.68, 66.72, 3),
@@ -1458,8 +1422,7 @@ describe('what the new refusals may spend', () => {
   it('every preset composes a refusal error_detail keeps whole', async () => {
     for (const key of Object.keys(CSV_PRESETS)) {
       const thrown = await importStatement({
-        accountName: `Budget ${key}`,
-        currency: 'EUR',
+        accountId: await accountFor(`Budget ${key}`),
         preset: key,
         bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
       }).catch((e) => e as Error);
@@ -1499,8 +1462,7 @@ describe('what the new refusals may spend', () => {
         ws.addRow([new Date('2026-09-01T00:00:00.000Z'), -5, 'one']);
 
         const thrown = await importStatement({
-          accountName: `Cut ${key} ${header[0]}`,
-          currency: 'EUR',
+          accountId: await accountFor(`Cut ${key} ${header[0]}`),
           preset: key,
           bytes: Buffer.from(await wb.xlsx.writeBuffer()),
         }).catch((e) => e as Error);
@@ -1619,13 +1581,11 @@ describe('decodeCsv', () => {
   it('a UTF-16LE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-01,-12.00,Utf16 bakery'].join('\n');
     const wide = await importAndConfirm({
-      accountName: 'Utf16 Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf16 Bank'),
       bytes: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
     });
     const narrow = await importAndConfirm({
-      accountName: 'Utf8 Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf8 Bank'),
       bytes: Buffer.from(text, 'utf8'),
     });
     expect(wide.inserted).toBe(1);
@@ -1644,13 +1604,11 @@ describe('decodeCsv', () => {
   it('a UTF-16BE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-02,-13.00,Utf16be bakery'].join('\n');
     const wide = await importAndConfirm({
-      accountName: 'Utf16be Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf16be Bank'),
       bytes: Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]),
     });
     const narrow = await importAndConfirm({
-      accountName: 'Utf8 Big Endian Twin',
-      currency: 'EUR',
+      accountId: await accountFor('Utf8 Big Endian Twin'),
       bytes: Buffer.from(text, 'utf8'),
     });
     expect(wide.inserted).toBe(1);

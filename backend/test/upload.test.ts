@@ -74,12 +74,23 @@ afterAll(() => {
   setWorkspaceFallback(TEST_WORKSPACE_ID);
 });
 
+/**
+ * An empty account over the same door the Accounts screen uses, which is where every
+ * account in this file comes from since row 26b. The data-layer helper cannot stand
+ * in: this file clears the process-wide workspace fallback, so createAccount called
+ * outside a request throws "no workspace context".
+ */
+const makeAccount = async (name: string, currency = 'EUR'): Promise<string> => {
+  const res = await agent.post('/api/accounts').send({ name, currency });
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body.id as string;
+};
+
 describe('POST /api/imports', () => {
   it('takes a CSV as multipart and answers with a summary to confirm', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Http Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Http Bank'))
       .field('preset', 'generic')
       .attach('file', csvFile('HTTP groceries'), 'statement.csv');
 
@@ -87,7 +98,6 @@ describe('POST /api/imports', () => {
     expect(res.body.outcome).toBe('awaiting_confirmation');
     expect(res.body.summary).toMatchObject({
       accountName: 'Http Bank',
-      accountExists: false,
       total: 1,
       accepted: 1,
       skipped: 0,
@@ -123,8 +133,7 @@ describe('POST /api/imports', () => {
   it('stores a non-ASCII filename as the browser sent it', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Cyrillic Name Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Cyrillic Name Bank'))
       .attach('file', await xlsxFile('выписка'), 'выписка.xlsx');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -145,8 +154,7 @@ describe('POST /api/imports', () => {
   it('takes an XLSX, sniffed by content rather than by its name', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Workbook Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Workbook Bank'))
       .attach('file', await xlsxFile('HTTP workbook'), 'statement.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -166,15 +174,13 @@ describe('POST /api/imports', () => {
   it('a skipped sheet reaches the client in problems, and adds no field to the body', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Skipped Sheet Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Skipped Sheet Bank'))
       .attach('file', await xlsxFile('behind the cover', true), 'statement.xlsx');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual(['outcome', 'summary']);
     expect(Object.keys(res.body.summary).sort()).toEqual([
       'accepted',
-      'accountExists',
       'accountId',
       'accountName',
       'alreadyPresent',
@@ -196,11 +202,11 @@ describe('POST /api/imports', () => {
   });
 
   it('the same file twice answers duplicate without parsing it again', async () => {
+    const accountId = await makeAccount('Twice Over Http');
     const upload = () =>
       agent
         .post('/api/imports')
-        .field('accountName', 'Twice Over Http')
-        .field('currency', 'EUR')
+        .field('accountId', accountId)
         .attach('file', csvFile('sent twice'), 'twice.csv');
 
     const first = await upload();
@@ -228,8 +234,7 @@ describe('POST /api/imports', () => {
     const before = (await imports()).length;
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Pdf Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Pdf Bank'))
       .attach('file', Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'), 'statement.pdf');
 
     expect(res.status).toBe(400);
@@ -267,8 +272,7 @@ describe('POST /api/imports', () => {
 
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Wrapped Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Wrapped Bank'))
       .attach('file', buildSignedContainer(inner), 'report.pdf');
 
     expect(res.status).toBe(400);
@@ -304,8 +308,7 @@ describe('POST /api/imports', () => {
 
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Zero Led Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Zero Led Bank'))
       .attach('file', csv, 'statement.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -315,8 +318,7 @@ describe('POST /api/imports', () => {
   it('a legacy .xls is refused with the message for that format', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Old Excel Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Old Excel Bank'))
       .attach(
         'file',
         Buffer.concat([
@@ -331,12 +333,9 @@ describe('POST /api/imports', () => {
   });
 
   it('an XML file and an unreadable binary each get their own message', async () => {
+    const accountId = await makeAccount('Odd Bytes Bank');
     const send = (bytes: Buffer, name: string) =>
-      agent
-        .post('/api/imports')
-        .field('accountName', 'Odd Bytes Bank')
-        .field('currency', 'EUR')
-        .attach('file', bytes, name);
+      agent.post('/api/imports').field('accountId', accountId).attach('file', bytes, name);
 
     const xml = await send(
       Buffer.from('<?xml version="1.0"?><Document><BkToCstmrStmt/></Document>', 'utf8'),
@@ -354,28 +353,16 @@ describe('POST /api/imports', () => {
     );
   });
 
-  it('rejects a request with no file, a bad currency or a mapping that is not an object', async () => {
+  it('rejects a request with no file, or a mapping that is not an object', async () => {
     const noFile = await agent
       .post('/api/imports')
-      .field('accountName', 'No File Bank')
-      .field('currency', 'EUR');
+      .field('accountId', await makeAccount('No File Bank'));
     expect(noFile.status).toBe(400);
     expect(noFile.body.error).toMatch(/file field required/);
 
-    const badCurrency = await agent
-      .post('/api/imports')
-      .field('accountName', 'Bad Currency Bank')
-      .field('currency', 'euro')
-      .attach('file', csvFile('x'), 'statement.csv');
-    expect(badCurrency.status).toBe(400);
-    // one schema at both doors, so one sentence: it is optional at the account
-    // doors now (row 65) and still required here, and this wording is true of both
-    expect(badCurrency.body.error).toMatch(/currency must be a 3-letter ISO code/);
-
     const badMapping = await agent
       .post('/api/imports')
-      .field('accountName', 'Bad Mapping Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Bad Mapping Bank'))
       .field('mapping', 'date')
       .attach('file', csvFile('x'), 'statement.csv');
     expect(badMapping.status).toBe(400);
@@ -389,11 +376,10 @@ describe('POST /api/imports', () => {
    */
   it('a mapping with the wrong field types or an unknown key is refused, with no import row', async () => {
     const before = (await imports()).length;
-    const send = (accountName: string, mapping: string) =>
+    const send = async (name: string, mapping: string) =>
       agent
         .post('/api/imports')
-        .field('accountName', accountName)
-        .field('currency', 'EUR')
+        .field('accountId', await makeAccount(name))
         .field('mapping', mapping)
         .attach('file', csvFile('x'), 'statement.csv');
 
@@ -443,8 +429,7 @@ describe('POST /api/imports', () => {
   it('a file under the wrong field name is still reported as the file field', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Wrong Field Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Wrong Field Bank'))
       .attach('statement', csvFile('x'), 'statement.csv');
 
     expect(res.status).toBe(400);
@@ -455,8 +440,7 @@ describe('POST /api/imports', () => {
   it('an oversized text field names the field', async () => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Fat Field Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Fat Field Bank'))
       .field('mapping', 'x'.repeat(2 * 1024 * 1024))
       .attach('file', csvFile('x'), 'statement.csv');
 
@@ -472,8 +456,7 @@ describe('POST /api/imports', () => {
   it('an unauthenticated upload is refused by the session check', async () => {
     const res = await request(app)
       .post('/api/imports')
-      .field('accountName', 'Stranger')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Stranger'))
       .attach('file', csvFile('should never be read'), 'statement.csv');
     expect(res.status).toBe(401);
     expect(res.body.error).toMatch(/sign in required/);
@@ -481,19 +464,14 @@ describe('POST /api/imports', () => {
 });
 
 /**
- * The wire half of the destination union (ROADMAP row 26a). Multipart fields carry no
- * type, so the exclusive union `importStatement` takes cannot hold anything here -
- * these eight cases are what a mobile client and curl meet, and the REST API is the
- * contract the picker is only one client of.
+ * The wire half of a destination that has one member (ROADMAP rows 26a, 26b).
+ * Multipart fields carry no type, so the `never` keys on StatementDestination hold
+ * nothing here - these nine cases are what a mobile client and curl meet, and the
+ * REST API is the contract the picker is only one client of. Two of them are the
+ * retired fields, refused rather than ignored so that a caller still sending them is
+ * told where an account comes from instead of having half its request dropped.
  */
 describe('POST /api/imports picks an account by id', () => {
-  /** An empty account over the same door the Accounts screen uses. */
-  const makeAccount = async (name: string): Promise<string> => {
-    const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    return res.body.id as string;
-  };
-
   /**
    * Distinct bytes per case, and not for tidiness: the hash short-circuit sits above
    * the destination resolution and stays there (024's D1), so bytes a committed
@@ -514,7 +492,6 @@ describe('POST /api/imports picks an account by id', () => {
     expect(res.body.summary).toMatchObject({
       accountId: id,
       accountName: 'Picked Over Http',
-      accountExists: true,
       accepted: 1,
     });
 
@@ -523,33 +500,58 @@ describe('POST /api/imports picks an account by id', () => {
     expect(confirmed.body).toMatchObject({ accountId: id, accountIds: [id], inserted: 1 });
   });
 
-  it('refuses a request that carries both an id and a name', async () => {
-    const id = await makeAccount('Both Arms Bank');
-    const res = await uploadWith('both arms', {
-      accountId: id,
-      accountName: 'Both Arms Bank',
-      currency: 'EUR',
-    });
+  /**
+   * accountName is refused rather than ignored (row 26b). Ignoring it would drop one
+   * of the two destinations a request stated, silently, which is the guess the old
+   * exclusivity refusal existed to prevent - and the sentence has to say where an
+   * account comes from now, because a caller sending this field believes an upload
+   * still makes one.
+   */
+  it('refuses accountName, and names the door that creates an account', async () => {
+    const id = await makeAccount('Retired Name Arm');
+    const before = (await imports()).length;
+
+    const res = await uploadWith('a name arm', { accountId: id, accountName: 'A New Bank' });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.error).toMatch(/POST \/api\/accounts/);
+    // and nothing was staged on the way to the refusal
+    expect(await imports()).toHaveLength(before);
+  });
+
+  it('refuses accountName even when it is the only destination sent', async () => {
+    const res = await uploadWith('a name alone', { accountName: 'Nobody Made This' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/not both/);
+    expect(res.body.error).toMatch(/POST \/api\/accounts/);
   });
 
   it('refuses a request that carries neither', async () => {
-    const res = await uploadWith('neither arm', { currency: 'EUR' });
+    const res = await uploadWith('neither arm', {});
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('accountId or accountName field required');
+    expect(res.body.error).toBe('accountId field required');
   });
 
   /**
    * An existing account owns its currency (ROADMAP 26(b)). Accepting one here and
    * then reading the account's instead is a field the caller believes in and nothing
    * uses - which is how "Savings" stayed EUR through a USD statement and reported it.
+   *
+   * Refused ahead of the accountId check, so a request carrying only this field reads
+   * the sentence about currency rather than one about a field it did not send.
    */
   it('refuses a currency sent alongside an id', async () => {
     const id = await makeAccount('Own Currency Bank');
     const res = await uploadWith('own currency', { accountId: id, currency: 'USD' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/keeps its own currency/);
+    expect(res.body.error).toMatch(/POST \/api\/accounts/);
+  });
+
+  it('refuses a currency sent alone, without asking for an accountId first', async () => {
+    const res = await uploadWith('currency alone', { currency: 'USD' });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/keeps its own currency/);
@@ -580,35 +582,10 @@ describe('POST /api/imports picks an account by id', () => {
   });
 
   /**
-   * multer turns a repeated multipart field into an array, so a presence test written
-   * as `typeof x === 'string'` reads a repeat as ABSENT: this request used to answer
-   * 200 as the name arm, staging the rows against a freshly minted id for an account
-   * the caller never picked - one Confirm from existing, with no account delete to
-   * undo it. Unreachable from the picker, which is not the argument: the REST API is
-   * the contract (row 24).
-   */
-  it('refuses a repeated accountId sent alongside a name', async () => {
-    const id = await makeAccount('Repeated With Name');
-    const before = (await imports()).length;
-
-    const res = await agent
-      .post('/api/imports')
-      .field('accountId', id)
-      .field('accountId', id)
-      .field('accountName', 'Some Other Bank')
-      .field('currency', 'EUR')
-      .attach('file', csvFile('repeated id and a name'), 'statement.csv');
-
-    expect(res.status, JSON.stringify(res.body)).toBe(400);
-    expect(res.body.error).toMatch(/not both/);
-    expect(await imports()).toHaveLength(before);
-  });
-
-  /**
    * Refused, not normalised - picking the first or the last of two values the caller
-   * may not agree on is the guess the exclusivity refusal exists to prevent. The
-   * sentence names the field, because "accountId or accountName field required" is
-   * false of a request that sent one twice.
+   * may not agree on is a guess about where a statement goes. The sentence names the
+   * field, because "accountId field required" is false of a request that sent one
+   * twice.
    */
   it('refuses a repeated accountId sent alone, naming the field', async () => {
     const id = await makeAccount('Repeated Alone');
@@ -629,8 +606,7 @@ describe('POST /api/imports/:id/confirm and /discard', () => {
   const stage = async (accountName: string, label: string) => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', accountName)
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount(accountName))
       .attach('file', csvFile(label), `${label}.csv`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     return res.body.summary as { importId: string };
@@ -778,12 +754,6 @@ describe('GET /api/imports: the filter and the totals', () => {
     const { importId } = res.body.summary;
     expect((await confirm(importId)).status).toBe(200);
     return importId as string;
-  };
-
-  const makeAccount = async (name: string): Promise<string> => {
-    const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    return res.body.id as string;
   };
 
   it('filters the page and counts the filtered set, not the workspace', async () => {
@@ -981,7 +951,7 @@ async function sendInPieces(
 describe('a body that spans socket reads keeps its workspace', () => {
   it('a multipart upload written in three pieces still imports', async () => {
     const body = multipartBody(
-      { accountName: 'Chunked Bank', currency: 'EUR', preset: 'generic' },
+      { accountId: await makeAccount('Chunked Bank'), preset: 'generic' },
       'chunked.csv',
       csvFile('chunked groceries'),
     );
@@ -1023,8 +993,7 @@ describe('a body that spans socket reads keeps its workspace', () => {
 
     const res = await agent
       .post('/api/imports')
-      .field('accountName', 'Big Body Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Big Body Bank'))
       .attach('file', padded, 'big.csv');
 
     expect(res.status, JSON.stringify(res.body)).toBe(200);

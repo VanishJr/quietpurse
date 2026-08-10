@@ -162,12 +162,13 @@ export const accounts = pgTable(
     primaryKey({ columns: [t.workspaceId, t.id] }),
     /**
      * A name identifies an account to the user, so no two of them may share one:
-     * an upload naming "Revolut" resolves to an account by name (see
-     * resolveUploadAccountId), and two accounts a person cannot tell apart would
-     * make that resolution a coin flip. Folded in SQL, and every comparison
-     * against it must fold the same way - JS toLowerCase() and lower() disagree
-     * (Turkish dotted I among others), and a lookup that misses where the index
-     * matches is an insert that collides.
+     * two accounts a person cannot tell apart are two the account picker on the
+     * import screen cannot tell them apart either. The resolution that used to rest
+     * on it - an upload naming "Revolut" - went with row 26b; POST and PATCH
+     * /api/accounts are the doors that collide here now. Folded in SQL, and every
+     * comparison against it must fold the same way - JS toLowerCase() and lower()
+     * disagree (Turkish dotted I among others), and a lookup that misses where the
+     * index matches is an insert that collides.
      */
     uniqueIndex('accounts_name_unique').on(t.workspaceId, sql`lower(${t.name})`),
   ],
@@ -188,16 +189,15 @@ export const imports = pgTable(
     fileHash: text('file_hash').notNull(),
     sourceType: text('source_type', { enum: ['csv', 'xlsx', 'pdf'] }).notNull(),
     originalFilename: text('original_filename'),
-    // What the upload asked for: the account name as the user typed it, the
-    // currency for rows whose file carries none, and the account the rows are
-    // going to. Recorded because Confirm is a later request that does not carry
-    // the form fields. The id is resolved once, at staging
-    // (resolveUploadAccountId), and read back verbatim at confirm, which derives
-    // nothing - that is what holds the two together now that a name is not an id.
-    // account_name is what was typed at upload and stays that fact forever; a
-    // rename moves accounts.name and never this. All three are NULL on every
-    // import that never reached the parse, and on every one from before the
-    // confirmation step.
+    // Where the upload went: the account's name and currency as they read at
+    // upload time, and the account the rows are going to. Recorded because Confirm
+    // is a later request that does not carry the form fields. The id is resolved
+    // once, at staging (resolveUploadAccount), and read back verbatim at confirm,
+    // which derives nothing - that is what holds the two together now that a name
+    // is not an id. account_name is what the account was called at upload and stays
+    // that fact forever; a rename moves accounts.name and never this, which is what
+    // the import history prints per row. All three are NULL on every import that
+    // never reached the parse, and on every one from before the confirmation step.
     accountName: text('account_name'),
     accountCurrency: text('account_currency'),
     accountId: text('account_id'),

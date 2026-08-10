@@ -5,7 +5,14 @@
  * the app works anyway: the client gets its ids from a list endpoint too.
  */
 import { sql } from 'drizzle-orm';
-import { allTransactions, confirmImport, currentWorkspaceId, dbInstance } from '../src/db';
+import {
+  allTransactions,
+  confirmImport,
+  createAccount,
+  currentWorkspaceId,
+  dbInstance,
+  findAccountByName,
+} from '../src/db';
 import { StatementImportRequest, importStatement } from '../src/providers/statement';
 import { Transaction } from '../src/types';
 
@@ -50,6 +57,26 @@ export interface ImportedStatement {
   importId: string;
   duplicate?: boolean;
   uploadedAt?: string;
+}
+
+/**
+ * The account an upload's rows go into, created if this workspace has not got one of
+ * that name. It stands exactly where resolveUploadAccountId's branch (a) stood: the
+ * cases that reach it are about parsing, deduplication, provenance and documents and
+ * merely need AN account - and several of them upload twice under one name and
+ * expect one account, which a lookup-then-create reproduces and a bare create does
+ * not.
+ *
+ * Data layer, so it does not work in the HTTP tests: upload.test.ts and
+ * http-accounts.test.ts clear the process-wide workspace fallback, and createAccount
+ * outside a request throws. Those files go through POST /api/accounts.
+ */
+export async function accountFor(name: string, currency = 'EUR'): Promise<string> {
+  const existing = await findAccountByName(name);
+  if (existing) return existing.id;
+  const made = await createAccount({ name, currency });
+  if (!made.ok) throw new Error(`could not create account "${name}": ${made.reason}`);
+  return made.account.id;
 }
 
 /**

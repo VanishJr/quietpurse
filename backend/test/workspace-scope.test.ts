@@ -29,7 +29,6 @@ import {
   listIncomeSources,
   recordImportDocument,
   resolveUploadAccount,
-  resolveUploadAccountId,
   runWithWorkspace,
   seedDefaults,
   setWorkspaceFallback,
@@ -75,7 +74,6 @@ describe('workspace scoping', () => {
       // new query is invisible to it until someone adds it - and an unscoped name
       // lookup would resolve an upload onto another workspace's account
       await expect(findAccountByName('Scope')).rejects.toThrow(/no workspace context/);
-      await expect(resolveUploadAccountId('Scope')).rejects.toThrow(/no workspace context/);
       // unscoped, this one either lets another workspace's account receive an upload
       // or lets another workspace's hidden row refuse one
       await expect(resolveUploadAccount('scope-account')).rejects.toThrow(/no workspace context/);

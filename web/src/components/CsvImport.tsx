@@ -61,9 +61,11 @@ const chipKey = (id: string): string => `id:${id}`;
 
 /**
  * The upload's body. Outside the component deliberately: the account name is not a
- * binding here, so a client that sends one does not compile. The backend still
- * accepts a name arm, and this is what makes it unreachable by construction rather
- * than by review.
+ * binding here, so a client that sends one does not compile. Since row 26b the
+ * backend refuses `accountName` and `currency` outright — an account is created at
+ * POST /api/accounts and nowhere else — so what this shape buys is that the refusal
+ * is never reached: there is no state of this component from which a request the
+ * server would reject can be composed.
  */
 const uploadForm = (account: Account, preset: string, file: File): FormData => {
   const form = new FormData();
@@ -570,11 +572,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             {fmtDay(summary.from)} to {fmtDay(summary.to)}, {summary.totals
               .map((t) => fmtMoney(t.net, t.currency))
               .join(' · ')}{' '}
-            in total. They'll join{' '}
-            {summary.accountExists
-              ? `your existing "${summary.accountName}"`
-              : `a new account "${summary.accountName}"`}
-            .
+            in total. They'll join your existing "{summary.accountName}".
           </p>
           {/*
             Only when the format states its own balances at all. A PDF prints an

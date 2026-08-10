@@ -19,7 +19,6 @@ import {
   createImport,
   dbInstance,
   deleteImport,
-  findAccountByName,
   getAccount,
   getImportDocumentRef,
   insertTransactions,
@@ -28,10 +27,10 @@ import {
   recordImportDocument,
   runWithWorkspace,
   stageImport,
+  upsertAccount,
 } from '../src/db';
 import { DOCUMENT_STORE_REFUSED, getDocument } from '../src/documents';
-import { importAndConfirm } from './helpers';
-import { importStatement } from '../src/providers/statement';
+import { accountFor, importAndConfirm } from './helpers';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
@@ -44,8 +43,8 @@ const csvFile = (...rows: string[]): string =>
 const repeated = (n: number, row: string): string =>
   csvFile(...Array.from({ length: n }, () => row));
 
-const importFile = (accountName: string, csv: string) =>
-  importAndConfirm({ accountName, currency: 'EUR', bytes: Buffer.from(csv, 'utf8') });
+const importFile = async (name: string, csv: string) =>
+  importAndConfirm({ accountId: await accountFor(name), bytes: Buffer.from(csv, 'utf8') });
 
 const countFor = async (accountId: string): Promise<number> =>
   (await listTransactions({ accountId, limit: 500 })).length;
@@ -72,17 +71,18 @@ describe('imports: the file layer', () => {
     expect(first.duplicate).toBeUndefined();
     expect(first.inserted).toBe(2);
 
-    // the same bytes under a different account name: were it parsed, it would
-    // create that account and insert two more rows
+    // the same bytes into a different account: were they parsed, two more rows
+    // would land in that one
+    const otherId = await accountFor('Hash Bank Other Name');
     const second = await importFile('Hash Bank Other Name', csv);
     expect(second.duplicate).toBe(true);
     expect(second.importId).toBe(first.importId);
     expect(second.inserted).toBe(0);
-    expect(await findAccountByName('Hash Bank Other Name')).toBeUndefined();
+    expect(await countFor(otherId)).toBe(0);
     expect(await countFor(first.accountId)).toBe(2);
 
-    // and the answer names the account the rows are ACTUALLY in, not the one
-    // that was asked for and does not exist
+    // and the answer names the account the rows are ACTUALLY in, not the one this
+    // request asked for
     expect(second.accountIds).toEqual([first.accountId]);
     expect(second.accountId).toBe(first.accountId);
     expect(await getAccount(second.accountId)).toBeDefined();
@@ -99,6 +99,11 @@ describe('imports: the file layer', () => {
    * earlier one, so the dedup key sent every insert away. The empty accountIds
    * is the honest answer - it says where this import's rows are, and there are
    * none, which is not the same as nothing having been imported.
+   *
+   * `accountId` is empty for the same reason and not for want of a better guess.
+   * The account the request picked is NOT the answer: the field says where the
+   * earlier import's rows went, and that import may have put them elsewhere
+   * entirely, so standing the requested id in would be a claim nothing checked.
    */
   it('a duplicate of an import that owns no rows answers with no accounts', async () => {
     const a = csvFile('2026-02-01,-15.00,Bakery');
@@ -115,9 +120,7 @@ describe('imports: the file layer', () => {
     expect(again.duplicate).toBe(true);
     expect(again.importId).toBe(second.importId);
     expect(again.accountIds).toEqual([]);
-    // the account exists - the first import created it - so the answer names it
-    // rather than minting a fresh id for a request that imported nothing
-    expect(again.accountId).toBe(first.accountId);
+    expect(again.accountId).toBe('');
   });
 
   it('a parse that throws leaves a failed import, and the same bytes may be retried', async () => {
@@ -129,7 +132,7 @@ describe('imports: the file layer', () => {
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toMatch(/could not find date\/amount\/description columns/);
     expect(failed[0].transactions).toBe(0);
-    expect(await findAccountByName('Retry Bank')).toBeUndefined();
+    expect(await countFor(await accountFor('Retry Bank'))).toBe(0);
     // and the row records no account: createImport writes before the parse, so there
     // is nothing to record yet. Asserted on the COLUMN, because the mapper is what
     // would be changed alongside a writer that started filling it in - and an account
@@ -142,8 +145,7 @@ describe('imports: the file layer', () => {
 
     // a failed import does not claim the file - only a committed one does
     const retried = await importAndConfirm({
-      accountName: 'Retry Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Retry Bank'),
       bytes: Buffer.from(csv, 'utf8'),
       mapping: {
         date: 'when',
@@ -445,6 +447,10 @@ describe('listImports: the filter and the totals', () => {
   async function importInto(accountId: string, name: string, n: number): Promise<string> {
     seq += 1;
     const mark = seq;
+    // the account first, and with these ids rather than minted ones: listImports
+    // filters on the literal below. An upload cannot stage into an account that is
+    // not there, so neither may this (row 26b)
+    await upsertAccount({ id: accountId, provider: 'upload', name, currency: 'EUR', balance: 0 });
     const record = await createImport({
       fileHash: `totals-${mark}`,
       sourceType: 'csv',
