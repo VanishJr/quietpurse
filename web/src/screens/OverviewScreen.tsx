@@ -395,7 +395,14 @@ export function OverviewScreen({
   if (panel?.kind === 'import') {
     return (
       <div className="screen-inner">
-        <CsvImport onBack={() => setPanel(null)} onImported={load} />
+        <CsvImport
+          onBack={() => setPanel(null)}
+          onImported={load}
+          // the same reload, and deliberately not the same prop: onBack closes the
+          // panel without one, so an account created in there reaches the rail here
+          onAccountCreated={load}
+          baseCurrency={baseCurrency}
+        />
       </div>
     );
   }
@@ -468,8 +475,8 @@ export function OverviewScreen({
             <h2 className="acct-blank-title">Nothing here yet — start with a statement</h2>
             <p className="acct-blank-text">
               Export a statement from your bank in whatever format it offers — .csv, .xlsx or
-              .pdf — and drop it in. Finto reads the transactions out of it and makes an
-              account for them, named after the file. You can rename it afterwards.
+              .pdf — and drop it in. Finto reads the transactions out of it and puts them in
+              an account you name on the way in.
             </p>
             <div className="acct-blank-actions">
               <button className="btn" onClick={() => setPanel({ kind: 'import' })}>

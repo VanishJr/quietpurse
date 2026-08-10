@@ -59,6 +59,20 @@ const NEW_ACCOUNT = 'new';
 
 const chipKey = (id: string): string => `id:${id}`;
 
+/**
+ * The upload's body. Outside the component deliberately: the account name is not a
+ * binding here, so a client that sends one does not compile. The backend still
+ * accepts a name arm, and this is what makes it unreachable by construction rather
+ * than by review.
+ */
+const uploadForm = (account: Account, preset: string, file: File): FormData => {
+  const form = new FormData();
+  form.append('accountId', account.id);
+  form.append('preset', preset);
+  form.append('file', file);
+  return form;
+};
+
 /** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
@@ -89,27 +103,45 @@ interface Props {
    * which is after Confirm, not after the upload: an upload writes nothing.
    */
   onImported: () => void;
+  /**
+   * An account was created here, which happens before any row lands and so is not
+   * the event above. Required: the account is on the server and on no screen until
+   * the caller reloads, and onBack reloads nothing.
+   */
+  onAccountCreated: () => void;
+  /**
+   * What a new account will be created in — printed, not sent, since the server
+   * defaults it to the same setting this came from. `null` when that setting could
+   * not be read: the sentence is left out, and nothing here is disabled over it —
+   * a cosmetic fetch must not block the only way data enters the product.
+   */
+  baseCurrency: string | null;
 }
 
 /**
  * Importing a bank statement — the only way data enters the product. Reached from
  * Overview, and a statement is not a one-off setup step: next month there is another.
  */
-export function CsvImport({ onBack, onImported }: Props) {
+export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }: Props) {
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('generic');
   /**
    * The workspace's accounts, and `null` means never loaded — never "you have none",
    * which is the distinction OverviewScreen holds for the same reason. A failed load
    * that fell through to "create a new one" would manufacture a second account for a
-   * bank the user already has, and there is no account delete to undo it.
+   * bank the user already has, and pressing Import is what writes it.
    */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   /** which chip is pressed; null until the user picks, because nothing is preselected */
   const [pickedKey, setPickedKey] = useState<string | null>(null);
   const [accountName, setAccountName] = useState('');
-  const [currency, setCurrency] = useState('EUR');
+  /**
+   * The account this screen made, which outlives the press that made it: it exists
+   * on the server whether or not the upload behind it produced a single row, and
+   * that is the thing the reader is owed. Cleared when rows land in it.
+   */
+  const [created, setCreated] = useState<Account | null>(null);
   const [csvText, setCsvText] = useState('');
   /** the chosen file itself: a workbook is bytes, and only the backend can read it */
   const [file, setFile] = useState<File | null>(null);
@@ -199,26 +231,40 @@ export function CsvImport({ onBack, onImported }: Props) {
     }
   };
 
+  /**
+   * The create arm's account, made before the file is read. Every state write lands
+   * before the caller awaits the upload, so a rejected upload finds the component
+   * already on the picker arm: a second press then uploads into this account instead
+   * of asking the server to create a name it created one press ago — which answers
+   * 409 and refuses the user on behalf of an account this screen made for them.
+   *
+   * The list as well as the key, because `picked` is the key looked up in the list:
+   * a key with no row renders a picker with nothing pressed and Import disabled.
+   */
+  const createDestination = async (): Promise<Account> => {
+    const made = await api.createAccount(accountName.trim());
+    setAccounts((list) => [...(list ?? []), made]);
+    setPickedKey(chipKey(made.id));
+    setAccountName('');
+    setCreated(made);
+    onAccountCreated();
+    return made;
+  };
+
   const runImport = async () => {
     setBusy(true);
     try {
       setError(null);
       setConfirmed(null);
       setDiscarded(false);
-      const form = new FormData();
-      // one object of two literals, never two appends behind two conditions: the
-      // request the backend refuses for carrying both arms has to be unbuildable
-      // here, not merely unbuilt
-      const destination = picked
-        ? { accountId: picked.id }
-        : { accountName: accountName.trim(), currency: currency.trim() };
-      for (const [field, value] of Object.entries(destination)) form.append(field, value);
-      form.append('preset', preset);
+      // a throw here is the whole of the create arm's refusal: nothing below runs, so
+      // a refused create never becomes an upload
+      const account = picked ?? (await createDestination());
       // the paste fallback goes through the same endpoint: it is a file too
-      form.append('file', file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' }));
+      const body = file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' });
       // this reads the file and answers with what it found — it imports nothing, so
       // onImported() stays out of here and fires when Confirm comes back
-      setResult(await api.importStatement(form));
+      setResult(await api.importStatement(uploadForm(account, preset, body)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -231,9 +277,19 @@ export function CsvImport({ onBack, onImported }: Props) {
     try {
       setError(null);
       setConfirmed(await api.confirmImport(summary.importId));
+      // rows are in it now, so it is no longer an account standing on nothing — and
+      // the subject is cleared rather than the sentence gated on `confirmed`, which
+      // newInput() resets on the next file chosen in this same mount.
+      //
+      // Only when the rows landed in THIS account: confirming into one the user
+      // picked instead leaves the created one standing empty, which is the case the
+      // sentence exists for. One slot is an accepted limit and not an oversight — a
+      // second create overwrites the first, so an account made two presses ago is
+      // announced nowhere; a list of them is a different screen's problem.
+      if (created?.id === summary.accountId) setCreated(null);
       onImported();
-      // the create arm's account exists now: without this a second file in the same
-      // mount cannot be sent to the account this one just made
+      // a refresh of a list another tab may have moved; the account this screen
+      // created went in when it was created, and does not arrive here
       await loadAccounts();
     } catch (e) {
       setError((e as Error).message);
@@ -418,27 +474,19 @@ export function CsvImport({ onBack, onImported }: Props) {
       {creating && (
         <>
           <label className="setting-label" htmlFor="csv-account">
-            Account name and currency
+            Account name
           </label>
-          <div className="inline-row">
-            <input
-              id="csv-account"
-              className="input"
-              value={accountName}
-              onChange={(e) => setAccountName(e.target.value)}
-              placeholder="Sparkasse Giro"
-            />
-            <input
-              className="input input-code"
-              value={currency}
-              onChange={(e) => setCurrency(e.target.value)}
-              placeholder="EUR"
-              aria-label="Account currency"
-            />
-          </div>
+          <input
+            id="csv-account"
+            className="input"
+            value={accountName}
+            onChange={(e) => setAccountName(e.target.value)}
+            placeholder="Sparkasse Giro"
+          />
           <p className="hint">
-            The account is created when you confirm the import, not now. The currency is
-            used when the file doesn't carry one.
+            The account is created when you press Import, before the file is read.
+            {baseCurrency !== null &&
+              ` It will hold amounts in ${baseCurrency}, the base currency of this workspace.`}
           </p>
         </>
       )}
@@ -477,6 +525,18 @@ export function CsvImport({ onBack, onImported }: Props) {
         <p className="hint" style={{ marginTop: 12 }}>
           Discarded — nothing was imported. The file is untouched, so you can fix the
           column layout or the account above and upload it again.
+        </p>
+      )}
+
+      {/* the write this screen makes before it reads anything, and the one the user did
+          not press a button called "Create" for. It stands until rows land in it, which
+          covers every way this import can end without any: an error, a duplicate, a
+          discard, and the summary card the user is about to discard from */}
+      {created && (
+        <p className="hint" style={{ marginTop: 12 }}>
+          The account "{created.name}" was created when you pressed Import, before the file
+          was read — it exists whether or not these rows land. Remove it from Overview if
+          you didn't want it.
         </p>
       )}
 
