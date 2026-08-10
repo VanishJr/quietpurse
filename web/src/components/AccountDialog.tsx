@@ -229,7 +229,7 @@ export function AccountDialog({
           <h2 className="sheet-title">New account</h2>
           <p className="hint">
             A name is all it needs. Import a statement into it whenever you have one — or
-            upload the statement first and let it name the account itself.
+            create it from the import screen while you upload the first one.
           </p>
           <label className="setting-label" htmlFor="acct-new-name">
             Name
