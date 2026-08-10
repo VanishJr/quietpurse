@@ -207,10 +207,9 @@ export type ReadAs =
  */
 export interface ImportSummary {
   importId: string;
-  /** where the rows will go: the derived id, the name as typed, and whether it exists */
+  /** where the rows will go: the picked account's id and its stored name */
   accountId: string;
   accountName: string;
-  accountExists: boolean;
   /** data rows in the file */
   total: number;
   /** rows that could be read */

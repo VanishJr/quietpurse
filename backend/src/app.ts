@@ -1143,66 +1143,49 @@ app.get('/api/imports/presets', (_req, res) => {
  */
 app.post('/api/imports', uploadFile, async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  // The runtime half of StatementDestination's exclusive union. Multipart fields
-  // carry no type, so nothing above this route can hold it, and this route is where
-  // curl and a mobile client meet it. Presence is "the field arrived", never "the
-  // field is a string": multer turns a repeated field into an array, so a typeof test
-  // reads an accountId sent twice as absent and answers a request carrying BOTH arms
-  // as the name arm - staging the upload against a freshly minted id for an account
-  // the caller never picked, one Confirm from existing, with no account delete to
-  // undo it. A non-string is refused rather than normalised: taking the first or the
-  // last picks between two values the caller may not agree on, which is the guess the
-  // exclusivity refusal exists to prevent. A blank accountName is present, and still
-  // reaches accountNameSchema for the refusal it has today.
-  const hasId = body.accountId !== undefined;
-  const hasName = body.accountName !== undefined;
-  if (hasId && hasName) {
+  // The runtime half of a StatementDestination that has one member now. Multipart
+  // fields carry no type, so nothing above this route can hold it, and this route is
+  // where curl and a mobile client meet it.
+  //
+  // The two retired fields are refused rather than ignored: a request carrying
+  // accountName states a destination, and dropping it silently is exactly the guess
+  // the exclusivity refusal used to be here to prevent. Refused ahead of accountId,
+  // so a request carrying only currency reads the sentence about currency rather
+  // than one about a field it did not send.
+  if (body.accountName !== undefined) {
     res.status(400).json({
-      error: 'send accountId or accountName, not both - an upload goes to one account',
+      error:
+        'an upload goes to an account that already exists - create it with POST /api/accounts, then send its accountId',
     });
     return;
   }
-  let destination: StatementDestination;
-  if (hasId) {
-    if (typeof body.accountId !== 'string') {
-      res.status(400).json({ error: 'accountId must be sent once, as a single value' });
-      return;
-    }
-    const pickedId = body.accountId.trim();
-    if (!pickedId) {
-      res.status(400).json({ error: 'accountId must not be empty' });
-      return;
-    }
-    // no shape check beyond that, deliberately: an id restored from a backup or
-    // written before row 25 is not a UUID, and the lookup is what decides whether an
-    // id is real
-    if (body.currency !== undefined) {
-      res.status(400).json({
-        error: 'an account keeps its own currency - send currency only with accountName',
-      });
-      return;
-    }
-    destination = { accountId: pickedId };
-  } else if (hasName) {
-    // the same schema the two account routes use: this name reaches accounts.name
-    // through the confirm, and a name only one of the three doors accepts is a name
-    // its own rename endpoint would refuse. Both schemas refuse a non-string
-    // themselves, so this arm needs no repeat check of its own.
-    const named = accountNameSchema.safeParse(body.accountName);
-    if (!named.success) {
-      res.status(400).json({ error: badRequest(named.error) });
-      return;
-    }
-    const parsedCurrency = currencyCode.safeParse(body.currency);
-    if (!parsedCurrency.success) {
-      res.status(400).json({ error: badRequest(parsedCurrency.error) });
-      return;
-    }
-    destination = { accountName: named.data, currency: parsedCurrency.data };
-  } else {
-    res.status(400).json({ error: 'accountId or accountName field required' });
+  if (body.currency !== undefined) {
+    res.status(400).json({
+      error:
+        'an account keeps its own currency - it is set when the account is created (POST /api/accounts) and corrected with PATCH /api/accounts/:id',
+    });
     return;
   }
+  if (body.accountId === undefined) {
+    res.status(400).json({ error: 'accountId field required' });
+    return;
+  }
+  // Presence is "the field arrived", never "the field is a string": multer turns a
+  // repeated field into an array. Refused rather than normalised - taking the first
+  // or the last picks between two values the caller may not agree on.
+  if (typeof body.accountId !== 'string') {
+    res.status(400).json({ error: 'accountId must be sent once, as a single value' });
+    return;
+  }
+  const pickedId = body.accountId.trim();
+  if (!pickedId) {
+    res.status(400).json({ error: 'accountId must not be empty' });
+    return;
+  }
+  // no shape check beyond that, deliberately: an id restored from a backup or
+  // written before row 25 is not a UUID, and the lookup is what decides whether an
+  // id is real
+  const destination: StatementDestination = { accountId: pickedId };
   if (!req.file) {
     res.status(400).json({ error: 'file field required (the statement itself)' });
     return;
@@ -1267,13 +1250,8 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
       return confirmRefusal(result.status);
     case 'file-committed':
       return `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`;
-    case 'account-name-taken': {
-      // the holder's stored name, for the reason nameTaken quotes it
-      const holder = result.taken?.name ?? result.accountName;
-      return result.taken?.hidden
-        ? `nothing was imported: another account already uses the name "${holder}", and that account has been removed from the app - restore it or rename it, then upload the file again`
-        : `nothing was imported: another account already uses the name "${holder}", and this import was staged for a different one. Upload the file again and its rows will join that account`;
-    }
+    case 'account-missing':
+      return 'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
     case 'account-hidden':
       return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
     default: {

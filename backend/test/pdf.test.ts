@@ -41,7 +41,7 @@ import {
   sniff,
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
-import { importAndConfirm } from './helpers';
+import { accountFor, importAndConfirm } from './helpers';
 import {
   CONTAINER_HEADER_BYTES,
   PlacedText,
@@ -277,12 +277,13 @@ const detailed = (tag: string): PlacedText[][] => {
   return [drawn];
 };
 
-const importPdf = (
-  accountName: string,
+const importPdf = async (
+  name: string,
   pages: PlacedText[][],
   preset?: string,
   currency = 'EUR',
-) => importStatement({ accountName, currency, bytes: buildPdf(pages), preset });
+) =>
+  importStatement({ accountId: await accountFor(name, currency), bytes: buildPdf(pages), preset });
 
 /** The import row a refused upload left, and the message it recorded. */
 async function lastFailure(before: string[]): Promise<{
@@ -324,9 +325,9 @@ describe('pdf: bytes to rows', () => {
 
   it('the amount column decides the sign, and the € decides the currency', async () => {
     const r = await importAndConfirm({
-      accountName: 'Revolut Signs',
-      // deliberately not EUR: a row's own currency must come from the document
-      currency: 'USD',
+      // the account is deliberately not EUR: a row's own currency must come from
+      // the document
+      accountId: await accountFor('Revolut Signs', 'USD'),
       bytes: buildPdf(statement('signs')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map((t) => [
@@ -362,8 +363,7 @@ describe('pdf: bytes to rows', () => {
     drawn.push(...box(620, '100,00€', '16,90€', '0,00€', '83,10€'));
 
     const r = await importAndConfirm({
-      accountName: 'Revolut Drawing Order',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Drawing Order'),
       bytes: buildPdf([drawn]),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map((t) => [
@@ -546,8 +546,7 @@ describe('pdf: bytes to rows', () => {
    */
   it('a transaction is its dated line and the labelled lines under it', async () => {
     const r = await importAndConfirm({
-      accountName: 'Revolut Descriptions',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Descriptions'),
       bytes: buildPdf(detailed('descriptions')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -579,8 +578,7 @@ describe('pdf: bytes to rows', () => {
    */
   it('the lines the template does not keep do not reach a description', async () => {
     const r = await importAndConfirm({
-      accountName: 'Revolut Cards',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Cards'),
       bytes: buildPdf(detailed('cards')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -702,8 +700,7 @@ describe('pdf: the reconciliation gate', () => {
   it('does not run again at confirm, where fewer rows are inserted than staged', async () => {
     const name = 'Revolut Overlapping Months';
     const first = await importAndConfirm({
-      accountName: name,
-      currency: 'EUR',
+      accountId: await accountFor(name),
       bytes: buildPdf(statement('overlap first')),
     });
     expect(first.inserted).toBe(3);
@@ -1117,8 +1114,7 @@ describe('pdf: the second layout', () => {
    */
   it('a transaction is its dated line and the lines under it', async () => {
     const r = await importAndConfirm({
-      accountName: 'N26 Descriptions',
-      currency: 'EUR',
+      accountId: await accountFor('N26 Descriptions'),
       bytes: buildPdf(n26Statement('descriptions')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -1183,8 +1179,7 @@ describe('pdf: the second layout', () => {
       y -= 14;
     }
     const r = await importAndConfirm({
-      accountName: 'N26 Near Miss',
-      currency: 'EUR',
+      accountId: await accountFor('N26 Near Miss'),
       bytes: buildPdf(pages),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -1773,8 +1768,7 @@ describe('pdf: the third layout', () => {
    */
   it('imports one inside a signed container, end to end', async () => {
     const imported = await importAndConfirm({
-      accountName: 'Universal Wrapped',
-      currency: 'UAH',
+      accountId: await accountFor('Universal Wrapped', 'UAH'),
       bytes: buildSignedContainer(buildPdf(ukStatement('wrapped'))),
     });
     expect(imported.inserted).toBe(3);
@@ -1813,8 +1807,7 @@ describe('pdf: the third layout', () => {
     expect(drop).toHaveLength(3);
 
     const r = await importAndConfirm({
-      accountName: 'Universal Continuations',
-      currency: 'UAH',
+      accountId: await accountFor('Universal Continuations', 'UAH'),
       bytes: buildPdf(ukStatement('continuations')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -2218,8 +2211,7 @@ describe('pdf: the fourth layout', () => {
     expect(c24.rows.kind === 'continuations' && c24.rows.drop).toEqual([]);
 
     const r = await importAndConfirm({
-      accountName: 'C24 Descriptions',
-      currency: 'EUR',
+      accountId: await accountFor('C24 Descriptions'),
       bytes: buildPdf(c24Statement('descriptions')),
     });
     const rows = (await listTransactions({ accountId: r.accountId, limit: 50 })).map(
@@ -2837,7 +2829,7 @@ describe('pdf: the refusals', () => {
     it(`${what} leaves a failed import with its document, and its own message`, async () => {
       const before = await idsNow();
       await expect(
-        importStatement({ accountName: 'Refused Bank', currency: 'EUR', bytes: bytes() }),
+        importStatement({ accountId: await accountFor('Refused Bank'), bytes: bytes() }),
       ).rejects.toThrow(message);
 
       const failed = await lastFailure(before);
@@ -3002,8 +2994,7 @@ describe('pdf: a statement inside a signed container', () => {
     expect(sniff(binaryInsideTheScan(bytes, CONTAINER_HEADER_BYTES))).toBe('pdf');
 
     const staged = await importStatement({
-      accountName: 'Wrapped Far Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Wrapped Far Bank'),
       bytes,
     });
     expect(staged.outcome).toBe('awaiting_confirmation');
@@ -3018,8 +3009,7 @@ describe('pdf: a statement inside a signed container', () => {
    */
   it('imports a known layout inside a container, end to end', async () => {
     const imported = await importAndConfirm({
-      accountName: 'Wrapped Revolut',
-      currency: 'EUR',
+      accountId: await accountFor('Wrapped Revolut'),
       bytes: binaryInsideTheScan(
         buildSignedContainer(buildPdf(statement('wrapped'))),
         CONTAINER_HEADER_BYTES,
@@ -3059,8 +3049,8 @@ describe('pdf: the caps', () => {
     Buffer.from('%PDF-1.4\n').copy(oversized);
     expect(sniff(oversized)).toBe('pdf');
     const before = (await listImports()).imports.length;
-    const attempt = () =>
-      importStatement({ accountName: 'Fat Pdf Bank', currency: 'EUR', bytes: oversized });
+    const accountId = await accountFor('Fat Pdf Bank');
+    const attempt = () => importStatement({ accountId, bytes: oversized });
 
     await expect(attempt()).rejects.toThrow(/the PDF is larger than 10 MB/);
     expect((await listImports()).imports).toHaveLength(before);
@@ -3083,7 +3073,7 @@ describe('pdf: the caps', () => {
 
     const before = await idsNow();
     await expect(
-      importStatement({ accountName: 'Long Pdf Bank', currency: 'EUR', bytes }),
+      importStatement({ accountId: await accountFor('Long Pdf Bank'), bytes }),
     ).rejects.toThrow(/this PDF has 201 pages, more than the 200 this importer reads in one file/);
 
     const failed = await lastFailure(before);
@@ -3093,23 +3083,22 @@ describe('pdf: the caps', () => {
 });
 
 /**
- * What replaced accountid.ts, and the cheapest possible check that the seam did not
- * grow a second account namespace: one resolution point, so a bank uploaded as a PDF
- * one month and as a CSV the next resolves the same name to the same recorded id and
- * lands in one account. A parser-specific id would split it, and every row appearing
- * in both files would insert twice - the dedup key is unique per (workspace, account,
- * key), so a second account id defeats it silently.
+ * Cross-format deduplication is the subject: a bank uploaded as a PDF one month and
+ * as a CSV the next lands its second file in the account the first one went to, and
+ * the rows the two files share insert once. The dedup key is unique per (workspace,
+ * account, key), so anything that split the two uploads across two accounts would
+ * insert every shared row twice and this would go red.
  *
- * The two ids are compared to each other, which is what the test was always about:
- * an id nothing derives has no literal to be checked against, and the deduplication
- * asserted below is what makes the comparison mean something.
+ * The one account is now the test's own setup rather than a resolution being
+ * asserted - row 26b took name resolution away and the caller picks the id - so what
+ * is left to check is that neither reader derives an account of its own from the
+ * file, and that the second import recognises the first's rows.
  */
 describe('pdf and csv of the same statement', () => {
   it('land in one account, and the second one deduplicates against the first', async () => {
-    const name = 'One Bank Two Formats';
+    const accountId = await accountFor('One Bank Two Formats');
     const fromPdf = await importAndConfirm({
-      accountName: name,
-      currency: 'EUR',
+      accountId,
       bytes: buildPdf(statement('two formats')),
     });
     expect(fromPdf.inserted).toBe(3);
@@ -3123,8 +3112,7 @@ describe('pdf and csv of the same statement', () => {
       '2026-07-31,Netflix,-12.99,EUR,COMPLETED',
     ].join('\n');
     const fromCsv = await importAndConfirm({
-      accountName: name,
-      currency: 'EUR',
+      accountId,
       preset: 'revolut',
       bytes: Buffer.from(csv, 'utf8'),
     });
@@ -3150,7 +3138,7 @@ describe('the source-type dispatch', () => {
   it('has no default that quietly reads something as a CSV', async () => {
     await expect(
       readSheet(
-        { accountName: 'x', currency: 'EUR', bytes: Buffer.from('date,amount,description\n') },
+        { accountId: await accountFor('x'), bytes: Buffer.from('date,amount,description\n') },
         'ofx' as ImportSourceType,
         null,
       ),

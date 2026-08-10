@@ -25,7 +25,7 @@ import { getDocument, putDocument } from '../src/documents';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
 import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
-import { idOf, importAndConfirm, markImportCommitted } from './helpers';
+import { accountFor, idOf, importAndConfirm, markImportCommitted } from './helpers';
 
 const tx = (description: string, amount: number): NewTransaction => ({
   accountId: 'acc1',
@@ -117,8 +117,7 @@ describe('backup and restore (JSON)', () => {
   it('a restore leaves the documents on disk, and deleting the import still removes them', async () => {
     const csv = 'date,amount,description\n2026-05-05,-21.00,Restore then delete\n';
     const imported = await importAndConfirm({
-      accountName: 'Restore Document Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Restore Document Bank'),
       bytes: Buffer.from(csv, 'utf8'),
     });
     const blob = path.join(storageRoot(), TEST_WORKSPACE_ID, imported.importId);
@@ -283,8 +282,7 @@ describe('backup and restore (JSON)', () => {
    */
   it('the account an import was staged for survives the round-trip', async () => {
     const imported = await importAndConfirm({
-      accountName: 'Account Id Backup Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Account Id Backup Bank'),
       bytes: Buffer.from('date,amount,description\n2026-06-06,-44.00,Round trip\n', 'utf8'),
     });
 

@@ -126,10 +126,6 @@ export const summaryResult = (patch: Partial<ImportSummary> = {}): CsvImportResu
     importId: IMPORT_ID,
     accountId: 'acc-9',
     accountName: 'statement',
-    // the arm this client can now produce, and the only one: the account exists before
-    // the upload is sent. `false` is still reachable over HTTP through the name arm and
-    // is asked for by name in the one case that covers it
-    accountExists: true,
     total: 14,
     accepted: 12,
     skipped: 0,

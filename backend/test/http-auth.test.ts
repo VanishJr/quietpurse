@@ -40,6 +40,17 @@ async function signUp(email: string) {
 let alice: request.Agent;
 let bob: request.Agent;
 
+/**
+ * An empty account for that agent, over the door that creates one - the only one
+ * since row 26b. Takes the agent, because the point of this file is that two of them
+ * see different workspaces.
+ */
+const makeAccount = async (agent: request.Agent, name: string): Promise<string> => {
+  const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body.id as string;
+};
+
 beforeAll(async () => {
   initAuth(dbInstance());
   setWorkspaceFallback(undefined);
@@ -53,8 +64,7 @@ beforeAll(async () => {
   ] as const) {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', `${label} bank`)
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount(agent, `${label} bank`))
       .field('preset', 'generic')
       .attach(
         'file',

@@ -4,14 +4,10 @@
  * Two things are asserted here that nothing else can hold. **No two accounts in one
  * workspace share a name**, and that is the database's job - accounts_name_unique
  * over (workspace_id, lower(name)) - so the first test inserts straight into the
- * table rather than through a function that could be checking in JS. And **one name
- * resolves to one id, once**: an upload records the id it resolved on the import row
- * and the confirm reads it back, so the two requests cannot come to disagree about
- * where the rows went. Everything else in the file is a consequence of those two.
- *
- * PGlite is single-connection (CLAUDE.md), so the resolution window branch (b) does
- * not close - two uploads of a new name overlapping before either stages - is not
- * reproducible here. Its outcome is the confirm-time collision asserted below.
+ * table rather than through a function that could be checking in JS. And **an upload
+ * records the id it was given and the confirm reads it back**, so the two requests
+ * cannot come to disagree about where the rows went. Everything else in the file is
+ * a consequence of those two.
  */
 import { sql, type SQL } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
@@ -31,7 +27,6 @@ import {
   insertTransactions,
   listTransactions,
   recalcAccountBalanceFromTransactions,
-  resolveUploadAccountId,
   stageImport,
   updateAccount,
 } from '../src/db';
@@ -42,28 +37,12 @@ import {
   importStatement,
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
-import { markImportCommitted } from './helpers';
+import { accountFor, markImportCommitted } from './helpers';
 import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
 
-async function upload(
-  accountName: string,
-  csv: string,
-  currency = 'EUR',
-): Promise<ImportSummary> {
-  const result = await importStatement({
-    accountName,
-    currency,
-    bytes: Buffer.from(csv, 'utf8'),
-  });
-  if (result.outcome !== 'awaiting_confirmation') {
-    throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
-  }
-  return result.summary;
-}
-
-/** The id arm: the account is picked, so the request carries no name and no currency. */
+/** The account is picked, so the request carries no name and no currency. */
 async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> {
   const result = await importStatement({ accountId, bytes: Buffer.from(csv, 'utf8') });
   if (result.outcome !== 'awaiting_confirmation') {
@@ -189,179 +168,6 @@ describe('a name is unique per workspace, case-insensitively', () => {
   });
 });
 
-describe('an upload resolves its account name to one id', () => {
-  it('joins an existing account, whose id is a UUID', async () => {
-    const created = await createAccount({ name: 'Existing Bank', currency: 'EUR' });
-    expect(created.ok).toBe(true);
-    const id = created.ok ? created.account.id : '';
-    expect(id).toMatch(UUID);
-
-    // typed in a different case: the comparison runs in SQL, folded the way the
-    // unique index folds it
-    const summary = await upload('existing bank', csvFile('2026-01-05,-9.00,Joined'));
-    expect(summary.accountId).toBe(id);
-    expect(summary.accountExists).toBe(true);
-    expect(await recordedAccountId(summary.importId)).toBe(id);
-
-    expect(await confirmImport(summary.importId)).toMatchObject({
-      confirmed: true,
-      accountId: id,
-      inserted: 1,
-    });
-    // and the name the user gave the account is not overwritten by the one typed
-    // at upload: the upsert's conflict arm does not touch it
-    expect((await getAccount(id))!.name).toBe('Existing Bank');
-  });
-
-  /**
-   * Branch (b): two statements for one NEW bank, both staged before either is
-   * confirmed. Without it each would mint its own id, the first confirm would create
-   * the account and the second would meet accounts_name_unique - a working flow
-   * turning into a refusal.
-   */
-  it('two uploads of one new account name land in one account', async () => {
-    const first = await upload('Two Tabs Bank', csvFile('2026-01-06,-11.00,Tab one'));
-    const second = await upload('two tabs bank', csvFile('2026-01-07,-12.00,Tab two'));
-
-    expect(second.accountId).toBe(first.accountId);
-    expect(first.accountId).toMatch(UUID);
-    // neither exists yet: the account is created at confirm, not at upload
-    expect(first.accountExists).toBe(false);
-    expect(second.accountExists).toBe(false);
-    expect(await getAccount(first.accountId)).toBeUndefined();
-
-    expect(await confirmImport(first.importId)).toMatchObject({ confirmed: true, inserted: 1 });
-    expect(await confirmImport(second.importId)).toMatchObject({ confirmed: true, inserted: 1 });
-    expect(await listTransactions({ accountId: first.accountId })).toHaveLength(2);
-  });
-
-  /**
-   * The mirror of the case above, and the reason branch (b) checks its precondition
-   * instead of asserting it. An outstanding import records the id it resolved; if the
-   * account behind that id has since been renamed, branch (a) misses - so the id names
-   * an account answering to a DIFFERENT name, and handing it back would put this
-   * statement's rows in it behind a 200, with no account delete to undo the merge.
-   */
-  it('does not join an outstanding import whose account has since been renamed', async () => {
-    const created = await createAccount({ name: 'Split Bank', currency: 'EUR' });
-    const holder = created.ok ? created.account.id : '';
-    const outstanding = await upload('Split Bank', csvFile('2026-01-20,-31.00,Before the rename'));
-    expect(outstanding.accountId).toBe(holder);
-
-    // the import is left awaiting confirmation, still carrying `holder`
-    await updateAccount(holder, { name: 'Split Bank EUR' });
-    expect(await findAccountByName('Split Bank')).toBeUndefined();
-
-    // a different bank, typed under the freed name
-    const other = await upload('Split Bank', csvFile('2026-01-21,-32.00,A different bank'));
-    expect(other.accountId).not.toBe(holder);
-    expect(other.accountId).toMatch(UUID);
-    expect(other.accountExists).toBe(false);
-
-    // and a third upload joins that one rather than minting again: the precondition
-    // is checked inside the query, so the ordering picks the oldest ELIGIBLE import
-    // and not the ineligible one that happens to be older
-    const third = await upload('split bank', csvFile('2026-01-22,-33.00,Same different bank'));
-    expect(third.accountId).toBe(other.accountId);
-
-    expect(await confirmImport(other.importId)).toMatchObject({ confirmed: true, inserted: 1 });
-    expect(await confirmImport(third.importId)).toMatchObject({ confirmed: true, inserted: 1 });
-    expect((await getAccount(other.accountId))!.name).toBe('Split Bank');
-    expect(await listTransactions({ accountId: other.accountId })).toHaveLength(2);
-    expect(await listTransactions({ accountId: holder })).toHaveLength(0);
-  });
-
-  /**
-   * Row 24's boundary, and where row 26a moved it: a hidden account is still matched
-   * by name - the refusal below is the evidence, because a lookup that missed it
-   * would mint a fresh id, create a second account at confirm and answer 200 - but
-   * the upload no longer stages against it. Both arms are refused, because a summary
-   * card reading "they'll join your existing X" for an account the confirm is about
-   * to refuse is a promise the server breaks one request later.
-   *
-   * Above createImport, so there is nothing left behind to explain: no import row,
-   * no stored document, no history entry.
-   */
-  it('refuses an upload naming a removed account, and makes no second one', async () => {
-    const created = await createAccount({ name: 'Removed Bank', currency: 'EUR' });
-    const id = created.ok ? created.account.id : '';
-    await updateAccount(id, { hidden: true });
-    const before = await importCount();
-
-    await expect(
-      upload('Removed Bank', csvFile('2026-01-08,-13.00,Into the hidden')),
-    ).rejects.toThrow(ACCOUNT_REMOVED);
-
-    expect(await importCount()).toBe(before);
-    // the name still answers to the one account, and it is still hidden
-    expect((await findAccountByName('Removed Bank'))!.id).toBe(id);
-    expect((await getAccount(id))!.hidden).toBe(true);
-  });
-
-  /** Consequence (b) of the row: a rename is no longer reverted by the next upload. */
-  it('a rename survives the next import into the same account', async () => {
-    const first = await upload('Renamed Bank', csvFile('2026-01-09,-14.00,Before'));
-    await confirmImport(first.importId);
-    expect(await updateAccount(first.accountId, { name: 'Renamed Bank EUR' })).toMatchObject({
-      ok: true,
-    });
-
-    // typed with the account's NEW name, so branch (a) finds it: the rename stands,
-    // and the upload does not write imports.account_name back over it
-    const second = await upload('Renamed Bank EUR', csvFile('2026-01-10,-15.00,After'));
-    expect(second.accountId).toBe(first.accountId);
-    await confirmImport(second.importId);
-
-    expect((await getAccount(first.accountId))!.name).toBe('Renamed Bank EUR');
-    expect(await listTransactions({ accountId: first.accountId })).toHaveLength(2);
-  });
-
-  /**
-   * The confirm reads imports.account_id and derives nothing. Asserted on the column
-   * rather than on the response: an id echoed back from the request would pass a test
-   * written against the response even if the confirm re-derived its own.
-   */
-  it('the confirm uses the id recorded on the import row, not the name', async () => {
-    const created = await createAccount({ name: 'Recorded Bank', currency: 'EUR' });
-    const id = created.ok ? created.account.id : '';
-    const summary = await upload('Recorded Bank', csvFile('2026-01-11,-16.00,Recorded'));
-    expect(await recordedAccountId(summary.importId)).toBe(id);
-
-    // the name on the import is rewritten to one no account answers to; the id is
-    // left alone. If the confirm derived from the name it would create a second
-    // account, and the staged rows would be strays
-    await dbInstance().execute(
-      sql`UPDATE imports SET account_name = 'Something Else Entirely'
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
-    );
-
-    expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, accountId: id });
-    expect(await findAccountByName('Something Else Entirely')).toBeUndefined();
-    expect(await listTransactions({ accountId: id })).toHaveLength(1);
-  });
-
-  /**
-   * A duplicate upload imports nothing, so it resolves nothing: minting an id there
-   * would answer with a fresh, meaningless identifier for an account that does not
-   * exist, on a request that wrote nothing.
-   */
-  it('a duplicate upload mints no id', async () => {
-    const csv = csvFile('2026-01-12,-17.00,Duplicate');
-    const first = await upload('Duplicate Bank', csv);
-    await confirmImport(first.importId);
-
-    const again = await importStatement({
-      accountName: 'Nobody Has This Name',
-      currency: 'EUR',
-      bytes: Buffer.from(csv, 'utf8'),
-    });
-    expect(again.outcome).toBe('duplicate');
-    if (again.outcome !== 'duplicate') return;
-    expect(again.accountId).toBe(first.accountId);
-    expect(await findAccountByName('Nobody Has This Name')).toBeUndefined();
-  });
-});
-
 /**
  * The id arm (ROADMAP row 26a): the screen offers the accounts that exist and the
  * upload carries the id of the one that was picked. There is no name and no currency
@@ -377,8 +183,6 @@ describe('an upload that picks its account by id', () => {
     const summary = await uploadTo(id, csvFile('2026-04-01,-41.00,Picked'));
     expect(summary.accountId).toBe(id);
     expect(summary.accountName).toBe('Picked Bank');
-    // always true on this arm: the lookup that produced the id is what proved it
-    expect(summary.accountExists).toBe(true);
     expect(await recordedAccountId(summary.importId)).toBe(id);
     expect(await recordedAccount(summary.importId)).toEqual({
       name: 'Picked Bank',
@@ -387,13 +191,13 @@ describe('an upload that picks its account by id', () => {
   });
 
   /**
-   * The case row 25's §20 accepted, closed here from the id side: there is no
-   * currency in the request to overwrite the account's with, because the column the
-   * import records is read off the account's own row.
+   * The case row 25's §20 accepted: there is no currency in the request to overwrite
+   * the account's with, because the column the import records is read off the
+   * account's own row - and since row 26b there is no other arm for one to arrive on.
    *
-   * Row 65 closed it from the other side as well - `currency` left upsertAccountOn's
-   * conflict set, so no arm rewrites an existing account's currency at all. The name
-   * arm's half of that is the case below.
+   * Row 65 closed it from the other side as well: `currency` is not in
+   * upsertAccountOn's conflict set, so nothing rewrites an existing account's
+   * currency at confirm either.
    */
   it("leaves the account's currency alone when the statement states another", async () => {
     const created = await createAccount({ name: 'Savings', currency: 'EUR' });
@@ -422,7 +226,16 @@ describe('an upload that picks its account by id', () => {
     expect(await importCount()).toBe(before);
   });
 
-  it('refuses a removed account by id as well as by name', async () => {
+  /**
+   * Row 24's boundary, where row 26a moved it: the upload does not stage against an
+   * account the user removed, because a summary card reading "they'll join your
+   * existing X" for an account the confirm is about to refuse is a promise the server
+   * breaks one request later.
+   *
+   * Above createImport, so there is nothing left behind to explain: no import row, no
+   * stored document, no history entry.
+   */
+  it('refuses a removed account, and leaves it exactly as it was', async () => {
     const created = await createAccount({ name: 'Picked Then Removed', currency: 'EUR' });
     const id = created.ok ? created.account.id : '';
     await updateAccount(id, { hidden: true });
@@ -430,12 +243,53 @@ describe('an upload that picks its account by id', () => {
 
     await expect(uploadTo(id, csvFile('2026-04-04,-44.00,Gone'))).rejects.toThrow(ACCOUNT_REMOVED);
     expect(await importCount()).toBe(before);
+    expect((await getAccount(id))!.hidden).toBe(true);
+  });
+
+  /** Consequence (b) of row 26b: a rename is no longer reverted by the next upload. */
+  it('a rename survives the next import into the same account', async () => {
+    const id = await accountFor('Renamed Bank');
+    const first = await uploadTo(id, csvFile('2026-01-09,-14.00,Before'));
+    await confirmImport(first.importId);
+    expect(await updateAccount(id, { name: 'Renamed Bank EUR' })).toMatchObject({ ok: true });
+
+    // the second upload records the account's CURRENT name and writes nothing back:
+    // the confirm creates no account, so imports.account_name reaches accounts.name
+    // through nothing at all
+    const second = await uploadTo(id, csvFile('2026-01-10,-15.00,After'));
+    expect((await recordedAccount(second.importId)).name).toBe('Renamed Bank EUR');
+    await confirmImport(second.importId);
+
+    expect((await getAccount(id))!.name).toBe('Renamed Bank EUR');
+    expect(await listTransactions({ accountId: id })).toHaveLength(2);
+  });
+
+  /**
+   * I5: the confirm reads imports.account_id and derives nothing from the other two
+   * columns. It is asserted by rewriting account_name to a string no account answers
+   * to - if anything below the null guard still read it, the rows would land
+   * somewhere else or not at all - and on the column rather than on the response,
+   * because an id echoed back from the request would pass either way.
+   */
+  it('the confirm uses the id recorded on the import row, not the name', async () => {
+    const id = await accountFor('Recorded Bank');
+    const summary = await uploadTo(id, csvFile('2026-01-11,-16.00,Recorded'));
+    expect(await recordedAccountId(summary.importId)).toBe(id);
+
+    await dbInstance().execute(
+      sql`UPDATE imports SET account_name = 'Something Else Entirely'
+          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
+    );
+
+    expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, accountId: id });
+    expect(await findAccountByName('Something Else Entirely')).toBeUndefined();
+    expect(await listTransactions({ accountId: id })).toHaveLength(1);
   });
 
   /**
    * `accountId` on a duplicate says where the EARLIER import's rows are, and that
    * import may have put them somewhere else entirely. The picked id must never stand
-   * in for it - on this arm there is not even a name to look up as a fallback.
+   * in for it.
    */
   it("answers a duplicate with the earlier import's account, not the picked one", async () => {
     const target = await createAccount({ name: 'Duplicate Target', currency: 'EUR' });
@@ -452,103 +306,6 @@ describe('an upload that picks its account by id', () => {
     if (again.outcome !== 'duplicate') return;
     expect(again.accountId).toBe(targetId);
     expect(again.accountIds).toEqual([targetId]);
-  });
-});
-
-/**
- * The other arm of the same guarantee (ROADMAP row 65). The name arm is the one that
- * hands a typed currency to an account it never read - uploadDestination returns the
- * request's own currency, and branch (a) of the id resolution then joins an account
- * that already exists - so uploading under an existing account's name used to
- * re-denominate it at confirm, at 200 and with nothing said.
- *
- * Held by the statement rather than by a branch: `currency` is not in
- * upsertAccountOn's conflict set, so there is no arm left for a later change to drop.
- */
-describe('an upload that names an account that already exists', () => {
-  it("does not re-denominate it, whatever currency the request stated", async () => {
-    const created = await createAccount({ name: 'Named Bank', currency: 'EUR' });
-    const id = created.ok ? created.account.id : '';
-
-    const summary = await upload('Named Bank', csvFile('2026-04-06,-46.00,Named'), 'USD');
-    expect(summary.accountId).toBe(id);
-    expect(summary.accountExists).toBe(true);
-    // what the FILE was uploaded as, which is allowed to disagree with the account
-    // now: the column decides the currency of an account the confirm CREATES, and is
-    // inert for one that is already there
-    expect((await recordedAccount(summary.importId)).currency).toBe('USD');
-
-    expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, inserted: 1 });
-    expect((await getAccount(id))!.currency).toBe('EUR');
-    // and the rows keep the unit they were read in - nothing is reconverted
-    expect((await listTransactions({ accountId: id }))[0].currency).toBe('USD');
-  });
-});
-
-describe('a name taken between the upload and the confirm', () => {
-  /**
-   * The id was minted for an account that did not exist, and by confirm time
-   * something else holds the name. Landing the rows in whoever holds it would merge
-   * two banks' history with no account delete to undo it, so the confirm refuses -
-   * and the refusal has to leave the import exactly as confirmable as it found it.
-   */
-  it('refuses, imports nothing, and stays confirmable once the obstacle moves', async () => {
-    const csv = csvFile('2026-02-01,-21.00,Collided');
-    const summary = await upload('Contested Bank', csv);
-    const blocker = await createAccount({ name: 'Contested Bank', currency: 'EUR' });
-    expect(blocker.ok).toBe(true);
-    const blockerId = blocker.ok ? blocker.account.id : '';
-    expect(blockerId).not.toBe(summary.accountId);
-
-    expect(await confirmImport(summary.importId)).toEqual({
-      confirmed: false,
-      reason: 'account-name-taken',
-      accountName: 'Contested Bank',
-      taken: expect.objectContaining({ id: blockerId, name: 'Contested Bank' }),
-    });
-    // the whole transaction rolled back: no rows in either account, no account
-    // under the staged id, and the import is where it was
-    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(0);
-    expect(await listTransactions({ accountId: blockerId })).toHaveLength(0);
-    expect(await getAccount(summary.accountId)).toBeUndefined();
-    expect(await recordedAccountId(summary.importId)).toBe(summary.accountId);
-
-    // the obstacle renamed away, the same import confirms
-    await updateAccount(blockerId, { name: 'Contested Bank Old' });
-    expect(await confirmImport(summary.importId)).toMatchObject({
-      confirmed: true,
-      accountId: summary.accountId,
-      inserted: 1,
-    });
-  });
-
-  /**
-   * The other exit, and the one the refusal's own sentence tells the user to take:
-   * upload the file again. Only `committed` claims a file hash, so the bytes still
-   * parse - and resolution consults existing accounts BEFORE outstanding imports, so
-   * the re-upload finds the holder instead of the stale id that just collided. With
-   * the two branches the other way round it would collide again, every time, and the
-   * server's own advice would be a promise it breaks.
-   */
-  it('and re-uploading the same bytes joins the account holding the name', async () => {
-    const csv = csvFile('2026-02-02,-22.00,Advised');
-    const summary = await upload('Advised Bank', csv);
-    const blocker = await createAccount({ name: 'Advised Bank', currency: 'EUR' });
-    const blockerId = blocker.ok ? blocker.account.id : '';
-
-    expect(await confirmImport(summary.importId)).toMatchObject({
-      confirmed: false,
-      reason: 'account-name-taken',
-    });
-
-    const again = await upload('Advised Bank', csv);
-    expect(again.accountId).toBe(blockerId);
-    expect(await confirmImport(again.importId)).toMatchObject({
-      confirmed: true,
-      accountId: blockerId,
-      inserted: 1,
-    });
-    expect(await listTransactions({ accountId: blockerId })).toHaveLength(1);
   });
 });
 
@@ -829,7 +586,7 @@ describe('deleting an account', () => {
 });
 
 describe('the account name bound', () => {
-  it('is one number, and the resolver accepts a name of exactly that length', async () => {
+  it('is one number, and a name of exactly that length is stored and found again', async () => {
     // built FROM the constant, never beside it: a literal here stops testing the
     // bound the moment the bound moves
     const longest = 'x'.repeat(ACCOUNT_NAME_MAX);
@@ -837,6 +594,8 @@ describe('the account name bound', () => {
     expect(created).toMatchObject({ ok: true });
 
     const id = created.ok ? created.account.id : '';
-    expect(await resolveUploadAccountId(longest)).toBe(id);
+    // the lookup as well as the insert: a bound the column accepts and the index
+    // folds differently would store a name nothing could find again
+    expect((await findAccountByName(longest))!.id).toBe(id);
   });
 });

@@ -13,13 +13,12 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ERROR_DETAIL_MAX,
-  findAccountByName,
   listAccounts,
   listImports,
   listTransactions,
 } from '../src/db';
 import { logImport } from '../src/logger';
-import { importAndConfirm } from './helpers';
+import { accountFor, importAndConfirm } from './helpers';
 import { importStatement } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import { XLSX_PARSER_VERSION } from '../src/providers/xlsx';
@@ -32,8 +31,8 @@ async function xlsx(build: (wb: ExcelJS.Workbook) => void): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-const importFile = (accountName: string, bytes: Buffer) =>
-  importAndConfirm({ accountName, currency: 'EUR', bytes });
+const importFile = async (name: string, bytes: Buffer) =>
+  importAndConfirm({ accountId: await accountFor(name), bytes });
 
 /** date, amount and description of an account's rows, oldest first. */
 async function rowsOf(accountId: string): Promise<unknown[][]> {
@@ -224,8 +223,7 @@ describe('xlsx: finding the statement', () => {
     });
 
     const staged = await importStatement({
-      accountName: 'Near Header Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Near Header Bank'),
       bytes: book,
     });
     if (staged.outcome !== 'awaiting_confirmation') throw new Error('the workbook was refused');
@@ -317,12 +315,11 @@ describe('xlsx: finding the statement', () => {
       parserVersion: XLSX_PARSER_VERSION,
       transactions: 0,
     });
-    expect(await findAccountByName('Odd Columns Bank')).toBeUndefined();
+    expect(await listTransactions({ accountId: await accountFor('Odd Columns Bank') })).toEqual([]);
 
     // a failed import does not claim the file - only a committed one does
     const retried = await importAndConfirm({
-      accountName: 'Odd Columns Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Odd Columns Bank'),
       bytes: book,
       mapping: { date: 'when', amount: 'how much', description: 'what' },
     });
@@ -373,8 +370,7 @@ describe('xlsx: finding the statement', () => {
 
     await expect(
       importStatement({
-        accountName: 'Wrong Preset Bank',
-        currency: 'EUR',
+        accountId: await accountFor('Wrong Preset Bank'),
         preset: 'sparkasse',
         bytes: book,
       }),
@@ -486,10 +482,11 @@ describe('the row guard', () => {
       ...Array.from({ length: MAX_DATA_ROWS + 1 }, (_, i) => `2026-09-01,-1.00,row ${i}`),
     ].join('\n');
     const bytes = Buffer.from(csv, 'utf8');
-    const attempt = () => importStatement({ accountName: 'Huge Bank', currency: 'EUR', bytes });
+    const accountId = await accountFor('Huge Bank');
+    const attempt = () => importStatement({ accountId, bytes });
 
     await expect(attempt()).rejects.toThrow(/50001 data rows/);
-    expect(await findAccountByName('Huge Bank')).toBeUndefined();
+    expect(await listTransactions({ accountId })).toHaveLength(0);
     // no committed import claims the hash, so the same bytes are parsed again
     await expect(attempt()).rejects.toThrow(/50001 data rows/);
 
@@ -533,7 +530,7 @@ describe('the row guard', () => {
 
     const r = await importFile('Cover Sheet Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([3, 3, 0]);
-    expect(await findAccountByName('Cover Sheet Bank')).toBeDefined();
+    expect(await listTransactions({ accountId: r.accountId })).toHaveLength(3);
     // the counts above are what pins it: the notice is a fact about the file, not a row
     expect(r.problems).toEqual([
       'sheet "Cover" (600000 rows) was too large to read and was skipped - these rows come from "Statement"',
@@ -581,10 +578,11 @@ describe('the row guard', () => {
       ws.addRow([utc('2026-10-08'), -4, 'one']);
       ws.getRow(600_000).height = 20;
     });
+    const accountId = await accountFor('Oversized Bank');
     const attempt = () => importFile('Oversized Bank', book);
 
     await expect(attempt()).rejects.toThrow(/skipped as too large to read: Huge \(600000 rows\)/);
-    expect(await findAccountByName('Oversized Bank')).toBeUndefined();
+    expect(await listTransactions({ accountId })).toEqual([]);
     // no committed import claims the hash, so the same bytes are read again
     await expect(attempt()).rejects.toThrow(/skipped as too large to read/);
 

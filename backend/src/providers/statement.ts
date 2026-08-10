@@ -27,13 +27,10 @@ import {
   countNewKeys,
   createImport,
   failImport,
-  findAccountByName,
   findCommittedImportByHash,
-  getAccount,
   listImportAccountIds,
   recordImportDocument,
   resolveUploadAccount,
-  resolveUploadAccountId,
   stageImport,
   supersedeStagedImports,
 } from '../db';
@@ -191,21 +188,17 @@ const SERIES_QUOTE_MAX = 24;
 const COLUMN_NAME_MAX = 40;
 
 /**
- * Where an upload's rows go: an account the caller picked, or a name to create one
- * under. Exclusive, and the absent keys are carried as optional `never` rather than
- * left off - a plain union would not hold it, because the excess-property check runs
- * against the union as a whole and `{accountName, currency, accountId}` satisfies
- * it. With these, both-at-once is a compile error at every call site, including one
- * that builds the object in a variable first.
+ * Where an upload's rows go: an account the caller already has. Creating one is
+ * POST /api/accounts and nothing else (row 26b).
  *
- * The second member is temporary by contract: row 26b moves account creation to
- * POST /api/accounts and deletes it, along with resolveUploadAccountId and the
- * 'account-name-taken' confirm outcome. It is here for one row so that `main` keeps
- * an import screen that imports at every commit.
+ * The absent keys stay, carried as optional `never`. They no longer hold
+ * exclusivity - there is nothing left to be exclusive with - they hold `src/`:
+ * app.ts annotates `let destination: StatementDestination`, so a product call site
+ * that built a name arm fails tsc, including one that builds the object in a
+ * variable first, where an excess-property check would not run. They hold NOTHING
+ * under test/, which this tsconfig does not compile.
  */
-export type StatementDestination =
-  | { accountId: string; accountName?: never; currency?: never }
-  | { accountName: string; currency: string; accountId?: never };
+export type StatementDestination = { accountId: string; accountName?: never; currency?: never };
 
 export type StatementImportRequest = StatementDestination & {
   /** a preset name from CSV_PRESETS; generic - auto-detect the columns */
@@ -229,9 +222,9 @@ export type StatementImportRequest = StatementDestination & {
  * confusion for a stored name to resolve, and a stored name is not bounded (a
  * restored backup can carry one past ACCOUNT_NAME_MAX). They speak the action the
  * product has - "removed", restore - because naming one it does not have is a dead
- * end, and there is no account delete. They name no screen: a constant here cannot
- * know what the tabs are called, and the tab labelled "Account" is the password form,
- * not the list that restores one.
+ * end. They name no screen: a constant here cannot know what the tabs are called,
+ * and the tab labelled "Account" is the password form, not the list that restores
+ * one.
  */
 export const ACCOUNT_NOT_FOUND =
   'no such account in this workspace - pick one of your accounts, or create a new one';
@@ -340,18 +333,15 @@ export interface ImportSummary {
   /** the import awaiting confirmation - Confirm and Discard address it */
   importId: string;
   /**
-   * Where the rows will go: the resolved id, the account's name, and whether an
-   * account with that id is already there. The id is recorded on the import and the
-   * confirm reads it back, so this is where they land and not a guess at it.
+   * Where the rows will go: the resolved id and the account's stored name, read off
+   * the account itself. The id is recorded on the import and the confirm reads it
+   * back, so this is where they land and not a guess at it.
    *
-   * The name is the picked account's stored name on the id arm and the string that
-   * was typed on the name arm, where no account exists yet to have one. Either way
-   * it is what the import was uploaded as: a rename between here and Confirm moves
-   * the account without moving this.
+   * The name is what the import was uploaded as: a rename between here and Confirm
+   * moves the account without moving this.
    */
   accountId: string;
   accountName: string;
-  accountExists: boolean;
   /** data rows in the file */
   total: number;
   /** rows that became staged transactions */
@@ -522,22 +512,15 @@ export async function importStatement(
 
   const already = await findCommittedImportByHash(fileHash);
   if (already) {
-    // the account this upload asked for may not exist at all - the file was
-    // imported under whatever name it was given the first time. So the name is
-    // looked up rather than resolved: resolving would mint an id for an account
-    // nothing created, on a request that imported nothing
+    // the account this upload asked for is not necessarily where the rows are - the
+    // file was imported into whatever account it was given the first time
     const accountIds = await listImportAccountIds(already.id);
     return {
       outcome: 'duplicate',
-      // and on the id arm there is no name to look up at all. The requested id must
-      // not stand in for it: this field says where the EARLIER import's rows are,
-      // and that import may have put them somewhere else entirely
-      accountId:
-        accountIds[0] ??
-        (req.accountName === undefined
-          ? undefined
-          : (await findAccountByName(req.accountName))?.id) ??
-        '',
+      // and the requested id must not stand in for it: this field says where the
+      // EARLIER import's rows are, and that import may have put them somewhere else
+      // entirely
+      accountId: accountIds[0] ?? '',
       accountIds,
       skipped: already.rowsRejected,
       total: already.rowsAccepted + already.rowsRejected,
@@ -615,24 +598,13 @@ export async function importStatement(
  * The one place an upload decides where its rows go, and the one place either
  * destination refusal is thrown. Both are plain throws above createImport, so a
  * refused upload leaves no `imports` row, no stored document and no history entry.
- *
- * On the name arm the account is read a second time, after the resolver has already
- * read it and thrown `hidden` away inside branch (a). That is deliberate: the read
- * misses by construction on the other two branches - (b) requires that no account
- * holds the id and (c) has just minted one - and folding it into
- * resolveUploadAccountId would refactor a function row 26b deletes whole.
  */
 async function uploadDestination(req: StatementImportRequest): Promise<StagedAccount> {
-  if (req.accountId !== undefined) {
-    const found = await resolveUploadAccount(req.accountId);
-    if (!found.ok) {
-      throw new Error(found.reason === 'hidden' ? ACCOUNT_REMOVED : ACCOUNT_NOT_FOUND);
-    }
-    return found.account;
+  const found = await resolveUploadAccount(req.accountId);
+  if (!found.ok) {
+    throw new Error(found.reason === 'hidden' ? ACCOUNT_REMOVED : ACCOUNT_NOT_FOUND);
   }
-  const id = await resolveUploadAccountId(req.accountName);
-  if ((await getAccount(id))?.hidden) throw new Error(ACCOUNT_REMOVED);
-  return { id, name: req.accountName, currency: req.currency.toUpperCase() };
+  return found.account;
 }
 
 /**
@@ -1273,21 +1245,9 @@ async function mapAndStore(
         },
   );
 
-  // The account the name arm names is deliberately NOT created here. One created now
-  // would stand on Overview with a balance of 0 before the user confirmed anything,
-  // and would outlive a discard permanently - there is no account delete yet. So the
-  // name and the currency go on the `imports` row and the account appears at confirm.
-  //
-  // Staged as uploadDestination handed it back, not re-uppercased. `currency` is no
-  // longer in upsertAccountOn's conflict set at all (row 65), so what this column
-  // decides at confirm is the currency of an account that does not exist yet - the
-  // name arm's create - and it is inert for one that does, on either arm. The
-  // overwrite row 25's §20 accepted is unreachable from every arm now, not just from
-  // the id one. `name` is untouched here for its own reason and keeps it.
-  //
-  // Uppercasing here would still be wrong: on the id arm this IS the account's own
-  // column read back, and normalising it would put a restored 'eur' onto the imports
-  // row as 'EUR' on an import that asked for nothing of the kind.
+  // Staged as uploadDestination handed it back, not re-uppercased: this IS the
+  // account's own column read back, and normalising it would put a restored 'eur'
+  // onto the imports row as 'EUR' on an import that asked for nothing of the kind.
   const newRows = await countNewKeys(txs);
   await stageImport(importId, txs, skipped, account);
   // Last, and after the staging rather than before it: a failure anywhere above must
@@ -1311,7 +1271,6 @@ async function mapAndStore(
       importId,
       accountId: account.id,
       accountName: account.name,
-      accountExists: (await getAccount(account.id)) !== undefined,
       total,
       accepted: txs.length,
       skipped,
