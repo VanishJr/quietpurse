@@ -37,8 +37,32 @@
  * deliberate `row-reverse` — the screens are what a keyboard should reach first — and
  * it does not survive a bar that is visually above the content: an order that
  * disagrees with the painted one is worse for a keyboard than a short tab-through.
+ *
+ * ---------------------------------------------------------------------------
+ * Which of the six is showing is in the URL
+ *
+ * `?screen=` names it, and the Overview adds `?account=` and `?panel=` of its own — see
+ * `url.ts`, including why a query parameter rather than a path. What it buys here is
+ * the Back button: six destinations and an import panel that could each be entered and
+ * none of which could be left by the one control every browser puts on the window.
+ *
+ * ---------------------------------------------------------------------------
+ * ...which is what lets the destinations be links
+ *
+ * Every section, and the avatar, is an `<a href>` carrying the URL it would move to.
+ * They were `<button onClick>` — a control that HAPPENS to change the page, and a
+ * browser has no way to find that out. So Cmd-click, middle click, "Open in a new tab"
+ * and "Copy link address" were all missing from the one element on the screen whose
+ * entire job is going somewhere, and hovering a section said nothing in the status bar.
+ * None of that was an oversight while the app had no addresses to put in an `href`; it
+ * has them now.
+ *
+ * A plain left click stays the app's: `preventDefault` and the same `setUrl` the button
+ * called, so nothing reloads, no screen is unmounted and nothing already fetched is
+ * thrown away. Every other click is handed straight back to the browser. That rule is
+ * written once, in `navigate` below.
  */
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { auth, SessionUser } from './api';
 import {
   AnalyticsIcon,
@@ -51,10 +75,11 @@ import { initialOf } from './identity';
 import { AccountScreen } from './screens/AccountScreen';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
 import { IndependenceScreen } from './screens/IndependenceScreen';
-import { OverviewScreen, PanelKind } from './screens/OverviewScreen';
+import { OverviewScreen } from './screens/OverviewScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ThemeMode, useTheme } from './theme';
 import { TxFocus } from './types';
+import { setUrl, urlFor, useUrl } from './url';
 
 const TABS = [
   { key: 'overview', title: 'Overview', Icon: OverviewIcon },
@@ -64,6 +89,30 @@ const TABS = [
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'] | 'account';
+
+const TAB_KEYS: readonly TabKey[] = [...TABS.map((t) => t.key), 'account'];
+
+/**
+ * Which screen a URL is asking for, and Overview for a URL that asks for nothing this
+ * app has. `?screen=` is typed by anybody who wants to type it — and an old link to a
+ * screen since renamed is the same case — so this is a normal arrival rather than an
+ * error: the alternative is a blank window under a bar with nothing marked on it.
+ */
+const tabOf = (screen: string | null): TabKey =>
+  TAB_KEYS.includes(screen as TabKey) ? (screen as TabKey) : 'overview';
+
+/**
+ * What each destination in the bar moves by. Every one of them is written twice now —
+ * once as the `href` the browser is shown and once as the write a click makes — and
+ * these two are what stop the pair from ever being different patches. A bar that
+ * advertises one address and delivers another is worse than one that advertises none:
+ * the click still works, so nothing in the app is visibly wrong, and what is wrong is
+ * the link somebody copied out of it.
+ */
+const patchFor = (key: TabKey) => ({ screen: key, panel: null });
+
+/** Import is a panel OF the Overview, which is a URL like any other. */
+const IMPORT_PATCH = { screen: 'overview', panel: 'import' } as const;
 
 /** Theme button cycle: system → light → dark. */
 const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
@@ -76,37 +125,21 @@ const MODE_NAME: Record<ThemeMode, string> = { system: 'Auto', light: 'Light', d
 
 export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
   const { mode, setMode } = useTheme();
-  const [tab, setTab] = useState<TabKey>('overview');
+  /**
+   * Where the reader is, read from the URL rather than held here — so Back, Reload and
+   * a pasted link all land on the screen they name. See `url.ts`.
+   *
+   * Two counters and a callback stood in this place. The bar had to ASK the Overview to
+   * open its import panel — a counter and not a boolean, because asking twice has to be
+   * two events rather than one value set twice — ask it again to close whatever panel
+   * was open, since clicking Overview while the import panel was up moved no `tab` and
+   * so did nothing at all, and then be TOLD BACK which panel had ended up open, because
+   * Import is a section in this bar and a panel on that screen. Three mechanisms, one
+   * missing fact: neither component owned where the reader was. The URL owns it.
+   */
+  const url = useUrl();
+  const tab = tabOf(url.screen);
   const [focus, setFocus] = useState<TxFocus | null>(null);
-  /**
-   * Bumped by the bar's Import. A counter and not a boolean for the reason
-   * `TxFocus` carries a nonce: the Overview stays mounted and owns which panel is
-   * open, so asking it twice has to be two events rather than one value set twice.
-   */
-  const [importAsk, setImportAsk] = useState(0);
-  /**
-   * The same thing the other way round, and the reason it has to exist: the bar's
-   * Overview was `setTab('overview')` and nothing else, which is a no-op while the
-   * import panel is up — that panel IS the Overview screen at that moment, and the tab
-   * was already on it. So Import could be entered and never left: every click on
-   * Overview looked like it bounced straight back to Import.
-   *
-   * A counter for the same reason `importAsk` is one, and bumped on every Overview
-   * click rather than only on the ones that change `tab`: leaving a panel open on a
-   * screen the reader has walked away from means Overview answers with Import when
-   * they come back to it, having asked for the dashboard.
-   */
-  const [overviewAsk, setOverviewAsk] = useState(0);
-  /**
-   * Which panel the Overview has taken itself over with, reported up by that screen.
-   *
-   * Import is a section in this bar but a panel on that screen, so `tab` alone cannot
-   * say where the reader is: it read 'overview' while the import page filled the
-   * window, and the bar marked Overview as the current page over it. This is the
-   * missing half of that answer, and it decides two things below — which item is
-   * current, and whether the band this bar starts is continued by anything.
-   */
-  const [ovPanel, setOvPanel] = useState<PanelKind | null>(null);
   /**
    * Whether the Overview is scrolled to its top, which is the other half of the same
    * question and was missing from it.
@@ -132,46 +165,69 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
     read();
     el.addEventListener('scroll', read, { passive: true });
     return () => el.removeEventListener('scroll', read);
-  }, [ovPanel]);
+  }, [url.panel]);
 
   const onOverview = tab === 'overview';
   /** The reader is on the import page, whichever control took them there. */
-  const importing = onOverview && ovPanel === 'import';
+  const importing = onOverview && url.panel === 'import';
   /** Only the Overview's own hero continues the band, and only where the bar left it. */
-  const bandRunsOn = onOverview && ovPanel === null && atTop;
+  const bandRunsOn = onOverview && url.panel === null && atTop;
 
-  /** Every destination in the bar goes through here, so none of them can forget. */
+  /**
+   * Every destination in the bar goes through here, so none of them can forget.
+   *
+   * The panel is dropped whichever screen is being asked for, and that one line is both
+   * halves of what the second counter used to do. A panel is a page OF the Overview, so
+   * clicking Overview has to be the way out of one — `tab` was already on that screen,
+   * so moving it changed nothing and Import could be entered and never left — and a
+   * panel left open behind a reader who walked away to another screen is Overview
+   * answering with Import when they come back to it, having asked for the dashboard.
+   *
+   * The account is NOT dropped: coming back to the Overview comes back to the account
+   * that was being read.
+   *
+   * The early return is about `tab` and not about the URL, which is why `setUrl` cannot
+   * make it: the app opens on `/`, where Overview is the current screen without being
+   * named, so clicking Overview there would write `?screen=overview` — a different URL
+   * that paints the identical window, and a history entry Back can only step over
+   * silently. Two states of this bar are the same page, and only this side knows it.
+   */
   const go = (key: TabKey) => {
-    if (key === 'overview') {
-      setOverviewAsk((n) => n + 1);
-      // what that ask is about to do, said in the same commit rather than a frame
-      // later — the reason is under `openImport` below
-      setOvPanel(null);
-    }
-    setTab(key);
+    if (key === tab && url.panel === null) return;
+    setUrl(patchFor(key));
+  };
+
+  /**
+   * Which half of a link click belongs to the app.
+   *
+   * Only the plain one. A modifier means the reader asked the BROWSER for something —
+   * a new tab, a new window, a download, the link on the clipboard — and every one of
+   * those is answered by doing nothing here and leaving the anchor alone. `button !== 0`
+   * is the middle click, which is a new tab as well; on the browsers this runs on React
+   * would not deliver that to `onClick` anyway, so it is the belt rather than the
+   * braces, but the rule reads as one rule with it written down.
+   */
+  const navigate = (e: React.MouseEvent, run: () => void) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    run();
   };
 
   const openTransactions = (accountId: string) => {
     setFocus((prev) => ({ accountId, nonce: (prev?.nonce ?? 0) + 1 }));
-    setTab('transactions');
+    setUrl({ screen: 'transactions', panel: null });
   };
 
-  const openImport = () => {
-    setImportAsk((n) => n + 1);
-    setTab('overview');
-    /*
-      The Overview reports its panel from a passive effect, which runs after the paint
-      of the commit that opened it. So entering Import from another tab drew one frame
-      of `onOverview && ovPanel === null` — a merged, shadowless bar over a panel that
-      has no hero to continue it — and only then corrected itself.
-
-      This is not a second source of truth: it is the same fact the effect is about to
-      report, said by the side that already knows it. The effect still owns every panel
-      this bar did not open (the import history, and a panel closed from inside the
-      screen), and when it reports 'import' back it sets the value already here.
-    */
-    setOvPanel('import');
-  };
+  /**
+   * Import is a panel OF the Overview, so this is that screen with that panel up —
+   * one write, and both components see it in the same commit.
+   *
+   * It used to be three statements that could not all land at once, and the bar drew a
+   * frame of the wrong thing between them: the Overview reported its panel from a
+   * passive effect, which runs after the paint, so entering Import from another tab
+   * painted one merged, shadowless bar over a panel with no hero to continue it.
+   */
+  const openImport = () => setUrl(IMPORT_PATCH);
 
   const signOut = async () => {
     try {
@@ -185,6 +241,14 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
 
   return (
     <div className="app">
+      {/* The bar above the content carries seven controls before the first thing on the
+          screen, and a keyboard walks all seven on every arrival. The landing page has
+          had this since it was written (`Landing.tsx`); the app, which is the side people
+          come back to daily, had not. */}
+      <a className="skip" href="#screens">
+        Skip to the content
+      </a>
+
       {/*
         `is-merged` is the one thing about the band this component knows and CSS cannot
         work out: on the Overview the dark band does not end at the foot of this bar, it
@@ -203,17 +267,20 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
           <nav className="tabbar" aria-label="Sections">
             <div className="nav-list">
               {TABS.map((t) => (
-                <button
+                <a
                   key={t.key}
                   className="nav-item"
-                  onClick={() => go(t.key)}
+                  // the same patch on both, so the address on hover cannot drift from
+                  // the screen a click lands on
+                  href={urlFor(patchFor(t.key))}
+                  onClick={(e) => navigate(e, () => go(t.key))}
                   // Overview yields the mark while its import panel is up: two current
                   // pages is no answer, and of the two it is Import the reader is on
                   aria-current={tab === t.key && !(t.key === 'overview' && importing) ? 'page' : undefined}
                 >
                   <t.Icon />
                   <span className="nav-label">{t.title}</span>
-                </button>
+                </a>
               ))}
               {/*
                 It opens a panel of the Overview rather than a screen of its own, and
@@ -222,14 +289,17 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
                 Overview. Where the page lives is this app's business; which of these
                 five is being looked at is theirs.
               */}
-              <button
+              <a
                 className="nav-item nav-import"
-                onClick={openImport}
+                // a panel of the Overview is a URL like any other, which is why this one
+                // is as linkable as the five screens
+                href={urlFor(IMPORT_PATCH)}
+                onClick={(e) => navigate(e, openImport)}
                 aria-current={importing ? 'page' : undefined}
               >
                 <ImportIcon />
                 <span className="nav-label">Import</span>
-              </button>
+              </a>
             </div>
           </nav>
 
@@ -243,14 +313,15 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
             </button>
             {/* the letter, not a photograph; it goes where the address and the
                 settings are, which is the fifth screen */}
-            <button
+            <a
               className="avatar"
-              onClick={() => go('account')}
+              href={urlFor(patchFor('account'))}
+              onClick={(e) => navigate(e, () => go('account'))}
               aria-current={tab === 'account' ? 'page' : undefined}
               aria-label={`Account: ${user.email}`}
             >
               <span aria-hidden="true">{initialOf(user)}</span>
-            </button>
+            </a>
           </div>
         </div>
       </header>
@@ -259,15 +330,12 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
         Screens stay mounted so filters and already-loaded data survive a tab switch;
         `hidden` only takes the inactive ones out of layout and the a11y tree.
       */}
-      <main className="screens">
+      <main className="screens" id="screens">
         <div className="screen" ref={overview} hidden={tab !== 'overview'}>
           <OverviewScreen
             user={user}
-            importAsk={importAsk}
             onOpenTransactions={openTransactions}
-            overviewAsk={overviewAsk}
-            onOpenAnalytics={() => setTab('analytics')}
-            onPanelChange={setOvPanel}
+            onOpenAnalytics={() => go('analytics')}
           />
         </div>
         <div className="screen" hidden={tab !== 'transactions'}>

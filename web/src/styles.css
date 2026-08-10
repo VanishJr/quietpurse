@@ -37,6 +37,23 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+ * `touch-action` and the tap highlight are the two things a touch browser does to a
+ * control that nobody asked it for.
+ *
+ * `manipulation` gives up double-tap-to-zoom on buttons, and with it the ~300ms a
+ * mobile browser otherwise waits after every tap to find out whether a second one is
+ * coming. Nothing in this app is zoomed by double-tapping a button — the chips, the
+ * pills, the rail and the sheet's actions are all single-tap — so the wait buys
+ * nothing and is paid on every tap of all of them. Panning and pinch-zoom of the page
+ * are untouched.
+ *
+ * The tap highlight is a filled rectangle drawn over the control on touch-down, in a
+ * colour the platform picks. On a row of `--r-pill` discs it is a square, on the navy
+ * band it is a flash of the wrong hue, and it says nothing `:active` and `:hover` do
+ * not already say in colours this file chose. Off, deliberately, rather than left at
+ * a default nothing here agreed to.
+ */
 button {
   font: inherit;
   color: inherit;
@@ -44,10 +61,30 @@ button {
   border: none;
   padding: 0;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:disabled {
   cursor: default;
+}
+
+/*
+ * The rest of that reset, for the two classes in the top bar that are anchors rather
+ * than buttons — the sections and the avatar; the header of SignedIn.tsx says why a
+ * destination is a link. The rule above cannot reach them, and a link arrives with an
+ * underline of its own that nothing further down this file turns off.
+ *
+ * Colour is not reset here: `.nav-item` and `.avatar` each set their own, so a
+ * `color: inherit` in this rule would be a declaration written to be beaten. What they
+ * never set is the underline — and the two touch behaviours are as true of a link that
+ * navigates as of a button that does.
+ */
+.nav-item,
+.avatar {
+  text-decoration: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 input,
@@ -75,6 +112,46 @@ textarea {
  */
 .ov-band :focus-visible {
   outline-color: var(--c-on-ground-1);
+}
+
+/*
+ * Reduced motion, for the whole sheet.
+ *
+ * Nothing in this app animates in order to be correct. Seven transitions are declared
+ * below and six of them are a colour: the nav pills, the two rail discs, the theme
+ * button, the tab names and the dropzone as the pointer arrives, and the switch's
+ * track as it turns on. The seventh is the switch knob, sliding 18px. Every one ends
+ * on a state that is right without the tween, so under `reduce` they cut to it and
+ * nothing is lost but the travel.
+ *
+ * The charts needed no equivalent. Every Recharts series in the app already passes
+ * `isAnimationActive={false}`, for a different reason — the screens stay mounted, so
+ * a chart first renders inside a hidden container and an animation started there
+ * freezes at an arbitrary frame — which happens to leave this file as the only thing
+ * in the app that moves.
+ *
+ * `*` rather than the seven selectors, because the point of the rule is the eighth:
+ * a transition written later is covered by something nobody has to remember. `0.01ms`
+ * and not `0` for the usual reason — a `transitionend` listener still fires — and it
+ * is what `landing.css` already says for the same job.
+ *
+ * Unscoped, where the landing's equivalent sits under `.landing`: this sheet is the
+ * app's alone, and the app's motion is not all under `.app` — `Unreachable` in
+ * App.tsx renders a `.screen` outside it. `auth.css` needs nothing from here, having
+ * no motion of its own at all.
+ *
+ * No `scroll-behavior`, which the landing's block does carry: nothing in the app
+ * scrolls smoothly, so a rule turning that off would be switching off a thing that
+ * is not on.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ---------- what the mock has that a flat colour cannot say ---------- */
@@ -140,6 +217,29 @@ textarea {
 /* ---------- app shell ---------- */
 
 /*
+ * Past the bar in one key, which is seven controls deep before the first thing on the
+ * page. The same idiom as the landing's (`landing.css`), including the park offscreen
+ * rather than `display: none` — a hidden element is not focusable, and a skip link
+ * that cannot be focused is not a skip link. `--z-raised` is reserved for exactly this
+ * and for the sheet's backdrop (tokens.css); without it the link is painted under the
+ * band it is offering to skip past.
+ */
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 16px;
+  top: 16px;
+  z-index: var(--z-raised);
+  padding: 12px 18px;
+  border-radius: var(--r-md);
+  background: var(--ink-surface);
+  color: var(--ink-primary);
+}
+
+/*
  * The page and not the navy it used to be: with the sidebar gone there is no ground
  * for a panel to be laid on, and the only place this fill is ever seen is the blank
  * `<div className="app" />` App.tsx paints while the session is still in flight.
@@ -164,11 +264,19 @@ textarea {
  * No padding of its own: the Overview's hero runs edge to edge and the body inside it
  * does not, so the column is a wrapper the content chooses (`.shell`) rather than a
  * gutter the scroll container imposes on everything in it.
+ *
+ * `overscroll-behavior` because this is the app's scroll container and not the page's:
+ * the page cannot scroll at all — `html`, `body` and `#root` are all `height: 100%` —
+ * so a flick that runs past the end of a screen has nowhere useful to chain to, and
+ * what it reaches instead is the viewport's own overscroll: the rubber band on iOS,
+ * pull-to-refresh on Android, which reloads the whole app in answer to a scroll that
+ * had simply finished. `contain` keeps the gesture in the element it started in.
  */
 .screen {
   position: absolute;
   inset: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .screen[hidden] {
@@ -328,6 +436,38 @@ textarea {
   font-size: 17px;
   font-weight: 700;
   margin: 16px 0 6px;
+}
+
+/*
+ * Every heading in the app that is allowed to wrap, in one place.
+ *
+ * `balance` spreads a wrapped heading evenly over its lines instead of filling each
+ * one and leaving the remainder on the last — which is how "Nothing here yet — start
+ * with a statement" and "Nothing has been loaded into <account>" each came to hang a
+ * single word under a full line, in the middle of a card whose text is centred. It
+ * costs nothing to be wrong about: a browser without it wraps as it does today, and
+ * one with it caps the work at a few lines and gives up on anything longer, so this
+ * cannot be paid for by a heading somebody makes long later.
+ *
+ * Headings only, and not the prose under them. `balance` on a paragraph is the wrong
+ * shape — a body of text wants full lines and an even last one, which is `pretty` —
+ * and the landing page already draws that line the same way.
+ *
+ * Three heading classes are deliberately absent. `.row-title` and `.tx-title` are one
+ * line with an ellipsis on the end — a rule about how they wrap would be a rule about
+ * a case that cannot arise — and `.flows-title` is always written beside
+ * `.block-title`, which is already here.
+ */
+.title,
+.block-title,
+.sheet-title,
+.fig-title,
+.settings-title,
+.dropzone-title,
+.ov-spend-title,
+.welcome-title,
+.acct-blank-title {
+  text-wrap: balance;
 }
 
 .hint {
@@ -655,12 +795,22 @@ textarea {
   padding: 24px;
 }
 
+/*
+ * The sheet is the taller of the two things that scroll, and it scrolls INSIDE a fixed
+ * backdrop that covers the screen. Without `contain`, a scroll continued past the foot
+ * of the sheet chains to whatever is behind the backdrop and moves it: the reader
+ * finishes reading what deleting an account destroys, keeps scrolling, and the page
+ * they were pulled out of slides about underneath a modal that is still up. The
+ * delete confirmation is the longest sheet in the app and the one where that matters
+ * most.
+ */
 .sheet {
   background: var(--ink-surface);
   padding: 20px;
   width: 100%;
   max-height: 88vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .backdrop-bottom .sheet {

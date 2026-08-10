@@ -67,7 +67,7 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
             there, and "Last 7" was a second place RECENT_LIMIT had to be kept true */}
         <h2 className="block-title">Recent transactions</h2>
         <button className="btn-link" onClick={onSeeAll}>
-          All transactions →
+          All transactions <span aria-hidden="true">→</span>
         </button>
       </div>
 
@@ -108,7 +108,16 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                   </td>
                   <td className="tx-desc">
                     <span className="tx-cell tx-desc-cell">
-                      <span className="tx-mark" style={{ background: categoryColor(t.category) }}>
+                      {/* The disc is a picture of the row, and its letter is the first
+                          letter of the description printed immediately to its right — so
+                          read out it is a stammer in front of every line of the table
+                          ("R, Rewe"). It identifies a row at a glance and by nothing
+                          else, which is the definition of decoration. */}
+                      <span
+                        className="tx-mark"
+                        style={{ background: categoryColor(t.category) }}
+                        aria-hidden="true"
+                      >
                         {initialOf(t)}
                       </span>
                       <span className="tx-desc-body">
@@ -128,7 +137,15 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                   </td>
                   <td className="tx-cat">
                     <span className="tx-cell tx-cat-cell">
-                      <span className="dot" style={{ background: categoryColor(t.category) }} />
+                      {/* the same colour the disc above carries, and the category it
+                          stands for is spelled out in the very next span — it is how the
+                          row is matched to the donut by eye, and nothing to anyone
+                          reading the cell */}
+                      <span
+                        className="dot"
+                        style={{ background: categoryColor(t.category) }}
+                        aria-hidden="true"
+                      />
                       <span className="tx-cat-name">{categoryLabel(t.category)}</span>
                     </span>
                   </td>

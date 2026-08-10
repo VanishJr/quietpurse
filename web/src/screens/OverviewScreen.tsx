@@ -76,6 +76,7 @@ import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactio
 import { SpendingByCategory } from '../components/SpendingByCategory';
 import { fmtMoney, fmtWeekday } from '../format';
 import { Account, AccountDeleted, Transaction } from '../types';
+import { setUrl, useUrl } from '../url';
 
 /** The window the chart opens on: long enough to be a trend, short enough to be full. */
 const DEFAULT_WINDOW: MonthWindow = 6;
@@ -103,11 +104,19 @@ interface AccountData {
   truncated: boolean;
 }
 
-/** Which panel has taken the screen over. They are pages, not dialogs. */
-type Panel = { kind: 'import' } | { kind: 'history'; account?: Account } | null;
+/**
+ * Which panel has taken the screen over. They are pages and not dialogs — which is why
+ * they are in the URL beside the screen rather than in state beside `dialog`.
+ *
+ * Neither carries an account of its own. The import history used to hold the `Account`
+ * it was opened with, and it is always the account on the rail: `?panel=history` next
+ * to `?account=` says the same thing in something a link can carry.
+ */
+type PanelKind = 'import' | 'history';
 
-/** What the navigation is told about that, which is the kind and not the account. */
-export type PanelKind = NonNullable<Panel>['kind'];
+/** ...and what a URL that asks for something else gets, which is the dashboard. */
+const panelOf = (panel: string | null): PanelKind | null =>
+  panel === 'import' || panel === 'history' ? panel : null;
 
 /**
  * Which step of the account panel is open, and for which account ('add' has none).
@@ -144,40 +153,13 @@ const destroyedSentence = (name: string, d: AccountDeleted): string =>
 
 interface Props {
   user: SessionUser;
-  /** Bumped by the navigation's Import; each new value opens the import panel once. */
-  importAsk: number;
-  /**
-   * Bumped by the navigation's Overview; each new value closes whatever panel is open.
-   *
-   * The bar cannot do this by moving `tab`, because a panel of this screen IS the
-   * Overview as far as `tab` is concerned — so the click that asked to come back to
-   * the dashboard changed nothing and the import page stayed up.
-   */
-  overviewAsk: number;
   /** Opens the Transactions screen with this account's filter already applied. */
   onOpenTransactions: (accountId: string) => void;
   /** Opens the Analytics screen — the spending card over the whole workspace. */
   onOpenAnalytics: () => void;
-  /**
-   * Which panel has taken this screen over, reported upwards as it changes.
-   *
-   * The navigation owns two things that are wrong while one is open, and neither is
-   * knowable from `tab` alone: Import is a section in the bar, so with the import
-   * panel up the bar was marking Overview as the page while the reader was plainly on
-   * Import; and the bar's band is only continued by this screen's hero, which a panel
-   * replaces, so `is-merged` left the bar with no shadow and nothing under it.
-   */
-  onPanelChange: (kind: PanelKind | null) => void;
 }
 
-export function OverviewScreen({
-  user,
-  importAsk,
-  overviewAsk,
-  onOpenTransactions,
-  onOpenAnalytics,
-  onPanelChange,
-}: Props) {
+export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Props) {
   /**
    * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
    * is how a failed request came to render as "you have no accounts".
@@ -188,12 +170,22 @@ export function OverviewScreen({
   /** What the last delete destroyed. Not a refusal, and not the dashboard's. */
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * Which account, and which panel — both from the URL, so a link names the account it
+   * was read on and Back is the way out of the import page. `url.ts` has the rest.
+   *
+   * The chart's window and the hidden-accounts switch stay in state on purpose. They
+   * are how this reader has set the screen up rather than what they are looking at, and
+   * a link that arrives carrying somebody else's chart range is a link that argues with
+   * whoever opened it.
+   */
+  const url = useUrl();
+  const panel = panelOf(url.panel);
+
   /** Hidden accounts are off the rail until asked for; restoring them has to stay reachable. */
   const [showHidden, setShowHidden] = useState(false);
   const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
 
-  const [panel, setPanel] = useState<Panel>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
 
   const [data, setData] = useState<AccountData | null>(null);
@@ -227,20 +219,6 @@ export function OverviewScreen({
     load();
   }, [load]);
 
-  // the navigation asked for the import panel; 0 is the initial value and asks nothing
-  useEffect(() => {
-    if (importAsk > 0) setPanel({ kind: 'import' });
-  }, [importAsk]);
-
-  // ...and asked for the dashboard back. 0 is the initial value and asks nothing.
-  useEffect(() => {
-    if (overviewAsk > 0) setPanel(null);
-  }, [overviewAsk]);
-
-  useEffect(() => {
-    onPanelChange(panel?.kind ?? null);
-  }, [panel, onPanelChange]);
-
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.hidden), [accounts]);
   const onRail = useMemo(
@@ -250,12 +228,19 @@ export function OverviewScreen({
 
   /**
    * Nothing chosen yet, or what was chosen has left the rail — the first account
-   * stands in. Resolved while rendering rather than in an effect that writes back to
-   * `selectedId`: the effect version painted one frame of a rail with no tab marked
-   * and no panel under it, and everything downstream — which page the rail shows,
-   * which account's transactions are fetched — was deciding against that empty frame.
+   * stands in. Resolved while rendering rather than in an effect that writes the answer
+   * back: the effect version painted one frame of a rail with no tab marked and no
+   * panel under it, and everything downstream — which page the rail shows, which
+   * account's transactions are fetched — was deciding against that empty frame.
+   *
+   * The fallback is not written back to the URL either, and for a second reason on top
+   * of that one: `?screen=overview` with no account is a true and useful URL — "the
+   * dashboard, whichever account is first" — and an app that immediately rewrote it to
+   * name today's first account would hand out links that go stale on the next upload.
+   * It also means an `?account=` naming something deleted, hidden, or belonging to
+   * somebody else's workspace lands on the first account rather than on a blank screen.
    */
-  const selected = onRail.find((a) => a.id === selectedId) ?? onRail[0] ?? null;
+  const selected = onRail.find((a) => a.id === url.account) ?? onRail[0] ?? null;
 
   /**
    * Which fetch the screen is waiting for. Two requests per account and the second
@@ -318,7 +303,7 @@ export function OverviewScreen({
 
   const afterCreate = (created: Account) => {
     setDialog(null);
-    setSelectedId(created.id);
+    setUrl({ account: created.id });
     load();
   };
 
@@ -392,11 +377,11 @@ export function OverviewScreen({
     [mine, monthKey],
   );
 
-  if (panel?.kind === 'import') {
+  if (panel === 'import') {
     return (
       <div className="screen-inner">
         <CsvImport
-          onBack={() => setPanel(null)}
+          onBack={() => setUrl({ panel: null })}
           onImported={load}
           // the same reload, and deliberately not the same prop: onBack closes the
           // panel without one, so an account created in there reaches the rail here
@@ -407,15 +392,22 @@ export function OverviewScreen({
     );
   }
 
-  if (panel?.kind === 'history') {
+  /*
+    `&& selected`, and it is load-bearing. ImportHistory reads a missing account as the
+    whole workspace, so a reload straight onto `?panel=history` — where the accounts are
+    still in flight and nothing is selected yet — would answer with every import the user
+    has ever made under a heading about one account. It falls through to the dashboard
+    for the tick that takes and arrives once there is an account for it to be about.
+  */
+  if (panel === 'history' && selected) {
     return (
       <div className="screen-inner">
         <ImportHistory
-          account={panel.account}
-          onBack={() => setPanel(null)}
+          account={selected}
+          onBack={() => setUrl({ panel: null })}
           onChanged={() => {
             load();
-            if (selected) loadAccount(selected);
+            loadAccount(selected);
           }}
         />
       </div>
@@ -435,7 +427,7 @@ export function OverviewScreen({
             <AccountTabs
               accounts={onRail}
               selectedId={selected?.id ?? null}
-              onSelect={setSelectedId}
+              onSelect={(id) => setUrl({ account: id })}
               onAdd={() => setDialog(openAt('add', null))}
               hiddenCount={hidden.length}
               showHidden={showHidden}
@@ -449,22 +441,22 @@ export function OverviewScreen({
         {/* Above the content, not below it: a refusal read after the list is a refusal
             the reader has already acted on.
 
-            `ov-notice` is what makes that survivable. This body is pulled 64px up over
-            the hero, so whatever is first in it is drawn ON the navy — and `--ink-bad`
-            there is 2.6:1. Every message here is first in one of the three states that
-            draws one, so each carries the cards' own paper under it rather than being
-            read off the band. */}
-        {error && <p className="error ov-notice">Error: {error}</p>}
+            One wrapper for both sentences rather than one each. It is always here and
+            only the sentences are conditional, because a live region that arrives in the
+            same commit as its text announces nothing — and both of these arrive out of a
+            request that has already come back, which is a moment nothing else on the page
+            marks. The refusal is the whole of what the reader is told when the accounts
+            could not be listed; the delete's sentence needs it for a second reason on top
+            of that, that Sheet does not restore focus on close, so afterwards focus is on
+            <body> and there is nothing else to say the account went.
 
-        {/* the wrapper is always here and only the sentence is conditional: a live region
-            that arrives in the same commit as its text announces nothing. It is needed at
-            all because Sheet does not restore focus on close, so after a delete focus is
-            on <body> and there is nothing else to say the account went.
-
-            `ov-notice` on the sentence and not on the wrapper: the wrapper is in the DOM
-            even with nothing to say, and a card's fill and padding on an empty element
-            would be a blank white box sitting on the navy. */}
+            `ov-notice` is what makes either of them survivable. This body is pulled 64px
+            up over the hero, so whatever is first in it is drawn ON the navy — and
+            `--ink-bad` there is 2.6:1. It is on the sentences and not on the wrapper: the
+            wrapper is in the DOM with nothing to say, and a card's fill and padding on an
+            empty element would be a blank white box sitting on the navy. */}
         <div aria-live="polite">
+          {error && <p className="error ov-notice">Error: {error}</p>}
           {notice && <p className="hint ov-notice">{notice}</p>}
         </div>
 
@@ -479,8 +471,10 @@ export function OverviewScreen({
               an account you name on the way in.
             </p>
             <div className="acct-blank-actions">
-              <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
-                ⭳ Import a statement
+              {/* the arrow is a picture of the verb beside it, so a reader who is given
+                  it aloud gets a syllable of nothing in front of every one of these */}
+              <button className="btn" onClick={() => setUrl({ panel: 'import' })}>
+                <span aria-hidden="true">⭳</span> Import a statement
               </button>
               <button
                 className="btn-ghost"
@@ -506,7 +500,14 @@ export function OverviewScreen({
           </p>
         )}
 
-        {dataError && <p className="error ov-notice">Error: {dataError}</p>}
+        {/* The dashboard's own refusal, and a second region rather than a line in the one
+            above: it belongs BELOW the two states that are about the rail, and a sentence
+            about the account on the rail standing over a sentence about the rail itself
+            is the wrong order to read them in. Same rule as that wrapper — always in the
+            DOM, only the sentence conditional. */}
+        <div aria-live="polite">
+          {dataError && <p className="error ov-notice">Error: {dataError}</p>}
+        </div>
 
         {selected && mine && (
           <div className="acct-panel" role="region" aria-label={selected.name}>
@@ -589,8 +590,8 @@ export function OverviewScreen({
                       into it and the figures, the chart and the transactions fill in.
                     </p>
                     <div className="acct-blank-actions">
-                      <button className="btn" onClick={() => setPanel({ kind: 'import' })}>
-                        ⭳ Import a statement
+                      <button className="btn" onClick={() => setUrl({ panel: 'import' })}>
+                        <span aria-hidden="true">⭳</span> Import a statement
                       </button>
                     </div>
                   </div>
@@ -616,9 +617,12 @@ export function OverviewScreen({
             baseCurrency={baseCurrency ?? ''}
             onStep={(kind) => setDialog({ ...dialog, kind })}
             onClose={() => setDialog(null)}
+            // the account as well as the panel: the dialog's account is the one on the
+            // rail today, and naming it is what makes the URL true on its own rather
+            // than only in a session that got here by opening this menu
             onOpenHistory={(account) => {
               setDialog(null);
-              setPanel({ kind: 'history', account });
+              setUrl({ account: account.id, panel: 'history' });
             }}
             onCreated={afterCreate}
             onUpdated={applyAccount}
