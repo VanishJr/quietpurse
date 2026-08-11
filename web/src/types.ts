@@ -112,21 +112,61 @@ export interface TxFocus {
   nonce: number;
 }
 
-/** Category total in the base currency. */
+/** Category total. The body carrying it names the currency, never this. */
 export interface CategorySummary {
   category: string;
   total: number;
 }
 
-/** All amounts in the base currency. Transfers excluded, refunds subtracted. */
+export interface SummaryTotals {
+  expense: number;
+  income: number;
+}
+
+/** Income by source: the id, its label and kind from income_sources, and the total. */
+export interface IncomeSourceTotal {
+  source: string;
+  label: string;
+  kind: IncomeSourceKind;
+  total: number;
+}
+
+/**
+ * All amounts in the base currency. Transfers excluded, refunds subtracted.
+ *
+ * `scope` is a literal rather than a field that happens to be there: the account
+ * bodies below carry `currency` and no `baseCurrency`, so the unit of every number
+ * in a body is named by that body, once, and a reader picking the wrong one is a
+ * compile error instead of a UAH figure labelled EUR.
+ */
 export interface Summary {
+  scope: 'workspace';
   from: string;
   to: string;
   baseCurrency: string;
-  totals: { expense: number; income: number };
+  totals: SummaryTotals;
   byCategory: CategorySummary[];
   incomeByCategory: CategorySummary[];
-  incomeBySource: { source: string; label: string; kind: IncomeSourceKind; total: number }[];
+  incomeBySource: IncomeSourceTotal[];
+}
+
+/** One named account, every amount in that account's own currency. */
+export interface AccountSummary {
+  scope: 'account';
+  from: string;
+  to: string;
+  accountId: string;
+  currency: string;
+  /**
+   * The currencies among this account's rows that are not its own — all time, not
+   * the window. Normally empty; required rather than optional, because [] means
+   * "checked, and there are none" where undefined means nobody looked.
+   */
+  otherCurrencies: string[];
+  totals: SummaryTotals;
+  byCategory: CategorySummary[];
+  incomeByCategory: CategorySummary[];
+  incomeBySource: IncomeSourceTotal[];
 }
 
 /** One month's totals in the base currency. */
@@ -143,11 +183,45 @@ export interface MonthTotals {
   incomeExternal: number;
 }
 
+/**
+ * One month of an account's own transactions, in that account's currency.
+ *
+ * `net` is every row of the month summed, transfers included — the rule the server
+ * computes a balance by, and the only reason a month can be compared with the balance
+ * printed beside it. `income` and `expense` exclude transfers, exactly as the
+ * workspace-wide figures do, so `net` is NOT `income - expense` and must never be
+ * reconstructed as one.
+ *
+ * Not MonthTotals and not assignable to it: expenseOneOff, incomeOwn and
+ * incomeExternal are independence figures and independence is a workspace question.
+ */
+export interface AccountMonthTotals {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  expense: number;
+  net: number;
+}
+
 export interface MonthlySummary {
+  scope: 'workspace';
   from: string;
   to: string;
   baseCurrency: string;
   months: MonthTotals[];
+}
+
+/** The same chart for one account, in that account's own currency. */
+export interface AccountMonthlySummary {
+  scope: 'account';
+  from: string;
+  to: string;
+  accountId: string;
+  currency: string;
+  /** as on AccountSummary: all time, and [] is an answer */
+  otherCurrencies: string[];
+  /** only the months that have rows — the anchoring and the gaps are the caller's */
+  months: AccountMonthTotals[];
 }
 
 /** App settings (the settings table). */

@@ -29,19 +29,24 @@
  * ---------------------------------------------------------------------------
  * Where the numbers come from
  *
- * Not from a summary endpoint: there isn't a per-account one. `/api/summary` and
- * `/api/summary/months` take a date range and sum the whole workspace. So this screen
- * fetches the account's own transactions and `accounts.ts` does the arithmetic the
- * server would have done — see the header there, and the row in
- * `REDESIGN-BACK-DEBT.md` that deletes it. The donut is the same story one level
- * further in: `categorySpend` over the newest month of the window already fetched, so
- * it costs no request of its own.
+ * From the summary endpoints, per account: `/api/summary?accountId=` for the newest
+ * month's totals and its breakdown by category, `/api/summary/months?accountId=` for
+ * the chart. Both answer in that account's own currency and both are the server's own
+ * sums — this screen used to read the rows and add them up itself, which is a mirror
+ * of SQL that drifts from it.
  *
- * Two requests per account, and the second depends on the first. The recent list also
- * says when this account's newest transaction is, and the chart window is anchored on
- * that rather than on today: an account whose last statement is eighteen months old
+ * Three requests per account, and the two summaries depend on the first. The recent
+ * list says when this account's newest transaction is, and both windows are anchored
+ * on that rather than on today: an account whose last statement is eighteen months old
  * would otherwise answer an empty year while its seven most recent transactions sit
- * underneath it.
+ * underneath it. The pair goes out together and lands in one state write — a failure
+ * in either is the dashboard's refusal, because a fresh total beside twelve empty bars
+ * is two answers about two different things.
+ *
+ * What the server does NOT do is fill the gaps: it answers only the months that have
+ * rows. The anchoring, the window and the 0/0/0 months inside it are `windowMonths` in
+ * `accounts.ts`, and they are what make "vs Jul" mean the month before and not
+ * whichever month was answered second-newest.
  *
  * ---------------------------------------------------------------------------
  * What is no longer here
@@ -55,16 +60,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, SessionUser } from '../api';
 import {
-  categorySpend,
-  foreignCurrencies,
   latestMonth,
   LONGEST_WINDOW,
-  monthlyTotals,
+  monthEnd,
   MonthWindow,
   monthOf,
   percentChange,
   priorMonth,
   shiftMonth,
+  windowMonths,
 } from '../accounts';
 import { AccountBalance } from '../components/AccountBalance';
 import { AccountDialog, DialogKind } from '../components/AccountDialog';
@@ -75,19 +79,17 @@ import { ImportHistory } from '../components/ImportHistory';
 import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactions';
 import { SpendingByCategory } from '../components/SpendingByCategory';
 import { fmtMoney, fmtWeekday } from '../format';
-import { Account, AccountDeleted, Transaction } from '../types';
+import {
+  Account,
+  AccountDeleted,
+  AccountMonthlySummary,
+  AccountSummary,
+  Transaction,
+} from '../types';
 import { setUrl, useUrl } from '../url';
 
 /** The window the chart opens on: long enough to be a trend, short enough to be full. */
 const DEFAULT_WINDOW: MonthWindow = 6;
-
-/**
- * The cap on the chart's fetch. The same number TransactionsScreen uses for a year,
- * and for the same reason — the endpoint's own default (1000) is inside what a busy
- * account produces. A response that comes back exactly this long is reported as
- * incomplete rather than drawn as a total.
- */
-export const WINDOW_TX_LIMIT = 5_000;
 
 /**
  * What one account's dashboard is drawn from. Carries the id it was fetched for, which
@@ -99,9 +101,12 @@ interface AccountData {
   accountId: string;
   /** Newest first — the endpoint orders by date DESC. */
   recent: Transaction[];
-  /** The longest window, sliced per toggle rather than re-fetched. */
-  window: Transaction[];
-  truncated: boolean;
+  /**
+   * Both summary bodies or neither, so that "the summary is present exactly when the
+   * months are" is a fact about the type instead of a convention. A hidden account and
+   * an empty one have neither: nothing was asked for.
+   */
+  figures: { summary: AccountSummary; monthly: AccountMonthlySummary } | null;
 }
 
 /**
@@ -243,7 +248,7 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
   const selected = onRail.find((a) => a.id === url.account) ?? onRail[0] ?? null;
 
   /**
-   * Which fetch the screen is waiting for. Two requests per account and the second
+   * Which fetch the screen is waiting for. Three requests per account and two of them
    * waiting on the first, so a tab switch has a wide window to be overtaken in — and
    * an answer for a tab nobody is looking at any more is not a slower answer, it is
    * the wrong one. Writing it anyway left `data` holding an id `mine` then rejected,
@@ -260,30 +265,31 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
     // a hidden account's transactions are filtered out of the endpoint, so asking for
     // them would answer an empty account rather than a removed one
     if (account.hidden) {
-      setData({ accountId: account.id, recent: [], window: [], truncated: false });
+      setData({ accountId: account.id, recent: [], figures: null });
       return;
     }
     try {
       const recent = await api.transactions({ accountId: account.id, limit: RECENT_LIMIT });
       if (token !== request.current) return;
       if (recent.length === 0) {
-        setData({ accountId: account.id, recent, window: [], truncated: false });
+        setData({ accountId: account.id, recent, figures: null });
         return;
       }
       // anchored on the newest transaction, not on today: see the header
-      const from = `${shiftMonth(monthOf(recent[0].date), -(LONGEST_WINDOW - 1))}-01`;
-      const rows = await api.transactions({
-        accountId: account.id,
-        from,
-        limit: WINDOW_TX_LIMIT,
-      });
+      const anchor = monthOf(recent[0].date);
+      // the last day of the month, and the endpoints keep it whole — a `to` short by
+      // one drops that day out of the donut, both figures and the newest point at once
+      const to = monthEnd(anchor);
+      const [summary, monthly] = await Promise.all([
+        api.accountSummary(account.id, `${anchor}-01`, to),
+        api.accountMonths(
+          account.id,
+          `${shiftMonth(anchor, -(LONGEST_WINDOW - 1))}-01`,
+          to,
+        ),
+      ]);
       if (token !== request.current) return;
-      setData({
-        accountId: account.id,
-        recent,
-        window: rows,
-        truncated: rows.length === WINDOW_TX_LIMIT,
-      });
+      setData({ accountId: account.id, recent, figures: { summary, monthly } });
     } catch (e) {
       // a refusal is as stale as an answer: the abandoned tab's 500 would otherwise
       // paint an error over the account that loaded
@@ -330,52 +336,32 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
   }, [dialog]);
 
   const mine = data?.accountId === selected?.id ? data : null;
+  const figures = mine?.figures ?? null;
+
+  /**
+   * The chart's months: the server's answer anchored, cut to the toggle and with its
+   * interior gaps filled. Sliced here rather than re-fetched — the request asks for
+   * the longest window once and 3 and 6 are cuts of it.
+   */
   const months = useMemo(
-    () => (mine ? monthlyTotals(mine.window, window_) : []),
-    [mine, window_],
+    () => (figures ? windowMonths(figures.monthly.months, window_) : []),
+    [figures, window_],
   );
-  const foreign = useMemo(
-    () => (mine && selected ? foreignCurrencies(mine.window, selected.currency) : []),
-    [mine, selected],
-  );
+
+  /**
+   * All time and not the window, which is what the endpoint answers and more than this
+   * screen could ever see before. The warning on the flows card says so in those words.
+   */
+  const otherCurrencies = figures?.monthly.otherCurrencies ?? [];
 
   /** The newest month the account has anything in — what every figure is about. */
   const month = latestMonth(months);
   const prior = priorMonth(months);
 
-  /**
-   * The month a comparison may be drawn from, or null when none may be — and the ONE
-   * place that is decided. Both cards that draw a percentage are handed this rather
-   * than the raw month and a `truncated` flag to re-apply the rule against: the
-   * balance card was making the same decision a second time, in its own words.
-   *
-   * No comparison at all off a truncated window. The fetch is ordered newest first, so
-   * a response at its limit lost the far end: `prior` is then whichever month survived
-   * second, which may be a part of one, and the balance's derived opening figure is
-   * short by whatever was dropped. An arrow and a percentage read as more certain
-   * than the figure they came from — the same reason `percentChange` answers null on a
-   * base of zero rather than printing an infinity.
-   */
-  const comparable = mine?.truncated ? null : month;
   const deltas = {
-    income: comparable && prior ? percentChange(comparable.income, prior.income) : null,
-    expense: comparable && prior ? percentChange(comparable.expense, prior.expense) : null,
+    income: month && prior ? percentChange(month.income, prior.income) : null,
+    expense: month && prior ? percentChange(month.expense, prior.expense) : null,
   };
-
-  /**
-   * The newest month's rows, by category. Off the window already in hand, so it is
-   * arithmetic rather than a request — and off the newest month specifically, which is
-   * the one end of that window a truncated fetch cannot have cut: the endpoint orders
-   * `date DESC`, so what a cap drops is the oldest.
-   */
-  const monthKey = month?.month ?? null;
-  const spend = useMemo(
-    () =>
-      mine && monthKey
-        ? categorySpend(mine.window.filter((t) => monthOf(t.date) === monthKey))
-        : [],
-    [mine, monthKey],
-  );
 
   if (panel === 'import') {
     return (
@@ -548,15 +534,22 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
                 <div className="ov-col">
                   <AccountBalance
                     account={selected}
-                    comparable={comparable}
+                    comparable={month}
                     onOpenMenu={() => setDialog(openAt('menu', selected))}
                   />
 
-                  {month && (
+                  {/* `month` is the same gate the flows card is behind, so the two can
+                      never disagree about whether the account holds anything; `figures`
+                      is what tells the compiler the bodies are here. Every prop is off
+                      the summary body its own detail came from — a write landing
+                      between the two requests then makes two cards about two months,
+                      each correctly labelled, rather than one labelled with the other's
+                      month. */}
+                  {month && figures && (
                     <SpendingByCategory
-                      spend={spend}
-                      month={month.month}
-                      total={month.expense}
+                      spend={figures.summary.byCategory}
+                      month={monthOf(figures.summary.from)}
+                      total={figures.summary.totals.expense}
                       currency={selected.currency}
                       onSeeAll={onOpenAnalytics}
                     />
@@ -571,8 +564,7 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
                     prior={prior}
                     window={window_}
                     onWindow={setWindow}
-                    foreign={foreign}
-                    truncated={mine.truncated}
+                    otherCurrencies={otherCurrencies}
                     deltas={deltas}
                   />
                 ) : (
