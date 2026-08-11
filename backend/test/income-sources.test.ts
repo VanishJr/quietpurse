@@ -63,7 +63,11 @@ describe('income_sources', () => {
     expect((await getTransaction(stipend))!.incomeSource).toBe('scholarship');
 
     const march = (
-      await summaryMonthlyTotals('2026-03-01T00:00:00.000Z', '2026-03-31T23:59:59.999Z')
+      await summaryMonthlyTotals(
+        { kind: 'workspace' },
+        '2026-03-01T00:00:00.000Z',
+        '2026-03-31T23:59:59.999Z',
+      )
     ).find((m) => m.month === '2026-03')!;
     // the stipend is external, an unrelated income is own (falls into other)
     expect(march.incomeExternal).toBe(300);
