@@ -21,9 +21,17 @@
  * The donut draws only the categories that are positive. A refund can push one
  * negative — the purchase it reverses was in an earlier month — and there is no such
  * thing as a negative sector. That is also why the middle is the month's expense total
- * as `AccountFlows` prints it rather than the sum of the sectors: those two disagree
- * exactly when a category is negative, and of the two it is the one the reader can
- * check against the card beside it that has to be right.
+ * rather than the sum of the sectors: those two disagree exactly when a category is
+ * negative, and of the two it is the one the reader can check against the card beside
+ * it that has to be right.
+ *
+ * That total is `totals.expense` from the same `/api/summary` body the breakdown came
+ * from, and not the Expenses figure the flows card was handed. The two are the same
+ * number for the same month by construction — the server applies one predicate to one
+ * set of rows for both — so taking each card's total from the body its own detail came
+ * from costs nothing, and it means a write landing between the two requests produces
+ * two cards about two months, each correctly labelled, instead of one card labelled
+ * with the other's month.
  *
  * ---------------------------------------------------------------------------
  * The colours are the dark palette in both schemes
@@ -35,10 +43,11 @@
  * `--c-on-ground-*` already follows.
  */
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
-import { CategoryTotal, toCents } from '../accounts';
+import { toCents } from '../accounts';
 import { categoryLabel } from '../categories';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
+import { CategorySummary } from '../types';
 
 /** How many categories are named. The rest arrive as one row that says how many. */
 const TOP = 3;
@@ -51,11 +60,11 @@ const TOP = 3;
 const DONUT_HEIGHT = 168;
 
 interface Props {
-  /** Biggest first, from `categorySpend` over the month's transactions. */
-  spend: CategoryTotal[];
+  /** Biggest first: `byCategory` off the account's summary for this month. */
+  spend: CategorySummary[];
   /** YYYY-MM the breakdown is of — the newest month the account has anything in. */
   month: string;
-  /** That month's expense total, the figure `AccountFlows` prints. */
+  /** That month's expense total, off the same body — see the header. */
   total: number;
   currency: string;
   /** Opens the Analytics screen: this card over the whole workspace, over a range. */
@@ -172,10 +181,10 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
               A row here rather than a second copy of the figure outside the ring: the
               rows above are what the total is a total OF, and a table that carries both
               says the relationship as well as the number. It is `total` and not the sum
-              of the rows on purpose — see the header: this is the Expenses figure off
-              the card to the right, and the two disagree exactly when a refund makes a
-              category negative. Of the two, the one a reader can check against the card
-              beside it is the one that has to be printed.
+              of the rows on purpose — see the header: this is the month's expense total,
+              the same figure the card to the right prints, and the two disagree exactly
+              when a refund makes a category negative. Of the two, the one a reader can
+              check against the card beside it is the one that has to be printed.
             */}
             <tfoot>
               <tr>

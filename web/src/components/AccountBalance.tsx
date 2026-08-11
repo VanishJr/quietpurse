@@ -20,20 +20,19 @@
  * converts to the base currency because it adds accounts together; one account has one
  * currency, and figures in one unit can be compared with each other.
  */
-import { balanceChange, MonthTotal } from '../accounts';
+import { balanceChange } from '../accounts';
 import { fmtMoney, fmtMonthKey } from '../format';
-import { Account } from '../types';
+import { Account, AccountMonthTotals } from '../types';
 import { Delta } from './Delta';
 
 interface Props {
   account: Account;
   /**
-   * The month a comparison may be drawn from, or null when none may be — the account
-   * has no months yet, or the window they were read from came back at its limit. The
-   * screen decides that once and hands the same answer to this card and to the
-   * flows card beside it; the rule is written where it is made, in `OverviewScreen`.
+   * The month a comparison may be drawn from — the newest one the account has anything
+   * in — or null when it has none. The same month the flows card beside it is about:
+   * the screen names it once so the two cannot draw percentages of different months.
    */
-  comparable: MonthTotal | null;
+  comparable: AccountMonthTotals | null;
   onOpenMenu: () => void;
 }
 

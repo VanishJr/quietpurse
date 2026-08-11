@@ -18,9 +18,9 @@
  * that printed it. The label under each figure still names the month, which is the
  * only part of it the card itself says.
  *
- * What is left below the split is a refusal rather than a caveat: a window that came
- * back cut, or two currencies inside one account. Those are printed because the
- * figures above them are wrong, not because they are hard to read.
+ * What is left below the split is a refusal rather than a caveat: two currencies inside
+ * one account. It is printed because the figures above it may be wrong, not because
+ * they are hard to read.
  *
  * ---------------------------------------------------------------------------
  * The chart
@@ -30,7 +30,7 @@
  * over time — where two bars per month answer it one month at a time.
  *
  * The window is 3, 6 or 12 months, and what it draws is however many of those the
- * account has: `monthlyTotals` never pads the range with months that predate the first
+ * account has: `windowMonths` never pads the range with months that predate the first
  * statement, since a point at zero for a month before anything was uploaded is a claim
  * that nothing happened then, and nothing in this app knows that. So the first users,
  * who have one statement, get one month, and nothing here apologises for it — the
@@ -53,10 +53,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { MonthTotal, MonthWindow, MONTH_WINDOWS } from '../accounts';
+import { MonthWindow, MONTH_WINDOWS } from '../accounts';
 import { fmtMoney, fmtMonthKey, fmtMonthTick, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
-import { Account } from '../types';
+import { Account, AccountMonthTotals } from '../types';
 import { Chips } from './Chips';
 import { Delta } from './Delta';
 
@@ -78,27 +78,25 @@ const DOTTED_UP_TO = 3;
 
 interface Props {
   account: Account;
-  /** Already windowed by `monthlyTotals`, oldest first. Never empty. */
-  months: MonthTotal[];
+  /** Already windowed and gap-filled by `windowMonths`, oldest first. Never empty. */
+  months: AccountMonthTotals[];
   /**
    * The last of them — the newest month the account has anything in, which is what
    * both figures are about. Handed down rather than read off the end of `months`
    * here: the screen has already asked `latestMonth` that question to decide whether
    * to draw this card at all, and asking it twice is two answers waiting to differ.
    */
-  month: MonthTotal;
-  /** The month before it, or null when the account has only ever had one. */
-  prior: MonthTotal | null;
+  month: AccountMonthTotals;
+  /** The month before it in that array, or null when the account has only ever had one. */
+  prior: AccountMonthTotals | null;
   window: MonthWindow;
   onWindow: (w: MonthWindow) => void;
-  /** Currencies among its transactions that are not the account's own; normally none. */
-  foreign: string[];
   /**
-   * The fetch came back at its limit, so there may be transactions these months do not
-   * include. Silence here would be a chart that is quietly wrong, and a percentage
-   * measured against a month that may be a part of one.
+   * Currencies among the account's rows that are not its own; normally none. All time
+   * and not the window, which is what the endpoint answers — see the sentence below,
+   * which is written to be true of that.
    */
-  truncated: boolean;
+  otherCurrencies: string[];
   /** Income and expenses of the newest month, as percentages of the month before. */
   deltas: { income: number | null; expense: number | null };
 }
@@ -110,8 +108,7 @@ export function AccountFlows({
   prior,
   window,
   onWindow,
-  foreign,
-  truncated,
+  otherCurrencies,
   deltas,
 }: Props) {
   const { ink } = useTheme();
@@ -279,25 +276,24 @@ export function AccountFlows({
         </div>
       </div>
 
-      {truncated && (
-        <p className="error">
-          This account has more transactions than one request returns, so the figures and
-          the chart above are read from an incomplete window, no comparison with the month
-          before is shown, and the window may be shorter than it should be. Nothing here is
-          safe to read as a total. Total balance is the server's own sum of every row and
-          is not affected.
-        </p>
-      )}
-
-      {foreign.length > 0 && (
+      {otherCurrencies.length > 0 && (
         // an account has one currency and an import into it carries that currency, so
         // this is a state nothing should reach - printing one code over a sum of two
-        // is the failure it exists to prevent
+        // is the failure it exists to prevent.
+        //
+        // The list is all time and the figures beside it are one window, so the two
+        // claims below have different strengths and are written as different
+        // sentences: the balance is all time too and IS wrong, while a figure on this
+        // screen is wrong only if one of those rows falls in a month it covers - which
+        // nothing here was told. The claim is screen-wide and this is the only place it
+        // is made: the donut's total sums the same unconverted rows, and one sentence
+        // said once is worth more than the same paragraph on every card.
         <p className="error">
-          Some transactions here are in {foreign.join(', ')}, not {account.currency}. Every
-          figure on this screen adds them together and labels the result {account.currency}{' '}
-          — these two, and the balance, which the server sums the same way — so they are
-          wrong until that is sorted out.
+          This account holds transactions in {otherCurrencies.join(', ')}, not{' '}
+          {account.currency}. The account's balance adds them in as though they were{' '}
+          {account.currency}, so it is wrong. So is any other figure on this screen
+          covering a month one of them falls in — and nothing here knows which months
+          those are.
         </p>
       )}
 

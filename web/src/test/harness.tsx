@@ -3,6 +3,7 @@ import React from 'react';
 import { ThemeProvider } from '../theme';
 import {
   ACCOUNTS,
+  accountSummary,
   APP_SETTINGS,
   BUDGETS,
   INCOME_SOURCES,
@@ -36,7 +37,13 @@ import {
  * or polled request, which is when this needs fixing.
  */
 
-type Handler = (init?: RequestInit) => Response | Promise<Response>;
+/**
+ * The URL is the second argument because `keyOf` throws the query string away, and one
+ * path now answers two different shapes: `/api/summary` is the workspace's body or one
+ * account's depending on `?accountId=`, and api.ts throws on the wrong one. Every
+ * handler that does not care ignores it.
+ */
+type Handler = (init?: RequestInit, url?: string) => Response | Promise<Response>;
 
 /** Key: `${METHOD} ${pathname}`. No patterns, no ordering, no fallthrough. */
 export type Routes = Record<string, Handler>;
@@ -82,7 +89,7 @@ export function resetFetch(): void {
       unstubbed.push(key);
       throw new Error(`no route for ${key}`);
     }
-    return handler(init);
+    return handler(init, urlOf(input));
   }) as typeof fetch;
 }
 
@@ -101,6 +108,14 @@ export const requests = (): string[] => [...seen];
  * break every route declared in the suite.
  */
 export const requestUrls = (): string[] => [...seenUrls];
+
+/**
+ * The account a request named, or '' when it named none. For a handler answering a
+ * path whose two arms differ by that parameter: a static account body is a body about
+ * whichever account the fixture was written for, and api.ts refuses it for every other.
+ */
+export const askedFor = (url = ''): string =>
+  new URL(url, 'http://localhost').searchParams.get('accountId') ?? '';
 
 /** Reads and clears, so a throw in the guard cannot leak into the next test. */
 export function takeUnstubbed(): string[] {
@@ -130,8 +145,13 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * test against an empty table and reading the guard's list - not by reading the
  * screens. A row that adds a first-paint request is told so by a red test.
  *
- * /api/summary/months (range === 'year') and /api/imports/presets (once CsvImport
- * mounts) are deliberately absent: neither is first paint.
+ * /api/imports/presets (once CsvImport mounts) is deliberately absent, and so is
+ * /api/summary/months. It is not absent because no screen would ask: Analytics asks
+ * only in its 'year' range, and Overview asks for every account that HAS a
+ * transaction - but TRANSACTIONS here is empty, so Overview short-circuits on
+ * `recent.length === 0` and fires neither summary request. Give that fixture a row and
+ * Overview fires both; the guard then names the missing one, which is this mechanism
+ * working rather than a hole in it.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),
@@ -141,7 +161,13 @@ export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(TRANSACTIONS),
-  'GET /api/summary': () => ok(SUMMARY),
+  // Analytics asks for the workspace on first paint; Overview would ask for one
+  // account. One key, two shapes, and api.ts throws on the wrong one - so the stub
+  // answers the arm the URL asked for rather than the one it was written for.
+  'GET /api/summary': (_init, url) => {
+    const id = askedFor(url);
+    return ok(id ? accountSummary(id) : SUMMARY);
+  },
   'GET /api/budgets': () => ok(BUDGETS),
   'GET /api/independence': () => ok(INDEPENDENCE),
 };

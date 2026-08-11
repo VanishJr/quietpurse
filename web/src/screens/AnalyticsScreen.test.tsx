@@ -19,6 +19,7 @@ const EMPTY_MONTH = 'No expenses this month.';
 const EMPTY_YEAR = 'No expenses this year.';
 
 const MONTH: Summary = {
+  scope: 'workspace',
   from: '2026-08-01',
   to: '2026-08-31',
   baseCurrency: 'EUR',
@@ -39,6 +40,7 @@ const NOTHING_SPENT: Summary = {
 };
 
 const YEAR: Summary = {
+  scope: 'workspace',
   from: '2026-01-01',
   to: '2026-12-31',
   baseCurrency: 'EUR',
@@ -56,6 +58,7 @@ const NOTHING_SPENT_YEAR: Summary = {
 };
 
 const YEAR_MONTHS: MonthlySummary = {
+  scope: 'workspace',
   from: '2026-01-01',
   to: '2026-12-31',
   baseCurrency: 'EUR',

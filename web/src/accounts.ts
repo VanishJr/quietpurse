@@ -1,29 +1,23 @@
 /**
- * What one account's transactions add up to.
+ * The month arithmetic the Overview owns, and the cents rule that goes with it.
  *
- * Every figure on the Overview dashboard is per-account, and the API has no
- * per-account arithmetic: `/api/summary` and `/api/summary/months` take a date range
- * and nothing else, and they sum the whole workspace. So this module does on the
- * client what the server would do in SQL, over the rows `/api/transactions` already
- * answers for one account.
+ * This module used to be the arithmetic itself: `/api/summary` and `/api/summary/months`
+ * summed the whole workspace and nothing else, so the screen fetched one account's
+ * transactions and did in the client what the server would have done in SQL. That
+ * mirror is gone — both endpoints take an `accountId` and answer that account's own
+ * figures, in its own currency.
  *
- * That is a mirror, and a mirror drifts. `REDESIGN-BACK-DEBT.md` carries the row that
- * deletes it — an `accountId` on those two endpoints — and until then the rules below
- * are written against `summaryTotals` and `summaryMonthlyTotals` in
- * `backend/src/db/index.ts` and must move when they do.
+ * What is left is the half the server deliberately does not do. It answers only the
+ * months that HAVE rows (048 D5), so the anchoring, the window and the interior gaps
+ * are the caller's: see `windowMonths`, which is where the whole of that rule lives and
+ * the one thing here no type can hold.
  *
- * Two differences from the server's version, both deliberate:
- *
- *  - **The account's own currency, not the base one.** The server sums
- *    `base_amount_cents`, because it is adding accounts that do not share a currency.
- *    One account has one currency, so there is nothing to convert and nothing to lose
- *    to a missing rate — and it puts Balance, Income and Expense in the same unit,
- *    which is the whole premise of the line explaining why they do not reconcile.
- *  - **No `base_amount IS NOT NULL` filter.** That filter exists because a row with no
- *    rate cannot be added to rows in another currency. Here it would silently drop a
- *    real transaction from its own account's total.
+ * And the cents rule stays, because every figure still arrives as a double that came
+ * from an integer — the server divides `*_cents` by a hundred on the way out — and
+ * anything that adds or subtracts two of them keeps the residue. `SpendingByCategory`
+ * takes a remainder off three of them, which is why `toCents` is exported.
  */
-import { Transaction } from './types';
+import { AccountMonthTotals } from './types';
 
 /** The windows the month chart offers. The toggle renders this array, in this order. */
 export const MONTH_WINDOWS = [3, 6, 12] as const;
@@ -36,27 +30,6 @@ export type MonthWindow = (typeof MONTH_WINDOWS)[number];
  * one step short of the toggle.
  */
 export const LONGEST_WINDOW: MonthWindow = MONTH_WINDOWS[MONTH_WINDOWS.length - 1];
-
-/** One calendar month of one account, in that account's currency. */
-export interface MonthTotal {
-  /** YYYY-MM */
-  month: string;
-  income: number;
-  expense: number;
-  /**
-   * What the balance moved by in this month — every row summed, transfers included.
-   * It is a different question from income minus expenses and has to be counted
-   * separately: `recalcAccountBalanceFromTransactions` sums `amount_cents` with no
-   * transfer filter, so this is the only figure the balance can be compared against.
-   */
-  net: number;
-}
-
-export interface Totals {
-  income: number;
-  expense: number;
-  net: number;
-}
 
 /**
  * The month a transaction belongs to, taken off the string rather than through
@@ -75,13 +48,12 @@ export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
  * month's net movement, which is exactly zero in cents, came out as 2e-13 — and a
  * percentage taken against that base printed as 103138588731900000.0%.
  *
- * So every sum below is accumulated in cents and divided once at the end, and every
- * comparison is made in cents. Nothing here is allowed to add two doubles that came
- * from integers and keep the residue.
+ * So every comparison below is made in cents. Nothing here is allowed to subtract two
+ * doubles that came from integers and keep the residue.
  *
  * Exported because the rule does not stop at this module: anything that adds or
- * subtracts the figures below — `SpendingByCategory` takes a remainder off them — is
- * adding the same doubles and has to do it the same way.
+ * subtracts the figures the API sends — `SpendingByCategory` takes a remainder off
+ * them — is adding the same doubles and has to do it the same way.
  */
 export const toCents = (amount: number): number => Math.round(amount * 100);
 
@@ -91,6 +63,22 @@ export function shiftMonth(month: string, delta: number): string {
   const index = Number(month.slice(5, 7)) - 1 + delta;
   const shifted = new Date(Date.UTC(year, index, 1));
   return shifted.toISOString().slice(0, 7);
+}
+
+/**
+ * The last calendar day of a YYYY-MM, as YYYY-MM-DD.
+ *
+ * In UTC from the month key and never `new Date(y, m, 0)` with local getters, which is
+ * a day out for half the planet. The endpoints pad a `to` to the end of the day it
+ * names, so a `to` short by one drops the last day of the month out of the donut, the
+ * two flow figures and the newest point of the chart at once — silently, because a
+ * month missing its last day still looks like a month.
+ */
+export function monthEnd(month: string): string {
+  const year = Number(month.slice(0, 4));
+  // 1-based, so this is next month's 0-based index — day 0 of it is this month's last
+  const next = Number(month.slice(5, 7));
+  return new Date(Date.UTC(year, next, 0)).toISOString().slice(0, 10);
 }
 
 /** Every YYYY-MM from `first` to `last` inclusive. Months with nothing in them included. */
@@ -105,102 +93,44 @@ export function monthRange(first: string, last: string): string[] {
 }
 
 /**
- * Income and expense over a set of transactions, by the server's rules:
- * transfers between the user's own accounts are neither, and a refund subtracts from
- * expenses in the period the refund landed rather than adding to income.
+ * The window the chart draws, oldest first: the account's months as the server
+ * answered them, anchored, cut to `window`, and with the holes filled in.
  *
- * A refund can therefore push a month's expense figure negative, and that is the
- * honest number — the purchase it reverses was in an earlier month.
+ * The server answers only the months that have rows, so all four rules below are the
+ * client's alone:
+ *
+ *  - The newest bucket is the newest month WITH DATA, not the current month. Anchoring
+ *    on the data rather than on today is what keeps a window from being mostly empty
+ *    for the reason the user is least able to fix: somebody who has uploaded July and
+ *    is looking at the screen in August wants July at the right-hand edge, not an empty
+ *    August bar with July pushed off-centre.
+ *  - The range never starts before the account's own first month, so an account with
+ *    one month of history answers one bucket for every window. It is not padded with
+ *    zeroes at the far end: a bar for a month that predates the first statement is a
+ *    claim that nothing happened then, and nothing here knows that.
+ *  - Gaps INSIDE the range are materialised as 0/0/0, because those are real — a month
+ *    between two months of statements with nothing in it is a month with nothing in it.
+ *    This is also what makes `priorMonth` adjacency: without it, "vs Jul" on an account
+ *    with a quiet June silently becomes a comparison against May.
+ *  - A month holding only transfers is a month with data. It totals 0/0 and the bar is
+ *    flat, but it is in the array the server sent — `net` carries no transfer filter —
+ *    and dropping it would move the anchor and quietly reshape the window.
  */
-export function totals(txs: Transaction[]): Totals {
-  let income = 0;
-  let expense = 0;
-  let net = 0;
-  for (const t of txs) {
-    const cents = toCents(t.amount);
-    net += cents;
-    if (t.transfer) continue;
-    if (cents < 0 || t.refund) expense += -cents;
-    else if (cents > 0) income += cents;
-  }
-  return { income: income / 100, expense: expense / 100, net: net / 100 };
-}
+export function windowMonths(
+  months: AccountMonthTotals[],
+  window: number,
+): AccountMonthTotals[] {
+  if (months.length === 0) return [];
 
-/**
- * The account's months, newest last, ending at the newest month it has anything in —
- * not at the current month.
- *
- * Anchoring on the data rather than on today is what keeps a window from being mostly
- * empty for the reason the user is least able to fix: somebody who has uploaded July
- * and is looking at the screen in August wants July at the right-hand edge, not an
- * empty August bar with July pushed off-centre.
- *
- * The range never starts before the account's own first month, so an account with one
- * month of history answers one bucket for every window. It is not padded with zeroes:
- * a bar for a month that predates the first statement is a claim that nothing happened
- * then, and nothing here knows that.
- *
- * Gaps *inside* the range are kept, because those are real — a month between two
- * months of statements with nothing in it is a month with nothing in it.
- *
- * A month holding only transfers counts as a month with data. It totals 0/0, and the
- * bar is flat, but dropping it would move the anchor and silently reshape the window.
- */
-export function monthlyTotals(txs: Transaction[], window: number): MonthTotal[] {
-  const seen = new Map<string, Transaction[]>();
-  for (const t of txs) {
-    const key = monthOf(t.date);
-    const bucket = seen.get(key);
-    if (bucket) bucket.push(t);
-    else seen.set(key, [t]);
-  }
-  if (seen.size === 0) return [];
-
-  const keys = [...seen.keys()].sort();
+  const byMonth = new Map(months.map((m) => [m.month, m]));
+  const keys = [...byMonth.keys()].sort();
   const last = keys[keys.length - 1];
   const wanted = shiftMonth(last, -(window - 1));
   const first = keys[0] > wanted ? keys[0] : wanted;
 
-  return monthRange(first, last).map((month) => ({
-    month,
-    ...totals(seen.get(month) ?? []),
-  }));
-}
-
-/** One category's share of what a period spent, in the account's own currency. */
-export interface CategoryTotal {
-  /** The backend slug. `categories.ts` holds the name a person reads. */
-  category: string;
-  total: number;
-}
-
-/**
- * What a set of transactions spent, by category, biggest first.
- *
- * The same two rules as `totals` and for the same reason — they are the SQL's:
- * transfers between the user's own accounts are not spending, and a refund subtracts
- * from the category it landed in rather than adding to income. Income rows are left
- * out entirely; this answers one question and it is where the money went.
- *
- * A category can therefore come back negative — a refund this month for a purchase
- * last month — and that is the honest figure. It is returned rather than dropped,
- * because the rows have to add up to the expense total the card beside them prints;
- * what cannot be drawn as a sector is the drawing's problem, not the arithmetic's.
- *
- * A category that nets to exactly zero is dropped: it is neither a sector nor a line
- * anybody can read.
- */
-export function categorySpend(txs: Transaction[]): CategoryTotal[] {
-  const cents = new Map<string, number>();
-  for (const t of txs) {
-    if (t.transfer) continue;
-    const c = toCents(t.amount);
-    if (c < 0 || t.refund) cents.set(t.category, (cents.get(t.category) ?? 0) - c);
-  }
-  return [...cents]
-    .filter(([, total]) => total !== 0)
-    .map(([category, total]) => ({ category, total: total / 100 }))
-    .sort((a, b) => b.total - a.total);
+  return monthRange(first, last).map(
+    (month) => byMonth.get(month) ?? { month, income: 0, expense: 0, net: 0 },
+  );
 }
 
 /**
@@ -208,15 +138,19 @@ export function categorySpend(txs: Transaction[]): CategoryTotal[] {
  * anything in. null when it has nothing at all, which is a state the screen has to
  * render rather than a zero it can print.
  */
-export const latestMonth = (months: MonthTotal[]): MonthTotal | null =>
+export const latestMonth = (months: AccountMonthTotals[]): AccountMonthTotals | null =>
   months.length > 0 ? months[months.length - 1] : null;
 
 /**
  * The month before it, which is what a "from last month" figure compares against.
  * null when the account has only ever had one month — and then no comparison is
  * shown at all, rather than one against a zero nobody recorded.
+ *
+ * Adjacency in the FILLED array and never "the previous element of the server's
+ * answer": the server skips a month with no rows, so reading its array directly makes
+ * a quiet June invisible and points "vs" at May with nothing on screen saying so.
  */
-export const priorMonth = (months: MonthTotal[]): MonthTotal | null =>
+export const priorMonth = (months: AccountMonthTotals[]): AccountMonthTotals | null =>
   months.length > 1 ? months[months.length - 2] : null;
 
 /**
@@ -245,34 +179,14 @@ export function percentChange(now: number, before: number): number | null {
  *
  * Derived rather than remembered: no history of the balance is stored anywhere, but
  * the balance IS the sum of every row, so the balance before this month is today's
- * balance less this month's net movement.
+ * balance less this month's net movement. `net` and nothing else — it is the one
+ * figure summed the way the balance is, transfers included.
  *
  * An account whose whole history is one month therefore opened at zero, and gets no
  * percentage at all — which is the common case for a new user and the one that used to
  * print seventeen digits.
  */
-export function balanceChange(balance: number, month: MonthTotal | null): number | null {
+export function balanceChange(balance: number, month: AccountMonthTotals | null): number | null {
   if (!month) return null;
   return percentChange(balance, balance - month.net);
-}
-
-/**
- * Currencies among the account's transactions that are not the account's own, sorted
- * and deduplicated.
- *
- * Normally empty: an account has one currency and an import into it carries that
- * currency. When it is not, the totals above are adding two units together and the
- * screen has to say so rather than print a number with one currency code after it.
- *
- * It sees only the rows it is handed, which is the fetched window. `account.balance` is
- * the server's sum over the whole history, so a foreign row older than the window — or
- * one dropped by a truncated fetch — is added into the balance without anything here
- * noticing. Answering that needs the account currencies the endpoint does not report;
- * it is the same `accountId` on the summary endpoints that `REDESIGN-BACK-DEBT.md`
- * already asks for.
- */
-export function foreignCurrencies(txs: Transaction[], accountCurrency: string): string[] {
-  const found = new Set<string>();
-  for (const t of txs) if (t.currency !== accountCurrency) found.add(t.currency);
-  return [...found].sort();
 }
