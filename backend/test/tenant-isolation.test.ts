@@ -17,7 +17,9 @@ import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
+  type AccountScope,
   type ResolvedAccountId,
+  accountOtherCurrencies,
   addCategoryRule,
   createAccount,
   findAccountByName,
@@ -61,6 +63,7 @@ import {
   setSetting,
   setTransferOverride,
   summaryByCategory,
+  summaryMonthlyTotals,
   summaryTotals,
   upsertAccount,
   upsertBaselineItem,
@@ -338,16 +341,47 @@ describe('workspace isolation', () => {
 
   it('aggregates only add up the current workspace', async () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-      const totals = await summaryTotals(JAN, DEC);
+      const totals = await summaryTotals({ kind: 'workspace' }, JAN, DEC);
       expect(totals.expense).toBe(100);
       expect(totals.income).toBe(500);
-      const byCategory = await summaryByCategory(JAN, DEC);
+      const byCategory = await summaryByCategory({ kind: 'workspace' }, JAN, DEC);
       expect(byCategory.reduce((s, c) => s + c.total, 0)).toBe(100);
     });
     await runWithWorkspace(OTHER, async () => {
-      const totals = await summaryTotals(JAN, DEC);
+      const totals = await summaryTotals({ kind: 'workspace' }, JAN, DEC);
       expect(totals.expense).toBe(7777);
       expect(totals.income).toBe(4242);
+    });
+  });
+
+  /**
+   * The same aggregates asked about one account, and the sharpest case this file
+   * has: both workspaces hold an account with the id 'acc-shared-id'. An account
+   * arm that filtered by account_id and forgot the workspace would answer the
+   * neighbour's money to a caller who named their own account.
+   */
+  it('an aggregate about one account is still about one workspace', async () => {
+    const scope = (currency: string): AccountScope => ({
+      kind: 'account',
+      id: 'acc-shared-id' as ResolvedAccountId,
+      currency,
+    });
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect(await summaryTotals(scope('EUR'), JAN, DEC)).toEqual({ expense: 100, income: 500 });
+      expect(await summaryMonthlyTotals(scope('EUR'), JAN, DEC)).toEqual([
+        { month: '2026-03', expense: 100, income: 500, net: 400 },
+      ]);
+      expect(await accountOtherCurrencies(scope('EUR'))).toEqual([]);
+    });
+    await runWithWorkspace(OTHER, async () => {
+      expect(await summaryTotals(scope('USD'), JAN, DEC)).toEqual({ expense: 7777, income: 4242 });
+      // its rows are in EUR and the account is denominated in USD: a mixture is read
+      // against the account's own currency, which is why this answers ['EUR'] where
+      // the EUR account above answers []. Neither line can see a lost workspace
+      // filter - both workspaces' rows here are EUR - and neither is what guards it:
+      // the totals above catch it by arithmetic, and workspace-scope.test.ts catches
+      // it in accountOtherCurrencies itself
+      expect(await accountOtherCurrencies(scope('USD'))).toEqual(['EUR']);
     });
   });
 

@@ -35,12 +35,14 @@ import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
 import {
   Account,
+  AccountMonthTotals,
   CategorySummary,
   IncomeSourceDef,
   IncomeSourceKind,
+  IncomeSourceTotal,
   MonthTotals,
   NewTransaction,
-  Summary,
+  SummaryTotals,
   Transaction,
   TransferRule,
 } from '../types';
@@ -435,17 +437,18 @@ export async function findAccountByName(name: string): Promise<Account | undefin
 declare const resolved: unique symbol;
 
 /**
- * An account id an upload may be staged against. The brand is the point: this type
- * cannot be produced outside this module without writing the assertion that says
- * so, and StagedAccount.id requires one - so a second way of turning a request into
- * an id is a compile error rather than a review finding. That is the whole subject
- * of row 25; a name was an id once, through a slug function, and two callers
- * deriving it differently put a statement's rows in an account its own summary did
- * not name.
+ * An account id proved to be a row of this workspace. The brand is the point: this
+ * type cannot be produced without writing the assertion that says so, and both
+ * StagedAccount.id and AccountScope.id require one - so a second way of turning a
+ * request into an id is a compile error rather than a review finding. That is the
+ * whole subject of row 25; a name was an id once, through a slug function, and two
+ * callers deriving it differently put a statement's rows in an account its own
+ * summary did not name.
  *
- * There is exactly one producer: resolveUploadAccount, for an upload that picks its
- * account by id. It reads the id out of this workspace's own rows and never brands a
- * string that arrived off the wire unread. Row 26b deleted the second one
+ * Two producers, each branding an id it has just read out of this workspace's own
+ * rows and never a string that arrived off the wire unread: resolveUploadAccount
+ * below, for an upload that picks its account by id, and app.ts's summaryScope, for
+ * a summary that asks about one account. Row 26b deleted a third
  * (resolveUploadAccountId, which minted an id for an account that did not exist yet)
  * along with the name arm.
  *
@@ -474,8 +477,7 @@ export type UploadAccount =
  * of by the caller remembering to read the row a second time.
  *
  * The id handed back is the one this read out of the row, never the string that was
- * passed in: that is the whole of what the brand promises, and this is now the only
- * place that promises it.
+ * passed in: that is the whole of what the brand promises.
  */
 export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
   const rows = await getDb()
@@ -825,36 +827,96 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
  * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
  * summaries - otherwise we would be adding euros to hryvnias. After backfillBaseAmounts
  * (which runs on every recompute) there are normally no such rows.
+ *
+ * The workspace arm's clause, and scopeSql below is the only thing that may name it:
+ * per account it drops a real transaction from its own account's total - an import
+ * short by a row, in the account's own currency, that nothing reports.
  */
 const CONVERTED = sql`base_amount_cents IS NOT NULL`;
 
+/** Every summary is about the whole workspace in the base currency... */
+export interface WorkspaceScope {
+  kind: 'workspace';
+}
+
 /**
- * Spending by category in the base currency, net: a refund ("Bolt, cancelled")
- * subtracts from spending in its own category, so a total can go negative if the
- * purchase was in a previous period and the refund arrived in this one. Categories
- * that collapse to exactly zero are not shown.
+ * ...or about one account, in that account's own currency.
+ *
+ * The id is branded, so this value cannot be built out of a request string without
+ * the assertion that says so (see ResolvedAccountId): there is no path from a query
+ * parameter to an account arm that skips the lookup. And it is an id and a currency
+ * rather than the whole Account on purpose - an Account carries a `balance` read
+ * before the query ran, and a value nobody may read the stale field off is better
+ * than a comment asking them not to.
  */
-export async function summaryByCategory(from: string, to: string): Promise<CategorySummary[]> {
+export interface AccountScope {
+  kind: 'account';
+  id: ResolvedAccountId;
+  currency: string;
+}
+
+export type SummaryScope = WorkspaceScope | AccountScope;
+
+/**
+ * The rows a scope is about and the column its money lives in - together, from one
+ * value, because picking the filter of one arm and the column of the other is what
+ * puts two currencies in one sum. Every summary query below goes through this and
+ * none of them names CONVERTED, VISIBLE_ACCOUNT() or base_amount_cents itself.
+ *
+ * NOT_TRANSFER is in the WHERE on both arms (transfers between your own accounts
+ * are neither income nor spending, per account exactly as workspace-wide). The one
+ * exception is accountMonths, which needs the month to survive even when every row
+ * in it is a transfer and therefore spells its own WHERE - see the note there.
+ *
+ * The workspace clause is table-qualified: summaryIncomeBySource joins
+ * income_sources, which has a workspace_id of its own, and an unqualified one is
+ * ambiguous there. Qualifying costs the other four nothing.
+ */
+const scopeSql = (scope: SummaryScope): { where: SQL; money: SQL } =>
+  scope.kind === 'account'
+    ? {
+        where: sql`transactions.${WS()} AND account_id = ${scope.id} AND ${NOT_TRANSFER}`,
+        money: sql`amount_cents`,
+      }
+    : {
+        where: sql`transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}`,
+        money: sql`base_amount_cents`,
+      };
+
+/**
+ * Spending by category, net: a refund ("Bolt, cancelled") subtracts from spending
+ * in its own category, so a total can go negative if the purchase was in a previous
+ * period and the refund arrived in this one. Categories that collapse to exactly
+ * zero are not shown.
+ */
+export async function summaryByCategory(
+  scope: SummaryScope,
+  from: string,
+  to: string,
+): Promise<CategorySummary[]> {
+  const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-base_amount_cents) AS total_cents
+    SELECT category, SUM(-${money}) AS total_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+    WHERE ${where}
       AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
     GROUP BY category
-    HAVING SUM(-base_amount_cents) <> 0
+    HAVING SUM(-${money}) <> 0
     ORDER BY total_cents DESC`);
   return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
 }
 
 /** Income by category: transfers between your own accounts and refunds excluded. */
 export async function summaryIncomeByCategory(
+  scope: SummaryScope,
   from: string,
   to: string,
 ): Promise<CategorySummary[]> {
+  const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(base_amount_cents) AS total_cents
+    SELECT category, SUM(${money}) AS total_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+    WHERE ${where}
       AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
     GROUP BY category
     ORDER BY total_cents DESC`);
@@ -871,22 +933,22 @@ const INCOME_SOURCE = sql`COALESCE(income_source_manual, income_source, 'other')
 const IS_EXTERNAL = (): SQL =>
   sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external' AND workspace_id = ${currentWorkspaceId()})`;
 
-/** Income by source in the base currency (id + label + kind). */
+/** Income by source (id + label + kind). */
 export async function summaryIncomeBySource(
+  scope: SummaryScope,
   from: string,
   to: string,
-): Promise<Summary['incomeBySource']> {
-  const rows = await rowsOf<
-    Omit<Summary['incomeBySource'][number], 'total'> & { total_cents: string }
-  >(sql`
+): Promise<IncomeSourceTotal[]> {
+  const { where, money } = scopeSql(scope);
+  const rows = await rowsOf<Omit<IncomeSourceTotal, 'total'> & { total_cents: string }>(sql`
     SELECT ${INCOME_SOURCE} AS source,
            COALESCE(i.label, ${INCOME_SOURCE}) AS label,
            COALESCE(i.kind, 'own') AS kind,
-           SUM(base_amount_cents) AS total_cents
+           SUM(${money}) AS total_cents
     FROM transactions
     LEFT JOIN income_sources i
       ON i.id = ${INCOME_SOURCE} AND i.workspace_id = transactions.workspace_id
-    WHERE transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+    WHERE ${where}
       AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
     GROUP BY 1, 2, 3
     ORDER BY total_cents DESC`);
@@ -894,14 +956,16 @@ export async function summaryIncomeBySource(
 }
 
 export async function summaryTotals(
+  scope: SummaryScope,
   from: string,
   to: string,
-): Promise<{ expense: number; income: number }> {
+): Promise<SummaryTotals> {
+  const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ expense_cents: string | null; income_cents: string | null }>(sql`
-    SELECT SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense_cents,
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income_cents
+    SELECT SUM(CASE WHEN amount_cents < 0 OR refund THEN -${money} ELSE 0 END) AS expense_cents,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN ${money} ELSE 0 END) AS income_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}`);
+    WHERE ${where} AND date >= ${from} AND date <= ${to}`);
   const row = rows[0];
   return {
     expense: fromCents(Number(row?.expense_cents ?? 0)),
@@ -917,7 +981,8 @@ export async function summaryTotals(
  *  - incomeOwn - income from your own sources (kind = own);
  *  - incomeExternal - help from external sources (kind = external).
  */
-export async function summaryMonthlyTotals(from: string, to: string): Promise<MonthTotals[]> {
+async function workspaceMonths(from: string, to: string): Promise<MonthTotals[]> {
+  const { where, money } = scopeSql({ kind: 'workspace' });
   // camelCase aliases must be quoted: PG folds unquoted identifiers to lowercase
   const rows = await rowsOf<{
     month: string;
@@ -928,13 +993,13 @@ export async function summaryMonthlyTotals(from: string, to: string): Promise<Mo
     incomeExternal: string;
   }>(sql`
     SELECT SUBSTR(date, 1, 7) AS month,
-           SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense,
-           SUM(CASE WHEN (amount_cents < 0 OR refund) AND one_off THEN -base_amount_cents ELSE 0 END) AS "expenseOneOff",
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income,
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND NOT ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeOwn",
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeExternal"
+           SUM(CASE WHEN amount_cents < 0 OR refund THEN -${money} ELSE 0 END) AS expense,
+           SUM(CASE WHEN (amount_cents < 0 OR refund) AND one_off THEN -${money} ELSE 0 END) AS "expenseOneOff",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN ${money} ELSE 0 END) AS income,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND NOT ${IS_EXTERNAL()} THEN ${money} ELSE 0 END) AS "incomeOwn",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND ${IS_EXTERNAL()} THEN ${money} ELSE 0 END) AS "incomeExternal"
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}
+    WHERE ${where} AND date >= ${from} AND date <= ${to}
     GROUP BY 1
     ORDER BY 1 ASC`);
   // the SUMs above are in cents (bigint strings from the driver) - convert every
@@ -950,9 +1015,81 @@ export async function summaryMonthlyTotals(from: string, to: string): Promise<Mo
 }
 
 /**
+ * The same chart for one account, in that account's own currency.
+ *
+ * This is the one summary query that does not take its WHERE from scopeSql, and the
+ * reason is the GROUP BY: it is the only query here that can lose a whole bucket, so
+ * a WHERE excluding transfers deletes a month whose every row is a transfer from the
+ * chart - which reads as "nothing happened" rather than "nothing is shown". So
+ * NOT_TRANSFER moves into the income and expense CASEs, where it excludes transfers
+ * from those two figures exactly as everywhere else, and the month survives.
+ *
+ * `net` carries no NOT_TRANSFER at all: it is a balance movement, summed by
+ * recalcAccountBalanceFromTransactions' rule (every row of the account, transfers
+ * and unconverted rows included), which is the only thing that makes these months
+ * add up to the balance printed beside them.
+ *
+ * Moving NOT_TRANSFER out of a WHERE anywhere else counts a transfer out of the
+ * account as spending in its category.
+ */
+async function accountMonths(
+  scope: AccountScope,
+  from: string,
+  to: string,
+): Promise<AccountMonthTotals[]> {
+  const rows = await rowsOf<{
+    month: string;
+    expense: string;
+    income: string;
+    net: string;
+  }>(sql`
+    SELECT SUBSTR(date, 1, 7) AS month,
+           SUM(CASE WHEN ${NOT_TRANSFER} AND (amount_cents < 0 OR refund) THEN -amount_cents ELSE 0 END) AS expense,
+           SUM(CASE WHEN ${NOT_TRANSFER} AND amount_cents > 0 AND NOT refund THEN amount_cents ELSE 0 END) AS income,
+           SUM(amount_cents) AS net
+    FROM transactions
+    WHERE transactions.${WS()} AND account_id = ${scope.id} AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY 1 ASC`);
+  return rows.map((r) => ({
+    month: r.month,
+    income: fromCents(Number(r.income)),
+    expense: fromCents(Number(r.expense)),
+    net: fromCents(Number(r.net)),
+  }));
+}
+
+/**
+ * Spending/income by month, for the workspace in the base currency or for one
+ * account in its own. The two arms answer different types - the workspace arm the
+ * independence figures, the account arm `net` - so the overloads give each caller
+ * the exact one rather than a union it has to narrow; the implementation signature
+ * is the unchecked one, so its body is the ternary and nothing else.
+ *
+ * See workspaceMonths and accountMonths for what each of them is, and why only one
+ * of them keeps NOT_TRANSFER out of its WHERE.
+ */
+export function summaryMonthlyTotals(
+  scope: WorkspaceScope,
+  from: string,
+  to: string,
+): Promise<MonthTotals[]>;
+export function summaryMonthlyTotals(
+  scope: AccountScope,
+  from: string,
+  to: string,
+): Promise<AccountMonthTotals[]>;
+export function summaryMonthlyTotals(scope: SummaryScope, from: string, to: string) {
+  return scope.kind === 'account' ? accountMonths(scope, from, to) : workspaceMonths(from, to);
+}
+
+/**
  * Average monthly spending by category over the window [from, to] in the base
  * currency: SUM per category / number of months with any money movement. One-off
  * purchases are excluded - the independence screen amortizes them separately.
+ *
+ * Workspace-wide and staying that way: independence is a question about the
+ * household, not about one account.
  */
 export async function avgMonthlyByCategory(
   from: string,
@@ -960,19 +1097,37 @@ export async function avgMonthlyByCategory(
   months: number,
 ): Promise<CategorySummary[]> {
   if (months <= 0) return [];
+  const { where, money } = scopeSql({ kind: 'workspace' });
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-base_amount_cents) AS total_cents
+    SELECT category, SUM(-${money}) AS total_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND NOT one_off
+    WHERE ${where} AND NOT one_off
       AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
     GROUP BY category
-    HAVING SUM(-base_amount_cents) > 0
+    HAVING SUM(-${money}) > 0
     ORDER BY total_cents DESC`);
   // the sum is exact; the division by months is a genuine fraction - round to whole cents
   return rows.map((r) => ({
     category: r.category,
     total: Math.round(Number(r.total_cents) / months) / 100,
   }));
+}
+
+/**
+ * The currencies among this account's rows that are not the account's own, sorted
+ * and deduplicated. Normally none: a row's currency comes from the account unless
+ * the file named one (statement.ts's rowCurrency), and nothing re-resolves it.
+ *
+ * All time rather than the summary window, deliberately: the balance printed beside
+ * these figures is all-time, so a superset over-warns at worst and never misses a
+ * mixture the reader is looking at.
+ */
+export async function accountOtherCurrencies(scope: AccountScope): Promise<string[]> {
+  const rows = await rowsOf<{ currency: string }>(sql`
+    SELECT DISTINCT currency FROM transactions
+    WHERE ${WS()} AND account_id = ${scope.id} AND currency <> ${scope.currency}
+    ORDER BY 1`);
+  return rows.map((r) => r.currency);
 }
 
 // ---------- imports (provenance, ROADMAP 4.4) ----------

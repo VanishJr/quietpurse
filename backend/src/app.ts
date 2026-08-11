@@ -18,6 +18,9 @@ import {
   type ConfirmOutcome,
   ImportNotConfirmable,
   ImportStatus,
+  type ResolvedAccountId,
+  type SummaryScope,
+  accountOtherCurrencies,
   addCategoryRule,
   addTransferRule,
   clearImportDocument,
@@ -39,6 +42,7 @@ import {
   restoreBackup,
   deleteIncomeSource,
   deleteTransferRule,
+  getAccount,
   getImportDocumentInfo,
   getImportDocumentRef,
   getIncomeSource,
@@ -85,7 +89,7 @@ import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { type StatementDestination, importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
-import { Account, Summary } from './types';
+import { Account, AccountMonthlySummary, AccountSummary, MonthlySummary, Summary } from './types';
 
 export const app = express();
 
@@ -546,13 +550,60 @@ app.delete('/api/transfer-rules/:id', async (req, res) => {
   res.json({ deleted: true });
 });
 
+type ScopeResult =
+  | { ok: true; scope: SummaryScope }
+  | { ok: false; status: number; error: string };
+
 /**
- * The current calendar month by default, or an explicit ?from=&to=. All amounts
- * are in the base currency: transfers between your own accounts are excluded from
- * every figure, refunds are subtracted from spending in their own category
- * (see classify.ts).
+ * Which summary a request is asking for, written once so the two routes below
+ * cannot drift.
+ *
+ * Not q(): it maps both '' and a repeated parameter to undefined, and undefined
+ * here means the whole workspace in the base currency - so a caller building
+ * `?accountId=${account?.id ?? ''}` would be handed every account's money labelled
+ * as one account's. Presence first, then the type, then the trimmed string, and
+ * each of the two refusals says its own cause: `?accountId=` was sent exactly once
+ * (Express 5's simple parser hands it over as ''), so answering it with the
+ * repeated-parameter sentence names something that did not happen.
+ *
+ * An unresolvable id is a 404 rather than a 200 of zeroes: a per-account body has
+ * to state a currency and there is no currency without an account. getAccount is
+ * workspace-scoped, so another workspace's id and a nonexistent one produce the
+ * same answer. A hidden account resolves like any other - the caller named it by
+ * id, and VISIBLE_ACCOUNT() keeps hidden accounts out of workspace totals, not out
+ * of their own.
+ */
+async function summaryScope(raw: unknown): Promise<ScopeResult> {
+  if (raw === undefined) return { ok: true, scope: { kind: 'workspace' } };
+  if (typeof raw !== 'string') {
+    return { ok: false, status: 400, error: 'accountId must be sent once, as a single value' };
+  }
+  const id = raw.trim();
+  if (!id) return { ok: false, status: 400, error: 'accountId must not be empty' };
+  const account = await getAccount(id);
+  if (!account) return { ok: false, status: 404, error: 'account not found' };
+  // branded here and only here on this path: the id is the one read off the row, so
+  // no string that arrived in the query can reach a summary query unproven
+  return {
+    ok: true,
+    scope: { kind: 'account', id: account.id as ResolvedAccountId, currency: account.currency },
+  };
+}
+
+/**
+ * The current calendar month by default, or an explicit ?from=&to=. Without
+ * ?accountId= this is the whole workspace in the base currency; with one it is that
+ * account alone, in the account's own currency, and the body says which by its
+ * `scope` field. Transfers between your own accounts are excluded from every figure
+ * on both arms, refunds are subtracted from spending in their own category (see
+ * classify.ts).
  */
 app.get('/api/summary', async (req, res) => {
+  const picked = await summaryScope(req.query.accountId);
+  if (!picked.ok) {
+    res.status(picked.status).json({ error: picked.error });
+    return;
+  }
   const now = new Date();
   let from = q(req.query.from);
   let to = q(req.query.to);
@@ -562,29 +613,77 @@ app.get('/api/summary', async (req, res) => {
   }
   const fromIso = `${from}T00:00:00.000Z`;
   const toIso = `${to}T23:59:59.999Z`;
+  const scope = picked.scope;
+  if (scope.kind === 'account') {
+    const summary: AccountSummary = {
+      scope: 'account',
+      from,
+      to,
+      accountId: scope.id,
+      currency: scope.currency,
+      otherCurrencies: await accountOtherCurrencies(scope),
+      totals: await summaryTotals(scope, fromIso, toIso),
+      byCategory: await summaryByCategory(scope, fromIso, toIso),
+      incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
+      incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
+    };
+    res.json(summary);
+    return;
+  }
   const summary: Summary = {
+    scope: 'workspace',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
-    totals: await summaryTotals(fromIso, toIso),
-    byCategory: await summaryByCategory(fromIso, toIso),
-    incomeByCategory: await summaryIncomeByCategory(fromIso, toIso),
-    incomeBySource: await summaryIncomeBySource(fromIso, toIso),
+    totals: await summaryTotals(scope, fromIso, toIso),
+    byCategory: await summaryByCategory(scope, fromIso, toIso),
+    incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
+    incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
   };
   res.json(summary);
 });
 
-/** Spending/income by month in the base currency - the "over the year" chart. */
+/**
+ * Spending/income by month - the "over the year" chart, for the workspace in the
+ * base currency or for one ?accountId= in its own. The account arm answers `net`
+ * as well, every row of the month summed, so over a window covering the account's
+ * whole history the bars add up to the balance shown beside them; over a shorter
+ * one - the calendar year this route defaults to, for instance - they add up to
+ * that window's movement and the balance does not.
+ */
 app.get('/api/summary/months', async (req, res) => {
+  const picked = await summaryScope(req.query.accountId);
+  if (!picked.ok) {
+    res.status(picked.status).json({ error: picked.error });
+    return;
+  }
   const now = new Date();
   const from = q(req.query.from) ?? `${now.getUTCFullYear()}-01-01`;
   const to = q(req.query.to) ?? `${now.getUTCFullYear()}-12-31`;
-  res.json({
+  const fromIso = `${from}T00:00:00.000Z`;
+  const toIso = `${to}T23:59:59.999Z`;
+  const scope = picked.scope;
+  if (scope.kind === 'account') {
+    const months: AccountMonthlySummary = {
+      scope: 'account',
+      from,
+      to,
+      accountId: scope.id,
+      currency: scope.currency,
+      otherCurrencies: await accountOtherCurrencies(scope),
+      months: await summaryMonthlyTotals(scope, fromIso, toIso),
+    };
+    res.json(months);
+    return;
+  }
+  const months: MonthlySummary = {
+    scope: 'workspace',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
-    months: await summaryMonthlyTotals(`${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`),
-  });
+    months: await summaryMonthlyTotals(scope, fromIso, toIso),
+  };
+  res.json(months);
 });
 
 // ---------- income sources / one-off / recurring ----------
@@ -882,7 +981,9 @@ app.get('/api/budgets', async (_req, res) => {
   const now = new Date();
   const from = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
   const to = now.toISOString();
-  const spent = new Map((await summaryByCategory(from, to)).map((c) => [c.category, c.total]));
+  const spent = new Map(
+    (await summaryByCategory({ kind: 'workspace' }, from, to)).map((c) => [c.category, c.total]),
+  );
   const dayOfMonth = now.getUTCDate();
   const daysInMonth = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
