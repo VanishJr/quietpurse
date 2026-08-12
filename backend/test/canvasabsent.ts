@@ -38,6 +38,7 @@ const TEMPLATE: PdfTemplate = {
     example: '1.234,56 €',
   },
   rows: { kind: 'one-line' },
+  fee: { kind: 'none' },
   balances: {
     scope: { kind: 'whole-document' },
     kind: 'one-line',
