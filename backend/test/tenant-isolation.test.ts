@@ -57,6 +57,7 @@ import {
   saveFxRate,
   seedDefaults,
   setBudget,
+  setCategoryOverride,
   setMeta,
   setOneOff,
   setRecurringIgnored,
@@ -312,11 +313,15 @@ describe('workspace isolation', () => {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
         await setOneOff(SHARED_TX_ID, true);
         await setTransferOverride(SHARED_TX_ID, true);
+        await setCategoryOverride(SHARED_TX_ID, 'food');
       });
       await runWithWorkspace(OTHER, async () => {
         const theirs = (await getTransaction(SHARED_TX_ID))!;
         expect(theirs.oneOff).toBe(false);
         expect(theirs.transfer).toBe(false);
+        // the neighbour's row keeps the categorizer's answer, and says nobody chose it
+        expect(theirs.category).not.toBe('food');
+        expect(theirs.categoryManual).toBe(false);
       });
     } finally {
       // put the row back: a transfer flag would drop it out of the aggregates the
@@ -324,6 +329,7 @@ describe('workspace isolation', () => {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
         await setOneOff(SHARED_TX_ID, false);
         await setTransferOverride(SHARED_TX_ID, null);
+        await setCategoryOverride(SHARED_TX_ID, null);
       });
     }
   });

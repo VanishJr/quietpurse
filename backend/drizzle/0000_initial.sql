@@ -181,6 +181,7 @@ CREATE TABLE "transactions" (
 	"description" text DEFAULT '' NOT NULL,
 	"mcc" integer,
 	"category" text DEFAULT 'other' NOT NULL,
+	"category_manual" text,
 	"transfer" boolean DEFAULT false NOT NULL,
 	"transfer_manual" boolean,
 	"refund" boolean DEFAULT false NOT NULL,

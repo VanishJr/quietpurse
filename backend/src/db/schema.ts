@@ -299,6 +299,10 @@ export const transactions = pgTable(
     mcc: integer('mcc'),
     // category slug (see categorizer.ts); human-readable names live in the client
     category: text('category').notNull().default('other'),
+    // the user's own answer for this one row: NULL = auto-detection decides. Its own
+    // column so that a recompute cannot erase it - reclassifyAll keeps `category`
+    // current underneath, which is what a later clear falls back to.
+    categoryManual: text('category_manual'),
     // transfer between own accounts: neither income nor expense (see classify.ts)
     transfer: boolean('transfer').notNull().default(false),
     // manual mark from the app: NULL = auto-detection decides, the user otherwise

@@ -21,7 +21,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { recurringKey } from '../categorizer';
+import { type Category, recurringKey } from '../categorizer';
 import { config } from '../config';
 import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
 import { causeChain, logDb } from '../logger';
@@ -155,6 +155,13 @@ const WS = (): SQL => sql`workspace_id = ${currentWorkspaceId()}`;
  * Transfer transactions count as neither income nor spending.
  */
 const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
+
+/**
+ * The effective category: the user's own answer for this row beats the categorizer's.
+ * Two arms and not three - `category` is NOT NULL DEFAULT 'other', so there is no
+ * third case to fall through to.
+ */
+const CATEGORY = sql`COALESCE(category_manual, category)`;
 
 /**
  * Transactions of hidden accounts are neither shown nor counted. They aren't
@@ -636,6 +643,7 @@ interface TxRow {
   description: string;
   mcc: number | null;
   category: string;
+  category_manual: string | null;
   transfer: boolean;
   transfer_manual: boolean | null;
   refund: boolean;
@@ -658,7 +666,8 @@ function rowToTx(r: TxRow): Transaction {
     date: r.date,
     description: r.description,
     mcc: r.mcc ?? undefined,
-    category: r.category,
+    category: r.category_manual ?? r.category,
+    categoryManual: r.category_manual !== null,
     transfer: r.transfer_manual ?? r.transfer,
     transferManual: r.transfer_manual,
     refund: r.refund,
@@ -679,7 +688,7 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
   // include the whole "to" day when a date without a time is given
   if (f.to) where.push(sql`date <= ${f.to.length === 10 ? `${f.to}T23:59:59.999Z` : f.to}`);
   if (f.accountId) where.push(sql`account_id = ${f.accountId}`);
-  if (f.category) where.push(sql`category = ${f.category}`);
+  if (f.category) where.push(sql`${CATEGORY} = ${f.category}`);
   const limit = f.limit && f.limit > 0 ? f.limit : 1000;
   const rows = await rowsOf<TxRow>(sql`
     SELECT * FROM transactions
@@ -750,11 +759,11 @@ export async function summaryByCategory(
 ): Promise<CategorySummary[]> {
   const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-${money}) AS total_cents
+    SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
     FROM transactions
     WHERE ${where}
       AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
-    GROUP BY category
+    GROUP BY 1
     HAVING SUM(-${money}) <> 0
     ORDER BY total_cents DESC`);
   return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
@@ -767,11 +776,11 @@ export async function summaryIncomeByCategory(
 ): Promise<CategorySummary[]> {
   const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(${money}) AS total_cents
+    SELECT ${CATEGORY} AS category, SUM(${money}) AS total_cents
     FROM transactions
     WHERE ${where}
       AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
-    GROUP BY category
+    GROUP BY 1
     ORDER BY total_cents DESC`);
   return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
 }
@@ -920,11 +929,11 @@ export async function avgMonthlyByCategory(
   if (months <= 0) return [];
   const { where, money } = scopeSql({ kind: 'workspace' });
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-${money}) AS total_cents
+    SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
     FROM transactions
     WHERE ${where} AND NOT one_off
       AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
-    GROUP BY category
+    GROUP BY 1
     HAVING SUM(-${money}) > 0
     ORDER BY total_cents DESC`);
   // the sum is exact; the division by months is a genuine fraction - round to whole cents
@@ -2044,6 +2053,22 @@ export async function setTransferOverride(
   return getTransaction(id);
 }
 
+/**
+ * The user's own category for one transaction; null hands the decision back to
+ * auto-detection. Takes a Category rather than a string: an unvalidated slug here is
+ * a bucket every summary answers and no client dictionary can label.
+ */
+export async function setCategoryOverride(
+  id: string,
+  category: Category | null,
+): Promise<Transaction | undefined> {
+  await getDb()
+    .update(s.transactions)
+    .set({ categoryManual: category })
+    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+  return getTransaction(id);
+}
+
 export async function setIncomeSourceOverride(
   id: string,
   source: string | null,
@@ -2323,7 +2348,7 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
     date: string;
     base_amount_cents: number;
   }>(sql`
-    SELECT description, category, date, base_amount_cents
+    SELECT description, ${CATEGORY} AS category, date, base_amount_cents
     FROM transactions
     WHERE ${WS()} AND recurring AND amount_cents < 0 AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()}
       AND base_amount_cents IS NOT NULL AND date >= ${sinceIso}
@@ -2414,12 +2439,22 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-export async function countCategoryRuleMatches(pattern: string): Promise<number> {
-  const rows = await rowsOf<{ n: string }>(
-    sql`SELECT COUNT(*) AS n FROM transactions
+/**
+ * How many transactions the pattern covers, and how many of those the rule cannot
+ * change because the user set the category by hand. One WHERE computing both, so the
+ * two can never be taken through different filters and matches - overridden go wrong
+ * for a workspace with a hidden account.
+ */
+export async function countCategoryRuleMatches(
+  pattern: string,
+): Promise<{ matches: number; overridden: number }> {
+  const rows = await rowsOf<{ matches: string; overridden: string }>(
+    sql`SELECT COUNT(*) AS matches,
+               COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
+        FROM transactions
         WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0 AND ${WS()}`,
   );
-  return Number(rows[0].n);
+  return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
 }
 
 export interface Budget {
