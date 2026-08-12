@@ -50,7 +50,7 @@ import {
   matchColumn,
   parseCsv,
 } from './csv';
-import { PDF_PARSER_VERSION, StatementBalances, readPdf } from './pdf';
+import { PDF_PARSER_VERSION, PdfFee, StatementBalances, readPdf } from './pdf';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
 import { XLSX_PARSER_VERSION, readXlsx } from './xlsx';
 
@@ -669,6 +669,8 @@ export type ParsedFile =
       template: string;
       /** and how it names the layout in a sentence a person reads */
       title: string;
+      /** which cell of `sheet` carries a fee, and on which convention */
+      fee: PdfFee;
       balances: StatementBalances;
     };
 
@@ -714,6 +716,7 @@ export async function readSheet(
         mapping: parsed.columns,
         template: parsed.template,
         title: parsed.title,
+        fee: parsed.fee,
         balances: parsed.balances,
       };
     }
@@ -958,6 +961,72 @@ function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
 type FeeCell = { ok: true; fee: number | null } | { ok: false; text: string };
 
 /**
+ * A fee one row of the file stated, and WHICH OF THE TWO THINGS IT IS.
+ *
+ * The discriminant travels with the number because the two conventions move the
+ * movement in opposite directions: an on-top fee is subtracted to get what the
+ * account did, an included one is already inside it. Until this row that fact lived
+ * in a doc comment on CsvPresetMapping.fee and was implemented by an unconditional
+ * subtraction - correct while a sheet was the only producer, and silently wrong money
+ * the moment a second one arrived with the other convention. On the one file measured
+ * a PDF fee subtracted a second time takes the net from 192.45 to 192.01 and the
+ * reconciliation gate refuses the whole import in a sentence about balances that names
+ * nothing about fees.
+ *
+ * A union rather than a number beside a boolean, for the reason TableLayout,
+ * AmountCurrency, RowExtent and StatedBalances are unions: a producer cannot state a
+ * fee without stating its convention, and applyFee below switches over the lot.
+ */
+export type StatedFee =
+  | { kind: 'not-stated' }
+  /** the amount cell is already the movement and the fee sits inside it: every PDF */
+  | { kind: 'included'; fee: number }
+  /** the bank took it on top, so the movement is amount - fee: a Revolut sheet */
+  | { kind: 'on-top'; fee: number };
+
+type StatedFeeCell = { ok: true; fee: StatedFee } | { ok: false; text: string };
+
+const NOT_STATED: StatedFeeCell = { ok: true, fee: { kind: 'not-stated' } };
+
+/**
+ * Which cell of the row carries a fee and on which convention, for one file. Built
+ * where the producer is known - the template for a PDF, the preset for a sheet - so
+ * that no site between there and applyFee can pick the wrong one.
+ *
+ * `feeCol: number` stays what it is on Columns and the tag is applied at the single
+ * site that reads it (037b MD2): the invariant is held identically either way, and
+ * the sheet path's reviewed types are not this row's front.
+ */
+type FeeSource = PdfFee | { kind: 'on-top'; col: number };
+
+/**
+ * The movement and what the source stated, out of ONE switch, so the amount and the
+ * fee cannot come to disagree about which convention was applied.
+ *
+ * Exported for the test, like readSheet and noRowsParsed and for the same reason: the
+ * `never` default is worth nothing unless something has watched it throw, and no
+ * caller in this file can reach it. Not API surface anyone asked for.
+ */
+export function applyFee(raw: number, stated: StatedFee): { amount: number; fee: number | null } {
+  switch (stated.kind) {
+    case 'not-stated':
+      return { amount: raw, fee: null };
+    case 'included':
+      return { amount: raw, fee: stated.fee };
+    case 'on-top':
+      // In decimals and rounded once, at toCents downstream: subtracting in cents
+      // would round twice and change what a sub-cent amount does, which reconcile's
+      // "an amount that rounded to zero cents would land on the incoming side" relies
+      // on.
+      return { amount: raw - stated.fee, fee: stated.fee };
+    default: {
+      const unreachable: never = stated;
+      throw new Error(`unhandled fee convention: ${String(unreachable)}`);
+    }
+  }
+}
+
+/**
  * What the sheet stated beside the rows it accepted, on its way to reconcile and
  * nowhere else. Not on Sheet, not on ParsedFile's sheet arm, not on NewTransaction
  * and not on a table (row 6a Ruling 1, row 6b R6): these are cells of the file, read
@@ -1031,6 +1100,41 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
   return fee === null || fee < 0 ? { ok: false, text } : { ok: true, fee };
 }
 
+/**
+ * The same cell, tagged with the convention its source declared. Each arm names its
+ * own, at the one place that knows it, and an arm added to FeeSource without one is a
+ * function that does not return.
+ *
+ * The `ok: false` arm is the sheet path's, and it is held there rather than read off
+ * one template's regex: a PDF's fee cell is a number this parser produced out of the
+ * template's own amount format, a fee line that format cannot read refuses the file in
+ * pdf.ts before a cell is written, and one it reads as negative is dropped there for
+ * the reason written at that drop site. Both of readFee's refusals are unreachable
+ * from this arm by a rule and not by coincidence.
+ */
+function statedFeeOf(
+  row: Cell[],
+  source: FeeSource,
+  decimal: CsvMapping['decimal'],
+): StatedFeeCell {
+  switch (source.kind) {
+    case 'none':
+      return NOT_STATED;
+    case 'on-top': {
+      const read = readFee(row[source.col], decimal);
+      if (!read.ok) return read;
+      return read.fee === null ? NOT_STATED : { ok: true, fee: { kind: 'on-top', fee: read.fee } };
+    }
+    case 'included': {
+      const read = readFee(row[source.col], decimal);
+      if (!read.ok) return read;
+      return read.fee === null
+        ? NOT_STATED
+        : { ok: true, fee: { kind: 'included', fee: read.fee } };
+    }
+  }
+}
+
 async function mapAndStore(
   req: StatementImportRequest,
   parsed: ParsedFile,
@@ -1073,6 +1177,22 @@ async function mapAndStore(
         return { kind: 'pdf-template', title: parsed.title };
       case 'sheet':
         return resolved.columns.readAs;
+      default: {
+        const unreachable: never = parsed;
+        throw new Error(`unhandled parsed file: ${String(unreachable)}`);
+      }
+    }
+  })();
+
+  // Which cell states a fee and on which convention, resolved once from the producer
+  // that knows. A PDF's is a fact about the layout its template read; a sheet's is a
+  // preset's, and a request can name neither (037a D1).
+  const feeSource: FeeSource = ((): FeeSource => {
+    switch (parsed.kind) {
+      case 'pdf':
+        return parsed.fee;
+      case 'sheet':
+        return feeCol >= 0 ? { kind: 'on-top', col: feeCol } : { kind: 'none' };
       default: {
         const unreachable: never = parsed;
         throw new Error(`unhandled parsed file: ${String(unreachable)}`);
@@ -1149,10 +1269,10 @@ async function mapAndStore(
     const rawAmount = cellAmount(row[amountCol], mapping.decimal);
     // read only for a row that would otherwise import: one already refused for its
     // date or its amount keeps the sentence it has always had
-    const statedFee: FeeCell =
-      feeCol >= 0 && date !== null && rawAmount !== null
-        ? readFee(row[feeCol], mapping.decimal)
-        : { ok: true, fee: null };
+    const statedFee: StatedFeeCell =
+      date !== null && rawAmount !== null
+        ? statedFeeOf(row, feeSource, mapping.decimal)
+        : NOT_STATED;
     if (!statedFee.ok) {
       skipped++;
       unreadable++;
@@ -1163,14 +1283,13 @@ async function mapAndStore(
     }
     // The amount is the movement of the account: what the statement's own running
     // balance moves by, fees included. That is what it means for CSV, XLSX and PDF
-    // alike - the PDF path prints the fee-inclusive figure already, and this is where
-    // the sheet path agrees with it. A fee is the bank's, always taken and never
-    // given, so it subtracts whichever way the operation itself points.
-    //
-    // In decimals and rounded once, at toCents downstream: subtracting in cents would
-    // round twice and change what a sub-cent amount does, which reconcile's "an amount
-    // that rounded to zero cents would land on the incoming side" relies on.
-    const amount = rawAmount === null ? null : rawAmount - (statedFee.fee ?? 0);
+    // alike - and the two paths reach it from opposite directions, which is why the
+    // arithmetic is applyFee's and not written out here. A sheet states the fee on top
+    // and the movement is the cell minus it; a PDF prints the movement already and the
+    // fee is a second reading of the same charge. One call, both outputs, so no site
+    // can subtract twice or store a fee against an amount it was not taken from.
+    const { amount, fee } =
+      rawAmount === null ? { amount: null, fee: null } : applyFee(rawAmount, statedFee.fee);
     // the movement, not the cell it came from: the €2.99 plan fee this dropped whole
     // has an Amount of 0.00 and is a real charge.
     //
@@ -1206,7 +1325,7 @@ async function mapAndStore(
         date,
         description,
         category: categorize(undefined, description, amount),
-        fee: statedFee.fee,
+        fee,
       },
       stated: {
         series: seriesCol >= 0 ? fold(cellText(row[seriesCol])) : '',

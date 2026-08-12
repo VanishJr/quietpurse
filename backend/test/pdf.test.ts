@@ -29,12 +29,14 @@ import {
   refusals,
   selectTemplate,
 } from '../src/providers/pdf';
-import { MAX_DATA_ROWS } from '../src/providers/sheet';
+import { Cell, MAX_DATA_ROWS } from '../src/providers/sheet';
 import {
   CURRENCY_CODE_MAX,
   NUL_SCAN_BYTES,
   ParsedFile,
   StatedBalances,
+  StatedFee,
+  applyFee,
   importStatement,
   readSheet,
   reconcile,
@@ -592,6 +594,464 @@ describe('pdf: bytes to rows', () => {
 });
 
 /**
+ * ROADMAP row 37b: the fee this layout prints on a line of its own under the
+ * transaction it belongs to.
+ *
+ * Everything below is built from the one occurrence in the one document that has one,
+ * measured at the template's own column spans: the dated line reads "20 июл. 2026г. |
+ * Wizz Air | 63,62€", the line under it "Комиссия: 0,44€" in the DESCRIPTION column
+ * with "63,18€" in the debit one, and the line under THAT the exchange rate, which is
+ * ROADMAP row 37's and is extracted by nothing here.
+ *
+ * The trap the whole block exists for: 63,18 is the merchant's share of the charge,
+ * 63,62 - 0,44. A reader that takes the fee from the column the fee line writes in
+ * stores a fee that is almost the whole movement, and nothing downstream can see it -
+ * the CHECK only refuses negatives, the gate sums `amount` and never reads `fee`, and
+ * no screen displays one.
+ */
+describe('pdf: the fee on a continuation line', () => {
+  // In cents, because the balance box below is arithmetic on the same numbers the
+  // lines are drawn from: a box computed any other way never approaches the bound the
+  // gate is supposed to hold, and passes by construction.
+  const GROSS = 6362;
+  const FEE = 44;
+  /** what the fee line writes in the AMOUNT column: the charge less the fee */
+  const MERCHANT = GROSS - FEE;
+  const OPENING = 120000;
+
+  /** cents to the shape revolut-ru's own amount pattern reads: "1 234,56€" */
+  const eur = (cents: number): string =>
+    `${Math.trunc(cents / 100)
+      .toString()
+      .replace(/\B(?=(\d{3})+$)/g, ' ')},${String(cents % 100).padStart(2, '0')}€`;
+
+  /**
+   * The label off the template rather than a copy of it, for the reason the keep-list
+   * case reads its own: a copied literal goes on passing against a rule that is no
+   * longer there. The throw is what a template that stops declaring a fee line gets.
+   */
+  const label = (): string => {
+    const { fee } = TEMPLATES.find((t) => t.id === 'revolut-ru')!;
+    if (fee.kind !== 'included') throw new Error('revolut-ru no longer declares a fee line');
+    return fee.label;
+  };
+
+  /**
+   * One fee line. `states` is the whole of what follows the label in the description
+   * cell, and `column` is what the line writes in the debit one - two parameters
+   * because the case's whole subject is that those are different numbers.
+   */
+  const feeLine = (y: number, states: string, column: string): PlacedText[] => [
+    { x: X.description, y, text: `${label()} ${states}` },
+    { x: X.debit, y, text: column },
+  ];
+
+  /**
+   * The line the real document prints directly under the fee line. It writes in the
+   * same description column AND in the debit column, which is what makes it reachable
+   * by any rule keyed on the shape of a line rather than on the label.
+   *
+   * `size` is the budget FOOTER's comment measures: 59 characters from x=124.8, whose
+   * last fragment begins at character 55, so at 3 points per character it stops 40
+   * short of the debit column and at 4 it would spill into it and stop being the line
+   * this case is about.
+   */
+  const RATE = 'Курс Revolut 1,00€ = 4,32 PLN (курс ECB * 1,00€ = 4,34 PLN)';
+  const rateLine = (y: number): PlacedText[] => [
+    { x: X.description, y, text: RATE, size: 3 },
+    { x: X.debit, y, text: '272,94 PLN' },
+  ];
+
+  /**
+   * The Wizz Air transaction with its fee line under it, and whatever else a case
+   * needs between that and the box.
+   *
+   * The box is the constants above and never the reader's output: opening minus the
+   * GROSS charge is the closing balance, so subtracting the fee from the amount moves
+   * the net by exactly FEE and the gate refuses with `doesNotAddUp`. The bound is
+   * approached by construction rather than by luck.
+   */
+  const feeStatement = (tag: string, states: string, ...extra: PlacedText[]): PlacedText[][] => [
+    [
+      ISSUER,
+      { x: 39.7, y: 15, text: tag },
+      ...header(700),
+      ...row(680, '20 июл. 2026г.', 'Wizz Air', { debit: eur(GROSS) }),
+      ...feeLine(668, states, eur(MERCHANT)),
+      ...extra,
+      ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
+    ],
+  ];
+
+  /** The same statement without the fee line: what every count below is measured against. */
+  const plainStatement = (tag: string): PlacedText[][] => [
+    [
+      ISSUER,
+      { x: 39.7, y: 15, text: tag },
+      ...header(700),
+      ...row(680, '20 июл. 2026г.', 'Wizz Air', { debit: eur(GROSS) }),
+      ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
+    ],
+  ];
+
+  /**
+   * The row's whole reason to exist. Seen red against a reader taking the fee out of
+   * `cellAt(line, debit)` instead of out of the label's own cell: `expected 63.18 to
+   * be 0.44`, on a charge of 63.62.
+   *
+   * Both numbers are on the same line of the same document and only one of them is
+   * the fee. The other is the merchant's share, and it is stored by a reader that is
+   * wrong in the way nothing in this system can detect.
+   */
+  it('the fee is the number beside the label, not the one in the amount column', async () => {
+    // the trap literal, stated so the case cannot drift away from the shape it is about
+    expect(eur(MERCHANT)).toBe('63,18€');
+    const r = await importAndConfirm({
+      accountId: await accountFor('Revolut Fee Line'),
+      bytes: buildPdf(feeStatement('fee line', eur(FEE))),
+    });
+    expect(r.inserted).toBe(1);
+
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.description).toBe('Wizz Air');
+    // the amount does not move: the dated line already carries the whole charge, and
+    // the CSV of the same month agrees - "Сумма -63.18 / Комиссия 0.44" maps to
+    // exactly this pair through the sheet path's own subtraction
+    expect(t.amount).toBe(-63.62);
+    expect(t.fee).toBe(0.44);
+  });
+
+  /**
+   * Trap 2, and DoD 3. If the PDF's fee reached the mapper on the sheet path's
+   * convention it would be subtracted from an amount that already contains it: the
+   * movement would read -64.06, the net would miss the closing balance the document
+   * printed by exactly FEE, and the gate would refuse this file with a sentence about
+   * balances that names nothing about fees - measured under that sabotage as "opening
+   * 1200.00 + the 1 transaction line = 1135.94 … closing 1136.38 … a difference of
+   * 0.44 EUR". Not -63.18: that is the merchant's share, a third number this same
+   * document prints, and no arithmetic here produces it.
+   *
+   * The box is built from the same cents the rows are, so that refusal is one cent
+   * away rather than nine months away.
+   */
+  it('a fee-bearing statement reconciles on the amounts the document printed', async () => {
+    const staged = await importPdf('Revolut Fee Gate', feeStatement('fee gate', eur(FEE)));
+    if (staged.outcome !== 'awaiting_confirmation') throw new Error('the PDF was refused');
+    expect(staged.summary).toMatchObject({
+      total: 1,
+      accepted: 1,
+      skipped: 0,
+      problems: [],
+      totals: [{ currency: 'EUR', net: -63.62 }],
+      balances: { opening: 1200, closing: 1136.38, currency: 'EUR' },
+    });
+  });
+
+  /**
+   * The rate line writes in the same two columns one line lower, so a rule keyed on
+   * the shape of a line reaches it and a rule keyed on the label does not. It must
+   * contribute nothing at all: not a fee, not a description, not a row, not a count.
+   * The exchange rate stays ROADMAP row 37's.
+   */
+  it('the exchange-rate line under the fee line contributes nothing', async () => {
+    const r = await importAndConfirm({
+      accountId: await accountFor('Revolut Fee Rate'),
+      bytes: buildPdf(feeStatement('rate line', eur(FEE), ...rateLine(656))),
+    });
+    expect(r.inserted).toBe(1);
+    const txs = await listTransactions({ accountId: r.accountId });
+    expect(txs).toHaveLength(1);
+    expect(txs[0].description).toBe('Wizz Air');
+    expect(txs[0].amount).toBe(-63.62);
+    expect(txs[0].fee).toBe(0.44);
+  });
+
+  /**
+   * Trap 6: `total` is the number of transaction lines, which is the number the
+   * summary shows a user. A fee line is not one and neither is a rate line, so the
+   * three counts read exactly what the same statement without them reads.
+   */
+  it('neither a fee line nor a rate line is a transaction line', async () => {
+    const counts = async (name: string, pages: PlacedText[][]) => {
+      const staged = await importPdf(name, pages);
+      if (staged.outcome !== 'awaiting_confirmation') throw new Error(`${name} was refused`);
+      const { total, accepted, skipped, problems } = staged.summary;
+      return { total, accepted, skipped, problems };
+    };
+    const plain = await counts('Revolut Fee Counts Plain', plainStatement('counts plain'));
+    expect(plain).toEqual({ total: 1, accepted: 1, skipped: 0, problems: [] });
+    expect(
+      await counts(
+        'Revolut Fee Counts',
+        feeStatement('counts', eur(FEE), ...rateLine(656)),
+      ),
+    ).toEqual(plain);
+  });
+
+  /**
+   * Trap 5. The fee line is refused by `blank()` today and so reaches no description;
+   * after this row it must still reach none, and the keep list must not gain the
+   * label. Held structurally by the `else if` rather than by revolut-ru happening not
+   * to list it - descriptions are not in the dedup key, so a change there is caught by
+   * nobody.
+   *
+   * Not vacuous: the kept line placed beside it on the same fixture does arrive, so a
+   * missing label is missing because the fee arm took the line, not because the line
+   * was never a candidate.
+   */
+  it('a fee line reaches no description, and the kept lines still do', async () => {
+    const KEPT = 'Получатель: Wizz Airline, Budapest';
+    const r = await importAndConfirm({
+      accountId: await accountFor('Revolut Fee Description'),
+      bytes: buildPdf(
+        feeStatement('fee description', eur(FEE), { x: X.description, y: 656, text: KEPT, size: 4 }),
+      ),
+    });
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.description).toBe(`Wizz Air ${KEPT}`);
+    expect(t.description).not.toContain(label());
+    expect(t.fee).toBe(0.44);
+  });
+
+  /**
+   * The half `blank()` does not hold. On the layout measured a fee line writes in the
+   * amount column, so `blank()` refuses it as a continuation and the label is not in
+   * the keep list either - two independent reasons, and neither is the `else if`.
+   *
+   * What the `else if` is for is the template that has both: a fee line blank in the
+   * amount column whose label the keep list names. Under two ifs the line would be a
+   * fee AND a description; under this one it is a fee. Watched through a template that
+   * is deliberately contradictory, because no shipped one can be.
+   */
+  it('the fee arm takes the line even from a keep list that names the label', async () => {
+    const revolut = TEMPLATES.find((t) => t.id === 'revolut-ru')!;
+    const contradictory: PdfTemplate = {
+      ...revolut,
+      id: 'fee-label-kept',
+      rows: { kind: 'labelled-continuations', keep: [label()] },
+    };
+    const st = await readPdf(
+      buildPdf([
+        [
+          ISSUER,
+          ...header(700),
+          ...row(680, '20 июл. 2026г.', 'Wizz Air', { debit: eur(GROSS) }),
+          // nothing in the amount column, so this line IS a candidate continuation
+          { x: X.description, y: 668, text: `${label()} ${eur(FEE)}` },
+          ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
+        ],
+      ]),
+      200,
+      [contradictory],
+    );
+    const [, amount, description, currency, fee] = st.sheet.rows[1];
+    expect({ amount, description, currency, fee }).toEqual({
+      amount: -63.62,
+      description: 'Wizz Air',
+      currency: 'EUR',
+      fee: 0.44,
+    });
+  });
+
+  /**
+   * Trap 7a. Two fee lines under one transaction is a shape no document measured has,
+   * so it has no natural answer and is given one deliberately: the template no longer
+   * describes the bank's output, and §5.2's rule is that decay is loud. A second fee
+   * accumulating on the first, or overwriting it, is unfalsifiable downstream.
+   *
+   * The flag is set on the LABEL and not on a fee that parsed, so the refusal does not
+   * depend on either value being readable.
+   */
+  it('two fee lines under one transaction refuse the file', async () => {
+    const before = await idsNow();
+    await expect(
+      importPdf(
+        'Revolut Two Fees',
+        feeStatement('two fees', eur(FEE), ...feeLine(656, eur(FEE), eur(MERCHANT))),
+      ),
+    ).rejects.toThrow(
+      `this Revolut statement prints more than one "${label()}" line under one transaction,` +
+        ' where this template reads one fee per transaction - export the same statement as CSV' +
+        ' or Excel (.xlsx) from your online banking and upload that',
+    );
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
+    expect(failed.documentAvailable).toBe(true);
+    expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * The other face of the same defect, and the worse one (037b MD3). If the label is
+   * found and the template's own amount format cannot read what follows it, the quiet
+   * answer - keep the row, drop the fee - is a statement whose every fee reads as no
+   * fee at all: indistinguishable from a bank that charges none, permanent, and
+   * visible to nobody. So it refuses, and the sentence names the label and the format
+   * rather than the file or a balance.
+   *
+   * What it costs, taken knowingly: a continuation line that legitimately opens with
+   * this label under an open row now refuses a file that imports today. A user can
+   * report that; nobody can report the silent version.
+   */
+  it('a fee line whose value this template cannot read refuses the file', async () => {
+    const before = await idsNow();
+    await expect(
+      importPdf('Revolut Fee Unreadable', feeStatement('fee unreadable', '0,44 EUR')),
+    ).rejects.toThrow(
+      `this Revolut statement's "${label()}" line reads "0,44 EUR" after its label, where this` +
+        ' template reads an amount like "1 234,56€" - export the same statement as CSV or Excel' +
+        ' (.xlsx) from your online banking and upload that',
+    );
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
+    expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+
+  /**
+   * Trap 7b. A fee line with no transaction open above it is dropped exactly as a
+   * stray continuation is, with the same silence every non-candidate line in this
+   * parser has - `open !== null` is in the shared conjunction and holds both. Pinned
+   * by a case rather than by a sentence.
+   */
+  it('a fee line with no transaction open above it is dropped in silence', async () => {
+    const r = await importAndConfirm({
+      accountId: await accountFor('Revolut Orphan Fee'),
+      bytes: buildPdf([
+        [
+          ISSUER,
+          { x: 39.7, y: 15, text: 'orphan fee' },
+          ...header(700),
+          // between the table header and the first dated line, where `open` is null
+          ...feeLine(690, eur(FEE), eur(MERCHANT)),
+          ...row(680, '20 июл. 2026г.', 'Wizz Air', { debit: eur(GROSS) }),
+          ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
+        ],
+      ]),
+    });
+    expect(r.inserted).toBe(1);
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.description).toBe('Wizz Air');
+    expect(t.fee).toBeUndefined();
+  });
+
+  /**
+   * Trap 4, on this layout's own version of it: "В статусе ожидания" is money that has
+   * not moved, and its block is `collect: false`. A fee line inside it must not donate
+   * a fee to the last settled row - a fee attached to the wrong transaction is
+   * invisible to every check in the system.
+   *
+   * Held by the shared conjunction and not by an arm of its own: `open` is nulled at
+   * every table header, so nothing under the pending heading has a row to attach to.
+   */
+  it('a fee line in the pending block does not reach the last settled row', async () => {
+    const r = await importAndConfirm({
+      accountId: await accountFor('Revolut Pending Fee'),
+      bytes: buildPdf([
+        [
+          ISSUER,
+          { x: 39.7, y: 15, text: 'pending fee' },
+          ...header(700),
+          ...row(680, '20 июл. 2026г.', 'Wizz Air', { debit: eur(GROSS) }),
+          ...header(660, 'Дата начала'),
+          ...feeLine(648, eur(FEE), eur(MERCHANT)),
+          ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
+        ],
+      ]),
+    });
+    expect(r.inserted).toBe(1);
+    const [t] = await listTransactions({ accountId: r.accountId });
+    expect(t.description).toBe('Wizz Air');
+    expect(t.fee).toBeUndefined();
+  });
+
+  /**
+   * What makes this row scoped by DECLARATION and not by vocabulary: a layout that
+   * says it prints no fee line reads one as the ordinary text it is. n26-de's detail
+   * lines are unlabelled continuations, so the line arrives in the description - which
+   * is what proves the case is not passing because the line was never a candidate.
+   */
+  it('a template that declares no fee line reads one as ordinary text', async () => {
+    const pages = n26Statement('no fee arm');
+    pages[1].push(...n26Detail(651.7, `${label()} 0,44€`));
+    const bytes = buildPdf(pages);
+
+    expect((await readPdf(bytes, 200)).fee).toEqual({ kind: 'none' });
+    const r = await importAndConfirm({ accountId: await accountFor('N26 Fee Text'), bytes });
+    const netto = (await listTransactions({ accountId: r.accountId, limit: 50 })).find((t) =>
+      t.description.startsWith('Netto GmbH'),
+    )!;
+    expect(netto.description).toContain(`${label()} 0,44€`);
+    expect(netto.fee).toBeUndefined();
+  });
+
+  /**
+   * 037b MD4. `fee_cents` carries no currency column, so a fee stated in one other
+   * than the row's would be stored as the row's - wrong money in the strongest sense.
+   * It is dropped instead, and silently: no document in the tree prints such a line,
+   * so nothing has stopped describing anything and refusing would be a rule invented
+   * from a layout nobody has.
+   *
+   * Unreachable through either shipped Revolut template, whose symbol map has one
+   * entry - so it is exercised through readPdf's `templates` parameter, the way the
+   * mixed-currency balance arm is. The EUR half of the case is what stops it passing
+   * vacuously.
+   */
+  it('a fee stated in another currency than the row is dropped, not stored', async () => {
+    const revolut = TEMPLATES.find((t) => t.id === 'revolut-ru')!;
+    const twoSymbols: PdfTemplate = {
+      ...revolut,
+      id: 'two-symbol-fees',
+      amount: {
+        ...revolut.amount,
+        currency: { kind: 'in-the-cell', symbols: { '€': 'EUR', '£': 'GBP' } },
+      },
+    };
+    const feeOf = async (states: string): Promise<Cell> => {
+      const st = await readPdf(buildPdf(feeStatement(states, states)), 200, [twoSymbols]);
+      if (st.fee.kind !== 'included') throw new Error('the template states no fee column');
+      return st.sheet.rows[1][st.fee.col];
+    };
+    expect(await feeOf(eur(FEE))).toBe(0.44);
+    expect(await feeOf('0,44£')).toBeNull();
+  });
+
+  /**
+   * The review's RR3: the same drop, for the other state no document held has shown.
+   * A sign on a printed fee is a convention nobody in this tree has measured - it may
+   * point at the fee or at the movement - so the fee is dropped rather than Math.abs'd
+   * into a guess, and dropped rather than refused, for MD4's reason.
+   *
+   * Unreachable on revolut-ru, whose amount pattern is the only unsigned one of the
+   * five shipped, so it is watched through a template carrying the sign the other four
+   * carry. What the drop stops is a chain, not a stored number: a negative in the fee
+   * cell is refused by readFee, which SKIPS the row, and a skipped row takes the whole
+   * file to doesNotAddUp - a sentence about balances that names nothing about a fee,
+   * which is the route MD3 ruled loud to close.
+   */
+  it('a fee this template reads as negative is dropped, and the row keeps its amount', async () => {
+    const revolut = TEMPLATES.find((t) => t.id === 'revolut-ru')!;
+    const signedAmounts: PdfTemplate = {
+      ...revolut,
+      id: 'signed-fees',
+      // the shape universalbank-uk and -en carry, on revolut-ru's own separators
+      amount: { ...revolut.amount, pattern: /^(-?\d{1,3}(?: \d{3})*,\d{2})([^\s\d]+)$/u },
+    };
+    const rowOf = async (states: string): Promise<{ amount: Cell; fee: Cell }> => {
+      const st = await readPdf(buildPdf(feeStatement(states, states)), 200, [signedAmounts]);
+      if (st.fee.kind !== 'included') throw new Error('the template states no fee column');
+      const row = st.sheet.rows[1];
+      const [, amount] = row;
+      return { amount, fee: row[st.fee.col] };
+    };
+    // the same template reads the positive one, so the negative half is not passing
+    // because this pattern reads no fee at all
+    expect(await rowOf(eur(FEE))).toEqual({ amount: -63.62, fee: 0.44 });
+    expect(await rowOf(`-${eur(FEE)}`)).toEqual({ amount: -63.62, fee: null });
+  });
+});
+
+/**
  * ROADMAP 5.3's middle row: a statement whose rows do not run from its own opening
  * balance to its own closing balance is refused and told what the discrepancy is.
  *
@@ -1034,6 +1494,7 @@ const twin = (id: string, title: string): PdfTemplate => ({
     example: '-1,00€',
   },
   rows: { kind: 'one-line' },
+  fee: { kind: 'none' },
   balances: {
     scope: { kind: 'whole-document' },
     kind: 'two-lines',
@@ -3147,6 +3608,31 @@ describe('the source-type dispatch', () => {
 });
 
 /**
+ * The same argument one seam down, for the fact this row exists to hold: a fee is
+ * either included in the movement or taken on top of it, and the two subtract in
+ * opposite directions. `tsc` forces every producer to say which - deleting an arm
+ * gives a StatedFee that is not assignable - and this is the other half: a compile
+ * error cannot show the runtime default actually throws rather than falling through
+ * to whichever convention is written first.
+ */
+describe('the fee convention dispatch', () => {
+  it('has no default that quietly picks a convention', () => {
+    expect(applyFee(-63.62, { kind: 'included', fee: 0.44 })).toEqual({
+      amount: -63.62,
+      fee: 0.44,
+    });
+    expect(applyFee(-63.18, { kind: 'on-top', fee: 0.44 })).toEqual({
+      amount: -63.62,
+      fee: 0.44,
+    });
+    expect(applyFee(-63.62, { kind: 'not-stated' })).toEqual({ amount: -63.62, fee: null });
+    expect(() => applyFee(1, { kind: 'guessed' } as unknown as StatedFee)).toThrow(
+      /unhandled fee convention/,
+    );
+  });
+});
+
+/**
  * Trap 5: describeRow and noRowsParsed are shared, and xlsx.ts's NOTICE_MAX is
  * derived from a measurement of the longest reason they can compose - 159, at which
  * point a longer one from this path would start dropping the unused-sheet notice off
@@ -3332,6 +3818,11 @@ describe('the diagnostic budget', () => {
    * short of the longest, and the set is 49 sentences where it was 39: seven fixed
    * sentences and eight per template, so a fifth template costs ten - its own eight,
    * plus the two builders this row added for the templates whose arms can reach them.
+   *
+   * ROW 37b ADDED TWO MORE BUILDERS AND MOVED NOTHING EITHER. Both are composed only
+   * for a template that declares a fee line, which is revolut-ru alone, so the set is
+   * 51: twoFeeLines at 226 and unreadableFee at 237, and "Revolut" is a title of 7
+   * where the number above belongs to one of 19.
    */
   it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
     const all = refusals();

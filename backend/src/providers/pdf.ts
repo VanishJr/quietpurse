@@ -26,7 +26,7 @@ import { Cell, Sheet, cellText } from './sheet';
  * Bumped whenever a change here would parse an existing file differently. Per
  * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
  */
-export const PDF_PARSER_VERSION = 5;
+export const PDF_PARSER_VERSION = 6;
 
 /**
  * What the document says it started and ended with, for the whole statement rather
@@ -73,8 +73,22 @@ export interface PdfStatement {
   title: string;
   /** the columns of `sheet`, named by this module and never by the request */
   columns: Partial<CsvMapping>;
+  /** which cell of `sheet` carries a fee, and what that fee is against the amount */
+  fee: PdfFee;
   balances: StatementBalances;
 }
+
+/**
+ * A fee column of `sheet`, and the convention it is stated on - one value, because
+ * the mapper subtracts an on-top fee and leaves an included one alone, and a column
+ * handed over without its convention is a comment standing between correct money and
+ * silently corrupted money.
+ *
+ * An index and not a name: `columns` above is resolved by name because it is a
+ * Partial<CsvMapping>, and CsvMapping has no `fee` and must not get one (037a D1). A
+ * name here would buy a second lookup whose only failure mode is unreachable.
+ */
+export type PdfFee = { kind: 'none' } | { kind: 'included'; col: number };
 
 /**
  * A statement's text layer runs to thousands of characters a page; a scan's runs to
@@ -172,13 +186,13 @@ const tooManyPages = (pages: number, max: number): string =>
   `this PDF has ${pages} pages, more than the ${max} this importer reads in one file - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
 
 /**
- * The seven builders below open `this ${title} statement` and not `this looks like a
+ * The nine builders below open `this ${title} statement` and not `this looks like a
  * ${title} statement but`, which is what they read as until row 31.
  *
  * Two reasons, and the first is the article: `a N26`, and `a АТ «УНІВЕРСАЛ БАНК»`.
  * The article-free fix that suggests itself - `this looks like a statement from
  * ${title}` - is taken, by notRecognisedFrom, where it means "this bank is known and
- * its layout is not"; these five mean the opposite ("the layout is known and
+ * its layout is not"; these nine mean the opposite ("the layout is known and
  * something inside it broke"), and two refusals with one head and opposite meanings
  * are worse than the article.
  *
@@ -221,6 +235,29 @@ const unplacedBalanceBox = (title: string, opens: string): string =>
  */
 const noStatementPeriod = (title: string, found: number): string =>
   `this ${title} statement's rows carry a day and a month and no year, so this template reads the year off the period the statement covers - and it expects exactly one such line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+/**
+ * The two ways a `fee` line can say the template has stopped describing the document,
+ * and both are loud for one reason: the quiet form of either is a statement whose
+ * every fee reads as no fee at all, which is indistinguishable from a bank that
+ * charges none and is therefore reportable by nobody (037b, MD3).
+ *
+ * The false-positive tail is taken knowingly. A continuation line that legitimately
+ * opens with this label under an open row now refuses a file that imports today - and
+ * a user who reads the sentence can say so, where the silent version cannot be seen
+ * from anywhere.
+ */
+const twoFeeLines = (title: string, label: string): string =>
+  `this ${title} statement prints more than one "${label}" line under one transaction, where this template reads one fee per transaction - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
+/**
+ * The label was found and what follows it is not an amount this template can read.
+ * Named by the label and by the format, never by the file or by a balance: the cause
+ * is that the layout's fee line has changed shape, and a sentence about anything else
+ * sends the reader to a column that is fine (ROADMAP row 23's family).
+ */
+const unreadableFee = (title: string, label: string, cell: string, example: string): string =>
+  `this ${title} statement's "${label}" line reads ${quote(cell)} after its label, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * Which cell of the box a refusal is about, as the whole noun phrase rather than a
@@ -401,6 +438,28 @@ type RowExtent =
   | { kind: 'labelled-continuations'; keep: readonly string[] };
 
 /**
+ * Where this layout prints a per-transaction fee, and what that fee is against the
+ * amount on the dated line above it.
+ *
+ * Required and total, like `rows` and `balances`: a layout with no fee line SAYS so.
+ * `included` is the whole vocabulary measured - the dated line's amount IS the
+ * movement and the fee sits inside it - and a layout whose fee is taken ON TOP is
+ * therefore not writable at all rather than spelled by omission. That is deliberate:
+ * the sheet path already has that convention (CsvPresetMapping.fee), the two corrupt
+ * money in opposite directions, and an author who meets an on-top PDF has to add an
+ * arm HERE and is dragged by tsc into adding its case at the mapper in the same edit.
+ *
+ * `label` is what the generator writes, never a pattern over the value beside it -
+ * RowExtent's own argument, and here it does a second job. The fee's number is in the
+ * LABEL'S OWN CELL and not in an amount column: the document measured prints
+ * "Комиссия: 0,44€" in the description column of a line whose debit cell reads
+ * "63,18€", the merchant's share of an 63,62 charge. A reader taking the column
+ * stores a fee that is almost the whole movement, and no CHECK, no gate and no screen
+ * can see it.
+ */
+type FeeLine = { kind: 'none' } | { kind: 'included'; label: string };
+
+/**
  * Which way round a summary cell carries its sign, and there is no deriving it: the
  * two layouts measured disagree. Revolut prints "1 742,18€" unsigned in a column
  * whose identity IS the sign; N26 prints "-2.948,37€" with the sign in the cell.
@@ -560,6 +619,7 @@ export type PdfTemplate = TableLayout & {
   dates: DateSource;
   amount: AmountFormat;
   rows: RowExtent;
+  fee: FeeLine;
   balances: BalanceBox;
 };
 
@@ -823,18 +883,48 @@ function dateReader(template: PdfTemplate, scoped: TextLine[]): DateReader {
  * rule "a PDF's columns come from the template" silently vacuous. Prefixed, nothing
  * but the override can resolve them and dropping it produces a loud refusal.
  */
-const HEADER = ['pdf:date', 'pdf:amount', 'pdf:description', 'pdf:currency'];
+const HEADER = ['pdf:date', 'pdf:amount', 'pdf:description', 'pdf:currency', 'pdf:fee'];
 const DATE = 0;
 const AMOUNT = 1;
 const DESCRIPTION = 2;
 const CURRENCY = 3;
+const FEE = 4;
 
+/**
+ * The fee is deliberately absent: COLUMNS is a Partial<CsvMapping> and CsvMapping has
+ * no `fee` (037a D1). The mapper is told which cell carries one by PdfStatement.fee,
+ * which carries the convention with it - a name here would be a column resolved twice
+ * and a convention resolved nowhere.
+ */
 const COLUMNS: Partial<CsvMapping> = {
   date: HEADER[DATE],
   amount: HEADER[AMOUNT],
   description: HEADER[DESCRIPTION],
   currency: HEADER[CURRENCY],
 };
+
+/**
+ * What the mapper is told about this layout's fee: which cell of the sheet carries
+ * one, and on which convention it is stated.
+ *
+ * A switch with one case per arm and NO default, on `wanted`'s shape, and that is the
+ * whole reason this is a function rather than an expression at the return. The
+ * two-way ternary it replaced - `kind === 'none' ? none : included` - is silent under
+ * tsc the day FeeLine gains an arm, and an on-top layout would then be handed to the
+ * mapper declared `included`: its fee never subtracted, every fee-bearing row's
+ * movement wrong by its fee, and reconcile unable to see it because the amounts the
+ * document printed still agree. Without a default, a new arm makes the endpoint
+ * reachable and tsc refuses this function (TS2366) - which is the drag FeeLine's own
+ * comment promises and cannot keep by itself.
+ */
+function feeOf(fee: FeeLine): PdfFee {
+  switch (fee.kind) {
+    case 'none':
+      return { kind: 'none' };
+    case 'included':
+      return { kind: 'included', col: FEE };
+  }
+}
 
 /** Exported for the test that hands selectTemplate two templates and one document. */
 export interface TextLine {
@@ -1168,8 +1258,11 @@ function readRows(
   const rows: Cell[][] = [];
   const notes = new Map<string, string>();
   let table: OpenTable | null = null;
-  // the row still taking continuation lines, and the page its dated line was on
-  let open: { row: Cell[]; page: number } | null = null;
+  // the row still taking continuation lines, the page its dated line was on, and
+  // whether this layout's fee label has already been seen under it. The flag is set
+  // on the LABEL and not on a fee that parsed: a second label is the layout having
+  // changed whether or not either value was readable
+  let open: { row: Cell[]; page: number; fee: boolean } | null = null;
 
   for (const line of lines) {
     const { cells, table: header } = readLine(template, line);
@@ -1181,18 +1274,19 @@ function readRows(
         open = null;
         continue;
       }
-      // A continuation of the row above it: nothing in the date column, nothing in
-      // the amount column, something in the description one, and on the page that
-      // row's dated line was read on.
+      // A line that attaches to the row above it: nothing in the date column,
+      // something in the description one, and on the page that row's dated line was
+      // read on. TWO things attach - a continuation and a fee line - and they share
+      // this condition rather than restating it.
       //
-      // FOUR rules meet in this one condition and nowhere else, which is why editing
-      // a line of it moves three things the editor was not looking at: the
-      // continuation rule itself - what a transaction's extent is; the template's own
-      // drop or keep list, through `wanted` below; the page test, whose cost is
-      // stated two paragraphs down; and TOLERANCE, because "nothing in the date
-      // column" is a claim about a line, and which baselines are one line is decided
-      // by readLines before any template is known. None of the four is written down
-      // anywhere else in this file.
+      // FOUR rules meet in it and nowhere else, which is why editing a line of it
+      // moves three things the editor was not looking at: the continuation rule
+      // itself - what a transaction's extent is; the template's own drop or keep
+      // list, through `wanted` below; the page test, whose cost is stated two
+      // paragraphs down; and TOLERANCE, because "nothing in the date column" is a
+      // claim about a line, and which baselines are one line is decided by readLines
+      // before any template is known. None of the four is written down anywhere else
+      // in this file.
       //
       // The page test is not decoration. Pages 2..n of the N26 statement repeat the
       // title and the period in the description column with both other cells empty,
@@ -1202,17 +1296,74 @@ function readRows(
       // lose its tail - and no transaction in any document measured is split: 0 of 72
       // in each of the third layout's two files, counted rather than assumed. A
       // layout that does split one is a finding for a later row.
+      //
+      // The two arms diverge on `blank()` and on `rows.kind`, and both belong to the
+      // continuation. A continuation is required to write nothing in an amount column
+      // (RowExtent's last paragraph); a fee line WRITES there - the document measured
+      // prints the merchant's share of the charge on it - so it is the one attaching
+      // line that may look at a line with an amount, and it looks at the description
+      // cell of it. `one-line` gates the continuation only: a layout whose
+      // transactions are one line each may still print a fee line, and what decides
+      // that is `template.fee`.
+      //
+      // `else if` and not two ifs: a line carrying the fee label can then never reach
+      // a description, for any template and any keep list. Descriptions are not in the
+      // dedup key, so a fee label appended to one is caught by nothing.
       if (
-        template.rows.kind !== 'one-line' &&
         open !== null &&
         table !== null &&
         open.page === line.page &&
         cells.date === '' &&
-        cells.description !== '' &&
-        table.blank(line) &&
-        wanted(template.rows, cells.description)
+        cells.description !== ''
       ) {
-        open.row[DESCRIPTION] = `${cellText(open.row[DESCRIPTION])} ${cells.description}`;
+        if (template.fee.kind === 'included' && cells.description.startsWith(template.fee.label)) {
+          // Both refusals below throw from inside readRows, so a document with a
+          // broken fee line AND an unreadable balance box reads the fee sentence -
+          // the position unreadableTable has always held, and for the same
+          // reason: by the time a line under an open row is being read, the template
+          // matched and rows parsed, so a fee line that has changed shape is the more
+          // specific true thing to say, and both sentences name the same cause.
+          if (open.fee) throw new Error(twoFeeLines(template.title, template.fee.label));
+          open.fee = true;
+          // the number is in THIS cell, after the label. The amount column on this
+          // line carries 63,18 against an 63,62 charge - the merchant's share - and a
+          // reader that took it would store a fee that is almost the whole movement,
+          // which the CHECK, the gate and every screen are unable to see
+          const raw = cells.description.slice(template.fee.label.length).trim();
+          const read = amountCell(template, raw);
+          if (read.value === null) {
+            throw new Error(
+              unreadableFee(template.title, template.fee.label, raw, template.amount.example),
+            );
+          }
+          // Two conditions and one drop, silent where the refusals above are loud.
+          //
+          // The currency half is narrower than it reads. It is for a template whose
+          // symbol map has more than one entry - the only shape in which a READABLE fee
+          // in a second known currency exists. On revolut-ru "Комиссия: 1,90 PLN" never
+          // gets here: the pattern wants the symbol against the digits, so amountCell
+          // answers unreadable and the file is refused fifteen lines above, by shape.
+          // So this half is alive today only through the two-symbol test template, and
+          // its case says so in its own docstring.
+          //
+          // fee_cents carries no currency column, so a fee stated in another one would
+          // be stored as the row's; and a SIGNED fee is a convention nobody here has
+          // measured - it may point at the fee or at the movement - so it is dropped
+          // and never Math.abs'd, which is guessing which. Only revolut-ru's pattern
+          // is unsigned, so the sign half is for the next included-fee template:
+          // without it a negative reaches readFee,
+          // which refuses the cell and SKIPS the row, taking the file to doesNotAddUp -
+          // a sentence about balances that names nothing about a fee.
+          if (read.value >= 0 && read.currency === cellText(open.row[CURRENCY])) {
+            open.row[FEE] = read.value;
+          }
+        } else if (
+          template.rows.kind !== 'one-line' &&
+          table.blank(line) &&
+          wanted(template.rows, cells.description)
+        ) {
+          open.row[DESCRIPTION] = `${cellText(open.row[DESCRIPTION])} ${cells.description}`;
+        }
       }
       continue;
     }
@@ -1237,8 +1388,10 @@ function readRows(
     row[AMOUNT] = amount.value;
     row[DESCRIPTION] = cells.description;
     row[CURRENCY] = amount.currency;
+    // null and never 0: the source stated no fee, which is not a fee of nothing
+    row[FEE] = null;
     rows.push(row);
-    open = { row, page: line.page };
+    open = { row, page: line.page, fee: false };
   }
   return { rows, notes };
 }
@@ -1488,6 +1641,7 @@ export async function readPdf(
     template: template.id,
     title: template.title,
     columns: COLUMNS,
+    fee: feeOf(template.fee),
     balances,
   };
 }
@@ -1584,6 +1738,21 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       kind: 'labelled-continuations',
       keep: ['Получатель:', 'Реквизиты:', 'Отправитель:'],
     },
+    // "Комиссия:" is deliberately NOT in the keep list above and must not be added to
+    // it: a fee line is read here and reaches no description.
+    //
+    // Measured on the July export: the label occurs exactly once in the whole
+    // document, on the line under "Wizz Air", and the line reads "Комиссия: 0,44€" in
+    // the description column with "63,18€" in the debit one against a dated line of
+    // "63,62€". The 0,44 is the fee, the 63,62 is the movement and the 63,18 is the
+    // merchant's share - which the CSV of the same month confirms independently, as
+    // "Сумма -63.18 / Комиссия 0.44", mapping to amount -63.62 and fee 0.44.
+    //
+    // The line directly below it - "Курс Revolut 1,00€ = 4,32 PLN (…)" - writes in the
+    // same column one line down and is reached by neither arm: it does not start with
+    // this label, and its own cell is a sentence rather than an amount. The exchange
+    // rate is ROADMAP row 37's and is not extracted anywhere.
+    fee: { kind: 'included', label: 'Комиссия:' },
     // "Сведения о балансе" states a pair per product - the account, then the
     // wallets - and an "Итого" line under them that is the sum of both. It is the
     // Итого pair and never the account's: the account's own transactions and the
@@ -1711,6 +1880,12 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // Verwendungszweck …" loses the reference with nothing refusing and nothing
     // noting it.
     rows: { kind: 'continuations', drop: ['IBAN:'] },
+    // The statement held for this layout prints no per-transaction fee line: the fee
+    // and rate vocabulary was counted over it and came to 0. Declared rather than
+    // omitted, because `none` is a measurement of a document somebody has read and an
+    // absent field would be the author who did not look (§5.2). The same census covers
+    // the three below.
+    fee: { kind: 'none' },
     // Two lines 79 units apart under two different labels, on the summary page, with
     // two other lines between them - which is why BalanceBox has a second kind at
     // all, and those two lines are this layout's gross totals. Each of the four
@@ -1876,6 +2051,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       kind: 'continuations',
       drop: ['Операційний директор', 'Вклади гарантуються', 'Детальна інформація'],
     },
+    // both files counted: no fee line, and "Курс" here is a column HEADING rather than
+    // a labelled line under a transaction
+    fee: { kind: 'none' },
     // Four labels on four baselines 13.5 apart, page 1, each stating its value in one
     // column - so `two-lines`, and `one-line` cannot say it. Each label occurs exactly
     // once in the whole document, counted over all four pages, which is what `only()`
@@ -1971,6 +2149,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       kind: 'continuations',
       drop: ['Operating Director', 'Deposits are guaranteed', 'Details in the Reference'],
     },
+    fee: { kind: 'none' },
     // Same four baselines, same spans: the labels are longer here and the values sit
     // further right (170.554-197.500 against 133.789-154.786), so [0, 133) / [133,
     // 596) holds for both files without either boundary being tuned to this one.
@@ -2172,6 +2351,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // silent truncation of a real description. Only a rule keyed on x can tell them
     // apart, and the span is that rule. Its cost is the one written above 250.
     rows: { kind: 'continuations', drop: [] },
+    // the one "Entgelte" in this document is a quarterly charges box on page 2 reading
+    // "0,00 €" - a second box, not a per-transaction fee line
+    fee: { kind: 'none' },
     // The document prints these four labels TWICE - once here for the statement, once
     // on page 2 for a quarterly Rechnungsabschluss covering 01.04 to 30.06 - and three
     // of the four numbers agree: Endsaldo 84,22 in both, Kontogutschriften +0,08 in
@@ -2294,6 +2476,12 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
       all.push(unplacedBalanceBox(t.title, t.balances.scope.opens));
     }
     if (t.dates.format === 'de-day-month-pair') all.push(noStatementPeriod(t.title, found));
+    if (t.fee.kind !== 'none') {
+      all.push(
+        twoFeeLines(t.title, t.fee.label),
+        unreadableFee(t.title, t.fee.label, cell, t.amount.example),
+      );
+    }
   }
   return all;
 }
