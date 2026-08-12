@@ -65,6 +65,8 @@ export interface Transaction {
   description: string;
   mcc?: number;
   category: string;
+  /** true — the category above was set by hand and no recompute will change it */
+  categoryManual?: boolean;
   /** transfer between your own accounts — neither income nor expense */
   transfer?: boolean;
   /** the user's manual flag; null — decided by auto-detection */

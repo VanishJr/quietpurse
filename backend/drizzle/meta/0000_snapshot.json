@@ -1,5 +1,5 @@
 {
-  "id": "26d41379-7878-43a6-87a7-0f07a33d6812",
+  "id": "084d3b8f-3bb0-4f6b-9799-3761f28df591",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1465,6 +1465,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'other'"
+        },
+        "category_manual": {
+          "name": "category_manual",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "transfer": {
           "name": "transfer",

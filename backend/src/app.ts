@@ -10,7 +10,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { ensureWorkspace, getAuth } from './auth';
-import { CATEGORIES } from './categorizer';
+import { CATEGORIES, type Category } from './categorizer';
 import { reclassifyAll } from './classify';
 import { config } from './config';
 import {
@@ -62,6 +62,7 @@ import {
   listTransactions,
   listTransferRules,
   setBudget,
+  setCategoryOverride,
   setIncomeSourceOverride,
   setOneOff,
   setRecurringIgnored,
@@ -222,6 +223,13 @@ app.use(withWorkspace(express.json({ limit: '25mb' })));
 
 const q = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
+
+/**
+ * The narrowing half of the check `POST /api/category-rules` and `PUT /api/budgets`
+ * already make: `CATEGORIES.includes(v)` answers a boolean and leaves the value a
+ * string, which is no use to a writer that takes a Category.
+ */
+const isCategory = (v: unknown): v is Category => (CATEGORIES as readonly unknown[]).includes(v);
 
 // Open endpoint: also tells the web client whether registration needs an invite
 // code, so the sign-up form can ask for one (see AuthScreen).
@@ -486,6 +494,25 @@ app.patch('/api/transactions/:id/transfer', async (req, res) => {
     return;
   }
   const tx = await setTransferOverride(req.params.id, value);
+  if (!tx) {
+    res.status(404).json({ error: 'transaction not found' });
+    return;
+  }
+  res.json(tx);
+});
+
+/**
+ * The category of this one transaction, and of no other: null hands the row back to
+ * auto-detection and is the only thing that ever clears the mark. No reclassifyAll -
+ * nothing derived reads the manual category, and a manual mark is not a rule.
+ */
+app.patch('/api/transactions/:id/category', async (req, res) => {
+  const category = (req.body as { category?: unknown }).category;
+  if (category !== null && !isCategory(category)) {
+    res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
+    return;
+  }
+  const tx = await setCategoryOverride(req.params.id, category);
   if (!tx) {
     res.status(404).json({ error: 'transaction not found' });
     return;
@@ -926,7 +953,7 @@ app.get('/api/category-rules', async (_req, res) => {
   const rules = await listCategoryRules();
   res.json(
     await Promise.all(
-      rules.map(async (r) => ({ ...r, matches: await countCategoryRuleMatches(r.pattern) })),
+      rules.map(async (r) => ({ ...r, ...(await countCategoryRuleMatches(r.pattern)) })),
     ),
   );
 });
@@ -957,7 +984,7 @@ app.post('/api/category-rules', async (req, res) => {
   }
   const rule = await addCategoryRule(pattern, category);
   await reclassifyAll();
-  res.json({ rule, matches: await countCategoryRuleMatches(rule.pattern) });
+  res.json({ rule, ...(await countCategoryRuleMatches(rule.pattern)) });
 });
 
 app.delete('/api/category-rules/:id', async (req, res) => {

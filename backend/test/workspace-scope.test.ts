@@ -32,6 +32,7 @@ import {
   resolveUploadAccount,
   runWithWorkspace,
   seedDefaults,
+  setCategoryOverride,
   setWorkspaceFallback,
   stageImport,
   summaryByCategory,
@@ -53,6 +54,12 @@ describe('workspace scoping', () => {
       // workspace clause matches whatever row holds that id, and no other test
       // in the suite would notice
       await expect(recordImportDocument('scope-import', 1)).rejects.toThrow(
+        /no workspace context/,
+      );
+      // an annotation write, which is the same shape and worse to lose: the id comes
+      // off a list the caller was handed, and unscoped it would write one workspace's
+      // correction onto whichever row anywhere on the server carries that id
+      await expect(setCategoryOverride('scope-transaction', 'food')).rejects.toThrow(
         /no workspace context/,
       );
       // and the other half of that pointer: clearing it unscoped would land on
