@@ -1,7 +1,7 @@
 /**
  * Where the data came from. 'upload' is a statement the user brought in, in any
  * format, and it is the only value anything writes: the direct bank integrations
- * were deleted (ROADMAP 5.4). 'monobank' and 'enablebanking' stay in the union
+ * were deleted. 'monobank' and 'enablebanking' stay in the union
  * because rows carrying them exist — in databases that ran those integrations and
  * in every backup taken since — and narrowing it would make the compiler assert
  * something false about them.
@@ -23,13 +23,6 @@ export interface Account {
   hidden?: boolean;
 }
 
-/**
- * A "transactions like this are transfers between my own accounts" rule:
- * description + account. Applied to every past and future transaction on each
- * recompute. Needed where pair matching can't help: an outgoing "Sent from N26",
- * say, whose other leg isn't in the database (the money went to a bank that isn't
- * connected).
- */
 export interface TransferRule {
   id: number;
   description: string;
@@ -46,7 +39,6 @@ export type IncomeSource = string;
 /** Kind of source: own = your own earnings, external = help from outside. */
 export type IncomeSourceKind = 'own' | 'external';
 
-/** Income source definition (the income_sources table). */
 export interface IncomeSourceDef {
   id: string;
   label: string;
@@ -83,7 +75,6 @@ export interface Transaction {
   baseAmount?: number;
   /** income source (income only) */
   incomeSource?: IncomeSource;
-  /** true = the income source was set manually */
   incomeSourceManual?: boolean;
   /** recurring payment (rent, subscription) — detected automatically */
   recurring?: boolean;
@@ -105,7 +96,7 @@ export interface Transaction {
  * dedupKey is a source's own stable reference to the operation. No parser supplies
  * one today — an uploaded statement carries no such reference, so every key is
  * computed by insertTransactions — and the field is where a format that does carry
- * one plugs in (ROADMAP 5.2 names CAMT.053 and MT940).
+ * one plugs in.
  *
  * fee is required here and optional on Transaction, and that asymmetry is the point:
  * a parser that read a fee and a data layer that dropped it would differ only in the
@@ -131,7 +122,6 @@ export interface MonthTotals {
   /** YYYY-MM */
   month: string;
   expense: number;
-  /** the share of spending flagged as one-off */
   expenseOneOff: number;
   income: number;
   /** income from your own sources (kind = own) */
@@ -168,7 +158,6 @@ export interface SummaryTotals {
   income: number;
 }
 
-/** Income by source: the id, its label and kind from income_sources, and the total. */
 export interface IncomeSourceTotal {
   source: string;
   label: string;
@@ -190,11 +179,8 @@ export interface Summary {
   to: string;
   baseCurrency: string;
   totals: SummaryTotals;
-  /** spending by category (net: refunds subtracted) */
   byCategory: CategorySummary[];
-  /** income by category */
   incomeByCategory: CategorySummary[];
-  /** income by source (id + label + kind from income_sources) */
   incomeBySource: IncomeSourceTotal[];
 }
 

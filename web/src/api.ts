@@ -37,7 +37,6 @@ function detectBaseUrl(): string {
 
 export const API_BASE = detectBaseUrl();
 
-/** Human-readable API address for the "API: …" hint in the UI. */
 export const apiLabel = (): string => API_BASE || `${window.location.origin} (proxy)`;
 
 /**
@@ -69,10 +68,9 @@ export function onUnauthorized(fn: () => void): () => void {
 const MAX_ERROR_CHARS = 500;
 
 /**
- * A proxy's error page is unbounded and is not written for a person to read.
- * Exported for the one test that has to know it: the auth classifier reads a
- * message this bound has already cut, so a refusal longer than it is classified
- * on a truncated string.
+ * A proxy's error page is unbounded and is not written for a person to read. The auth
+ * classifier reads a message this bound has already cut, so a refusal longer than it is
+ * classified on a truncated string.
  */
 export const MAX_RAW_BODY_CHARS = 200;
 
@@ -146,7 +144,6 @@ async function scoped<T extends { scope: 'workspace' | 'account' }>(
     );
   }
   if (accountId !== null) {
-    // one cause, one sentence: a message listing every way this can happen names none
     const answered = (body as { accountId?: string }).accountId;
     if (answered !== accountId) {
       throw new Error(
@@ -199,8 +196,6 @@ const json = (method: string, body?: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
-
-// ---------- auth (better-auth, /api/auth/*) ----------
 
 export interface SessionUser {
   id: string;
@@ -530,7 +525,6 @@ export const api = {
   renameAccount: (id: string, name: string) =>
     request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { name })),
 
-  /** Remove an account from the app or bring it back. */
   setAccountHidden: (id: string, hidden: boolean) =>
     request<Account>(`/api/accounts/${encodeURIComponent(id)}`, json('PATCH', { hidden })),
 
@@ -574,7 +568,6 @@ export const api = {
   summary: (from: string, to: string) =>
     workspaceBody<Summary>(`/api/summary?from=${from}&to=${to}`, 'summary'),
 
-  /** Spending/income by month — the "over the year" chart. */
   months: (from: string, to: string) =>
     workspaceBody<MonthlySummary>(`/api/summary/months?from=${from}&to=${to}`, 'monthly summary'),
 
@@ -616,21 +609,17 @@ export const api = {
       json('PATCH', { oneOff }),
     ),
 
-  /** Recurring payments over the last 12 months. */
   recurring: () => request<RecurringSummary>('/api/recurring'),
 
-  /** Hide a group of recurring payments from the Overview or bring it back. */
   setRecurringIgnored: (description: string, ignored: boolean) =>
     request<RecurringSummary>('/api/recurring/ignore', json('POST', { description, ignored })),
 
-  /** The headline metric: how much you need to earn. */
   independence: () => request<Independence>('/api/independence'),
 
   settings: () => request<Settings>('/api/settings'),
   updateSettings: (patch: Partial<Settings>) =>
     request<Settings>('/api/settings', json('PATCH', patch)),
 
-  /** Baseline minimum line items: what "living on your own" adds up to. */
   baseline: () => request<BaselineResponse>('/api/baseline'),
 
   /** monthly = null deletes the line item. */
@@ -712,14 +701,14 @@ export const api = {
 
   /**
    * The import history: one account's when an id is given, the workspace's otherwise.
-   * The page is still capped at a hundred, and `totals` counts the whole filtered
-   * set — so how many are not listed is something the caller reads rather than guesses.
+   * The page is capped, and `totals` counts the whole filtered set - so how many are not
+   * listed is something the caller reads rather than guesses.
    *
    * An id of '' is SENT rather than dropped, against the URLSearchParams idiom
    * `transactions` uses above: the server refuses it, and a caller writing
-   * `?accountId=${account?.id ?? ''}` has to meet that refusal. Dropping it here
-   * would answer with every import in the workspace and let a panel print them as
-   * one account's.
+   * `?accountId=${account?.id ?? ''}` has to meet that refusal. Dropping it here would
+   * answer with every import in the workspace and let a panel print them as one
+   * account's.
    */
   imports: (accountId?: string) =>
     request<ImportList>(
@@ -739,10 +728,9 @@ export const api = {
       json('DELETE'),
     ),
 
-  /** The stored statement itself. */
   importDocument: (id: string) => download(`/api/imports/${encodeURIComponent(id)}/document`),
 
-  /** bytesRemoved false is not a failure: most rows never had a document (010 D5). */
+  /** bytesRemoved false is not a failure: most rows never had a document. */
   deleteImportDocument: (id: string) =>
     request<{ deleted: boolean; importId: string; bytesRemoved: boolean }>(
       `/api/imports/${encodeURIComponent(id)}/document`,

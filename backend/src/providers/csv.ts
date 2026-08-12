@@ -1,20 +1,6 @@
-/**
- * CSV frontend: the text side of a statement - decoding, RFC 4180 parsing, the
- * column mapping and the presets. The rows go on to the shared seam and from there
- * through providers/statement.ts, which owns the file, the import record and the
- * pipeline.
- *
- * Everything below works on strings and knows nothing about how the bytes arrived.
- */
 
-/**
- * Bumped whenever a change here would parse an existing file differently. Nothing
- * reads it yet; it is recorded per import so that re-parsing can be targeted
- * later ("re-run everything below CSV parser v2").
- */
+/** Bumped whenever a change here would parse an existing file differently. */
 export const CSV_PARSER_VERSION = 3;
-
-// ---------- decoding ----------
 
 /**
  * The uploaded bytes as text. Two decoders and no charset detection: a BOM is
@@ -34,8 +20,6 @@ export function decodeCsv(bytes: Buffer): string {
     return new TextDecoder('windows-1252').decode(bytes);
   }
 }
-
-// ---------- CSV parsing ----------
 
 /** RFC 4180-compatible parsing: quotes, "" inside quotes, CRLF. */
 export function parseCsv(text: string, delimiter: string): string[][] {
@@ -80,7 +64,6 @@ export function parseCsv(text: string, delimiter: string): string[][] {
   return rows;
 }
 
-/** Delimiter picked from the header row: whichever yields more columns. */
 export function detectDelimiter(text: string): string {
   const header = text.replace(/^﻿/, '').split(/\r?\n/, 1)[0] ?? '';
   const candidates = [';', ',', '\t'];
@@ -95,8 +78,6 @@ export function detectDelimiter(text: string): string {
   }
   return best;
 }
-
-// ---------- column mapping ----------
 
 /**
  * Mapping: column names from the file's header (case-insensitive).
@@ -130,7 +111,7 @@ export interface CsvMapping {
 type NonEmpty<T> = readonly [T, ...T[]];
 
 /**
- * What a preset is, now that it is not a CsvMapping (ROADMAP 5.2): a bank ships one
+ * What a preset is, now that it is not a CsvMapping: a bank ships one
  * export in every language its app offers, so each column is a list of accepted names
  * and onlyWhen a set of accepted values, and the header decides which of them a given
  * file uses. Candidate order breaks a tie, so a more specific name goes first.
@@ -183,10 +164,6 @@ export interface CsvPresetMapping {
   readonly onlyWhen?: { readonly column: NonEmpty<string>; readonly equals: NonEmpty<string> };
 }
 
-/**
- * Presets for specific banks. generic picks up the usual column names
- * (date/amount/description and their German/Ukrainian variants) - see below.
- */
 export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapping }> = {
   sparkasse: {
     title: 'Sparkasse (CAMT CSV)',
@@ -223,15 +200,13 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapp
       amount: ['Amount', 'Сумма'],
       description: [['Description', 'Описание']],
       currency: ['Currency', 'Валюта'],
-      // stated on top of Amount, never inside it: measured over a real July export,
-      // Сумма − Комиссия reproduces both halves the PDF of the same month prints
-      // about itself (−1742.18 out, +1953.40 in) to the cent, where Сумма alone is
-      // short by exactly the fees on the outgoing side
+      // stated on top of Amount, never inside it: the amount less the fee is what
+      // reproduces both halves the PDF of the same month prints about itself, where the
+      // amount alone is short by exactly the fees on the outgoing side
       fee: ['Fee', 'Комиссия'],
-      // the last column of ten in the measured export, and the series column beside
-      // it is not a convenience: one file states two running balances under one
-      // column, and a check that inferred the split from the numbers could not tell
-      // a second product from a lost row (row 54, R2)
+      // the series column beside it is not a convenience: one file states two running
+      // balances under one column, and a check that inferred the split from the numbers
+      // could not tell a second product from a lost row
       balance: { column: ['Balance', 'Остаток средств'], series: ['Product', 'Продукт'] },
       dateFormat: 'iso',
       decimal: '.',
@@ -258,7 +233,7 @@ export const fold = (s: string): string => s.trim().toLowerCase();
  * Whole-cell equality, never a prefix or a substring: "Дата начала" is when a Revolut
  * transaction *started* and sits two columns from "Дата выполнения", so a matcher that
  * settles for a prefix imports dates that can be days off - and the date is in the
- * dedup key (ROADMAP 4.2), so re-importing after the mistake is found duplicates the
+ * dedup key, so re-importing after the mistake is found duplicates the
  * statement rather than recognising it.
  *
  * The candidate list breaks a tie, not the header's order: the list's author knows
@@ -304,8 +279,6 @@ export function genericMapping(header: string[]): CsvMapping | null {
   if (!date || !amount || !description) return null;
   return { date, amount, description, currency: matchColumn(header, GENERIC_CANDIDATES.currency) };
 }
-
-// ---------- value parsing ----------
 
 /** "1.234,56", "1,234.56", "-1140,57" -> a number. null = not a number. */
 export function parseAmount(raw: string, decimal: CsvMapping['decimal'] = 'auto'): number | null {
