@@ -125,9 +125,31 @@ everywhere.
 
 ## Conventions
 
-- **Comments are sparse.** The existing density is low and deliberate — comments explain *why* a
-  non-obvious decision was made (see the header of `src/db/workspace.ts`), never what the code
-  already says. Do not annotate obvious lines.
-- Match the style, naming and idiom of the file being edited.
+- **A comment may not state a fact that something else could check.** Nothing tests prose, so a
+  comment carrying a number, a count, a measurement, a reachability claim or an inventory of what
+  exists is believed long after it stopped being true — comments in this tree have been found
+  measurably false, and in the densest files they outweighed the code. If the fact is worth
+  holding, **assert it in a test and let the comment name the reason instead**: the refusal bound
+  in `pdf.test.ts` survived every rewrite around it because an assertion sits beside the sentence,
+  where `csv.ts`'s "nothing reads it yet" was false the moment something read it and nothing said
+  so.
+  - **Delete** on sight: a number, count, date, percentage, byte size, line number or file
+    inventory; a row number, task id, review round or decision reference; what a test does, what
+    a fixture holds, what a past run produced; anything the line below already says; a section
+    banner or divider.
+  - **Keep** only what cannot be recovered by reading the code *and* would break behaviour if got
+    wrong: **why something is ABSENT** — a missing clause, filter or check that looks like an
+    oversight and is deliberate, which is the most valuable kind here because absence has no
+    syntax; which of two compiling readings is the intended one; a rejected alternative a reader
+    will otherwise re-attempt, stating the reason and not the story; an ordering or coupling
+    constraint between distant parts of the code; a unit, sign or rounding convention the type
+    does not carry.
+  - There should be **far fewer keeps than feels right.** If the keep list for one file runs past
+    a dozen entries, the rule was applied too generously. A loud failure does not justify a
+    comment — the bar is *silent* breakage. Where a comment mixes a kept reason with a checkable
+    claim, rewrite it to the reason alone; do not keep the number "for context".
+  - `src/db/workspace.ts`'s header is the shape to copy.
+- Match the style, naming and idiom of the file being edited — **but never its comment volume.**
+  Matching a dense neighbour is how the density spread.
 - **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
   human commits.
