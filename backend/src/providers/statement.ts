@@ -1,22 +1,14 @@
 /**
- * The one ingestion surface (ROADMAP 5.1): POST /api/imports hands the raw bytes
- * here, this file decides what they are, picks a parser, and stages the rows behind
- * a summary the user has to accept. Confirm is what runs the rest of the pipeline -
- * insertTransactions -> reclassifyAll -> backfillBaseAmounts - and it lives in the
- * data layer (confirmImport, db/index.ts) because it is one database transaction.
- * The classifier doesn't care where a transaction came from.
+ * The one ingestion surface: POST /api/imports hands the raw bytes here, this file
+ * decides what they are, picks a parser, and stages the rows behind a summary the user
+ * has to accept. Confirm is what runs the rest of the pipeline - insertTransactions ->
+ * reclassifyAll -> backfillBaseAmounts - and it lives in the data layer
+ * (confirmImport, db/index.ts) because it is one database transaction.
  *
- * This is the only way data enters the product: an upload is a push, so nothing
- * here polls or schedules (ROADMAP 5.4 deleted the direct bank integrations).
- *
- * Deduplication: a statement row carries no bank reference, so this parser supplies
- * no dedupKey and insertTransactions computes one from the row's stable fields. That
- * requires the whole file to be inserted in one call, which it is - a statement
- * covers whole days, so every group of identical rows arrives complete.
- *
- * Ahead of all that sits the file itself: every import is recorded in `imports`,
- * and a file already imported into this workspace is recognised by the hash of its
- * bytes and never parsed a second time (ROADMAP 4.3, 4.4).
+ * Deduplication: a statement row carries no bank reference, so this parser supplies no
+ * dedupKey and insertTransactions computes one from the row's stable fields. That
+ * requires the whole file to be inserted in one call, which it is - a statement covers
+ * whole days, so every group of identical rows arrives complete.
  */
 import crypto from 'crypto';
 import { categorize } from '../categorizer';
@@ -62,15 +54,6 @@ const PARSER_VERSION: Record<ImportSourceType, number> = {
 
 const MB = 1024 * 1024;
 
-/**
- * What a format may weigh, and what it is told when it does not fit. Total over
- * ImportSourceType rather than a chain of ifs: a loader that holds the whole file
- * in memory and is added beside one that does gets no cap and nothing says so. A
- * format with no cap of its own has to say that here.
- *
- * The sentence travels with the number so the limit enforced and the limit printed
- * cannot come apart.
- */
 interface SizeCap {
   max: number;
   tooLarge: (mb: number) => string;
@@ -93,13 +76,6 @@ const SIZE_CAP: Record<ImportSourceType, SizeCap | null> = {
   },
 };
 
-/**
- * What this importer reads, named the way the person holding the file would name it.
- * Total over ImportSourceType for SIZE_CAP's reason and one of its own: the two
- * refusals in `sniff` described a two-format world for as long as PDF has been
- * accepted, and a fourth format added without a name here is a TS2741 rather than a
- * sentence that has quietly stopped being true.
- */
 const FORMAT_NAME: Record<ImportSourceType, string> = {
   csv: 'CSV',
   xlsx: 'Excel (.xlsx)',
@@ -112,84 +88,44 @@ const FORMATS = `${FORMAT_NAMES.slice(0, -1).join(', ')} or ${FORMAT_NAMES[FORMA
 
 /**
  * And a page cap as well, because the byte cap does not bound the page count even
- * loosely: 500 pages of dense transactions is 3.6 MB before compression, and
- * compressed streams are the point of the format. A yearly retail statement runs
- * 40-80 pages, so this is 2-3x the plausible maximum for one document; above it the
- * file is almost certainly not one statement. Enforced inside readPdf and not here,
- * because numPages needs the document open - see the band comment below.
+ * loosely: compressed streams are the point of the format, so a plausible statement
+ * fits in a few megabytes however many pages it has. Enforced inside readPdf and not
+ * here, because numPages needs the document open - see the band comment below.
  */
 const MAX_PDF_PAGES = 200;
 
-/**
- * How many bytes of a text file are searched for the NUL that says it is not one.
- *
- * Exported for the test, like readSheet and CURRENCY_CODE_MAX and for the same
- * reason: a container fixture that carries no NUL inside this window is classified
- * the same whether the branch above the scan exists or not, so the case pinning that
- * order has to state the precondition and has to compose it from this number.
- */
+/** How far into a text file the NUL that says it is not one is searched for. */
 export const NUL_SCAN_BYTES = 8192;
 
 /** The five bytes pdfjs itself searches for (PDF_HEADER_SIGNATURE), dash included. */
 const PDF_HEADER = '%PDF-';
 
-/** Notices and row problems share this budget - the client renders the first three. */
+/** Notices and row problems share this budget; the client renders only the first few. */
 const MAX_PROBLEMS = 5;
 
-/**
- * What the status column's name may spend inside its quotes, and what the whole list
- * of refused values may. Budgets, not facts about status columns: noRowsParsed's head
- * costs 40 at MAX_DATA_ROWS skipped, the reason's fixed prose 55, and 40 + 55 + 24 +
- * 72 = 191 against the 199 that xlsx.ts's NOTICE_MAX is derived from. Raising either
- * for a longer status value pushes past that number without anything saying so, and
- * the unused-sheet notice then starts falling off workbooks with no status column at
- * all. The list's own last resort - a count of the values that did not fit - is inside
- * the second bound, so a file whose status column is really a description costs the
- * same as one with two values.
- */
 const STATUS_QUOTE_MAX = 24;
 const STATUS_LIST_MAX = 72;
 
-/**
- * And what an unreadable fee cell may spend inside its quotes. The same budget as
- * above and derived the same way: feeRefused's fixed prose costs 127 at a row label
- * of Excel's own ceiling, noRowsParsed's head 40 at MAX_DATA_ROWS skipped, and
- * 127 + 40 + 24 = 191 against the 199 that xlsx.ts's NOTICE_MAX is subtracted from.
- * A fee cell wide enough to need more than this is not a fee, and the mark bounded()
- * leaves says the rest is there.
- */
 const FEE_QUOTE_MAX = 24;
 
-/**
- * And what a series name may spend inside its quotes, derived the same way as the
- * two above. The refusal it sits in is not part of noRowsParsed - it is a throw from
- * reconcile, so xlsx.ts's NOTICE_MAX is untouched by it - and it is measured against
- * ERROR_DETAIL_MAX directly in csv.test.ts's budget block. A product name wider than
- * this is not a product name, and bounded() leaves the mark that says so.
- */
 const SERIES_QUOTE_MAX = 24;
 
 /**
  * What one column name may spend in the summary's readAs. A RENDER bound, and the one
  * number in this band that is NOT part of the ERROR_DETAIL_MAX derivation the three
  * above share: readAs is a field of the summary, never a problem and never an
- * error_detail, so nothing it carries is measured by error-budget.test.ts.
- *
- * 40 because the widest column name any preset in this tree resolves is
- * "Beguenstigter/Zahlungspflichtiger" at 33 (csv.ts), so every name this importer can
- * name today survives whole with headroom, and a header cell wider than this is a
- * paragraph rather than a column - bounded() leaves the mark that says so.
+ * error_detail.
  *
  * The NUMBER of description names is deliberately not bounded. A truncated list of
- * column names reads exactly like a complete one, and a "+N more" tail is a fifth
- * state on a type whose whole point is that two states are never spelled the same way
- * (row 6a, the optional-fields ruling). The per-name bound is the one that is safe.
+ * column names reads exactly like a complete one, and a "+N more" tail is a fifth state
+ * on a type whose whole point is that two states are never spelled the same way. The
+ * per-name bound is the one that is safe.
  */
 const COLUMN_NAME_MAX = 40;
 
 /**
  * Where an upload's rows go: an account the caller already has. Creating one is
- * POST /api/accounts and nothing else (row 26b).
+ * POST /api/accounts and nothing else.
  *
  * The absent keys stay, carried as optional `never`. They no longer hold
  * exclusivity - there is nothing left to be exclusive with - they hold `src/`:
@@ -201,31 +137,13 @@ const COLUMN_NAME_MAX = 40;
 export type StatementDestination = { accountId: string; accountName?: never; currency?: never };
 
 export type StatementImportRequest = StatementDestination & {
-  /** a preset name from CSV_PRESETS; generic - auto-detect the columns */
   preset?: string;
-  /** a custom mapping (overrides the preset) */
   mapping?: Partial<CsvMapping>;
-  /** the uploaded file, exactly as it arrived */
   bytes: Buffer;
-  /** the uploaded file's name, if the caller has one */
   originalFilename?: string;
-  /** the signed-in user (recorded on the import, not a foreign key) */
   uploadedBy?: string;
 };
 
-/**
- * The two destination refusals, exported so a test asserts the sentence rather than
- * a fragment of it: narrowing one to "no such account" would otherwise keep a test
- * matching on /no such account/ green while the way out disappeared from the screen.
- *
- * Neither quotes the account: the caller supplied an id, so there is no case
- * confusion for a stored name to resolve, and a stored name is not bounded (a
- * restored backup can carry one past ACCOUNT_NAME_MAX). They speak the action the
- * product has - "removed", restore - because naming one it does not have is a dead
- * end. They name no screen: a constant here cannot know what the tabs are called,
- * and the tab labelled "Account" is the password form, not the list that restores
- * one.
- */
 export const ACCOUNT_NOT_FOUND =
   'no such account in this workspace - pick one of your accounts, or create a new one';
 export const ACCOUNT_REMOVED =
@@ -233,73 +151,32 @@ export const ACCOUNT_REMOVED =
 
 declare const checked: unique symbol;
 
-/**
- * The file's net movement per currency, and the balances it was checked against.
- * Both are branded, and the brand is the point rather than decoration: neither type
- * can be produced outside `reconcile` without writing the assertion that says so,
- * and `reconcile` is also the only thing that throws on a statement whose rows do
- * not add up. `ImportSummary.totals` is required, so deleting the reconcile call
- * leaves nothing able to fill it and `tsc` says so - the gate cannot be dropped by
- * an edit that still compiles, only by one that spells the cast out.
- *
- * That is why `totals` carries a brand despite not being about balances at all: it
- * is the required field, so it is the one that holds the call. Phantom, so the wire
- * shape does not move and web/src/types.ts mirrors plain objects.
- */
 export type CheckedTotals = readonly { currency: string; net: number }[] & {
   readonly [checked]: true;
 };
 
-/**
- * How many running balances a derived pair was summed from, and how many of those the
- * check could have failed on.
- *
- * Nested rather than a count beside an optional second count, for the reason
- * CsvPresetMapping.balance is nested: a pair carries both numbers or is not a derived
- * pair at all, so "we summed N and checked M" is a type rather than a convention two
- * blocks have to keep. A half-filled one does not compile.
- *
- * `checked` counts the runs of more than one link. A run of one link has no junction -
- * no balance value the file had to state as one row's post and the next one's pre - so
- * there is nothing for the check to compare, and runsAsOne cannot return `broken` for
- * it whatever the row says: one link with pre != post is a path always, and pre == post
- * is the circuit exit. On the owner's real July export that is 1 of 2, and the
- * unchecked one supplies 315.00 of the 387.40 opening and 445.00 of the 579.85 closing.
- */
 export type SeriesCounts = { summed: number; checked: number };
 
 export type CheckedBalances = {
   opening: number;
   closing: number;
   currency: string;
-  /**
-   * Which running balances the pair was summed from: how many, and how many of those
-   * were checked by anything. Absent means the document printed the pair itself, which
-   * is the PDF path and can never be a count: there is one balance box and it is not a
-   * series. So the field says two things at once and both are facts about where the
-   * numbers came from - the client needs the second to know which sentence is true of
-   * them.
-   */
   series?: SeriesCounts;
 } & { readonly [checked]: true };
 
 /**
  * Why no opening/closing pair is shown for a file that DOES state a running balance.
  * Absent together with `balances` means the format states none, and the two must not
- * spell the same (row 6a, Ruling 1): after this row a third state exists - a preset
+ * spell the same: after this row a third state exists - a preset
  * declared a balance column, it resolved, and the check could not be completed.
  *
  * A slug over the wire with the sentence in the client dictionary, which is this
  * codebase's own idiom for a value a screen renders as prose.
  */
 export type BalancesNotShown =
-  /** the status filter dropped rows the balance column also covers */
   | 'rows-outside-the-balance'
-  /** an imported row states no balance, or one this parser could not read */
   | 'rows-without-a-balance'
-  /** the series ends where it began: unbroken, but with no endpoints to name */
   | 'balance-closes-on-itself'
-  /** every series reconciled, and one pair cannot carry two currencies */
   | 'more-than-one-currency';
 
 /** date, amount and description: the three slots every reader fills, and no others. */
@@ -309,11 +186,6 @@ export interface ReadColumns {
   description: string[];
 }
 
-/**
- * What a sheet reader can answer. resolveColumns produces exactly this and nothing
- * else, which is the point of splitting it out of ReadAs below: a sheet parse cannot
- * claim a PDF layout and a PDF cannot acquire columns by an edit that compiles.
- */
 export type SheetReadAs =
   | { kind: 'preset'; preset: string; title: string; columns: ReadColumns }
   | { kind: 'auto-detected'; columns: ReadColumns }
@@ -325,30 +197,13 @@ export type ReadAs = SheetReadAs | { kind: 'pdf-template'; title: string };
 const check = <T>(value: T): T & { readonly [checked]: true } =>
   value as T & { readonly [checked]: true };
 
-/**
- * What was read, for the user to accept or reject. Nothing here is in the database
- * yet: the rows are staged (ROADMAP 5.3) and become data only on Confirm.
- */
 export interface ImportSummary {
-  /** the import awaiting confirmation - Confirm and Discard address it */
   importId: string;
-  /**
-   * Where the rows will go: the resolved id and the account's stored name, read off
-   * the account itself. The id is recorded on the import and the confirm reads it
-   * back, so this is where they land and not a guess at it.
-   *
-   * The name is what the import was uploaded as: a rename between here and Confirm
-   * moves the account without moving this.
-   */
   accountId: string;
   accountName: string;
-  /** data rows in the file */
   total: number;
-  /** rows that became staged transactions */
   accepted: number;
-  /** rows the parser could not use */
   skipped: number;
-  /** the first parsing errors, plus any notice about the file itself */
   problems: string[];
   /**
    * Of `accepted`, how many are not already in the database - the number the user
@@ -357,66 +212,21 @@ export interface ImportSummary {
    */
   newRows: number;
   alreadyPresent: number;
-  /** earliest and latest row date, YYYY-MM-DD */
   from: string;
   to: string;
-  /** net total per currency: a file with a currency column can carry more than one */
   totals: CheckedTotals;
-  /**
-   * Which reader filled the date, amount and description columns, and what it filled
-   * them from - the one thing the counts cannot say, and the reason row 20's "every
-   * headline number the row promised, and not one correct reason" was invisible.
-   *
-   * That is the whole of what it answers, and the narrowness is deliberate: a request
-   * can also supply dateFormat, decimal, delimiter and onlyWhen, and those decide how
-   * the amounts parse and which rows are dropped. None of them is reported here, so a
-   * line that would report one still has to be written.
-   */
   readAs: ReadAs;
-  /**
-   * The statement's own opening and closing balance, which these rows were checked
-   * to add up between - printed by the document on the PDF path, derived from the
-   * running balance the file prints per row on the sheet path. Absent means either
-   * the format states none, or it does and `balancesNotShown` says why no pair could
-   * be derived. It never means a check that failed: a break throws, so no summary is
-   * built for one at all.
-   */
   balances?: CheckedBalances;
   /** set only when the file states a running balance and no pair came out of it */
   balancesNotShown?: BalancesNotShown;
-  /**
-   * An earlier upload of these same bytes was still awaiting confirmation and has
-   * been discarded to make room for this one. A field rather than a sentence: the
-   * REST API is the contract iOS and Android read too, and an optional field is
-   * something a test can assert the absence of.
-   */
   supersededImportId?: string;
 }
 
-/**
- * Nothing is imported by an upload any more. Either the file is one this workspace
- * already committed - which is not something to confirm, and must not render as an
- * empty summary - or it is parsed, staged, and waiting for the user.
- */
 export type StatementImportResult =
   | {
       outcome: 'duplicate';
-      /** the earlier import that already holds the file */
       importId: string;
-      /**
-       * accountIds[0], or the account holding the requested name when that import
-       * owns no rows. Empty when neither exists: the earlier import wrote nothing of
-       * its own and no account answers to the name typed here. On the id arm no name
-       * is looked up - the requested id says nothing about where the earlier import
-       * put its rows - so empty means only that it owns none. Never a fresh id -
-       * nothing was imported, so there is no account for one to mean.
-       */
       accountId: string;
-      /**
-       * Where the earlier import's rows are, which need not be the account this
-       * upload asked for. Empty means it owns none because an even earlier import
-       * had already written every one of them - not that nothing was imported.
-       */
       accountIds: string[];
       uploadedAt: string;
       skipped: number;
@@ -432,7 +242,7 @@ export type StatementImportResult =
  * It answers a type and nothing else, deliberately: a classifier with no bytes to
  * hand back cannot give a caller a buffer different from the one it was passed, so
  * the bytes hashed, the bytes stored and the bytes parsed stay one buffer even for a
- * file whose document starts at an offset (row 33).
+ * file whose document starts at an offset.
  */
 export function sniff(bytes: Buffer): ImportSourceType {
   const starts = (...signature: number[]): boolean =>
@@ -462,24 +272,22 @@ export function sniff(bytes: Buffer): ImportSourceType {
       `this looks like XML or HTML, not a ${FORMATS} statement - CAMT.053 and MT940 are not supported yet`,
     );
   }
-  // A bank's own export can be a signed container: the whole statement inside a CMS
-  // envelope, `%PDF-` at byte 71 rather than at 0 (ROADMAP row 33). Answered on the
-  // header being FOUND and never on the lead-in - "it starts like an ASN.1 SEQUENCE"
-  // is not evidence a statement is in there. 0x30 is also ASCII `0`, so a CSV whose
-  // first cell is 01.07.2026 reaches this line; the second byte is what parts them,
-  // and only because 0x80-0x84 are UTF-8 continuation bytes, which cannot follow an
-  // ASCII digit in a text file. Short form (<= 0x7f) says the whole value is at most
-  // 127 bytes and cannot hold a document; 0x80 is BER indefinite length, which a
-  // signer that streams emits. The two real containers carry 0x83, and the same bank's
-  // statement under 64 KiB would carry 0x82 - so a rule narrowed to 0x83 passes every
-  // test written from the documents in hand and refuses the same bank's next one.
-  //
-  // Searched whole rather than within a window: readPdf gets this same buffer, and
-  // pdfjs finds the header at any offset - past its own 1024-byte find() it
-  // reconstructs the xref, and a header at 262 144 was measured reaching its template
-  // - so a window here would make the classifier stricter than the reader it feeds
-  // and refuse a file this product can read. Only a file that already matched the
-  // lead-in gets this far, so no CSV pays for the search.
+      // A bank's own export can be a signed container: the whole statement inside a CMS
+      // envelope, with `%PDF-` at an offset rather than at 0. Answered on the header being
+      // FOUND and never on the lead-in - "it starts like an ASN.1 SEQUENCE" is not evidence
+      // a statement is in there. 0x30 is also ASCII `0`, so a CSV whose first cell is a
+      // dotted date reaches this line; the second byte is what parts them, and only because
+      // 0x80-0x84 are UTF-8 continuation bytes, which cannot follow an ASCII digit in a text
+      // file. Short form says the whole value is at most 127 bytes and cannot hold a
+      // document; 0x80 is BER indefinite length, which a signer that streams emits. A rule
+      // narrowed to the one length byte the documents in hand happen to carry would pass
+      // every test written from them and refuse the same bank's next file.
+      //
+      // Searched whole rather than within a window: readPdf gets this same buffer, and
+      // pdfjs finds the header at any offset - past its own find() window it reconstructs
+      // the xref - so a window here would make the classifier stricter than the reader it
+      // feeds and refuse a file this product can read. Only a file that already matched the
+      // lead-in gets this far, so no CSV pays for the search.
   if (bytes[0] === 0x30 && bytes[1] >= 0x80 && bytes[1] <= 0x84 && bytes.includes(PDF_HEADER)) {
     return 'pdf';
   }
@@ -495,7 +303,7 @@ export function sniff(bytes: Buffer): ImportSourceType {
  * Parses the statement and stages what it read. Nothing reaches `transactions`
  * here, and nothing on any screen moves until confirmImport runs.
  *
- * Order of operations (ROADMAP 5.1): hash and check before parsing, so a
+ * Order of operations: hash and check before parsing, so a
  * re-upload costs nothing; write the import row before touching anything else, so
  * a failure leaves a failed import rather than nothing at all. The import row is
  * deliberately NOT in a transaction with the parse - a rollback would take the
@@ -562,7 +370,7 @@ export async function importStatement(
     uploadedBy: req.uploadedBy,
   });
   try {
-    // The file itself, before the parse and inside the same catch (ROADMAP 4.5).
+    // The file itself, before the parse and inside the same catch.
     // Before, because the imports that FAILED are precisely the ones support needs
     // the input for - so a failed import keeps its document, and so does a `pending`
     // one left by a process that died between here and the parse.
@@ -572,7 +380,7 @@ export async function importStatement(
     // would then answer "already imported" on every retry, so the one artefact that
     // cannot be recovered later could never be captured for that file at all. The
     // throw lands in the catch below - a `failed` row with no transactions, and
-    // bytes that stay re-uploadable because only `committed` blocks (ROADMAP 4.3).
+    // bytes that stay re-uploadable because only `committed` blocks.
     await recordImportDocument(record.id, await putDocument(record.id, req.bytes));
     const parsed = await readSheet(req, sourceType, preset);
     // logged here rather than in the route because the route only sees the
@@ -584,7 +392,7 @@ export async function importStatement(
     // which layout read it is genuinely useful to someone about to confirm, and it
     // still does not go in `problems`: the client renders those under "N rows
     // couldn't be read", so "read as a Revolut statement" would land under a
-    // sentence saying it could not be (Ruling 4). What the layout DID reach the
+    // sentence saying it could not be. What the layout DID reach the
     // screen with is its balances, as a field of the summary and not a sentence.
     if (parsed.kind === 'pdf') logImport.info(`import ${record.id}: read as ${parsed.template}`);
     return await mapAndStore(req, parsed, account, record.id, fileHash);
@@ -607,27 +415,12 @@ async function uploadDestination(req: StatementImportRequest): Promise<StagedAcc
   return found.account;
 }
 
-/**
- * A preset that resolved, carrying its identity as well as its columns. `mapping` is
- * nested and must stay nested: CsvPresetMapping's date/amount/description are
- * required, so every call site that has not threaded `.mapping` through is a compile
- * error. Flattened into { key, title, ...mapping } this type would be structurally
- * assignable to CsvPresetMapping, a missed site would read `preset?.fee` as undefined,
- * and the Revolut fee would silently stop being subtracted (row 37a's defect, restored
- * by an edit that compiles).
- */
 interface NamedPreset {
   key: string;
   title: string;
   mapping: CsvPresetMapping;
 }
 
-/**
- * The preset the request named, or null for generic. It answers the preset's identity
- * as well as its mapping: the key is the slug a caller sends back in `preset=` and the
- * title is the string on the chip, and the summary names both (row 56). Dropping them
- * here is what made "which reader read this file" unrecoverable downstream.
- */
 function presetMapping(preset: string | undefined): NamedPreset | null {
   if (!preset || preset === 'generic') return null;
   // hasOwn and not CSV_PRESETS[preset]: the record is a plain object literal, so
@@ -639,20 +432,6 @@ function presetMapping(preset: string | undefined): NamedPreset | null {
   return { key: preset, ...known };
 }
 
-/**
- * What a frontend answered with, and what the mapper is to read it against. The
- * preset and the mapping travel with the sheet rather than being read off the
- * request a second time, because for one format they are not the request's to
- * decide - see the pdf arm below.
- *
- * A union and not one shape with optional fields: the balances are required on the
- * arm that has them and absent from the arms that cannot, so `reconcile` switching
- * on `kind` is total, and a csv sheet cannot acquire an optional balance field that
- * spells "no balances" and "the template lost the closing balance" the same way
- * (row 6a, Ruling 1).
- *
- * Exported for the test, like readSheet below and for the same reason.
- */
 export type ParsedFile =
   | {
       kind: 'sheet';
@@ -665,20 +444,12 @@ export type ParsedFile =
       sheet: Sheet;
       preset: null;
       mapping: Partial<CsvMapping>;
-      /** which template read it, for the log */
       template: string;
-      /** and how it names the layout in a sentence a person reads */
       title: string;
-      /** which cell of `sheet` carries a fee, and on which convention */
       fee: PdfFee;
       balances: StatementBalances;
     };
 
-/**
- * Exported for the test, like noRowsParsed below and for the same reason - the
- * `never` default is worth nothing unless something has watched it throw, and
- * nothing else can reach it. Not API surface anyone asked for.
- */
 export async function readSheet(
   req: StatementImportRequest,
   sourceType: ImportSourceType,
@@ -708,7 +479,7 @@ export async function readSheet(
       // A PDF's columns come from the template that matched, and from nothing the
       // request said. `preset` names header text and `mapping` names columns, and a
       // PDF has neither for them to name - so a chip the user may not remember
-      // picking must not decide whether their statement imports (Ruling 3).
+      // picking must not decide whether their statement imports.
       return {
         kind: 'pdf',
         sheet: parsed.sheet,
@@ -729,14 +500,6 @@ export async function readSheet(
 
 interface Columns {
   mapping: CsvMapping;
-  /**
-   * Which reader filled the slots below, answered here so that the indices and the
-   * statement of what produced them cannot come apart. One producer, and it is also
-   * the XLSX header scan's predicate: a candidate row the scan rejects is refused
-   * above this site, and the only kind that reaches it - an override naming all three
-   * slots - takes its names from `effective` rather than from the row, so even a
-   * descriptor that leaked could not differ from the header the scan settled on.
-   */
   readAs: SheetReadAs;
   dateCol: number;
   amountCol: number;
@@ -754,7 +517,6 @@ interface Columns {
 
 type Resolved = { ok: true; columns: Columns } | { ok: false; error: string };
 
-/** A slot no name filled, and everything that was tried for it. */
 interface Unresolved {
   slot: string;
   tried: readonly string[];
@@ -988,15 +750,6 @@ type StatedFeeCell = { ok: true; fee: StatedFee } | { ok: false; text: string };
 
 const NOT_STATED: StatedFeeCell = { ok: true, fee: { kind: 'not-stated' } };
 
-/**
- * Which cell of the row carries a fee and on which convention, for one file. Built
- * where the producer is known - the template for a PDF, the preset for a sheet - so
- * that no site between there and applyFee can pick the wrong one.
- *
- * `feeCol: number` stays what it is on Columns and the tag is applied at the single
- * site that reads it (037b MD2): the invariant is held identically either way, and
- * the sheet path's reviewed types are not this row's front.
- */
 type FeeSource = PdfFee | { kind: 'on-top'; col: number };
 
 /**
@@ -1029,7 +782,7 @@ export function applyFee(raw: number, stated: StatedFee): { amount: number; fee:
 /**
  * What the sheet stated beside the rows it accepted, on its way to reconcile and
  * nowhere else. Not on Sheet, not on ParsedFile's sheet arm, not on NewTransaction
- * and not on a table (row 6a Ruling 1, row 6b R6): these are cells of the file, read
+ * and not on a table: these are cells of the file, read
  * by the one loop that builds the transactions and thrown away once the gate has run.
  */
 export type StatedBalances =
@@ -1049,7 +802,6 @@ export type StatedBalances =
        * whether a break somewhere else in the file is explained by it or not.
        */
       coveredButSkipped: readonly { series: string; currency: string }[];
-      /** rows the parser could not read at all - what the refusal's cause clause counts */
       unreadable: number;
     };
 
@@ -1161,7 +913,7 @@ async function mapAndStore(
   } = resolved.columns;
 
   // Which reader the summary names. `req` is deliberately unread on the pdf arm: the
-  // chip persists across files and a PDF's outcome does not depend on it (Ruling 3), so
+  // chip persists across files and a PDF's outcome does not depend on it, so
   // a descriptor built from the request would state, in the one place the user is asked
   // to trust, something the parser did not do.
   //
@@ -1186,7 +938,7 @@ async function mapAndStore(
 
   // Which cell states a fee and on which convention, resolved once from the producer
   // that knows. A PDF's is a fact about the layout its template read; a sheet's is a
-  // preset's, and a request can name neither (037a D1).
+  // preset's, and a request can name neither.
   const feeSource: FeeSource = ((): FeeSource => {
     switch (parsed.kind) {
       case 'pdf':
@@ -1209,11 +961,10 @@ async function mapAndStore(
 
   // Pairs rather than two arrays, and txs is derived from them below: what the gate
   // checks and what the file stated beside it are read in one loop and cannot come
-  // apart by an index (reconcile's own doc comment, and ROADMAP 5.3's argument about
-  // newRows).
+  // apart by an index.
   const accepted: { tx: NewTransaction; stated: StatedRow }[] = [];
-  // a notice is a fact about the file, not a rejected row: it goes in front of the
-  // row problems (the client shows the first three) and touches no count. The two
+    // a notice is a fact about the file, not a rejected row: it goes in front of the
+    // row problems and touches no count. The two
   // are kept apart so that neither has to be recovered from the other by index -
   // an extra notice would silently make problems[0] the wrong kind of sentence
   const notices = sheet.notices ?? [];
@@ -1227,7 +978,7 @@ async function mapAndStore(
   // counted where the rows are dropped rather than subtracted from `skipped` after the
   // loop: a row the status filter took and a row dropped for a zero movement were both
   // read perfectly, and a refusal naming either as a line it could not read names a
-  // cause that is not the cause (row 6b, R5)
+  // cause that is not the cause
   let unreadable = 0;
   // read the same way for a row that is dropped as for one that is kept: the two have
   // to agree on which running balance a row belongs to, and a dropped row that read
@@ -1290,17 +1041,15 @@ async function mapAndStore(
     // can subtract twice or store a fee against an amount it was not taken from.
     const { amount, fee } =
       rawAmount === null ? { amount: null, fee: null } : applyFee(rawAmount, statedFee.fee);
-    // the movement, not the cell it came from: the €2.99 plan fee this dropped whole
-    // has an Amount of 0.00 and is a real charge.
+    // the movement, not the cell it came from: a plan fee this dropped whole has an
+    // amount of 0.00 and is a real charge.
     //
     // describeRow gets the cell, so every row that was refusable before this change
-    // carries the sentence it always carried. The subtraction invents one that was
-    // not - a credit its own fee eats, +5.00 against a fee of 5.00 - and that row
-    // reaches describeRow's fall-through with a date and an amount that both parsed,
-    // and is told neither could be. That is the same wrong sentence a literal 0.00
-    // amount already gets there, which is ROADMAP row 23's finding (a): a bespoke
-    // sentence composed here would cover the new shape and leave the old one lying,
-    // so both wait for row 23 and are fixed as one.
+    // carries the sentence it always carried. The subtraction invents one that was not -
+    // a credit its own fee eats - and that row reaches describeRow's fall-through with a
+    // date and an amount that both parsed, and is told neither could be. That is the same
+    // wrong sentence a literal 0.00 amount already gets there, so a bespoke sentence here
+    // would cover the new shape and leave the old one lying; both are fixed as one.
     if (date === null || amount === null || amount === 0) {
       skipped++;
       if (date === null || amount === null) unreadable++;
@@ -1348,8 +1097,7 @@ async function mapAndStore(
   // Ahead of the staging, so a statement that will be refused stages nothing. And
   // here rather than at confirm: confirm inserts a subset - an overlapping
   // statement's rows are already present and are skipped - so a gate re-run there
-  // would refuse every legitimate overlapping import, which is the common case
-  // ROADMAP 4.3's second layer exists for.
+  // would refuse every legitimate overlapping import, which is the common case.
   const reconciled = reconcile(
     parsed,
     txs,
@@ -1393,11 +1141,11 @@ async function mapAndStore(
       total,
       accepted: txs.length,
       skipped,
-      // the aggregate sits ahead of the row problems and inside the three the client
-      // renders: a fifth per-row reason after four others refines a picture the user
-      // already has, where "some of your rows were dropped, and these are the values
-      // that did it" is the only line saying the import is partial at all. The cut
-      // cannot reach a notice - one is the most any sheet produces
+    // the aggregate sits ahead of the row problems and inside the few the client
+    // renders: a further per-row reason refines a picture the user already has, where
+    // "some of your rows were dropped, and these are the values that did it" is the
+    // only line saying the import is partial at all. The cut cannot reach a notice -
+    // one is the most any sheet produces
       problems: [
         ...notices,
         ...(status ? [`${rowCount(status.skipped)} skipped: ${statusReason('the', status)}`] : []),
@@ -1418,20 +1166,16 @@ async function mapAndStore(
 
 /**
  * How many codes a refusal names before it counts the rest, and what one may spend.
- * An ISO 4217 code is three characters, and neither bound is reached by anything in
- * the tree - the upload route takes three letters, and a PDF's codes are literals in
- * the template that read it. They exist because the sentence below carries four
- * amounts and up to four codes, and it is asserted against ERROR_DETAIL_MAX: an
- * assertion over a value nothing bounds is an assertion about the day it was
- * written. At six, the longer of the two refusals below composes 484 of the 500 at
- * its own extreme - MAX_DATA_ROWS lines read, as many skipped, every amount at the
- * widest toFixed(2) produces, and the running sum negative, which is the only one
- * of the four that can carry a sign.
+ * Neither bound is reached by anything in the tree - the upload route takes three
+ * letters, and a PDF's codes are literals in the template that read it. They exist
+ * because the sentence below carries four amounts and up to four codes and is asserted
+ * against ERROR_DETAIL_MAX: an assertion over a value nothing bounds is an assertion
+ * about the day it was written.
  *
- * The code bound is exported for exactly that assertion, which builds its codes FROM
- * it rather than beside it: a literal wide enough today stops reaching the bound the
- * moment the bound is raised, and the assertion then goes on passing over a sentence
- * that has grown past what error_detail keeps (row 6b, D10).
+ * The code bound is exported for exactly that assertion, which builds its codes FROM it
+ * rather than beside it: a literal wide enough today stops reaching the bound the moment
+ * the bound is raised, and the assertion then goes on passing over a sentence that has
+ * grown past what error_detail keeps.
  */
 const CURRENCY_LIST_MAX = 3;
 export const CURRENCY_CODE_MAX = 6;
@@ -1453,18 +1197,6 @@ const lineCount = (n: number): string => `${n} transaction line${n === 1 ? '' : 
 const money = (cents: number, currency: string): string =>
   `${fromCents(cents).toFixed(2)} ${bounded(currency, CURRENCY_CODE_MAX)}`;
 
-/**
- * The three ways the gate refuses. They live here rather than beside the parser's own
- * refusals in pdf.ts because all of them name counts of MAPPED rows, which pdf.ts
- * cannot see (row 6b, D2, and the amended comment above pdf.ts's refusal set).
- *
- * `skipped` decides which cause is named, and it is in the head clause rather than
- * appended: rows the parser could not read ARE the likely cause of a short sum, and
- * naming a mystery instead would be a refusal blaming something that is not to
- * blame. With nothing skipped, "an operation is probably missing" is the honest
- * wording - a line dropped before it was ever a candidate is counted nowhere, and
- * this sum is the only thing that can notice it.
- */
 const doesNotAddUp = (
   title: string,
   balances: StatementBalances,
@@ -1520,7 +1252,6 @@ interface Link {
   postCents: number;
 }
 
-/** One running balance the file states: every accepted row of one series and currency. */
 interface RunningBalance {
   /** the series as the file spelled it, taken from the row that opened the run */
   label: string;
@@ -1633,29 +1364,6 @@ function firstBreak(links: readonly Link[]): { before: Link; after: Link } | und
   return undefined;
 }
 
-/**
- * How the sheet arm refuses: the file's own running balance does not run through the
- * rows that were read, so an operation between two of its lines is not in the import
- * the user is about to confirm (ROADMAP 5.3 - refuse and explain the discrepancy).
- *
- * Every number named is a number the file prints - and so is the series, quoted as the
- * file spelled it and never as the accept test folded it. The two balances are quoted
- * as adjacent lines rather than as the endpoints of the whole run: on a file that is not
- * in posting order the located pair is a true fact about two lines and not the missing
- * operation, so the wording claims only that one does not follow the other. The gap is
- * a magnitude for the same reason doesNotAddUp's difference is - which side it falls
- * on is the missing row's, not either named line's, and on a file out of posting order
- * the sign is a claim the sentence has no right to make.
- *
- * `unreadable` counts rows the parser genuinely failed on and never the ones the
- * status filter took, for row 6b's R5 - and the cause clause is in the head rather
- * than appended for row 035's R1. The tail differs from the pdf arm's on purpose:
- * "export it as CSV or Excel" is advice for someone holding a PDF.
- *
- * Exported for the budget test, like noRowsParsed and feeRefused and for the same
- * reason: what this composes at its extreme is a measurement, and one made by hand is
- * true only on the day it is taken.
- */
 export const balanceBreaks = (
   label: string,
   currency: string,
@@ -1734,7 +1442,7 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   if (incomplete) return { kind: 'unusable', reason: 'rows-without-a-balance' };
   if (covered) return { kind: 'unusable', reason: 'rows-outside-the-balance' };
   // one run with no endpoints leaves the sum without them too, and a pair summed over
-  // the rest would be a pair of a part of the statement presented as the whole (R11)
+  // the rest would be a pair of a part of the statement presented as the whole
   if (circuit || pairs.length === 0) {
     return { kind: 'unusable', reason: 'balance-closes-on-itself' };
   }
@@ -1743,9 +1451,8 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   // Both counts are defined here and at no other exit, which is what makes them agree
   // about their denominator. Every exit above is a whole-file one - one incomplete,
   // covered or endpointless run takes the entire file to `unusable` - so by the time
-  // this returns, every run produced exactly one pair and every pair is a path.
-  // `summed` is therefore the count this field has carried since row 54, unmoved, and
-  // a circuit is in neither number because a circuit never reaches here at all.
+  // this returns, every run produced exactly one pair and every pair is a path. A
+  // circuit is in neither number because a circuit never reaches here at all.
   return {
     kind: 'checked',
     openingCents: pairs.reduce((sum, p) => sum + p.openingCents, 0),
@@ -1756,7 +1463,7 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
 }
 
 /**
- * The three states a sheet's balances can be in, and there is no fourth. R9's holder:
+ * The three states a sheet's balances can be in, and there is no fourth:
  * "this file states no running balance" and "it stated one and it could not be used"
  * are different variants, so collapsing the second into the first cannot happen by
  * omission - it would have to be written out - and the exhaustive switch below makes
@@ -1780,17 +1487,17 @@ type SheetBalances =
  *
  * The two are one pass on purpose. The number a person reads before confirming and
  * the number the gate checks have to come out of the same loop, or they drift with
- * nothing failing until somebody reads a wrong one; it is the argument ROADMAP 5.3
- * already makes about `newRows` coming from the key generator the confirm uses.
+ * nothing failing until somebody reads a wrong one - the same argument that has
+ * `newRows` come from the key generator the confirm uses.
  *
  * Summed in minor units rather than decimals for the reason money.ts gives, and here
- * it is not theoretical: the real statement's 70 amounts summed as decimals miss its
- * closing balance by a ten-thousandth of a cent, and an exact comparison refuses
- * that. Exactly, with no tolerance anywhere - one cent of slack hides a
- * systematically dropped fee on a small statement and lets a drifted template import
- * plausible numbers, which ROADMAP 5.2 says is the one outcome worse than refusing.
+ * it is not theoretical: a real statement's amounts summed as decimals miss its
+ * closing balance by a fraction of a cent, and an exact comparison refuses that.
+ * Exactly, with no tolerance anywhere - one cent of slack hides a systematically
+ * dropped fee on a small statement and lets a drifted template import plausible
+ * numbers, which is the one outcome worse than refusing.
  *
- * `stated` is required and not optional, and that is R9 at the call site: an optional
+ * `stated` is required and not optional at the call site: an optional
  * one forgotten at a sheet caller reads as "this format states no balances", which is
  * exactly the collapse the type below exists to prevent. The pdf path passes
  * `{ kind: 'none' }`, which is true of it - the sheet mapper stated nothing for a PDF
@@ -1840,7 +1547,7 @@ export function reconcile(
     // balance under one Product, and keying on the product alone would interleave two
     // of them into one chain and refuse a file that imports today. It cannot split a
     // bank that keeps one converted balance across currencies by accident, because the
-    // balance column is preset-declared and nothing guesses it (R4)
+    // balance column is preset-declared and nothing guesses it
     const row = stated.rows[i];
     const key = runKey(row.series, t.currency);
     let run = running.get(key);
@@ -1851,8 +1558,6 @@ export function reconcile(
     if (row.postCents === null) run.incomplete = true;
     else run.links.push({ preCents: row.postCents - c, postCents: row.postCents });
   }
-  // one line for the overwhelming case; a file with a currency column carries more
-  // than one, and a single labelled number would be wrong for it
   const totals = check(
     [...cents.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -1886,19 +1591,14 @@ export function reconcile(
     case 'pdf': {
       const { balances, title } = parsed;
       const net = cents.get(balances.currency);
-      // a balance is stated in one currency, so a file carrying two cannot be
-      // checked against it - and picking whichever entry came first would be a
-      // comparison against a number that is not the one printed
       if (net === undefined || cents.size !== 1) {
         throw new Error(mixedCurrencies(title, balances.currency, [...cents.keys()].sort()));
       }
       if (balances.openingCents + net !== balances.closingCents) {
         throw new Error(doesNotAddUp(title, balances, net, txs.length, skipped));
       }
-      // Second, and never first: a single dropped row fails both, and the sentence
       // above names the missing amount where this one names a discrepancy in a
-      // subtotal. Reordering these hands the common case the weaker diagnostic
-      // (row 035, R1).
+      // subtotal. Reordering these hands the common case the weaker diagnostic.
       if (balances.gross.kind === 'printed') {
         const { outgoingCents, incomingCents } = balances.gross;
         if (outgoingCents !== outCents || incomingCents !== inCents) {
@@ -1931,12 +1631,6 @@ export function reconcile(
   }
 }
 
-/**
- * The distinct values the status filter refused, and how many rows each cost.
- *
- * Exported for the budget test, like noRowsParsed below and for the same reason -
- * not API surface anyone asked for.
- */
 export interface StatusSkips {
   column: string;
   counts: Map<string, number>;
@@ -1945,17 +1639,9 @@ export interface StatusSkips {
 
 const rowCount = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
 
-/** Cut with a mark, so a value with more behind it does not read as the whole one. */
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
-/**
- * Why rows were filtered out, aggregated - one line however many rows. There is
- * deliberately no second vocabulary of known-bad statuses behind this: it names the
- * values that actually caused skips, so a language nobody has listed yet needs no
- * maintenance to be reported. The values are quoted as the file spelled them, since
- * folding is only for the accept test and two casings of one word are worth seeing.
- */
 function statusReason(lead: string, status: StatusSkips): string {
   const entries = [...status.counts.entries()]
     .sort(([, a], [, b]) => b - a)
@@ -1963,16 +1649,6 @@ function statusReason(lead: string, status: StatusSkips): string {
   return `${lead} "${bounded(status.column, STATUS_QUOTE_MAX)}" value is not one of the accepted ones - ${statusList(entries)}`;
 }
 
-/**
- * As many values as STATUS_LIST_MAX buys, then a count of the rest - cut between
- * whole entries and never inside one, because half a status value names a status the
- * file has not got and sends the reader looking for it. The first entry is always
- * kept: both bounds above are sized so that it and a count fit.
- *
- * At least one entry is a precondition, not a branch: statusReason is reached only
- * when the filter refused something, so an empty list is a caller that has invented
- * a StatusSkips - which only the budget test can do.
- */
 function statusList(entries: string[]): string {
   let out = entries[0];
   for (let i = 1; i < entries.length; i++) {
@@ -1986,26 +1662,6 @@ function statusList(entries: string[]): string {
   return out;
 }
 
-/**
- * Why nothing parsed, ordered by what yields rather than by what is read first: the
- * client renders the whole of what error_detail keeps (MAX_ERROR_CHARS in
- * web/src/api.ts), so the last clause is the one that gets dropped, not the one that
- * goes unread. The row's own reason is the actionable half - "the amount cells are
- * formulas with no stored result" is something the user can fix, "these rows come
- * from Februar" is not - so the sheet notice is what yields, and only whole. The
- * `problems` array is not reordered: there the notice stays at the head, which is
- * the window the client renders.
- *
- * The status filter owns the reason when it accounts for every skipped row, and only
- * then: "no row could be parsed (72 skipped)" with nothing else said sends the user
- * to the preset chips, and no chip fixes a status value nobody has listed. The two
- * are exclusive - a row dropped for its date or its amount is not one the filter took
- * - so the sentence never carries both and its ceiling stays one clause.
- *
- * Exported for the budget test: what this composes at its extreme is the number
- * xlsx.ts's NOTICE_MAX is subtracted from, and a measurement made by hand is true
- * only on the day it is taken.
- */
 export function noRowsParsed(
   skipped: number,
   rowProblems: string[],
@@ -2019,12 +1675,6 @@ export function noRowsParsed(
   return head.length + notice.length <= ERROR_DETAIL_MAX ? head + notice : head;
 }
 
-/**
- * Why a row was dropped. A cell the frontend blanked for a reason of its own - an
- * uncached formula, an #N/A - is reported as that reason rather than as an
- * unreadable value: the generic message sends the user to the preset chips, and no
- * preset can fix a workbook whose amounts were never computed.
- */
 function describeRow(
   sheet: Sheet,
   i: number,
@@ -2048,19 +1698,5 @@ function describeRow(
   return `row ${label}: could not parse the date "${cellText(row[dateCol])}" or the amount "${cellText(row[amountCol])}"`;
 }
 
-/**
- * Why a row with an unreadable fee was dropped. Its own sentence rather than
- * describeRow's, because that one names the date and the amount cells - and here both
- * parsed, which sends the reader to two columns that are fine.
- *
- * The cell is quoted bounded, never raw: this reason can reach error_detail as
- * noRowsParsed's rowProblems[0], so an unbounded cell would open a second instance of
- * the defect ROADMAP row 23 still carries in describeRow, where a CSV field is
- * interpolated at whatever width the file wrote it.
- *
- * Exported for the budget test, like noRowsParsed and for the same reason: what this
- * composes at its extreme is part of the number xlsx.ts's NOTICE_MAX is subtracted
- * from, and no real file reaches a row label at Excel's ceiling.
- */
 export const feeRefused = (sheet: Sheet, i: number, text: string): string =>
   `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee - the row is skipped rather than imported without it`;
