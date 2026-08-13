@@ -13,7 +13,7 @@ import {
   parseCsvDate,
 } from '../src/providers/csv';
 import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
-import { accountFor, importAndConfirm } from './helpers';
+import { accountFor, importAndConfirm, rejectionOf } from './helpers';
 import {
   CURRENCY_CODE_MAX,
   ImportSummary,
@@ -274,10 +274,12 @@ describe('a CSV statement: pipeline and deduplication', () => {
    */
   it('nothing parsed: the CSV message is the row reason and nothing else', async () => {
     const unreadable = ['date,amount,description', 'not a date,not a number,broken'].join('\n');
-    const thrown = await importStatement({
-      accountId: await accountFor('Unreadable Bank'),
-      bytes: Buffer.from(unreadable, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Unreadable Bank'),
+        bytes: Buffer.from(unreadable, 'utf8'),
+      }),
+    );
 
     expect(thrown.message).toBe(
       'no row could be parsed (1 skipped): row 2: could not parse the date "not a date" or the amount "not a number"',
@@ -383,11 +385,13 @@ describe('a bank export in a language the preset also accepts', () => {
       'CARD_PAYMENT,Current,2026-04-02 10:00:00,2026-04-02 10:00:00,Two,-20.00,0,EUR,ЗАВЕРШЕНО,120',
     ].join('\n');
 
-    const thrown = await importStatement({
-      accountId: await accountFor('Revolut Unknown Status'),
-      preset: 'revolut',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Unknown Status'),
+        preset: 'revolut',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     // the value, because no preset chip fixes a status nobody has listed - which is
     // exactly what the bare "(2 skipped)" sentence used to send the user off to try
@@ -428,11 +432,13 @@ describe('a bank export in a language the preset also accepts', () => {
   it('a header matching no accepted name names the slots and what was tried', async () => {
     const file = ['Дата,Сумма операции,Назначение', '2026-06-01,-1.00,тест'].join('\n');
 
-    const thrown = await importStatement({
-      accountId: await accountFor('Revolut Unlisted Language'),
-      preset: 'revolut',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Unlisted Language'),
+        preset: 'revolut',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     // every unresolved slot, the names tried, then the header - in that order,
     // because the header dump is unbounded and the cap cuts the tail
@@ -455,11 +461,13 @@ describe('a bank export in a language the preset also accepts', () => {
   it('a preset named after an Object.prototype member is refused like any other', async () => {
     const file = ['Дата выполнения,Сумма,Описание', '2026-06-01,-1.00,тест'].join('\n');
 
-    const thrown = await importStatement({
-      accountId: await accountFor('Revolut Prototype Preset'),
-      preset: 'toString',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Prototype Preset'),
+        preset: 'toString',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     expect(thrown.message).toBe('unknown preset: toString');
   });
@@ -1400,15 +1408,17 @@ describe("the statement's own running balance, on the sheet path", () => {
     });
 
     it('and refuses the same workbook with a row taken out', async () => {
-      const thrown = await importStatement({
-        accountId: await accountFor('Balance Workbook Broken'),
-        preset: 'revolut',
-        bytes: await workbook([
-          sheetRow('Book card', -5.68, 66.72, 3),
-          sheetRow('Book rent', -31.87, 134.85, 5),
-        ]),
-      }).catch((e) => e as Error);
-      expect((thrown as Error).message).toContain('100.00 EUR is unaccounted for between them');
+      const thrown = await rejectionOf(
+        importStatement({
+          accountId: await accountFor('Balance Workbook Broken'),
+          preset: 'revolut',
+          bytes: await workbook([
+            sheetRow('Book card', -5.68, 66.72, 3),
+            sheetRow('Book rent', -31.87, 134.85, 5),
+          ]),
+        }),
+      );
+      expect(thrown.message).toContain('100.00 EUR is unaccounted for between them');
     });
   });
 });
@@ -1421,11 +1431,13 @@ describe("the statement's own running balance, on the sheet path", () => {
 describe('what the new refusals may spend', () => {
   it('every preset composes a refusal error_detail keeps whole', async () => {
     for (const key of Object.keys(CSV_PRESETS)) {
-      const thrown = await importStatement({
-        accountId: await accountFor(`Budget ${key}`),
-        preset: key,
-        bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
-      }).catch((e) => e as Error);
+      const thrown = await rejectionOf(
+        importStatement({
+          accountId: await accountFor(`Budget ${key}`),
+          preset: key,
+          bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
+        }),
+      );
 
       expect(thrown.message).toMatch(/^no column matched for /);
       expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
@@ -1461,11 +1473,13 @@ describe('what the new refusals may spend', () => {
         ws.addRow(header);
         ws.addRow([new Date('2026-09-01T00:00:00.000Z'), -5, 'one']);
 
-        const thrown = await importStatement({
-          accountId: await accountFor(`Cut ${key} ${header[0]}`),
-          preset: key,
-          bytes: Buffer.from(await wb.xlsx.writeBuffer()),
-        }).catch((e) => e as Error);
+        const thrown = await rejectionOf(
+          importStatement({
+            accountId: await accountFor(`Cut ${key} ${header[0]}`),
+            preset: key,
+            bytes: Buffer.from(await wb.xlsx.writeBuffer()),
+          }),
+        );
 
         // the refusal is in there at all, so an even count cannot pass by vacancy
         expect(thrown.message).toContain('no column matched for ');

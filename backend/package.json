@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "migrate:sqlite": "tsx scripts/migrate-sqlite-to-pg.ts"

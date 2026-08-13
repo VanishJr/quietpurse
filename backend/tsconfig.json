@@ -11,5 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["src", "scripts"]
+  // Everything except the test tree, which tsconfig.test.json takes as ESM. No
+  // "include": a directory added later is covered without anybody remembering,
+  // which is the hole this file had. `npm run typecheck` runs both configs -
+  // bare `tsc --noEmit` reads this one alone and never sees test/.
+  "exclude": ["node_modules", "test"]
 }

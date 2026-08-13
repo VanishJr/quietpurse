@@ -857,7 +857,7 @@ const BOUNDARY = '----fintoChunkedBoundary';
 
 /** A multipart body built by hand, so the test owns exactly which bytes go out when. */
 function multipartBody(fields: Record<string, string>, filename: string, bytes: Buffer): Buffer {
-  const parts = Object.entries(fields).map(([name, value]) =>
+  const parts: Buffer[] = Object.entries(fields).map(([name, value]) =>
     Buffer.from(
       `--${BOUNDARY}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
       'utf8',
