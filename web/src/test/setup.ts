@@ -35,6 +35,10 @@ beforeEach(() => {
   // log left over from the test before it
   URL.createObjectURL = vi.fn(() => 'blob:test');
   URL.revokeObjectURL = vi.fn();
+  // jsdom has no layout, so it implements this one not at all: called unguarded it
+  // throws inside the handler that scrolls a caption into view and turns a success
+  // into an error on screen. Fresh per test for the same reason as the two above.
+  Element.prototype.scrollIntoView = vi.fn();
   // theme.tsx reads finto.theme at mount, and jsdom keeps localStorage across the
   // tests in a file: a test that pins a theme must not pin it for the ones after.
   localStorage.clear();

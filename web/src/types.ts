@@ -65,7 +65,18 @@ export interface CategoryRule {
   pattern: string;
   category: string;
   createdAt: string;
+}
+
+/**
+ * How many transactions a pattern covers, and how many of those the rule cannot move
+ * because the category was set by hand. One type and both required: CATEGORY is
+ * COALESCE(category_manual, category), neither number may be read without the other.
+ *
+ * Workspace-wide and period-blind — hidden accounts included, no filter applied.
+ */
+export interface CategoryRuleCounts {
   matches: number;
+  overridden: number;
 }
 
 export interface Transaction {
@@ -78,6 +89,8 @@ export interface Transaction {
   description: string;
   mcc?: number;
   category: string;
+  /** true = the category above was set by hand, and no recompute will change it */
+  categoryManual?: boolean;
   /** transfer between own accounts — neither income nor expense */
   transfer: boolean;
   /** manual override; null — the flag was decided by auto-detection */
