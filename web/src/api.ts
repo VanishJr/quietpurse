@@ -7,6 +7,7 @@ import {
   BaselineResponse,
   BudgetsResponse,
   CategoryRule,
+  CategoryRuleCounts,
   CsvImportResult,
   ImportConfirmed,
   ImportList,
@@ -21,6 +22,7 @@ import {
   Transaction,
   TransferRule,
 } from './types';
+import { Category } from './categories';
 
 /**
  * Backend address.
@@ -602,6 +604,17 @@ export const api = {
       json('PATCH', { source }),
     ),
 
+  /**
+   * This one transaction's category and no other's; null hands the row back to
+   * auto-detection. A manual category outranks every rule, so this is also how a row
+   * is pinned against one.
+   */
+  setCategory: (id: string, category: Category | null) =>
+    request<Transaction>(
+      `/api/transactions/${encodeURIComponent(id)}/category`,
+      json('PATCH', { category }),
+    ),
+
   /** Set/clear "one-off large purchase" (amortized into average spending). */
   setOneOff: (id: string, oneOff: boolean) =>
     request<Transaction>(
@@ -626,7 +639,7 @@ export const api = {
   setBaselineItem: (label: string, monthly: number | null) =>
     request<BaselineResponse>('/api/baseline', json('PUT', { label, monthly })),
 
-  categoryRules: () => request<CategoryRule[]>('/api/category-rules'),
+  categoryRules: () => request<(CategoryRule & CategoryRuleCounts)[]>('/api/category-rules'),
 
   /**
    * A "description contains … -> category" rule (+ a full recompute on the backend).
@@ -635,9 +648,12 @@ export const api = {
    * in a rent reference, a contract number: a rule built from one full description
    * would then match that single transaction and nothing else. `txId` is the shorthand
    * for "the whole description as it is".
+   *
+   * The counts are beside `rule` on the wire and not inside it — `rule` is the stored
+   * row and carries neither.
    */
-  addCategoryRule: (target: { txId: string } | { pattern: string }, category: string) =>
-    request<{ rule: CategoryRule; matches: number }>(
+  addCategoryRule: (target: { txId: string } | { pattern: string }, category: Category) =>
+    request<{ rule: CategoryRule } & CategoryRuleCounts>(
       '/api/category-rules',
       json('POST', { ...target, category }),
     ),
