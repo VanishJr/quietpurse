@@ -80,6 +80,23 @@ export async function accountFor(name: string, currency = 'EUR'): Promise<string
 }
 
 /**
+ * The Error a refusal rejected with. Not a cast: a call that RESOLVES is a
+ * regression from a refusal into an acceptance, and this says so in one sentence
+ * instead of a matcher error or a TypeError on `undefined` at whichever line read
+ * `.message` first.
+ */
+export async function rejectionOf(attempt: Promise<unknown>): Promise<Error> {
+  let resolved: unknown;
+  try {
+    resolved = await attempt;
+  } catch (e) {
+    if (e instanceof Error) return e;
+    throw new Error(`expected a refusal, and it rejected with a non-Error: ${String(e)}`);
+  }
+  throw new Error(`expected a refusal, and it resolved: ${JSON.stringify(resolved)}`);
+}
+
+/**
  * Upload and confirm in one call, answering in the shape the upload had before the
  * confirmation step existed (ROADMAP 5.3). It is here so that the cases about
  * parsing, deduplication and provenance keep asserting exactly what they asserted

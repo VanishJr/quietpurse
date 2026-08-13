@@ -5,12 +5,13 @@ import {
   getTransaction,
   insertTransactions,
   listRecurringGroups,
+  resolveUploadAccount,
   setOneOff,
   setRecurringIgnored,
   stageImport,
 } from '../src/db';
 import { NewTransaction } from '../src/types';
-import { idOf } from './helpers';
+import { accountFor, idOf } from './helpers';
 
 const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   accountId: 'acc1',
@@ -179,12 +180,16 @@ describe('a negative fee is refused by the column', () => {
       sourceType: 'csv',
       parserVersion: 1,
     });
+    const owner = await resolveUploadAccount(await accountFor('Negative Fee Bank', 'EUR'));
+    if (!owner.ok) throw new Error(`could not resolve the staging account: ${owner.reason}`);
     expect(
       await violated(
-        stageImport(record.id, [tx({ fee: -0.01, description: 'bad staged fee' })], 0, {
-          name: 'Negative Fee Bank',
-          currency: 'EUR',
-        }),
+        stageImport(
+          record.id,
+          [tx({ fee: -0.01, description: 'bad staged fee' })],
+          0,
+          owner.account,
+        ),
       ),
     ).toEqual({ code: '23514', constraint: 'staged_transactions_fee_cents_nonneg' });
 

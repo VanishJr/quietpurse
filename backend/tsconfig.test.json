@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  // vitest evaluates test/ as ESM: test/setup.ts's top-level awaits are legal
+  // there, and awaiting freshTestDb() at module scope is the whole guarantee
+  // that a migrated database exists before the first test imports src/db.
+  "compilerOptions": { "module": "es2022" },
+  "include": ["test"],
+  "exclude": ["node_modules"]
+}

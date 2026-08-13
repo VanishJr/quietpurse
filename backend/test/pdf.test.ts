@@ -11,6 +11,7 @@ import {
   NOTE_MAX,
   PDF_PARSER_VERSION,
   PdfTemplate,
+  StatementBalances,
   TEMPLATES,
   TextLine,
   readPdf,
@@ -20,6 +21,7 @@ import {
 import { Cell, MAX_DATA_ROWS } from '../src/providers/sheet';
 import {
   CURRENCY_CODE_MAX,
+  ImportSummary,
   NUL_SCAN_BYTES,
   ParsedFile,
   StatedBalances,
@@ -363,7 +365,7 @@ describe('pdf: bytes to rows', () => {
   });
 
   it('the preset chip does not decide what a PDF imports', async () => {
-    const strip = (s: Record<string, unknown>) => {
+    const strip = (s: ImportSummary) => {
       const { importId, accountId, accountName, supersededImportId, ...rest } = s;
       return rest;
     };
@@ -789,7 +791,10 @@ describe('pdf: the reconciliation gate', () => {
 
     const confirmed = await confirmImport(staged.summary.importId);
     expect(confirmed?.confirmed).toBe(true);
-    expect(confirmed?.inserted).toBe(1);
+    if (!confirmed || !confirmed.confirmed) {
+      throw new Error(`confirming ${staged.summary.importId} failed: ${JSON.stringify(confirmed)}`);
+    }
+    expect(confirmed.inserted).toBe(1);
   });
 
   it('a statement whose amounts are not exact in binary floating point reconciles', async () => {
@@ -882,6 +887,7 @@ describe('pdf: the reconciliation gate', () => {
       mapping: {},
       template: 'revolut-ru',
       title: 'Revolut',
+      fee: { kind: 'none' },
       balances: {
         openingCents: 0,
         closingCents: 3000,
@@ -1338,7 +1344,7 @@ const uaRow = (
   time: string,
   description: string,
   amount: string,
-  x = U.amount,
+  x: number = U.amount,
   tail?: string,
 ): PlacedText[] => [
   { x: L.date, y, text: date },
@@ -2151,6 +2157,7 @@ describe('pdf: what a template says about its gross totals', () => {
       mapping: st.columns,
       template: st.template,
       title: st.title,
+      fee: st.fee,
       balances: st.balances,
     };
     const tx = (amount: number): NewTransaction => ({
@@ -2507,7 +2514,7 @@ describe('the diagnostic budget', () => {
     });
     const parsed = (
       currency: string,
-      gross = { kind: 'printed', outgoingCents: 0, incomingCents: 0 } as const,
+      gross: StatementBalances['gross'] = { kind: 'printed', outgoingCents: 0, incomingCents: 0 },
     ): ParsedFile => ({
       kind: 'pdf',
       sheet: { rows: [], rowLabel: (i) => i },
@@ -2515,6 +2522,7 @@ describe('the diagnostic budget', () => {
       mapping: {},
       template: 'revolut-ru',
       title: TITLE,
+      fee: { kind: 'none' },
       balances: { openingCents: 1e22, closingCents: 1e22, gross, currency },
     });
     const refusalOf = (run: () => unknown): string => {

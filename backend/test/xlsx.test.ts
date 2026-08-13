@@ -18,7 +18,7 @@ import {
   listTransactions,
 } from '../src/db';
 import { logImport } from '../src/logger';
-import { accountFor, importAndConfirm } from './helpers';
+import { accountFor, importAndConfirm, rejectionOf } from './helpers';
 import { importStatement } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
 import { XLSX_PARSER_VERSION } from '../src/providers/xlsx';
@@ -342,7 +342,7 @@ describe('xlsx: finding the statement', () => {
       secret.addRow([utc('2026-01-03'), -8, 'also never read']);
     });
 
-    const thrown = await importFile('All Hidden Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('All Hidden Bank', book));
     expect(thrown.message).toBe(
       'this workbook has no visible sheet - unhide the sheet holding the statement, or export the statement again',
     );
@@ -408,7 +408,7 @@ describe('xlsx: finding the statement', () => {
     const book = await xlsx(() => {});
     const before = (await listImports()).imports.map((i) => i.id);
 
-    const thrown = await importFile('Empty Workbook Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('Empty Workbook Bank', book));
     expect(thrown.message).toBe(
       'this is a zip archive but not an Excel workbook (.xlsx) - .ods and .numbers are not supported; export the statement as .xlsx or CSV',
     );
@@ -609,7 +609,7 @@ describe('the row guard', () => {
       ws.addRow(header.map(() => 'x'));
     });
 
-    const thrown = await importFile('Both Clauses Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('Both Clauses Bank', book));
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain(' - skipped as too large to read: Huge (600000 rows)');
     expect(thrown.message).toMatch(
@@ -638,7 +638,7 @@ describe('the row guard', () => {
       }
     });
 
-    const thrown = await importFile('Nine Sheets Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('Nine Sheets Bank', book));
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain(
       ' - skipped as too large to read: Kontoauszug 01-2026 (600000 rows)',
@@ -668,7 +668,7 @@ describe('the row guard', () => {
       }
     });
 
-    const thrown = await importFile('No Rows Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('No Rows Bank', book));
     expect(thrown.message).toBe(
       'no row could be parsed (2 skipped): row 2: the amount cell is a formula with no stored result - open the file in Excel, re-save it, and upload again' +
         ' - sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
@@ -692,7 +692,7 @@ describe('the row guard', () => {
     });
 
     const warn = vi.spyOn(logImport, 'warn').mockImplementation(() => {});
-    const thrown = await importFile('Dropped Notice Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('Dropped Notice Bank', book));
     // read before restoring: mockRestore clears the calls with the implementation
     const logged = warn.mock.calls.map((args) => String(args[0]));
     warn.mockRestore();
@@ -903,9 +903,7 @@ describe('xlsx: the sheets that were not used', () => {
     });
 
     const before = (await listImports()).imports.map((i) => i.id);
-    const thrown = await importFile('Many Sheets Nothing Parsed Bank', unreadable).catch(
-      (e) => e as Error,
-    );
+    const thrown = await rejectionOf(importFile('Many Sheets Nothing Parsed Bank', unreadable));
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain('more were not imported');
     const failed = (await listImports()).imports.filter((i) => !before.includes(i.id));
@@ -966,7 +964,7 @@ describe('xlsx: the sheets that were not used', () => {
     });
 
     const before = (await listImports()).imports.map((i) => i.id);
-    const thrown = await importFile('Jahresdatei Bank', book).catch((e) => e as Error);
+    const thrown = await rejectionOf(importFile('Jahresdatei Bank', book));
 
     // the whole of it, both clauses: the row's reason first because it is the half
     // the user can act on, and the two skipped sheets still named behind it

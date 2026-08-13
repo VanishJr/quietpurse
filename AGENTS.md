@@ -42,7 +42,7 @@ the threat model.
 Run from `backend/` unless stated otherwise.
 
 ```
-npm run typecheck     tsc --noEmit          both packages have this
+npm run typecheck     tsc --noEmit          both packages; backend runs it twice
 npm test              vitest run            both packages have this
 npm run dev           tsx watch src/index.ts
 npm run db:generate   drizzle-kit generate
@@ -52,9 +52,18 @@ cd web && npm run dev
 Verification means both `npm run typecheck` and `npm test` green in `backend/`. A change is not
 finished on a claim that they pass — run them.
 
-`typecheck` covers `src` and `scripts` only — `tsconfig.json`'s `include` does not list `test`, and
-vitest strips types without checking them. So a change confined to test files is verified by the
-suite alone, and "typecheck clean" says nothing about it.
+`typecheck` is two `tsc` runs and reaches every `.ts` file in `backend/` outside `node_modules`.
+`tsconfig.json` takes `src`, `scripts` and the root config files as CommonJS, which is what `tsx`
+runs them as; `tsconfig.test.json` takes `test/` as ESM, which is what vitest runs it as.
+`tsconfig.json` is deny-by-default (an `exclude`, no `include`), so a directory added later is
+checked by it without anybody remembering. `tsconfig.test.json` names `test/` explicitly, so a test
+directory created outside `test/` is checked as CommonJS by the base config — a red, not a silent
+gap. vitest still strips types without checking them, so a green suite is not a type check — but a
+change confined to test files is no longer verified by the suite alone.
+
+**Bare `npx tsc --noEmit` is weaker than `npm run typecheck`**: it reads `tsconfig.json` only and
+never sees `test/`. Nothing can force the second invocation; the script is what holds it, and CI
+runs the script.
 
 ## Invariants
 
