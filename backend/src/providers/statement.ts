@@ -42,7 +42,7 @@ import {
   matchColumn,
   parseCsv,
 } from './csv';
-import { PDF_PARSER_VERSION, PdfFee, StatementBalances, readPdf } from './pdf';
+import { PDF_PARSER_VERSION, PdfFee, PdfLimits, StatementBalances, readPdf } from './pdf';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
 import { XLSX_PARSER_VERSION, readXlsx } from './xlsx';
 
@@ -93,6 +93,20 @@ const FORMATS = `${FORMAT_NAMES.slice(0, -1).join(', ')} or ${FORMAT_NAMES[FORMA
  * here, because numPages needs the document open - see the band comment below.
  */
 const MAX_PDF_PAGES = 200;
+
+/**
+ * And a deadline, because neither cap bounds the WORK: how long a parse holds the only
+ * thread this process has is the document's to decide, not the byte count's.
+ *
+ * What it does not bound. The check runs between pdfjs calls and cannot interrupt one, and
+ * a document may put everything on a single page; what a compressed stream expands to is
+ * bounded by neither cap. Opening the document is outside it the same way - charged to the
+ * budget, not interruptible by it. So this bounds accidental pathology and not someone who
+ * is trying. Closing that needs an execution context that can be terminated, which is a
+ * second thread, and the argument that the workspace store is safe rests on there being
+ * none. Sustained load across many uploads is a rate limit and not this.
+ */
+const PDF_LIMITS: PdfLimits = { maxPages: MAX_PDF_PAGES, deadlineMs: 20_000 };
 
 /** How far into a text file the NUL that says it is not one is searched for. */
 export const NUL_SCAN_BYTES = 8192;
@@ -406,9 +420,10 @@ export async function importStatement(
   // written, and `failed` means "an import did not complete", not "the user picked
   // the wrong file". What does leave a failed row is everything the loader has to
   // open the file to discover - a zip that turns out not to be a workbook, a sheet
-  // with no header, a PDF that is password-protected or past MAX_PDF_PAGES -
-  // because the bytes alone cannot tell. It is the opening that decides the band and
-  // not how much was parsed: an encrypted PDF parses nothing either.
+  // with no header, a PDF that is password-protected, past MAX_PDF_PAGES or still
+  // being read at the deadline in PDF_LIMITS - because the bytes alone cannot tell.
+  // It is the opening that decides the band and not how much was parsed: an
+  // encrypted PDF parses nothing either.
   const sourceType = sniff(req.bytes);
   const cap = SIZE_CAP[sourceType];
   if (cap && req.bytes.length > cap.max) throw new Error(cap.tooLarge(cap.max / MB));
@@ -527,7 +542,7 @@ export async function readSheet(
       };
     }
     case 'pdf': {
-      const parsed = await readPdf(req.bytes, MAX_PDF_PAGES);
+      const parsed = await readPdf(req.bytes, PDF_LIMITS);
       // A PDF's columns come from the template that matched, and from nothing the
       // request said. `preset` names header text and `mapping` names columns, and a
       // PDF has neither for them to name - so a chip the user may not remember

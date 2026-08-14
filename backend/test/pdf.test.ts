@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
@@ -10,6 +10,7 @@ import {
 import {
   NOTE_MAX,
   PDF_PARSER_VERSION,
+  PdfLimits,
   PdfTemplate,
   StatementBalances,
   TEMPLATES,
@@ -43,6 +44,12 @@ import {
 } from './pdffixture';
 
 const NO_BALANCES: StatedBalances = { kind: 'none' };
+
+/**
+ * A page cap every fixture below is far under, and a deadline none of them approaches, so
+ * neither bound decides anything except in the cases written against it.
+ */
+const LIMITS: PdfLimits = { maxPages: 200, deadlineMs: 60_000 };
 
 const X = {
   date: 42.7,
@@ -563,7 +570,7 @@ describe('pdf: the fee on a continuation line', () => {
           ...box(620, eur(OPENING), eur(GROSS), eur(0), eur(OPENING - GROSS)),
         ],
       ]),
-      200,
+      LIMITS,
       [contradictory],
     );
     const [, amount, description, currency, fee] = st.sheet.rows[1];
@@ -655,7 +662,7 @@ describe('pdf: the fee on a continuation line', () => {
     pages[1].push(...n26Detail(651.7, `${label()} 0,44€`));
     const bytes = buildPdf(pages);
 
-    expect((await readPdf(bytes, 200)).fee).toEqual({ kind: 'none' });
+    expect((await readPdf(bytes, LIMITS)).fee).toEqual({ kind: 'none' });
     const r = await importAndConfirm({ accountId: await accountFor('N26 Fee Text'), bytes });
     const netto = (await listTransactions({ accountId: r.accountId, limit: 50 })).find((t) =>
       t.description.startsWith('Netto GmbH'),
@@ -675,7 +682,7 @@ describe('pdf: the fee on a continuation line', () => {
       },
     };
     const feeOf = async (states: string): Promise<Cell> => {
-      const st = await readPdf(buildPdf(feeStatement(states, states)), 200, [twoSymbols]);
+      const st = await readPdf(buildPdf(feeStatement(states, states)), LIMITS, [twoSymbols]);
       if (st.fee.kind !== 'included') throw new Error('the template states no fee column');
       return st.sheet.rows[1][st.fee.col];
     };
@@ -691,7 +698,7 @@ describe('pdf: the fee on a continuation line', () => {
       amount: { ...revolut.amount, pattern: /^(-?\d{1,3}(?: \d{3})*,\d{2})([^\s\d]+)$/u },
     };
     const rowOf = async (states: string): Promise<{ amount: Cell; fee: Cell }> => {
-      const st = await readPdf(buildPdf(feeStatement(states, states)), 200, [signedAmounts]);
+      const st = await readPdf(buildPdf(feeStatement(states, states)), LIMITS, [signedAmounts]);
       if (st.fee.kind !== 'included') throw new Error('the template states no fee column');
       const row = st.sheet.rows[1];
       const [, amount] = row;
@@ -1212,13 +1219,17 @@ describe('pdf: the second layout', () => {
         example: '-1,00€',
       },
     };
-    await expect(readPdf(twinDoc('+10,00€', '+9,00£', '-1,00€', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
+    await expect(
+      readPdf(twinDoc('+10,00€', '+9,00£', '-1,00€', '+0,00€'), LIMITS, [twoSymbols]),
+    ).rejects.toThrow(
       'this Two Symbols statement\'s opening balance ("Anfang") is stated in' +
         ' EUR and its closing balance ("Ende") in GBP - this importer cannot check a statement' +
         ' that mixes currencies',
     );
 
-    await expect(readPdf(twinDoc('+10,00€', '+9,00€', '-1,00£', '+0,00€'), 200, [twoSymbols])).rejects.toThrow(
+    await expect(
+      readPdf(twinDoc('+10,00€', '+9,00€', '-1,00£', '+0,00€'), LIMITS, [twoSymbols]),
+    ).rejects.toThrow(
       'this Two Symbols statement\'s opening balance ("Anfang") is stated in' +
         ' EUR and its outgoing total ("Raus") in GBP',
     );
@@ -1226,7 +1237,7 @@ describe('pdf: the second layout', () => {
 
   it('a two-lines box broken in two places refuses by the balance, not the subtotal', async () => {
     await expect(
-      readPdf(twinDoc('+1,00€', '', '', '+0,00€'), 200, [twin('order', 'Two Layouts')]),
+      readPdf(twinDoc('+1,00€', '', '', '+0,00€'), LIMITS, [twin('order', 'Two Layouts')]),
     ).rejects.toThrow(
       'this Two Layouts statement\'s closing balance cell reads "" on its "Ende" line',
     );
@@ -1467,7 +1478,7 @@ describe('pdf: the third layout', () => {
   });
 
   it('reads the same statement in the other locale, under the other title', async () => {
-    const st = await readPdf(buildPdf(enStatement('en happy path')), 200);
+    const st = await readPdf(buildPdf(enStatement('en happy path')), LIMITS);
     expect(st.template).toBe('universalbank-en');
     expect(st.title).toBe('UNIVERSAL BANK JSC');
     expect(st.balances).toEqual({
@@ -1795,7 +1806,7 @@ describe('pdf: the fourth layout', () => {
   });
 
   it('names the layout, and reads all four of the numbers its own section prints', async () => {
-    const st = await readPdf(buildPdf(c24Statement('four numbers')), 200);
+    const st = await readPdf(buildPdf(c24Statement('four numbers')), LIMITS);
     expect(st.template).toBe('c24-de');
     expect(st.title).toBe('C24 Bank GmbH');
     expect(st.balances).toEqual({
@@ -1832,7 +1843,7 @@ describe('pdf: the fourth layout', () => {
   });
 
   it('reads the transaction section box where two are printed under one set of labels', async () => {
-    const st = await readPdf(buildPdf(c24Statement('two boxes')), 200);
+    const st = await readPdf(buildPdf(c24Statement('two boxes')), LIMITS);
     expect(st.balances.openingCents).toBe(8416);
   });
 
@@ -1856,7 +1867,7 @@ describe('pdf: the fourth layout', () => {
       ],
       [...c24LegalPage('reordered'), ...c24Footer(2, 2)],
     ]);
-    const st = await readPdf(bytes, 200);
+    const st = await readPdf(bytes, LIMITS);
     expect(st.balances.openingCents).toBe(8416);
   });
 
@@ -1931,7 +1942,7 @@ describe('pdf: the fourth layout', () => {
           ...c24Footer(2, 2, '07/2026'),
         ],
       ]),
-      200,
+      LIMITS,
     );
     expect(st.balances).toMatchObject({ openingCents: 8416, closingCents: 8422 });
     expect(st.sheet.rows.slice(1).map((r) => (r[0] as Date).toISOString().slice(0, 10))).toEqual([
@@ -1941,17 +1952,17 @@ describe('pdf: the fourth layout', () => {
   });
 
   it('finds two of every label when the scope is the whole document', async () => {
-    await expect(readPdf(buildPdf(c24Statement('unscoped')), 200, [c24Unscoped()])).rejects.toThrow(
-      /expects exactly one such line and found 2/,
-    );
+    await expect(
+      readPdf(buildPdf(c24Statement('unscoped')), LIMITS, [c24Unscoped()]),
+    ).rejects.toThrow(/expects exactly one such line and found 2/);
 
     const onePeriod = c24Statement('unscoped box');
     onePeriod[1] = onePeriod[1].filter((t) => t.text !== '01.04.2026 - 30.06.2026');
     const bytes = buildPdf(onePeriod);
-    await expect(readPdf(bytes, 200, [c24Unscoped()])).rejects.toThrow(
+    await expect(readPdf(bytes, LIMITS, [c24Unscoped()])).rejects.toThrow(
       /it expects exactly one "Startsaldo" line and found 2/,
     );
-    expect((await readPdf(bytes, 200, [c24Template()])).balances.openingCents).toBe(8416);
+    expect((await readPdf(bytes, LIMITS, [c24Template()])).balances.openingCents).toBe(8416);
   });
 
   it('refuses a document whose section heading it cannot find at all', async () => {
@@ -1993,7 +2004,7 @@ describe('pdf: the fourth layout', () => {
           box: ['100,00 €', '-6,00 €', '+6,00 €', '100,00 €'],
         }),
       ),
-      200,
+      LIMITS,
     );
     expect(st.sheet.rows.slice(1).map((r) => (r[0] as Date).toISOString().slice(0, 10))).toEqual([
       '2025-12-01',
@@ -2013,7 +2024,7 @@ describe('pdf: the fourth layout', () => {
         box: ['84,16 €', '-1,02 €', '+0,08 €', '83,22 €'],
       });
 
-    const st = await readPdf(buildPdf(outside('outside note')), 200);
+    const st = await readPdf(buildPdf(outside('outside note')), LIMITS);
     expect(st.sheet.rows[3][0]).toBeNull();
     expect(st.sheet.note!(3, 0)).toBe(
       `reads "15.03. 15.03.", which this statement's period (${C24_PERIOD}) does not contain`,
@@ -2033,7 +2044,7 @@ describe('pdf: the fourth layout', () => {
           box: ['100,00 €', '-1,00 €', '+0,00 €', '99,00 €'],
         }),
       ),
-      200,
+      LIMITS,
     );
     expect(st.sheet.rows[1][0]).toBeNull();
     expect(st.sheet.note!(1, 0)).toBe(
@@ -2042,7 +2053,7 @@ describe('pdf: the fourth layout', () => {
   });
 
   it('reads a credit whose sign is a run of its own', async () => {
-    const st = await readPdf(buildPdf(c24Statement('split credit')), 200);
+    const st = await readPdf(buildPdf(c24Statement('split credit')), LIMITS);
     expect(st.sheet.rows[2][1]).toBe(0.08);
   });
 
@@ -2057,7 +2068,7 @@ describe('pdf: the fourth layout', () => {
       ],
       box: ['84,16 €', '-0,04 €', '+0,08 €', '84,20 €'],
     });
-    const st = await readPdf(buildPdf(pages), 200);
+    const st = await readPdf(buildPdf(pages), LIMITS);
     expect(st.sheet.rows[3][1]).toBe(-0.02);
 
     const staged = await importPdf('C24 Split Debit', pages);
@@ -2075,7 +2086,7 @@ describe('pdf: the fourth layout', () => {
           box: ['84,16 €', '-1.234,58 €', '+0,08 €', '-1.150,34 €'],
         }),
       ),
-      200,
+      LIMITS,
     );
     expect(st.sheet.rows[3][1]).toBe(-1234.56);
     expect(st.balances).toMatchObject({ openingCents: 8416, closingCents: -115034 });
@@ -2147,7 +2158,7 @@ describe('pdf: what a template says about its gross totals', () => {
         gross: { kind: 'not-printed' },
       },
     };
-    const st = await readPdf(twinDoc('+10,00€', '+9,00€', '-1,00€', '+0,00€'), 200, [noGross]);
+    const st = await readPdf(twinDoc('+10,00€', '+9,00€', '-1,00€', '+0,00€'), LIMITS, [noGross]);
     expect(st.balances.gross).toEqual({ kind: 'not-printed' });
 
     const parsed: ParsedFile = {
@@ -2193,7 +2204,7 @@ const unknownLayout = (pages: number, lines: (page: number) => string[]): Placed
 
 const refusalOfPdf = async (bytes: Buffer): Promise<string> => {
   try {
-    await readPdf(bytes, 200);
+    await readPdf(bytes, LIMITS);
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
@@ -2293,8 +2304,8 @@ describe('pdf: a refusal that names the bank', () => {
     ].map((iban, n) => ({ x: 520, y: 600 - n * 20, text: `IBAN: ${iban}` }));
     const [plain = []] = statement('foreign ibans');
 
-    const control = await readPdf(buildPdf([plain, []]), 200);
-    const read = await readPdf(buildPdf([[...plain, ...elsewhere], elsewhere]), 200);
+    const control = await readPdf(buildPdf([plain, []]), LIMITS);
+    const read = await readPdf(buildPdf([[...plain, ...elsewhere], elsewhere]), LIMITS);
 
     expect(read.template).toBe(control.template);
     expect(read.title).toBe(control.title);
@@ -2378,11 +2389,41 @@ describe('pdf: a statement inside a signed container', () => {
     const bytes = binaryInsideTheScan(container(0x83));
     expect(bytes.indexOf('%PDF-')).toBeGreaterThan(0);
 
-    await expect(readPdf(bytes, 200)).rejects.toThrow(
+    await expect(readPdf(bytes, LIMITS)).rejects.toThrow(
       /looks like a PDF but could not be opened as one/,
     );
   });
 });
+
+/**
+ * A clock that moves only when it is read, so expiry lands on a known check rather than on
+ * how fast this machine is. It reads deterministically because pdfjs never calls this clock
+ * during a parse: every reading below is one of the parser's own. Re-check that on a pdfjs
+ * bump - nothing else in the tree would notice.
+ *
+ * Restored in a finally because vitest runs one process with isolation off, so a leaked spy
+ * on a global would poison every later file and the symptom would appear nowhere near here.
+ */
+const stepping = async (step: number, run: () => Promise<unknown>): Promise<string> => {
+  let t = 0;
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => (t += step));
+  try {
+    await run();
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  } finally {
+    clock.mockRestore();
+  }
+  throw new Error('did not refuse');
+};
+
+/** How far the deadline refusal says it got, and that it is the deadline refusal at all. */
+const pagesRead = (refusal: string, of: number): number => {
+  expect(refusal).toMatch(/was taking longer than \d+ seconds to read/);
+  const read = new RegExp(`stopped after (\\d+) of its ${of} pages`).exec(refusal);
+  expect(read, refusal).not.toBeNull();
+  return Number(read![1]);
+};
 
 describe('pdf: the caps', () => {
   it('a PDF past the byte cap is refused before an import row exists', async () => {
@@ -2413,6 +2454,55 @@ describe('pdf: the caps', () => {
     const failed = await lastFailure(before);
     expect(failed.status).toBe('failed');
     expect(failed.documentAvailable).toBe(true);
+  });
+
+  // Pages carrying no text at all, which is the one shape the check inside the item loop
+  // cannot see: it never runs, so only the per-page check can stop this document.
+  it('a PDF past the deadline stops between pages, and says how many it read', async () => {
+    const bytes = buildPdf(Array.from({ length: 100 }, () => []));
+
+    const refusal = await stepping(100, () =>
+      readPdf(bytes, { maxPages: 200, deadlineMs: 5_000 }),
+    );
+
+    expect(pagesRead(refusal, 100)).toBe(50);
+  });
+
+  // And one page carrying more items than the stride the item check runs at, which only that
+  // check can stop: the per-page check has already run for the only page there is.
+  it('a PDF past the deadline stops partway through a page it has entered', async () => {
+    const items: PlacedText[] = [];
+    for (let i = 0; i < 1_200; i++) {
+      items.push({ x: 30 + (i % 12) * 45, y: 800 - Math.floor(i / 12) * 8, text: 'x' });
+    }
+
+    const refusal = await stepping(10, () =>
+      readPdf(buildPdf([items]), { maxPages: 200, deadlineMs: 25 }),
+    );
+
+    expect(pagesRead(refusal, 1)).toBe(0);
+  });
+
+  it('a PDF past the deadline leaves a failed import with its document', async () => {
+    const pages: PlacedText[][] = [];
+    for (let p = 0; p < 200; p++) pages.push([{ x: 50, y: 700, text: `page ${p}` }]);
+    const bytes = buildPdf(pages);
+    const accountId = await accountFor('Slow Pdf Bank');
+
+    const before = await idsNow();
+    // A step of a second against the deadline the importer really passes in, so this is also
+    // the only case that constrains that number's magnitude: a value small enough to expire
+    // on the first page or large enough to survive all 200 checks fails here.
+    const refusal = await stepping(1_000, () => importStatement({ accountId, bytes }));
+
+    const read = pagesRead(refusal, 200);
+    expect(read).toBeGreaterThan(0);
+    expect(read).toBeLessThan(200);
+
+    const failed = await lastFailure(before);
+    expect(failed.status).toBe('failed');
+    expect(failed.documentAvailable).toBe(true);
+    expect(failed.errorDetail).toContain('taking longer than');
   });
 });
 
@@ -2489,7 +2579,7 @@ describe('the diagnostic budget', () => {
           ...box(640, '1,00€', '1,00€', '1,00€', '1,00€'),
         ],
       ]),
-      200,
+      LIMITS,
     );
 
     const notes = [st.sheet.note!(1, 0), st.sheet.note!(1, 1)];

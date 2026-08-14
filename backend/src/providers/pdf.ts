@@ -80,6 +80,9 @@ const ambiguousLayout = (titles: string[]): string =>
 const tooManyPages = (pages: number, max: number): string =>
   `this PDF has ${pages} pages, more than the ${max} this importer reads in one file - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
 
+const tookTooLong = (read: number, pages: number, seconds: number): string =>
+  `this PDF was taking longer than ${seconds} seconds to read, so reading it was stopped after ${read} of its ${pages} pages - it may simply be a very large statement; export a narrower date range, or export the statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+
 const unreadableTable = (title: string, cell: string): string =>
   `this ${title} statement has a table this importer cannot read (${cell}) - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
@@ -513,6 +516,16 @@ export interface TextLine {
 const TOLERANCE = 2;
 
 /**
+ * What bounds a parse, in one object because two bare numbers in a row transpose silently.
+ * Total, so a bound added later breaks every call site rather than inheriting a value
+ * nobody chose.
+ */
+export interface PdfLimits {
+  maxPages: number;
+  deadlineMs: number;
+}
+
+/**
  * The document's text, one array of lines in reading order.
  *
  * Grouped by baseline and not by array position (see the file header), then sorted by
@@ -522,8 +535,13 @@ const TOLERANCE = 2;
  */
 async function readLines(
   bytes: Buffer,
-  maxPages: number,
+  limits: PdfLimits,
 ): Promise<{ lines: TextLine[]; pages: number; chars: number }> {
+  // Read before anything is loaded, so a document that is slow to open spends the budget
+  // rather than escaping it. Compared against on this function's own code path and never
+  // raced with a timer: whether the event loop turns during a parse is a property of the
+  // document, and the uploader chooses the document.
+  const deadline = performance.now() + limits.deadlineMs;
   const { getDocument, PasswordException, VerbosityLevel } = await loadPdfjs();
   // A copy, not a view: getDocument detaches the array it is given, and a small Node
   // Buffer is a window onto a shared pool that other allocations sit in. It refuses a
@@ -537,15 +555,29 @@ async function readLines(
       throw new Error(e instanceof PasswordException ? ENCRYPTED : NOT_A_PDF);
     });
     const pages = doc.numPages;
-    if (pages > maxPages) throw new Error(tooManyPages(pages, maxPages));
+    if (pages > limits.maxPages) throw new Error(tooManyPages(pages, limits.maxPages));
+
+    const seconds = Math.round(limits.deadlineMs / 1000);
+    // Expiry throws rather than destroying the task. destroy() resolves while the getPage or
+    // getTextContent it interrupted settles neither way, so the frame suspended at that await
+    // - and the copy of the file it holds - would be retained for the life of the process.
+    // The throw unwinds through the destroy() below with no pdfjs call in flight.
+    const stopIfLate = (read: number): void => {
+      if (performance.now() > deadline) throw new Error(tookTooLong(read, pages, seconds));
+    };
 
     const lines: TextLine[] = [];
     let chars = 0;
     for (let p = 1; p <= pages; p++) {
+      stopIfLate(p - 1);
       const page = await doc.getPage(p);
       const content = await page.getTextContent();
       const onPage: TextLine[] = [];
+      // At a stride, because the find below is a scan of the lines already placed and a page
+      // may carry enough baselines for that to square into seconds of its own.
+      let seen = 0;
       for (const item of content.items) {
+        if ((seen++ & 1023) === 0) stopIfLate(p - 1);
         if (!('str' in item)) continue;
         const text = item.str.trim();
         if (!text) continue;
@@ -980,10 +1012,10 @@ const pageLines = (lines: TextLine[], pages: number): string[][] => {
 
 export async function readPdf(
   bytes: Buffer,
-  maxPages: number,
+  limits: PdfLimits,
   templates: readonly PdfTemplate[] = TEMPLATES,
 ): Promise<PdfStatement> {
-  const { lines, pages, chars } = await readLines(bytes, maxPages);
+  const { lines, pages, chars } = await readLines(bytes, limits);
 
   const template = selectTemplate(templates, lines);
   if (!template) {
@@ -1364,6 +1396,7 @@ export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[
     notRecognisedFrom(longest(Object.values(ISSUERS))),
     SCANNED,
     tooManyPages(found, found),
+    tookTooLong(found, found, found),
     ambiguousLayout(templates.map((t) => t.title)),
   ];
   const role = longest([...ROLES]) as BalanceRole;
