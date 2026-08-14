@@ -81,7 +81,7 @@ const NOT_THIS_LAYOUT: PlacedText[][] = [
 
 const refused = async (bytes: Buffer): Promise<string> => {
   try {
-    await readPdf(bytes, 10, [TEMPLATE]);
+    await readPdf(bytes, { maxPages: 10, deadlineMs: 600_000 }, [TEMPLATE]);
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
@@ -117,7 +117,9 @@ const throws = (f: () => unknown): boolean => {
 };
 
 export async function parseWithoutCanvas(): Promise<CanvasAbsentParse> {
-  const parsed = await readPdf(buildPdf(STATEMENT), 10, [TEMPLATE]);
+  const parsed = await readPdf(buildPdf(STATEMENT), { maxPages: 10, deadlineMs: 600_000 }, [
+    TEMPLATE,
+  ]);
   const globals = globalThis as unknown as {
     Path2D: new () => unknown;
     DOMMatrix: new (init: number[]) => unknown;
