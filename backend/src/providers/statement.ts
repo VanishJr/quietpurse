@@ -111,6 +111,58 @@ const FEE_QUOTE_MAX = 24;
 const SERIES_QUOTE_MAX = 24;
 
 /**
+ * What one cell describeRow quotes back at the user may spend - and the one place
+ * the 199 that NOTICE_MAX (xlsx.ts) and NOTE_MAX (pdf.ts) are both derived against
+ * is written whole. Three files each carried half of that derivation, each half was
+ * locally checkable, and nobody owned the sum: which is how BOTH premises of the
+ * sentence in xlsx.ts came to be false while its number stayed right.
+ *
+ * 199 = noRowsParsed's head at MAX_DATA_ROWS skipped, 40, plus the longest reason
+ * describeRow composes, 159. NOTICE_MAX is what ERROR_DETAIL_MAX leaves after those
+ * two, the 3 characters that join them, and 8 of margin.
+ *
+ * The 159, at the extreme of every number it carries. The lead is `row `, the label
+ * and `: `, and the label is whatever the path's rowLabel emits:
+ *   xlsx   kept[i].sheetRow, and never past MAX_SHEET_ROWS = 500000, because a
+ *          worksheet with more rows than that is skipped before readRows walks it -
+ *          so Excel's own 1048576 is NOT reachable, however the file was written
+ *   csv    i + 1, so MAX_DATA_ROWS + 1
+ *   pdf    i, so MAX_DATA_ROWS
+ * against the arms:
+ *   numeric date   String(n) for a double is 25 characters at its widest
+ *                  (-0.0000010352999999999999), not the 24 of -Number.MAX_VALUE.
+ *                  Bounded here, which is what makes 159 hold at a seven-digit label
+ *                  instead of only at the six the xlsx gate happens to allow: 158
+ *                  under a six-digit label, 159 at Excel's unreachable one
+ *   a note         the wider of the two arms that quote one spends 22 of fixed prose
+ *                  (`the amount cell `; the date one is 20), so what a note MAY spend
+ *                  - the budget a producer is writing against - is what 159 leaves
+ *                  after that and the label: 131 under xlsx's six digits, 132 under
+ *                  the five pdf and csv can reach. The two cannot be traded: a
+ *                  132-character note at a six-digit label composes 160, so 131 is
+ *                  the only figure safe on every path.
+ *                  Spent today: pdf's NOTE_MAX is 132 and composes 159 exactly; csv
+ *                  produces no note at all; xlsx produces two, UNCACHED_FORMULA at 89
+ *                  composing 117, and errorNote at 33 composing 61 - and what holds
+ *                  errorNote inside the budget is the CUT at ERROR_TEXT_MAX in
+ *                  xlsx.ts. Not its type: CellErrorValue['error'] is a union of seven
+ *                  literals that nothing checks the file against, so before that cut
+ *                  the note was 9 plus whatever the bytes said, and a workbook a
+ *                  spreadsheet did not write composed past 400 here - evicting
+ *                  noRowsParsed's notice about a different part of the file whole.
+ *                  NOT held: that a note producer added later respects its path's
+ *                  budget. Nothing checks it, and a blanket bounded() here cannot -
+ *                  it would have to cut at 131, which is under what pdf already
+ *                  spends. DEBT.md carries it
+ *   no movement    the on-top arm quotes two cells at this bound: 159 under a
+ *                  six-digit label, and it is spent to the character. included is
+ *                  pdf-only, 142; not-stated is every path's, 133 under a six-digit
+ *                  label
+ *   fall-through   two cells at this bound: 104 under a six-digit label
+ */
+const CELL_QUOTE_MAX = 24;
+
+/**
  * What one column name may spend in the summary's readAs. A RENDER bound, and the one
  * number in this band that is NOT part of the ERROR_DETAIL_MAX derivation the three
  * above share: readAs is a field of the summary, never a problem and never an
@@ -779,6 +831,62 @@ export function applyFee(raw: number, stated: StatedFee): { amount: number; fee:
   }
 }
 
+declare const refused: unique symbol;
+
+/**
+ * WHY a row was not imported, decided where it is known and carried to the sentence
+ * whole. Until this row the mapper computed the reason, threw it away, and handed
+ * describeRow two nullables out of which "the movement was zero" is not expressible -
+ * so every zero-movement row was told that neither of its cells could be read, about
+ * cells that had both parsed.
+ */
+export type RowRefusal =
+  | ({ kind: 'unread'; date: string | null; amount: number | null } & {
+      readonly [refused]: true;
+    })
+  | ({ kind: 'no-movement'; stated: StatedFee } & { readonly [refused]: true });
+
+/**
+ * And the arm that is not a refusal, which carries the two values out non-null. The
+ * guard this replaced decided the row AND narrowed date and amount for everything
+ * below it; a verdict that answered only the refusals would have thrown the narrowing
+ * away and needed a second test to get it back - a predicate written twice, which is
+ * the shape of defect this row exists to remove one level up.
+ */
+export type RowVerdict =
+  | RowRefusal
+  | ({ kind: 'import'; date: string; amount: number } & { readonly [refused]: true });
+
+/** The one place this brand is applied, and it is private to this module. */
+const refuse = <T>(value: T): T & { readonly [refused]: true } =>
+  value as T & { readonly [refused]: true };
+
+/**
+ * Whether a row imports and, when it does not, WHY - decided once, where both are
+ * known, and carried to the sentence whole.
+ *
+ * The brand is what makes the ordering below a rule rather than a convention: no
+ * other file can build a RowVerdict at all, so no caller can claim `no-movement` for
+ * a row whose date or amount never parsed - the nullness test comes first here, once,
+ * and the zero arm is reachable only past it. It stops an accident, not a determined
+ * caller: `as unknown as RowRefusal` still compiles, which is all `check` claims
+ * either.
+ *
+ * `amount` is the MOVEMENT, after applyFee, where describeRow used to be handed the
+ * cell. Safe because amount === null iff rawAmount === null at the call site: applyFee
+ * returns a number on every arm, so the only null is the caller's own rawAmount guard.
+ * That equivalence is obvious for exactly as long as applyFee has no fourth arm.
+ */
+export function rowVerdict(
+  date: string | null,
+  amount: number | null,
+  stated: StatedFee,
+): RowVerdict {
+  if (date === null || amount === null) return refuse({ kind: 'unread', date, amount });
+  if (amount === 0) return refuse({ kind: 'no-movement', stated });
+  return refuse({ kind: 'import', date, amount });
+}
+
 /**
  * What the sheet stated beside the rows it accepted, on its way to reconcile and
  * nowhere else. Not on Sheet, not on ParsedFile's sheet arm, not on NewTransaction
@@ -952,6 +1060,11 @@ async function mapAndStore(
     }
   })();
 
+  // and which column that was, for the sentence to quote: the cell the arithmetic
+  // read, never resolveColumns's feeCol, which on the pdf path names a header this
+  // importer invented
+  const statedFeeCol = feeSource.kind === 'none' ? -1 : feeSource.col;
+
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
     throw new Error(
@@ -1041,20 +1154,13 @@ async function mapAndStore(
     // can subtract twice or store a fee against an amount it was not taken from.
     const { amount, fee } =
       rawAmount === null ? { amount: null, fee: null } : applyFee(rawAmount, statedFee.fee);
-    // the movement, not the cell it came from: a plan fee this dropped whole has an
-    // amount of 0.00 and is a real charge.
-    //
-    // describeRow gets the cell, so every row that was refusable before this change
-    // carries the sentence it always carried. The subtraction invents one that was not -
-    // a credit its own fee eats - and that row reaches describeRow's fall-through with a
-    // date and an amount that both parsed, and is told neither could be. That is the same
-    // wrong sentence a literal 0.00 amount already gets there, so a bespoke sentence here
-    // would cover the new shape and leave the old one lying; both are fixed as one.
-    if (date === null || amount === null || amount === 0) {
+    const verdict = rowVerdict(date, amount, statedFee.fee);
+    if (verdict.kind !== 'import') {
       skipped++;
       if (date === null || amount === null) unreadable++;
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
-        rowProblems.push(describeRow(sheet, i, { dateCol, amountCol, date, amount: rawAmount }));
+        const cols = { dateCol, amountCol, feeCol: statedFeeCol };
+        rowProblems.push(describeRow(sheet, i, cols, verdict));
       }
       continue;
     }
@@ -1069,11 +1175,11 @@ async function mapAndStore(
       tx: {
         accountId: account.id,
         provider: 'upload',
-        amount,
+        amount: verdict.amount,
         currency,
-        date,
+        date: verdict.date,
         description,
-        category: categorize(undefined, description, amount),
+        category: categorize(undefined, description, verdict.amount),
         fee,
       },
       stated: {
@@ -1642,6 +1748,9 @@ const rowCount = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
+/** A cell as the file spelled it, at the width CELL_QUOTE_MAX derives. */
+const quote = (c: Cell | undefined): string => `"${bounded(cellText(c), CELL_QUOTE_MAX)}"`;
+
 function statusReason(lead: string, status: StatusSkips): string {
   const entries = [...status.counts.entries()]
     .sort(([, a], [, b]) => b - a)
@@ -1675,27 +1784,66 @@ export function noRowsParsed(
   return head.length + notice.length <= ERROR_DETAIL_MAX ? head + notice : head;
 }
 
-function describeRow(
+/**
+ * Exported for the test, like readSheet and applyFee and for the same reason: neither
+ * `never` below is worth anything unless something has watched it throw, and the
+ * lengths this composes are bounded by an assertion rather than by a type, so that
+ * assertion has to be able to reach every arm. Not API surface anyone asked for.
+ *
+ * `feeCol` is the column statedFeeOf actually read, not resolveColumns's - on the PDF
+ * path the latter is the synthetic header's and quoting it would name a column the
+ * document has not got.
+ */
+export function describeRow(
   sheet: Sheet,
   i: number,
-  parsed: { dateCol: number; amountCol: number; date: string | null; amount: number | null },
+  cols: { dateCol: number; amountCol: number; feeCol: number },
+  refusal: RowRefusal,
 ): string {
   const label = sheet.rowLabel(i);
   const row: Cell[] = sheet.rows[i];
-  const { dateCol, amountCol } = parsed;
+  const { dateCol, amountCol, feeCol } = cols;
 
-  if (parsed.date === null) {
-    const note = sheet.note?.(i, dateCol);
-    if (note) return `row ${label}: the date cell ${note}`;
-    if (typeof row[dateCol] === 'number') {
-      return `row ${label}: the date cell holds the number ${row[dateCol]}, which this parser will not read as a date - format that column as a date and upload again`;
+  switch (refusal.kind) {
+    case 'unread': {
+      if (refusal.date === null) {
+        const note = sheet.note?.(i, dateCol);
+        if (note) return `row ${label}: the date cell ${note}`;
+        if (typeof row[dateCol] === 'number') {
+          return `row ${label}: the date cell holds the number ${bounded(String(row[dateCol]), CELL_QUOTE_MAX)}, which this parser will not read as a date - format that column as a date and upload again`;
+        }
+      }
+      if (refusal.amount === null) {
+        const note = sheet.note?.(i, amountCol);
+        if (note) return `row ${label}: the amount cell ${note}`;
+      }
+      return `row ${label}: could not parse the date ${quote(row[dateCol])} or the amount ${quote(row[amountCol])}`;
+    }
+    case 'no-movement': {
+      // keyed to the convention rather than flattened into this switch, so a fourth
+      // StatedFee arm is a compile error here and not a row told about somebody
+      // else's convention - applyFee's guarantee, extended to the sentence
+      switch (refusal.stated.kind) {
+        case 'not-stated':
+          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and no fee is stated - the row is skipped rather than imported as a zero`;
+        case 'on-top':
+          // the direction of the subtraction, not "they cancel": a fee cell reading
+          // 0.00 states a zero and cancels nothing, and the sign is what the guard is
+          // for - a -5.00 row with a 5.00 fee is a -10.00 movement
+          return `row ${label}: the amount cell ${quote(row[amountCol])} less the fee cell ${quote(row[feeCol])} is zero - the row is skipped rather than imported as a zero`;
+        case 'included':
+          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and it already carries the fee - the row is skipped rather than imported as a zero`;
+        default: {
+          const unreachable: never = refusal.stated;
+          throw new Error(`unhandled fee convention: ${String(unreachable)}`);
+        }
+      }
+    }
+    default: {
+      const unreachable: never = refusal;
+      throw new Error(`unhandled row refusal: ${String(unreachable)}`);
     }
   }
-  if (parsed.amount === null) {
-    const note = sheet.note?.(i, amountCol);
-    if (note) return `row ${label}: the amount cell ${note}`;
-  }
-  return `row ${label}: could not parse the date "${cellText(row[dateCol])}" or the amount "${cellText(row[amountCol])}"`;
 }
 
 export const feeRefused = (sheet: Sheet, i: number, text: string): string =>

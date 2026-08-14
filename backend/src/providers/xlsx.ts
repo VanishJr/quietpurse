@@ -35,8 +35,13 @@ const HEADER_SCAN_ROWS = 20;
  * Cheap early-out only, deliberately far above MAX_DATA_ROWS: rowCount counts rows
  * carrying nothing but formatting, and formatting a whole column is something
  * people do. The cap that decides an import is the mapper's, over kept data rows.
+ *
+ * Exported because it is also the widest row LABEL a sheet can carry, and every
+ * xlsx figure in the derivation above statement.ts's CELL_QUOTE_MAX is read at that
+ * ceiling: the budget sweep imports this rather than keeping a second copy, or it
+ * goes on measuring the old ceiling, green, after this one moves.
  */
-const MAX_SHEET_ROWS = 10 * MAX_DATA_ROWS;
+export const MAX_SHEET_ROWS = 10 * MAX_DATA_ROWS;
 
 /** The reason the closest row was rejected is the user's, but not at any length. */
 const CLOSEST_CLAUSE_MAX = 300;
@@ -48,17 +53,34 @@ const CLOSEST_CLAUSE_MIN = 60;
 const UNUSED_LIST_MAX = 150;
 
 /**
+ * What an error cell's own text may spend, cut here rather than trusted.
+ * CellErrorValue['error'] is seven string literals at compile time and the loader
+ * never checks the file it read against them, so String(v.error) is whatever the
+ * bytes say - a workbook no spreadsheet wrote is still a workbook this parser opens.
+ * The note errorNote composes is `contains ` plus this, 33, against the 131 an xlsx
+ * note may spend (derived above statement.ts's CELL_QUOTE_MAX), and THIS CUT is what
+ * holds that number: neither the union nor the two `as ExcelJS.CellErrorValue` casts
+ * hold anything about the file. 24 because every error code a spreadsheet writes is
+ * 7 characters or fewer, and a cell's own text is quoted at 24 across this parser.
+ */
+const ERROR_TEXT_MAX = 24;
+
+/**
  * What the whole notice may spend. noRowsParsed appends it behind the row's own
  * reason whole or not at all, so a notice past this costs the too-large clause as
  * well as the unused one - and that clause reached the user before this one existed.
  * What ERROR_DETAIL_MAX leaves after the longest reason the parser composes from
  * fixed prose, the 3 characters that join the two, and 8 of margin. That reason is
- * 199, measured at the extreme of every number it carries: a row label at Excel's
- * own ceiling, MAX_DATA_ROWS skipped, and -Number.MAX_VALUE in the date cell at 24
- * characters. 298 is therefore the exact bound - the margin is there because this
- * number has been derived three times and been wrong twice. The too-large list is
- * not bounded by it and predates it, so when the two together do not fit it is the
- * unused clause that yields.
+ * 199 - MAX_DATA_ROWS skipped, plus the 159 derived in full above statement.ts's
+ * CELL_QUOTE_MAX, which is the one place that number is now written whole. 298 is
+ * therefore the exact bound - the margin is there because this number has been
+ * derived three times and been wrong twice.
+ *
+ * Both premises this comment used to state were among those wrongs, and they cancelled:
+ * the row label cannot reach Excel's own ceiling (MAX_SHEET_ROWS above stops it at
+ * six digits), and -Number.MAX_VALUE is not the widest String(n). Read the
+ * derivation there, not here. The too-large list is not bounded by this number and
+ * predates it, so when the two together do not fit it is the unused clause that yields.
  */
 const NOTICE_MAX = ERROR_DETAIL_MAX - 210;
 
@@ -364,4 +386,8 @@ function fromResult(result: unknown): Normalised {
 const joinRichText = (v: ExcelJS.CellRichTextValue): string =>
   v.richText.map((part) => part.text).join('');
 
-const errorNote = (v: ExcelJS.CellErrorValue): string => `contains ${String(v.error)}`;
+const errorNote = (v: ExcelJS.CellErrorValue): string => {
+  const text = String(v.error);
+  const cut = text.length <= ERROR_TEXT_MAX ? text : `${text.slice(0, ERROR_TEXT_MAX - 3)}...`;
+  return `contains ${cut}`;
+};
