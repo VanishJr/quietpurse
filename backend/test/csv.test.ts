@@ -12,17 +12,23 @@ import {
   parseCsv,
   parseCsvDate,
 } from '../src/providers/csv';
-import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
+import { Cell, MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
+import { NOTE_MAX } from '../src/providers/pdf';
+import { MAX_SHEET_ROWS } from '../src/providers/xlsx';
 import { accountFor, importAndConfirm, rejectionOf } from './helpers';
 import {
   CURRENCY_CODE_MAX,
   ImportSummary,
   ParsedFile,
+  RowRefusal,
+  RowVerdict,
   balanceBreaks,
+  describeRow,
   feeRefused,
   importStatement,
   noRowsParsed,
   reconcile,
+  rowVerdict,
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
 
@@ -283,6 +289,27 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
     expect(thrown.message).toBe(
       'no row could be parsed (1 skipped): row 2: could not parse the date "not a date" or the amount "not a number"',
+    );
+  });
+
+  /**
+   * The same sentence with a cell that has no width at all - which is what a CSV
+   * field is. Unbounded, this reason alone composed ~395 characters and pushed a
+   * workbook's unused-sheet notice off a message that had nothing to do with it,
+   * because noRowsParsed appends the notice whole or not at all. Both quotes are cut
+   * here, so neither can be the one holding the bound up.
+   */
+  it('a CSV cell with no width of its own is quoted inside the budget', async () => {
+    const wide = 'Ruecklastschrift wegen Widerspruch '.repeat(12).slice(0, 400);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Wide Cell Bank'),
+        bytes: Buffer.from(`date,amount,description\n${wide},${wide},broken`, 'utf8'),
+      }),
+    );
+
+    expect(thrown.message).toBe(
+      'no row could be parsed (1 skipped): row 2: could not parse the date "Ruecklastschrift wegen …" or the amount "Ruecklastschrift wegen …"',
     );
   });
 });
@@ -696,8 +723,14 @@ describe('a fee the statement states beside the amount', () => {
    * fee eats the whole of it moved nothing, and importing it as a zero would put a
    * transaction in the history the statement does not show. Note the sign: the fee is
    * always taken, so a -5.00 row with a 5.00 fee is a -10.00 movement, not a zero.
+   *
+   * And the sentence names the subtraction rather than saying the two cancel: a fee
+   * cell reading 0.00 is a stated zero, not an absent fee (readFee returns null only
+   * for an EMPTY cell), so "Nothing Moved" is an on-top row whose fee cancelled
+   * nothing. Both rows are told which two cells the movement came out of and in which
+   * direction, which is the sign the comment above exists to protect.
    */
-  it('a row with no movement at all is still skipped', async () => {
+  it('a row with no movement at all is still skipped, and told why', async () => {
     const r = await importRevolut(
       'Fee No Movement',
       WITH_FEE,
@@ -709,6 +742,51 @@ describe('a fee the statement states beside the amount', () => {
     expect(r.skipped).toBe(2);
     expect((await listTransactions({ accountId: r.accountId })).map((t) => t.description)).toEqual([
       'Kept',
+    ]);
+    expect(r.problems).toEqual([
+      'row 2: the amount cell "0.00" less the fee cell "0.00" is zero - the row is skipped rather than imported as a zero',
+      'row 3: the amount cell "5.00" less the fee cell "5.00" is zero - the row is skipped rather than imported as a zero',
+    ]);
+  });
+
+  /**
+   * The shape observed live: a real charge whose money sits in a column this file has
+   * not got. Told what is known - the amount cell read zero and nothing stated a fee -
+   * and not that the export is missing a column, which is a guess a genuine 0.00 row
+   * would make false.
+   *
+   * What it must never say again is that neither cell could be read. Both parsed.
+   */
+  it('a zero amount with no fee column names the zero, not an unreadable cell', async () => {
+    const r = await importRevolut(
+      'Fee Column Deleted',
+      WITHOUT_FEE,
+      withoutFee('Kept', '-1.00', '07'),
+      withoutFee('Premium plan fee', '0.00', '08'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 3: the amount cell reads "0.00" and no fee is stated - the row is skipped rather than imported as a zero',
+    ]);
+  });
+
+  /**
+   * And the quote is bounded, on the path where a cell has no width at all. 25
+   * characters of zero parse to zero, so this reaches the same arm as the row above
+   * with a cell one character past CELL_QUOTE_MAX - the shortest cell that proves the
+   * cut happened rather than that it was not needed.
+   */
+  it('a zero amount cell wider than the quote budget is cut', async () => {
+    const r = await importRevolut(
+      'Fee Wide Zero',
+      WITHOUT_FEE,
+      withoutFee('Kept', '-1.00', '09'),
+      withoutFee('Long Zero', `0.${'0'.repeat(23)}`, '10'),
+    );
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 3: the amount cell reads "0.000000000000000000000…" and no fee is stated - the row is skipped rather than imported as a zero',
     ]);
   });
 
@@ -1536,6 +1614,145 @@ describe('what the new refusals may spend', () => {
   });
 
   /**
+   * The 159 itself - the number the three sweeps around this one are all derived
+   * against, and the one describeRow spends. The derivation is written whole above
+   * CELL_QUOTE_MAX in statement.ts; this is the assertion underneath it, and until
+   * this row there was none: the fall-through interpolated two CSV cells raw, and a
+   * CSV field has no width of its own.
+   *
+   * Through describeRow rather than through an import, for feeRefused's reason above:
+   * the extremes are row labels no file this suite can build reaches.
+   *
+   * Each arm is paired with the labels that can REACH it, which is a departure from
+   * the feeRefused sweep above - a flat 1_048_576, conservative for that one sentence
+   * and wrong as a general habit. The pairing is the only reason 159 is true: a
+   * NOTE_MAX-length note belongs to the PDF reader, whose rowLabel is `i` and so at
+   * most MAX_DATA_ROWS, and the same note under Excel's own ceiling would compose 161
+   * for a combination no path produces. 1_048_576 appears below only where it sits
+   * ABOVE the reachable label and is therefore the stricter test.
+   */
+  it('every reason describeRow composes stays under the number NOTICE_MAX is derived from', () => {
+    // a worksheet with more rows than this is skipped before readRows walks it, so it
+    // is the widest label any sheet can carry. Imported and not restated: a second
+    // copy goes on measuring the old ceiling, green, after xlsx.ts moves this one
+    const SHEET_LABEL = MAX_SHEET_ROWS;
+    const EXCEL_LABEL = 1_048_576;
+    // what the 159 leaves a note: the arm quoting one spends 22 of fixed prose, so the
+    // budget is 159 - 22 - the label. Swept to the BUDGET rather than to the widest
+    // literal xlsx.ts happens to hold, so this is a bound on describeRow rather than a
+    // measurement of that file - what keeps xlsx.ts's own two producers inside it is
+    // UNCACHED_FORMULA's length and errorNote's cut, held there and not here. pdf's
+    // budget is NOTE_MAX itself, which is why that import is the one carrying it
+    const XLSX_NOTE_MAX = 159 - 22 - String(SHEET_LABEL).length;
+
+    const cols = { dateCol: 0, amountCol: 1, feeCol: 2 };
+    const sheetOf = (label: number, row: Cell[], note?: string): Sheet => ({
+      rows: [[], row],
+      rowLabel: () => label,
+      note: () => note,
+    });
+
+    const composed: string[] = [];
+    const reason = (sheet: Sheet, verdict: RowVerdict): string => {
+      // the sweep is over refusals; an import arm here would mean a case asserting the
+      // budget of a sentence nobody is composing
+      if (verdict.kind === 'import') throw new Error('the sweep reached the import arm');
+      return describeRow(sheet, 1, cols, verdict);
+    };
+    const take = (sheet: Sheet, verdict: RowVerdict): void => {
+      composed.push(reason(sheet, verdict));
+    };
+
+    // 0 to well past CELL_QUOTE_MAX, and then two cells with no width of their own,
+    // which is what a CSV field is. Both halves are load-bearing: 40 characters twice
+    // composes 137 and never approaches the bound at all, so a sweep that stopped
+    // there would be asserting a budget it could not overspend.
+    const cells = [
+      ...Array.from({ length: 41 }, (_, w) => 'Ф'.repeat(w)),
+      'Ф'.repeat(200),
+      'Ф'.repeat(400),
+    ];
+    // every shape String(n) takes, including either side of 1e21 where it stops being
+    // decimal and turns exponential, and its widest form at 25 characters
+    const numbers = [
+      0, -0, 1e20, -1e20, 1e21, -1e21, -1e22, -3e22, 20260106, 1234567890123456,
+      Number.MAX_VALUE, -Number.MAX_VALUE, Number.MIN_VALUE, -Number.MIN_VALUE,
+      -0.0000010352999999999999,
+    ];
+    const DATE = '2026-01-01T00:00:00.000Z';
+
+    // the unread arm with no note: the numeric-date branch and the fall-through, both
+    // quoted cells swept, and the doubly-bad row that must keep the date's sentence
+    for (const dateCell of [...cells, ...numbers]) {
+      for (const amountCell of cells) {
+        for (const [date, amount] of [
+          [null, null],
+          [null, 0],
+          [DATE, null],
+        ] as const) {
+          const sheet = sheetOf(EXCEL_LABEL, [dateCell, amountCell, '']);
+          take(sheet, rowVerdict(date, amount, { kind: 'not-stated' }));
+        }
+      }
+    }
+
+    // the note branches, each path's budget under the widest label it can emit. The
+    // CSV reader supplies no `note` at all, so only two of the three are here
+    for (const [label, widest] of [
+      [MAX_DATA_ROWS, NOTE_MAX],
+      [SHEET_LABEL, XLSX_NOTE_MAX],
+    ]) {
+      for (let width = 0; width <= widest; width++) {
+        const note = 'ы'.repeat(width);
+        for (const [date, amount] of [
+          [null, null],
+          [DATE, null],
+        ] as const) {
+          const sheet = sheetOf(label, ['x', 'x', ''], note);
+          take(sheet, rowVerdict(date, amount, { kind: 'not-stated' }));
+        }
+      }
+    }
+
+    // the no-movement arm, each convention under the widest label that can reach it:
+    // on-top is a sheet's, included is a PDF's, not-stated is every path's
+    for (const amountCell of cells) {
+      for (const feeCell of cells) {
+        const row = [DATE, amountCell, feeCell];
+        take(sheetOf(EXCEL_LABEL, row), rowVerdict(DATE, 0, { kind: 'not-stated' }));
+        take(sheetOf(SHEET_LABEL, row), rowVerdict(DATE, 0, { kind: 'on-top', fee: 0 }));
+        take(sheetOf(MAX_DATA_ROWS, row), rowVerdict(DATE, 0, { kind: 'included', fee: 0 }));
+      }
+    }
+
+    // every arm was actually walked: a sweep that quietly stopped reaching one would
+    // otherwise pass on the strength of the arms it still reached
+    for (const arm of [
+      'the date cell ы',
+      'the date cell holds the number ',
+      'the amount cell ы',
+      'could not parse the date ',
+      'and no fee is stated',
+      'less the fee cell ',
+      'and it already carries the fee',
+    ]) {
+      expect(composed.some((s) => s.includes(arm)), arm).toBe(true);
+    }
+
+    const longest = composed.reduce((a, b) => (a.length >= b.length ? a : b));
+    expect(longest.length).toBeLessThanOrEqual(159);
+    expect(noRowsParsed(MAX_DATA_ROWS, [longest], [], null).length).toBeLessThanOrEqual(199);
+
+    // the on-top arm spends the budget to the character, so <= cannot tell "still
+    // exactly fits" from "about to stop fitting"
+    const onTop = reason(
+      sheetOf(SHEET_LABEL, [DATE, 'Ф'.repeat(40), 'Ф'.repeat(40)]),
+      rowVerdict(DATE, 0, { kind: 'on-top', fee: 0 }),
+    );
+    expect(onTop.length).toBe(159);
+  });
+
+  /**
    * And row 54's, against ERROR_DETAIL_MAX rather than against 199: it is a throw from
    * reconcile, not a clause of noRowsParsed, so xlsx.ts's NOTICE_MAX is untouched by
    * it. Built FROM the bounds rather than beside them (row 6b, D10) - the currency
@@ -1569,6 +1786,49 @@ describe('what the new refusals may spend', () => {
       }
     }
     expect(longest).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+  });
+});
+
+/**
+ * The whole point of the reason travelling as a union: the mapper knows why it dropped
+ * a row and describeRow is told, instead of re-deriving it from two nullables out of
+ * which "the movement was zero" is not expressible. Neither `never` below is worth
+ * anything unless something has watched it throw, which is the fee dispatch's own
+ * reason for existing (pdf.test.ts).
+ */
+describe('the row-refusal dispatch', () => {
+  it('has no default that quietly names a cause', () => {
+    expect(() =>
+      describeRow(
+        { rows: [[], ['x', 'x']], rowLabel: () => 1 },
+        1,
+        { dateCol: 0, amountCol: 1, feeCol: -1 },
+        { kind: 'filtered' } as unknown as RowRefusal,
+      ),
+    ).toThrow(/unhandled row refusal/);
+
+    expect(() =>
+      describeRow(
+        { rows: [[], ['x', 'x']], rowLabel: () => 1 },
+        1,
+        { dateCol: 0, amountCol: 1, feeCol: -1 },
+        { kind: 'no-movement', stated: { kind: 'guessed' } } as unknown as RowRefusal,
+      ),
+    ).toThrow(/unhandled fee convention/);
+  });
+
+  /**
+   * And the ordering Trap 3 asks for is a compile error rather than a convention. A
+   * hand-built refusal is how a caller would come to claim a zero movement for a row
+   * whose date never parsed; the brand stops it, and rowVerdict tests nullness first,
+   * once. Remove the brand and this directive becomes TS2578 under
+   * tsconfig.test.json - which is the half of `npm run typecheck` that reads this
+   * tree, and is what holds the rule.
+   */
+  it('cannot be built anywhere but rowVerdict', () => {
+    // @ts-expect-error the brand is private to statement.ts
+    const forged: RowRefusal = { kind: 'no-movement', stated: { kind: 'not-stated' } };
+    expect(forged.kind).toBe('no-movement');
   });
 });
 

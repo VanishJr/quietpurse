@@ -48,6 +48,11 @@ export type PdfFee = { kind: 'none' } | { kind: 'included'; col: number };
 
 const MIN_CHARS_PER_PAGE = 50;
 
+/**
+ * The whole of what a note may spend ON THIS PATH: 132 under a five-digit label
+ * composes exactly the 159 derived above statement.ts's CELL_QUOTE_MAX. The budget is
+ * per path and this is not the smallest - the same 132 under xlsx's six digits is 160.
+ */
 export const NOTE_MAX = 132;
 
 const CELL_QUOTE_MAX = 24;

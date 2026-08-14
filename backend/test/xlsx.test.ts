@@ -173,6 +173,31 @@ describe('xlsx: cells that are not scalars', () => {
       'row 5: the amount cell contains #N/A',
     ]);
   });
+
+  /**
+   * The error text is the FILE's, not the type's: CellErrorValue['error'] is seven
+   * string literals at compile time and exceljs never checks the bytes it read against
+   * them, so a workbook no spreadsheet wrote carries whatever it likes into the note.
+   * Without errorNote's cut this composed 432 characters, past the 159 the derivation
+   * above statement.ts's CELL_QUOTE_MAX declares - and a row reason that long evicts
+   * noRowsParsed's notice about a different part of the file whole.
+   */
+  it('an error text the seven literals do not cover is cut, not carried', async () => {
+    const forged = `#${'A'.repeat(400)}!`;
+    const book = await xlsx((wb) => {
+      const ws = wb.addWorksheet('Forged');
+      ws.addRow(['date', 'amount', 'description']);
+      ws.addRow([utc('2026-05-01'), -10, 'fine']);
+      const broken = ws.addRow([utc('2026-05-02'), null, 'forged error']);
+      broken.getCell(2).value = { error: forged } as ExcelJS.CellErrorValue;
+    });
+
+    const r = await importFile('Forged Error Bank', book);
+    expect([r.total, r.inserted, r.skipped]).toEqual([2, 1, 1]);
+    // 20 A's: the cut spelled out independently of ERROR_TEXT_MAX, ellipsis included
+    expect(r.problems[0]).toBe(`row 3: the amount cell contains #${'A'.repeat(20)}...`);
+    expect(r.problems[0].length).toBeLessThanOrEqual(159);
+  });
 });
 
 describe('xlsx: finding the statement', () => {
@@ -676,19 +701,30 @@ describe('the row guard', () => {
   });
 
   /**
-   * The other arm: a row reason long enough that the notice no longer fits. It is
-   * dropped whole rather than cut - and the fact it carried is not lost with it,
-   * because the log runs at the parser and not on the successful path. On a refusal
-   * `problems` is never sent and the `imports` row stores only the message.
+   * The other arm: a notice that no longer fits behind the row's reason. It is dropped
+   * whole rather than cut - and the fact it carried is not lost with it, because the
+   * log runs at the parser and not on the successful path. On a refusal `problems` is
+   * never sent and the `imports` row stores only the message.
+   *
+   * It used to be built on a 400-character date cell, and it cannot be any more: every
+   * cell describeRow quotes is bounded now, so noRowsParsed's head is at most 199 and a
+   * NOTICE_MAX-bounded notice with its join at most 293 - 492 of the 500, which is
+   * exactly what that derivation is for. The one clause left that can still overrun is
+   * the too-large list, which sheetNotice leaves unbounded and which xlsx.ts names as
+   * the one that wins. Twelve oversized sheets put that list alone past error_detail
+   * whatever the head is, so the drop is
+   * forced by the clause and not by the length of the row's reason - a wording change
+   * upstream cannot quietly stop exercising this arm.
    */
   it('nothing parsed and no room for the notice: it is dropped, and logged instead', async () => {
-    // sized so that the row reason alone fits error_detail and the notice behind it does not
-    const longCell = 'Ruecklastschrift wegen Widerspruch '.repeat(12).slice(0, 400);
     const book = await xlsx((wb) => {
-      wb.addWorksheet('Januar').getRow(600_000).height = 20;
+      for (let i = 1; i <= 12; i++) {
+        const name = `Kontoauszug ${String(i).padStart(2, '0')}-2026`;
+        wb.addWorksheet(name).getRow(600_000).height = 20;
+      }
       const februar = wb.addWorksheet('Februar');
       februar.addRow(['date', 'amount', 'description']);
-      februar.addRow([longCell, 'xx', 'the only row']);
+      februar.addRow(['Widerspruch', 'xx', 'the only row']);
     });
 
     const warn = vi.spyOn(logImport, 'warn').mockImplementation(() => {});
@@ -697,20 +733,26 @@ describe('the row guard', () => {
     const logged = warn.mock.calls.map((args) => String(args[0]));
     warn.mockRestore();
 
-    // if the row reason alone overran the budget, failImport would have sliced and
-    // the drop arm would not be the thing under test
+    // the head alone, to the character: dropped whole is the rule, and a cut notice
+    // would satisfy a toContain on the reason just as well
+    expect(thrown.message).toBe(
+      'no row could be parsed (1 skipped): row 2: could not parse the date "Widerspruch" or the amount "xx"',
+    );
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
-    expect(thrown.message).toContain(`could not parse the date "${longCell}"`);
-    expect(thrown.message).not.toContain('too large to read');
 
     const failed = (await listImports()).imports.filter((i) =>
-      /Ruecklastschrift/.test(i.errorDetail ?? ''),
+      /Widerspruch/.test(i.errorDetail ?? ''),
     );
     expect(failed).toHaveLength(1);
     expect(failed[0].errorDetail).toBe(thrown.message);
 
+    // and the notice really was composed, all twelve of it, so the assertion above
+    // cannot be passing because there was nothing to drop
     expect(logged).toContainEqual(
-      expect.stringContaining('sheet "Januar" (600000 rows) was too large to read'),
+      expect.stringContaining('"Kontoauszug 01-2026" (600000 rows)'),
+    );
+    expect(logged).toContainEqual(
+      expect.stringContaining('"Kontoauszug 12-2026" (600000 rows)'),
     );
   });
 
