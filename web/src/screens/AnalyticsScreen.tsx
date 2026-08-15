@@ -1,320 +1,273 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Bar,
-  BarChart,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-} from 'recharts';
+/**
+ * Analytics: a workspace the reader builds, rather than one analysis the app chose.
+ *
+ * It used to be a single fixed view — a period pager, two total cards, a donut over a
+ * category legend, and twelve bars if you switched to Year. That answered one question
+ * well and every other question not at all: "how did groceries move over two years",
+ * "what did this one account earn against what it spent", "is the shape of this quarter
+ * the shape of the last one" were all outside it, and none of them is exotic.
+ *
+ * So the screen holds no analysis of its own now. It starts empty, the reader makes the
+ * charts they want, and each one is a `ChartSpec` remembered in this browser. Nothing
+ * that the old screen could say has been lost: its yearly bars are a Column of Expenses
+ * over 12 months, its donut and legend are a Donut split by category, its income-by-
+ * source block is the same donut split by source — all of them reachable, and none of
+ * them the only thing on offer.
+ *
+ * ---------------------------------------------------------------------------
+ * One chart at a time, and the dock says which
+ *
+ * Not a grid of every chart at once. A chart is worth the width of the screen — the
+ * axis labels of a 24-month series are unreadable at a third of it — and the reader
+ * asked a specific question, which is answered by one plot rather than by six of them
+ * needing to be found among each other. The dock along the bottom is the index.
+ *
+ * Which one is showing lives in the URL (`?chart=`), the way every other "where the
+ * reader is" fact in this app does since the navigation moved there: a chart is a place
+ * you can be sent to and come Back from.
+ *
+ * The dock is also the only place a chart is acted on. There is no "New chart" beside
+ * the heading and no Edit/Duplicate/Delete over the plot: making a chart, choosing one
+ * and changing one are all things you do to the LIST, and the list is one strip at the
+ * foot of the screen rather than three controls in three places.
+ *
+ * ---------------------------------------------------------------------------
+ * Budgets is pinned, and is not a chart
+ *
+ * Monthly budgets is a per-category limit with an editor behind it, and it lived on this
+ * screen because the old fixed view had somewhere to put it. It is not something the
+ * wizard could build — there is nothing to configure and no series to plot — so it is a
+ * pinned tab at the end of the dock rather than a seventh shape in the picker, and it is
+ * unchanged. Deleting it along with the layout it happened to sit in would have been a
+ * feature removed by accident.
+ */
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { categoryLabel } from '../categories';
+import {
+  ChartSpec,
+  newChartId,
+  readCharts,
+  suggestedTitle,
+  writeCharts,
+} from '../analytics';
 import { BudgetsBlock } from '../components/BudgetsBlock';
-import { Chips } from '../components/Chips';
-import { fmtMoney, fmtMonth, fmtShort, isoDay, MONTHS_SHORT, niceMax } from '../format';
-import { useTheme } from '../theme';
-import { CategorySummary, MonthTotals, Summary } from '../types';
+import { ChartCard } from '../components/ChartCard';
+import { ChartDock, DockTab } from '../components/ChartDock';
+import { BlankPlotGlyph } from '../components/ChartGlyphs';
+import { ChartWizard } from '../components/ChartWizard';
+import { setUrl, useUrl } from '../url';
+import { Account } from '../types';
 
-/** What the chart shows. Toggled by clicking the "Expenses"/"Income" cards. */
-type Mode = 'expense' | 'income';
-/** Analysis window: a calendar month or a calendar year. */
-type Range = 'month' | 'year';
-
-const RANGES: { key: Range; label: string }[] = [
-  { key: 'month', label: 'Month' },
-  { key: 'year', label: 'Year' },
-];
-
-function bounds(range: Range, d: Date): { from: string; to: string } {
-  if (range === 'year') {
-    return {
-      from: isoDay(new Date(d.getFullYear(), 0, 1)),
-      to: isoDay(new Date(d.getFullYear(), 11, 31)),
-    };
-  }
-  return {
-    from: isoDay(new Date(d.getFullYear(), d.getMonth(), 1)),
-    to: isoDay(new Date(d.getFullYear(), d.getMonth() + 1, 0)),
-  };
-}
+/**
+ * The pinned tab's id. A `#` in it so that no chart id can ever collide with it —
+ * `newChartId` builds from base-36 digits and cannot produce one.
+ */
+const BUDGETS_TAB = '#budgets';
 
 export function AnalyticsScreen() {
-  const { ink, categoryColor } = useTheme();
+  const [charts, setCharts] = useState<ChartSpec[]>(readCharts);
+  /** null while the list is in flight — `useChartData` needs the two apart. */
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  /** open, and on what: a spec to edit, or null to build a new one. */
+  const [wizard, setWizard] = useState<{ editing: ChartSpec | null } | null>(null);
 
-  const [range, setRange] = useState<Range>('month');
-  const [anchor, setAnchor] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  });
-  const [mode, setMode] = useState<Mode>('expense');
-  /**
-   * One object and not a state each: the summary used to land before the months
-   * request, so a failure in the second left a fresh total on the card and twelve
-   * empty bars beside it, describing the same year.
+  const { chart: urlChart } = useUrl();
+
+  /*
+   * The accounts are read once, here, and handed down. Every card would otherwise ask
+   * for the same list — a workspace of five per-account charts is five identical
+   * requests — and the answer is the same for all of them.
+   *
+   * Hidden accounts are kept in what is stored: a chart pointed at one must keep
+   * drawing rather than turn into "that account is no longer here" because it was taken
+   * off the Overview's rail. The wizard is what filters them out of the CHOICES.
+   *
+   * Asking again is a control and not a page reload, for the same reason the read is
+   * shared: one failure here stops every per-account card on the screen at once, so the
+   * way out of it has to be a step and not a fresh start on the whole workspace.
    */
-  const [data, setData] = useState<{ summary: Summary; months: MonthTotals[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const loadAccounts = useCallback(() => {
+    setAccountsError(null);
+    api
+      .accounts(true)
+      .then((rows) => {
+        setAccounts(rows);
+        setAccountsError(null);
+      })
+      .catch((e: unknown) => {
+        // an empty list would be a claim that the workspace has no accounts, and every
+        // per-account chart on the screen would then say its account had been deleted
+        setAccounts(null);
+        setAccountsError((e as Error).message);
+      });
+  }, []);
 
-  const load = useCallback(async () => {
-    try {
-      setError(null);
-      const { from, to } = bounds(range, anchor);
-      const summary = await api.summary(from, to);
-      const months = range === 'year' ? (await api.months(from, to)).months : [];
-      setData({ summary, months });
-    } catch (e) {
-      // the period label sits directly above the totals, so July's numbers under an
-      // "August 2026" label would be a straight statement of something false
-      setData(null);
-      setError((e as Error).message);
-    }
-  }, [range, anchor]);
+  useEffect(loadAccounts, [loadAccounts]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const save = (next: ChartSpec[]) => {
+    setCharts(next);
+    writeCharts(next);
+  };
 
-  const shift = (delta: number) =>
-    setAnchor((d) =>
-      range === 'year'
-        ? new Date(d.getFullYear() + delta, d.getMonth(), 1)
-        : new Date(d.getFullYear(), d.getMonth() + delta, 1),
-    );
-
-  const now = new Date();
-  // nothing to page forward to: there are no future transactions
-  const atPresent =
-    range === 'year'
-      ? anchor.getFullYear() === now.getFullYear()
-      : anchor.getFullYear() === now.getFullYear() && anchor.getMonth() === now.getMonth();
-  const isCurrentMonth =
-    range === 'month' &&
-    anchor.getFullYear() === now.getFullYear() &&
-    anchor.getMonth() === now.getMonth();
-
-  const summary = data?.summary ?? null;
-  // an absent block and a default currency label are absences, not false claims
-  const baseCurrency = summary?.baseCurrency ?? 'EUR';
-
-  /** Categories of the selected side (expenses/income) — already in the base currency. */
-  const byCategory: CategorySummary[] = useMemo(() => {
-    if (!summary) return [];
-    return mode === 'expense' ? summary.byCategory : summary.incomeByCategory;
-  }, [summary, mode]);
-
-  /** By month of the year: the total of the selected side (12 values). */
-  const monthlyValues = useMemo(() => {
-    if (range !== 'year') return [];
-    const values = new Array(12).fill(0);
-    for (const m of data?.months ?? []) {
-      const idx = parseInt(m.month.slice(5, 7), 10) - 1;
-      values[idx] += mode === 'expense' ? m.expense : m.income;
-    }
-    return values;
-  }, [range, data, mode]);
-
-  /** Months with money movement — so the average isn't divided by empty months. */
-  const activeMonths = monthlyValues.filter((v) => v > 0).length;
   /**
-   * The `0` is not the fallback this row exists to remove: every site that turns it
-   * into something a person reads is inside a region that renders only once `data`
-   * is there, and the one reader outside is the `total > 0` chart gate below, where
-   * 0 gives the right answer.
+   * Which tab is showing.
+   *
+   * The URL is asked first and is not trusted: an id it carries may be a chart this
+   * browser does not have (a link from somebody else, or a chart since deleted), and
+   * showing the first chart under a URL naming another one is better than a blank
+   * screen with a dock full of names. Falling back to the first chart rather than to
+   * nothing is also what makes the workspace open where it was left in the common case
+   * where the URL carries nothing at all.
    */
-  const total = summary ? (mode === 'expense' ? summary.totals.expense : summary.totals.income) : 0;
+  const known = urlChart === BUDGETS_TAB || charts.some((c) => c.id === urlChart);
+  const activeId = known ? urlChart : (charts[0]?.id ?? null);
+  const active = charts.find((c) => c.id === activeId) ?? null;
 
-  const barMax = niceMax(Math.max(...monthlyValues, 0));
-  const barColor = mode === 'expense' ? ink.accent : ink.good;
-  const bars = monthlyValues.map((value, i) => ({ value, label: MONTHS_SHORT[i] }));
+  const show = (id: string) => setUrl({ chart: id });
 
-  // A refund can push a category negative (the purchase was last month, the refund
-  // came this month) — the legend shows such a row honestly, but you can't put a
-  // negative sector into the chart.
-  const pieData = byCategory
-    .filter((c) => c.total > 0)
-    .map((c) => ({ name: categoryLabel(c.category), value: c.total, slug: c.category }));
+  const onSave = (spec: ChartSpec) => {
+    const exists = charts.some((c) => c.id === spec.id);
+    save(exists ? charts.map((c) => (c.id === spec.id ? spec : c)) : [...charts, spec]);
+    setWizard(null);
+    /*
+     * Only a chart that did not exist a moment ago. Every tab carries its own ⋮, so an
+     * edit is as often a change to the LIST as to the chart on screen — and the reader
+     * who renamed the third tab while reading the first did not ask to be moved to the
+     * third. The same rule `remove` states at length, and the two disagreed: this one
+     * navigated on every save.
+     *
+     * Nothing is needed for the case where the edited chart IS the one showing. It is
+     * already at this URL, and `setUrl` treats a write that changes nothing as the
+     * non-navigation it is.
+     */
+    if (!exists) show(spec.id);
+  };
 
-  const incomeBySource = summary?.incomeBySource ?? [];
+  /* Everything below is keyed on an id rather than on a spec: the dock is what calls
+     them now, and a strip of tabs knows which chart it is pointing at and nothing else
+     about it. */
+  const edit = (id: string) => {
+    const spec = charts.find((c) => c.id === id);
+    if (spec) setWizard({ editing: spec });
+  };
 
-  const emptyText =
-    mode === 'expense'
-      ? `No expenses this ${range === 'year' ? 'year' : 'month'}.`
-      : `No income this ${range === 'year' ? 'year' : 'month'}.`;
+  const duplicate = (id: string) => {
+    const at = charts.findIndex((c) => c.id === id);
+    if (at < 0) return;
+    const copy: ChartSpec = {
+      ...charts[at],
+      id: newChartId(),
+      title: `${charts[at].title} (copy)`,
+    };
+    save([...charts.slice(0, at + 1), copy, ...charts.slice(at + 1)]);
+    show(copy.id);
+  };
 
-  const axisTick = { fill: ink.muted, fontSize: 10 };
+  const remove = (id: string) => {
+    const at = charts.findIndex((c) => c.id === id);
+    if (at < 0) return;
+    const next = charts.filter((c) => c.id !== id);
+    save(next);
+    /*
+     * Only when what went was what was showing. Every tab carries its own ⋮, so a
+     * delete is as often an edit to the LIST as it is to the chart on screen — and
+     * moving the reader then would take them off the chart they are reading and put
+     * them beside the one they just deleted, which is the single place they did not
+     * ask to be.
+     */
+    if (id !== activeId) return;
+    /*
+     * The neighbour, and `replace`: deleting a chart is not a place to come Back to —
+     * Back would land on the URL naming the chart that no longer exists, and the
+     * fallback above would put the reader on the first chart with no way to tell that
+     * anything had happened.
+     */
+    const neighbour = next[Math.min(at, next.length - 1)];
+    setUrl({ chart: neighbour ? neighbour.id : null }, 'replace');
+  };
+
+  const tabs: DockTab[] = [
+    ...charts.map((c) => ({
+      id: c.id,
+      label: c.title || suggestedTitle(c),
+      glyph: c.kind,
+    })),
+    { id: BUDGETS_TAB, label: 'Budgets', pinned: true as const },
+  ];
 
   return (
-    <div className="screen-inner">
+    <div className="screen-inner analytics-screen">
       <h1 className="title">Analytics</h1>
 
-      <Chips
-        label="Range"
-        options={RANGES.map((r) => ({ key: r.key, label: r.label }))}
-        selected={range}
-        onSelect={(k) => setRange(k as Range)}
-      />
-
-      <div className="period-row">
-        <button className="period-btn" onClick={() => shift(-1)} aria-label="Previous period">
-          ‹
-        </button>
-        <span className="period-label">
-          {range === 'year' ? anchor.getFullYear() : fmtMonth(anchor)}
-        </span>
-        <button
-          className="period-btn"
-          onClick={() => shift(1)}
-          disabled={atPresent}
-          aria-label="Next period"
-        >
-          ›
-        </button>
-      </div>
-
-      {error && <p className="error">Error: {error}</p>}
-
-      {/* the cards double as the chart toggle: the active side is highlighted */}
-      <div className="totals-row" role="tablist">
-        <button
-          className="total-box"
-          role="tab"
-          aria-selected={mode === 'expense'}
-          onClick={() => setMode('expense')}
-        >
-          <div className="total-label">Expenses</div>
-          <div className="total-value">
-            {summary ? fmtMoney(summary.totals.expense, baseCurrency) : '—'}
-          </div>
-        </button>
-        <button
-          className="total-box"
-          role="tab"
-          aria-selected={mode === 'income'}
-          onClick={() => setMode('income')}
-        >
-          <div className="total-label">Income</div>
-          <div className="total-value" style={{ color: ink.good }}>
-            {summary ? fmtMoney(summary.totals.income, baseCurrency) : '—'}
-          </div>
-        </button>
-      </div>
-
-      {range === 'year' && activeMonths > 0 && (
-        <p className="average">
-          On average {fmtMoney(total / activeMonths, baseCurrency)} per month
-          {activeMonths < 12 ? ` (over ${activeMonths} mo. with activity)` : ''}
+      {accountsError && (
+        <p className="error">
+          Error: {accountsError}{' '}
+          <button className="btn-ghost btn-sm" onClick={loadAccounts}>
+            Try again
+          </button>
         </p>
       )}
 
-      <p className="hint">
-        All amounts in {baseCurrency} at the NBU rate on the transaction date. Transfers between
-        your own accounts aren't counted, refunds are subtracted from expenses.
-      </p>
-
-      {range === 'year' && total > 0 && (
-        <div style={{ height: 180, marginBottom: 8 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={bars} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <XAxis
-                dataKey="label"
-                tick={axisTick}
-                axisLine={{ stroke: ink.grid }}
-                tickLine={false}
-              />
-              <YAxis
-                domain={[0, barMax]}
-                tickCount={4}
-                tick={axisTick}
-                axisLine={false}
-                tickLine={false}
-                width={52}
-                tickFormatter={fmtShort}
-              />
-              {/*
-                Animation off: every screen stays mounted, so this chart first renders
-                inside a hidden container. An animation started there freezes at an
-                arbitrary frame and the bars keep that wrong height once the screen is
-                shown — the axis, which isn't animated, would stay correct and hide it.
-              */}
-              <Bar
-                dataKey="value"
-                fill={barColor}
-                radius={[3, 3, 0, 0]}
-                isAnimationActive={false}
-                maxBarSize={40}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* on the state, never on byCategory: the derived array is where a summary that
-          was never read turns back into "you spent nothing this month" */}
-      {data !== null &&
-        (byCategory.length === 0 ? (
-          <p className="empty">{emptyText}</p>
+      <div className="chart-stage">
+        {activeId === BUDGETS_TAB ? (
+          <BudgetsBlock />
+        ) : active ? (
+          <ChartCard
+            // the id, so switching tabs remounts rather than reusing the last chart's
+            // loading state under the new one's name
+            key={active.id}
+            spec={active}
+            accounts={accounts}
+            accountsError={accountsError}
+          />
         ) : (
-          <div className="analytics-split">
-            {pieData.length > 0 && (
-              <div className="chart-wrap" style={{ height: 240 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius="62%"
-                      outerRadius="100%"
-                      stroke={ink.page}
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    >
-                      {pieData.map((d) => (
-                        <Cell key={d.slug} fill={categoryColor(d.slug)} />
-                      ))}
-                    </Pie>
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="donut-center">
-                  <div className="donut-value">{fmtMoney(total)}</div>
-                  <div className="donut-currency">{baseCurrency}</div>
-                </div>
-              </div>
-            )}
+          <Blank onNew={() => setWizard({ editing: null })} />
+        )}
+      </div>
 
-            {/* legend with values — category identity isn't carried by color alone */}
-            <div className="legend">
-              {byCategory.map((c) => (
-                <div key={c.category} className="legend-row">
-                  <span className="dot" style={{ background: categoryColor(c.category) }} />
-                  <span className="legend-name">{categoryLabel(c.category)}</span>
-                  <span className="legend-pct">
-                    {total > 0 ? Math.round((c.total / total) * 100) : 0}%
-                  </span>
-                  <span className="legend-value">{fmtMoney(c.total)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
+      <ChartDock
+        tabs={tabs}
+        activeId={activeId}
+        onSelect={show}
+        onNew={() => setWizard({ editing: null })}
+        onEdit={edit}
+        onDuplicate={duplicate}
+        onDelete={remove}
+      />
 
-      {/* income by source: your own earnings apart from family help */}
-      {mode === 'income' && incomeBySource.length > 0 && (
-        <div className="legend">
-          <h2 className="block-title">By source</h2>
-          {incomeBySource.map((s) => (
-            <div key={s.source} className="legend-row">
-              <span className="legend-name">{s.label}</span>
-              <span className="legend-value">{fmtMoney(s.total)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {isCurrentMonth && <BudgetsBlock />}
-      <div className="bottom-pad" />
+      <ChartWizard
+        open={wizard !== null}
+        editing={wizard?.editing ?? null}
+        accounts={accounts}
+        accountsError={accountsError}
+        onClose={() => setWizard(null)}
+        onSave={onSave}
+      />
     </div>
   );
 }
+
+/**
+ * The screen before anything has been made on it: a mark, a line and the way in.
+ *
+ * It carried two paragraphs of instructions — what a shape is, what the wizard will ask
+ * next, where the charts are kept — and every one of those questions is answered by
+ * pressing the button underneath them. The one thing this has to say is that the
+ * emptiness is the starting state and not a failure to load, which is what the mark
+ * says: a bare axis, and deliberately not one of the six shapes, because a drawn chart
+ * here would read as a chart that did not arrive.
+ */
+const Blank = ({ onNew }: { onNew: () => void }) => (
+  <div className="chart-blank">
+    <span className="chart-blank-mark">
+      <BlankPlotGlyph />
+    </span>
+    <h2 className="block-title chart-blank-title">Nothing plotted yet</h2>
+    {/* not "Create chart", which is what the wizard's own submit says: two controls a
+        step apart with one name is what makes a screenshot of a bug unreadable */}
+    <button className="btn" onClick={onNew}>
+      Build your first chart
+    </button>
+  </div>
+);

@@ -4,11 +4,9 @@ import { ThemeProvider } from '../theme';
 import {
   ACCOUNTS,
   APP_SETTINGS,
-  BUDGETS,
   INCOME_SOURCES,
   INDEPENDENCE,
   RECURRING,
-  SUMMARY,
   TRANSACTIONS,
   TRANSFER_RULES,
   USER,
@@ -130,8 +128,13 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * test against an empty table and reading the guard's list - not by reading the
  * screens. A row that adds a first-paint request is told so by a red test.
  *
- * /api/summary/months (range === 'year') and /api/imports/presets (once CsvImport
- * mounts) are deliberately absent: neither is first paint.
+ * /api/imports/presets (once CsvImport mounts) is deliberately absent: it is not first
+ * paint.
+ *
+ * Neither are the two the Analytics screen used to fire and no longer does. It is a
+ * workspace of charts the reader builds now, and an empty one asks for nothing but the
+ * account list: /api/summary and /api/summary/months are requested by a chart that
+ * exists, and /api/budgets by the Budgets tab once it is the one showing.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),
@@ -141,8 +144,6 @@ export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(TRANSACTIONS),
-  'GET /api/summary': () => ok(SUMMARY),
-  'GET /api/budgets': () => ok(BUDGETS),
   'GET /api/independence': () => ok(INDEPENDENCE),
 };
 

@@ -66,6 +66,27 @@ export interface Ink {
    * card's own `background` reads the same value rather than a second copy of it.
    */
   panel: string;
+  /**
+   * The third chart series.
+   *
+   * Income is `good` and expenses are `accent` on every screen in this app, and the
+   * Analytics workspace draws a third measure beside them — Net, which is one minus
+   * the other and therefore neither of those two colours. It cannot borrow one of
+   * the pair without saying something false, it cannot be `brand` (in light mode
+   * that is the same navy as `accent`, and two series would be one line), and it
+   * cannot be `primary` for the same reason one step further: #010710 beside
+   * #0a213f is a difference nobody reads off a 2px stroke.
+   *
+   * So: a hue neither of the other two uses, measured against both grounds a series
+   * can be drawn on. Light is 6.5:1 on `surface` and 5.9:1 on `page`; dark is 7.4:1
+   * and 8.1:1 — well past the 3:1 a graphical object needs, because the same value
+   * also draws this series' name in the legend beside it.
+   *
+   * It overlaps the Health category's violet, and that is not a collision: a series
+   * chart plots measures over time and a share chart plots categories, and no canvas
+   * in the app draws both.
+   */
+  net: string;
 }
 
 /**
@@ -115,6 +136,7 @@ export const lightInk: Ink = {
   onBrand: '#ffffff',
   /* the mock's spending card, a step darker than the band it sits under */
   panel: '#030e20',
+  net: '#6d4aad',
 };
 
 /* Measured on `surface` (#161c25) and `page` (#0d1117); the page is the lighter-
@@ -146,6 +168,7 @@ export const darkInk: Ink = {
   /* the same fill as `brand` here, where in light mode it is a step darker: on this
      page the card has to clear the surface behind it, and #030e20 would be a hole */
   panel: '#25344c',
+  net: '#b59cf0',
 };
 
 // Category palettes — keyed by backend slugs (labels live in categories.ts)

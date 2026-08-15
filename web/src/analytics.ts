@@ -1,0 +1,648 @@
+/**
+ * The Analytics workspace's model: what a chart IS, and what its numbers are.
+ *
+ * The screen used to be one analysis, wired straight into the two endpoints that
+ * answer it — a period pager, two total cards, a donut and twelve bars, in that order,
+ * for everybody. It is a workspace now: the reader builds the charts they want, each
+ * one a `ChartSpec`, and the screen draws whatever specs exist. So the questions the
+ * old screen answered by being shaped that way — which measure, over which window, for
+ * which account — are values in an object here, and the arithmetic that answers them
+ * is a pure function of data the caller already fetched.
+ *
+ * Pure on purpose. Nothing in this file fetches, reads the clock or touches React:
+ * `today` is always an argument, so every series below can be asserted against a fixed
+ * date, and `chartData.ts` is the one place that turns a spec into requests.
+ *
+ * ---------------------------------------------------------------------------
+ * Two shapes, and the difference is not cosmetic
+ *
+ * A `series` chart plots measures ACROSS ticks — income over twelve months. A `share`
+ * chart plots one period's parts AGAINST each other — where the money went. They take
+ * different data, ask different endpoints and are configured by different questions,
+ * and `CHART_KINDS` is what says which a kind is, so the wizard and the loader read one
+ * answer rather than each keeping a list of names.
+ *
+ * ---------------------------------------------------------------------------
+ * Cents, everywhere
+ *
+ * Every amount here came off `*_cents` on the server and was divided by a hundred on
+ * the way out, so summing the doubles back up accumulates the residue — see `toCents`
+ * in accounts.ts, which is imported rather than copied for exactly that reason. Every
+ * sum below is accumulated as an integer and divided once at the end.
+ */
+import { monthOf, toCents, totals } from './accounts';
+import { categoryLabel } from './categories';
+import { isoDay, MONTHS_SHORT } from './format';
+import { MonthTotals, Summary, Transaction } from './types';
+
+// ---------------------------------------------------------------------------
+// the vocabulary
+// ---------------------------------------------------------------------------
+
+export type ChartKind = 'line' | 'column' | 'area' | 'donut' | 'ranking' | 'radar';
+
+/** Measures across ticks, or the parts of one period. See the header. */
+export type ChartShape = 'series' | 'share';
+
+/** What a series chart plots. `net` is income minus expenses — the bottom line. */
+export type Metric = 'income' | 'expense' | 'net';
+
+/** What a share chart splits a period by. */
+export type Breakdown = 'expense-categories' | 'income-categories' | 'income-sources';
+
+export type RangeKey = '3m' | '6m' | '12m' | '24m' | '3y' | '5y';
+
+/** A tick is a calendar month or a calendar year; nothing here plots days. */
+export type Grain = 'month' | 'year';
+
+export interface ChartKindDef {
+  key: ChartKind;
+  name: string;
+  /** One line in the picker: what this shape is FOR, not what it looks like. */
+  blurb: string;
+  shape: ChartShape;
+  /**
+   * The kind draws the chosen period beside the one before it, so its loader has to
+   * fetch both. Only the radar does, and it is the whole of why that kind exists —
+   * a single polygon says no more than the ranking beside it in the picker does.
+   */
+  comparative?: true;
+}
+
+export const CHART_KINDS: ChartKindDef[] = [
+  {
+    key: 'line',
+    name: 'Line',
+    shape: 'series',
+    blurb: 'A measure over time. The shape of the trend, read at a glance.',
+  },
+  {
+    key: 'column',
+    name: 'Column',
+    shape: 'series',
+    blurb: 'One bar per tick. For reading single months off against each other.',
+  },
+  {
+    key: 'area',
+    name: 'Area',
+    shape: 'series',
+    blurb: 'The line with the ground filled in — volume rather than direction.',
+  },
+  {
+    key: 'donut',
+    name: 'Donut',
+    shape: 'share',
+    blurb: 'What a period is made of, as shares of one total.',
+  },
+  {
+    key: 'ranking',
+    name: 'Ranking',
+    shape: 'share',
+    blurb: 'The same parts as bars, biggest first — the easiest to read exactly.',
+  },
+  {
+    key: 'radar',
+    name: 'Radar',
+    shape: 'share',
+    comparative: true,
+    blurb: 'The shape of a period laid over the one before it. For what changed.',
+  },
+];
+
+export const chartKind = (key: ChartKind): ChartKindDef =>
+  CHART_KINDS.find((k) => k.key === key) ?? CHART_KINDS[0];
+
+export interface MetricDef {
+  key: Metric;
+  label: string;
+  /**
+   * The palette key its stroke and its swatch both read. A key rather than a colour
+   * because the two schemes have two palettes and a literal here would be right in
+   * one of them.
+   */
+  ink: 'good' | 'accent' | 'net';
+}
+
+export const METRICS: MetricDef[] = [
+  { key: 'income', label: 'Income', ink: 'good' },
+  { key: 'expense', label: 'Expenses', ink: 'accent' },
+  { key: 'net', label: 'Net', ink: 'net' },
+];
+
+export interface BreakdownDef {
+  key: Breakdown;
+  label: string;
+  /**
+   * Whether one account can answer it. Income sources are named by the server's own
+   * catalogue and arrive only on `/api/summary`, which has no per-account form — so a
+   * chart about one account cannot ask this, and the wizard does not offer it there
+   * rather than offering it and drawing nothing.
+   */
+  workspaceOnly?: true;
+}
+
+export const BREAKDOWNS: BreakdownDef[] = [
+  { key: 'expense-categories', label: 'Expenses by category' },
+  { key: 'income-categories', label: 'Income by category' },
+  { key: 'income-sources', label: 'Income by source', workspaceOnly: true },
+];
+
+export interface RangeDef {
+  key: RangeKey;
+  label: string;
+  grain: Grain;
+  /** How many ticks, ending at the one `today` is in. */
+  count: number;
+}
+
+export const RANGES: RangeDef[] = [
+  { key: '3m', label: '3 months', grain: 'month', count: 3 },
+  { key: '6m', label: '6 months', grain: 'month', count: 6 },
+  { key: '12m', label: '12 months', grain: 'month', count: 12 },
+  { key: '24m', label: '24 months', grain: 'month', count: 24 },
+  { key: '3y', label: '3 years', grain: 'year', count: 3 },
+  { key: '5y', label: '5 years', grain: 'year', count: 5 },
+];
+
+export const rangeDef = (key: RangeKey): RangeDef =>
+  RANGES.find((r) => r.key === key) ?? RANGES[2];
+
+/**
+ * One chart on the screen, and the whole of what is remembered about it.
+ *
+ * `metrics` and `breakdown` are both present whatever the kind is, and only one of
+ * them is read. That is deliberate: switching a chart from a donut to a line in the
+ * wizard keeps the measures it had, so a reader who picked the wrong shape does not
+ * lose the rest of the answer on the way back.
+ */
+export interface ChartSpec {
+  id: string;
+  kind: ChartKind;
+  /** What the tab says. The reader's, and never rewritten under them. */
+  title: string;
+  /** null — every account together, which is what the summary endpoints answer. */
+  accountId: string | null;
+  /**
+   * Series charts. May be empty while the reader is between two choices in the wizard —
+   * the chips enforce no minimum — and a spec in that state cannot be saved. Anything
+   * that draws one says so; see `ChartPlot`.
+   */
+  metrics: Metric[];
+  /** Share charts. */
+  breakdown: Breakdown;
+  range: RangeKey;
+}
+
+/**
+ * The row cap on a per-account fetch, and the same number `WINDOW_TX_LIMIT` uses on
+ * the Overview. A chart built from a fetch that came back AT it is drawn from part of
+ * the window, and `chartData.ts` says so on the card rather than letting the shape
+ * pass for the whole period.
+ */
+export const CHART_TX_LIMIT = 5_000;
+
+// ---------------------------------------------------------------------------
+// ticks and bounds
+// ---------------------------------------------------------------------------
+
+/**
+ * The ticks a range asks for, oldest first — `YYYY-MM` on a month grain, `YYYY` on a
+ * year one.
+ *
+ * They end at the tick `today` is in and not at the newest tick with data in it,
+ * which is the opposite of what `monthlyTotals` does on the Overview and is the right
+ * answer here for the opposite reason: this axis is a window the reader chose, so a
+ * month with nothing in it is part of the answer ("we spent nothing in June"), where
+ * there the window is derived from the data and a leading empty bar would be a claim
+ * about a month that predates the first statement.
+ */
+export function ticksOf(range: RangeDef, today: Date): string[] {
+  const out: string[] = [];
+  if (range.grain === 'year') {
+    const last = today.getFullYear();
+    for (let y = last - (range.count - 1); y <= last; y += 1) out.push(String(y));
+    return out;
+  }
+  for (let i = range.count - 1; i >= 0; i -= 1) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+/**
+ * Whether an axis of these ticks has to name the year — see `tickLabel`.
+ *
+ * A property of the WINDOW and not of any tick in it, which is why the whole list is
+ * the argument. Year ticks carry their year already and answer true here harmlessly.
+ */
+const spansYears = (ticks: string[]): boolean =>
+  new Set(ticks.map((t) => t.slice(0, 4))).size > 1;
+
+/**
+ * What a tick is called on the axis: "Aug" for a month, "2026" for a year — and
+ * "Aug 25" for a month in a window that crosses one.
+ *
+ * 24 months is two Augusts, and so is nearly every 12-month window, the default among
+ * them: only one ending in December does not cross a year. Labelled by the month name
+ * alone they were the same word twice on the axis and again in the tooltip, which is
+ * where recharts echoes whatever `XAxis dataKey` names — and there is nothing else on
+ * the card to tell them apart, since the subtitle spelling the range out was taken off
+ * it deliberately.
+ *
+ * Two digits of year and not four. It is the form that fits: at eleven pixels "Sep 2025"
+ * is most of the width one of twelve ticks has, and recharts answers a label too wide to
+ * place by dropping it. Read as a column of them in date order the suffix cannot be
+ * anything but a year.
+ *
+ * The hidden table under the plot is unaffected either way — it prints `tick` itself,
+ * which has always been the whole `YYYY-MM`.
+ */
+export const tickLabel = (tick: string, grain: Grain, withYear = false): string => {
+  if (grain === 'year') return tick;
+  const name = MONTHS_SHORT[Number(tick.slice(5, 7)) - 1];
+  if (!name) return tick;
+  return withYear ? `${name} ${tick.slice(2, 4)}` : name;
+};
+
+/** The tick a `YYYY-MM-DD` or `YYYY-MM` falls in. */
+export const tickOf = (isoDate: string, grain: Grain): string =>
+  grain === 'year' ? isoDate.slice(0, 4) : monthOf(isoDate);
+
+export interface Bounds {
+  from: string;
+  to: string;
+}
+
+/** The calendar days the range covers, inclusive — what the endpoints take. */
+export function boundsOf(range: RangeDef, today: Date): Bounds {
+  if (range.grain === 'year') {
+    const last = today.getFullYear();
+    return {
+      from: isoDay(new Date(last - (range.count - 1), 0, 1)),
+      to: isoDay(new Date(last, 11, 31)),
+    };
+  }
+  const first = new Date(today.getFullYear(), today.getMonth() - (range.count - 1), 1);
+  return {
+    from: isoDay(first),
+    // day 0 of the next month is the last day of this one, leap years included
+    to: isoDay(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+  };
+}
+
+/**
+ * The same length of window immediately before it — what a comparative kind is drawn
+ * against. Built by moving `today` back a whole range and asking `boundsOf` again, so
+ * the two windows are the same shape by construction rather than by two sums agreeing.
+ */
+export function priorBoundsOf(range: RangeDef, today: Date): Bounds {
+  const shifted =
+    range.grain === 'year'
+      ? new Date(today.getFullYear() - range.count, today.getMonth(), 1)
+      : new Date(today.getFullYear(), today.getMonth() - range.count, 1);
+  return boundsOf(range, shifted);
+}
+
+// ---------------------------------------------------------------------------
+// series: measures across ticks
+// ---------------------------------------------------------------------------
+
+export interface SeriesPoint {
+  /** `YYYY-MM` or `YYYY` — the identity, which is what a key is taken from. */
+  tick: string;
+  /** What the axis prints. */
+  label: string;
+  income: number;
+  expense: number;
+  /**
+   * Income minus expenses, and NOT what `totals().net` answers. That one sums every
+   * row including transfers, because it exists to be compared against a balance; this
+   * is the bottom line of a period, and a transfer between two of your own accounts
+   * must not move it.
+   */
+  net: number;
+}
+
+const point = (
+  tick: string,
+  grain: Grain,
+  /** Whether the window this tick belongs to crosses a year — see `tickLabel`. */
+  withYear: boolean,
+  incomeCents: number,
+  expenseCents: number,
+): SeriesPoint => ({
+  tick,
+  label: tickLabel(tick, grain, withYear),
+  income: incomeCents / 100,
+  expense: expenseCents / 100,
+  net: (incomeCents - expenseCents) / 100,
+});
+
+/**
+ * `/api/summary/months` folded onto the ticks. A month the endpoint did not answer is
+ * a tick at zero, which is the true statement here — see `ticksOf`.
+ */
+export function seriesFromMonths(
+  months: MonthTotals[],
+  ticks: string[],
+  grain: Grain,
+): SeriesPoint[] {
+  const income = new Map<string, number>();
+  const expense = new Map<string, number>();
+  for (const m of months) {
+    const tick = tickOf(m.month, grain);
+    income.set(tick, (income.get(tick) ?? 0) + toCents(m.income));
+    expense.set(tick, (expense.get(tick) ?? 0) + toCents(m.expense));
+  }
+  const withYear = spansYears(ticks);
+  return ticks.map((t) => point(t, grain, withYear, income.get(t) ?? 0, expense.get(t) ?? 0));
+}
+
+/**
+ * The same series for one account, summed on the client because the two summary
+ * endpoints take a date range and nothing else — the same gap `accounts.ts` exists to
+ * cover, and `totals()` is imported from there so both sides apply one set of rules:
+ * transfers between your own accounts are neither income nor an expense, and a refund
+ * subtracts from expenses in the period it landed in.
+ *
+ * The account's own currency, not the base one, for the reason that module gives: one
+ * account is one currency, so there is nothing to convert and nothing to lose to a
+ * missing rate.
+ */
+export function seriesFromTransactions(
+  txs: Transaction[],
+  ticks: string[],
+  grain: Grain,
+): SeriesPoint[] {
+  const buckets = new Map<string, Transaction[]>();
+  for (const t of txs) {
+    const tick = tickOf(t.date, grain);
+    const bucket = buckets.get(tick);
+    if (bucket) bucket.push(t);
+    else buckets.set(tick, [t]);
+  }
+  const withYear = spansYears(ticks);
+  return ticks.map((t) => {
+    const sums = totals(buckets.get(t) ?? []);
+    return point(t, grain, withYear, toCents(sums.income), toCents(sums.expense));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// share: the parts of one period
+// ---------------------------------------------------------------------------
+
+export interface SharePoint {
+  /** The backend slug (or source id) — the colour and the React key are taken from it. */
+  key: string;
+  label: string;
+  value: number;
+}
+
+/**
+ * A refund can push a category negative — the purchase was in an earlier period, the
+ * refund landed in this one — and that is the honest figure. It is kept out of the
+ * shares a donut or a radar draws, because a negative sector is not a thing, and the
+ * ranking prints it: a bar chart has a baseline and can show one.
+ */
+export const positiveShares = (shares: SharePoint[]): SharePoint[] =>
+  shares.filter((s) => s.value > 0);
+
+/**
+ * The parts a kind actually draws.
+ *
+ * The rule above, read from the kind's side, and in one place because three different
+ * files were answering "what is this chart of" and were free to disagree. They did: a
+ * card summed every slice for its "Total" while the donut in the middle of it summed
+ * only the positive ones, so one refunded category put two different totals on the same
+ * card — and divided the largest part by the smaller of them, which printed 1000%.
+ */
+export const drawnShares = (kind: ChartKind, shares: SharePoint[]): SharePoint[] =>
+  kind === 'ranking' ? shares : positiveShares(shares);
+
+const fromCategories = (rows: { category: string; total: number }[]): SharePoint[] =>
+  rows
+    .map((c) => ({ key: c.category, label: categoryLabel(c.category), value: c.total }))
+    .sort((a, b) => b.value - a.value);
+
+export function shareFromSummary(summary: Summary, breakdown: Breakdown): SharePoint[] {
+  if (breakdown === 'income-sources') {
+    return summary.incomeBySource
+      .map((s) => ({ key: s.source, label: s.label, value: s.total }))
+      .sort((a, b) => b.value - a.value);
+  }
+  return fromCategories(
+    breakdown === 'income-categories' ? summary.incomeByCategory : summary.byCategory,
+  );
+}
+
+/**
+ * The same split for one account. `income-sources` cannot be answered here and never
+ * arrives: `BREAKDOWNS` marks it workspace-only and the wizard drops it from the
+ * choices the moment an account is picked. It falls through to income by category
+ * rather than throwing, because a spec saved before an account was chosen is a real
+ * state and an empty card would say less than the near-miss does.
+ */
+export function shareFromTransactions(txs: Transaction[], breakdown: Breakdown): SharePoint[] {
+  const cents = new Map<string, number>();
+  const wantsExpenses = breakdown === 'expense-categories';
+  for (const t of txs) {
+    if (t.transfer) continue;
+    const c = toCents(t.amount);
+    // the rules of `categorySpend`/`totals`, read from both sides: a refund is a
+    // negative expense and never income, whichever way it is signed
+    const isExpense = c < 0 || t.refund;
+    if (isExpense !== wantsExpenses) continue;
+    const delta = wantsExpenses ? -c : c;
+    cents.set(t.category, (cents.get(t.category) ?? 0) + delta);
+  }
+  return fromCategories(
+    [...cents]
+      .filter(([, total]) => total !== 0)
+      .map(([category, total]) => ({ category, total: total / 100 })),
+  );
+}
+
+/**
+ * The two periods on one axis, for a comparative kind.
+ *
+ * Every slice either side gets a row — a category that exists only in the prior period
+ * is exactly what the chart is being asked about — and the order is the CURRENT
+ * period's, biggest first, so the polygon the reader came for is the one the axis is
+ * arranged around.
+ */
+export interface ComparedPoint {
+  key: string;
+  label: string;
+  now: number;
+  before: number;
+}
+
+export function compareShares(now: SharePoint[], before: SharePoint[]): ComparedPoint[] {
+  const priorByKey = new Map(before.map((s) => [s.key, s.value]));
+  const rows: ComparedPoint[] = now.map((s) => ({
+    key: s.key,
+    label: s.label,
+    now: s.value,
+    before: priorByKey.get(s.key) ?? 0,
+  }));
+  const seen = new Set(now.map((s) => s.key));
+  for (const s of before) {
+    if (!seen.has(s.key)) rows.push({ key: s.key, label: s.label, now: 0, before: s.value });
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// naming a chart
+// ---------------------------------------------------------------------------
+
+const metricLabel = (m: Metric): string => METRICS.find((d) => d.key === m)?.label ?? m;
+
+const breakdownLabel = (b: Breakdown): string =>
+  BREAKDOWNS.find((d) => d.key === b)?.label ?? b;
+
+/** A list a person reads: "Income", "Income and Expenses", "Income, Expenses and Net". */
+export function joinWords(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? '';
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
+}
+
+/**
+ * What a chart is called when the reader has not named it.
+ *
+ * A suggestion and not a binding: the wizard puts it in the name box, the reader is
+ * free to type over it, and nothing recomputes it afterwards. A title that rewrote
+ * itself when the range changed would take away the one part of the tab strip the
+ * reader owns.
+ *
+ * `accountName` is here because the card no longer carries a line spelling the spec out
+ * underneath it — that was a sentence restating what the title, the figures and the
+ * legend already showed. Which account a chart is about was the one fact none of those
+ * three held, so it goes into the name instead: a chart of everything is
+ * "Expenses · 12 months" and a chart of one account says so first.
+ *
+ * The name and not the id, so it is handed in: this module knows nothing about the
+ * account list.
+ */
+export function suggestedTitle(
+  spec: Omit<ChartSpec, 'id' | 'title'>,
+  accountName?: string | null,
+): string {
+  const what =
+    chartKind(spec.kind).shape === 'series'
+      ? joinWords(spec.metrics.map(metricLabel))
+      : breakdownLabel(spec.breakdown);
+  const where = spec.accountId && accountName ? `${accountName} · ` : '';
+  return `${where}${what} · ${rangeDef(spec.range).label}`;
+}
+
+// ---------------------------------------------------------------------------
+// what is remembered
+// ---------------------------------------------------------------------------
+
+/**
+ * The charts live in localStorage and nowhere else.
+ *
+ * There is no endpoint for them, and inventing one is a server change — which this
+ * tree does not make. So they are this browser's: they do not follow the account to a
+ * second device, and nothing here pretends otherwise. Written on every change rather
+ * than on a save button, because the tab strip IS the saved state.
+ */
+const STORAGE_KEY = 'finto.analytics.charts';
+
+const KINDS = new Set<string>(CHART_KINDS.map((k) => k.key));
+const METRIC_KEYS = new Set<string>(METRICS.map((m) => m.key));
+const BREAKDOWN_KEYS = new Set<string>(BREAKDOWNS.map((b) => b.key));
+const RANGE_KEYS = new Set<string>(RANGES.map((r) => r.key));
+
+/**
+ * One stored object, checked field by field, or null.
+ *
+ * Everything here was written by an older version of this file or by hand in a
+ * devtools console, so none of it can be trusted into a `ChartSpec` on the strength of
+ * having parsed. A row that fails is dropped and the rest are kept: losing one chart
+ * to a shape nobody recognises is a smaller loss than an empty workspace, and a throw
+ * here would take the whole screen down on first paint.
+ */
+function parseChart(raw: unknown): ChartSpec | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.id !== 'string' || o.id === '') return null;
+  if (typeof o.kind !== 'string' || !KINDS.has(o.kind)) return null;
+  if (typeof o.range !== 'string' || !RANGE_KEYS.has(o.range)) return null;
+  if (typeof o.title !== 'string') return null;
+  if (o.accountId !== null && typeof o.accountId !== 'string') return null;
+  const metrics = Array.isArray(o.metrics)
+    ? o.metrics.filter((m): m is Metric => typeof m === 'string' && METRIC_KEYS.has(m))
+    : [];
+  const breakdown =
+    typeof o.breakdown === 'string' && BREAKDOWN_KEYS.has(o.breakdown)
+      ? (o.breakdown as Breakdown)
+      : 'expense-categories';
+  return {
+    id: o.id,
+    kind: o.kind as ChartKind,
+    title: o.title,
+    accountId: o.accountId as string | null,
+    /*
+     * An empty list is kept empty. It used to fall back to `['expense']`, which was a
+     * silent substitution of one chart for another — and it stopped being defensible
+     * the moment the wizard let a reader clear every measure: "no measure is picked" is
+     * now a state the app has words for, on the plot and under the chips, and the
+     * chart is not saveable until it is out of it. A stored row arrives at the same
+     * sentence rather than at a chart nobody asked for.
+     */
+    metrics,
+    breakdown,
+    range: o.range as RangeKey,
+  };
+}
+
+export function readCharts(): ChartSpec[] {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    // a browser with storage denied has no charts, and that is a whole answer
+    return [];
+  }
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(parseChart).filter((c): c is ChartSpec => c !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function writeCharts(charts: ChartSpec[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(charts));
+  } catch {
+    // quota, or storage denied. The workspace on screen is still correct for this
+    // session; the alternative is a modal about a browser setting nobody chose.
+  }
+}
+
+/**
+ * A fresh id. Not `crypto.randomUUID`, which is not everywhere this app runs, and not
+ * an index — an index is reused the moment a chart is deleted, and the URL remembers
+ * which tab was open.
+ */
+export const newChartId = (): string =>
+  `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+
+/** The chart the wizard starts from once a shape has been picked. */
+export function blankChart(kind: ChartKind): ChartSpec {
+  const draft = {
+    kind,
+    accountId: null,
+    metrics: ['expense'] as Metric[],
+    breakdown: 'expense-categories' as Breakdown,
+    range: '12m' as RangeKey,
+  };
+  return { id: newChartId(), title: suggestedTitle(draft), ...draft };
+}

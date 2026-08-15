@@ -41,11 +41,22 @@ export interface AppUrl {
   account: string | null;
   /** 'import' or 'history', unvalidated for the same reason `screen` is. */
   panel: string | null;
+  /**
+   * Which chart the Analytics workspace is showing — a chart id this module knows
+   * nothing about, like the three above.
+   *
+   * The charts themselves are this browser's (localStorage; see `analytics.ts`), so a
+   * link carrying one of these ids opens the right tab for the person who made it and
+   * falls back to the first chart for anybody else. That is the same promise `account`
+   * already makes: the URL says where the reader was, and the reader's own data says
+   * whether that place still exists.
+   */
+  chart: string | null;
 }
 
-const KEYS = ['screen', 'account', 'panel'] as const;
+const KEYS = ['screen', 'account', 'panel', 'chart'] as const;
 
-const EMPTY: AppUrl = { screen: null, account: null, panel: null };
+const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null };
 
 /**
  * The last query string parsed, and what it parsed to.
@@ -68,6 +79,7 @@ function read(): AppUrl {
     screen: params.get('screen'),
     account: params.get('account'),
     panel: params.get('panel'),
+    chart: params.get('chart'),
   };
   return cached;
 }
