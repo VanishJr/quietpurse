@@ -1380,9 +1380,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
  * written down once would go on passing over one that had grown past what error_detail
  * keeps.
  *
- * What it does not hold is a refusal added above and not added here. Nothing structural
- * can - the set is a list of literals and builders with different signatures - so it is
- * one list beside another and this comment is the whole of the warning.
+ * What holds a refusal added above and not added here is test/refusal-set.test.ts, which
+ * parses this file and requires every throw site's refusal to be named below. Nothing
+ * structural can - the set is literals and builders with different signatures.
  */
 export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[] {
   const cell = 'W'.repeat(CELL_QUOTE_MAX + 2);

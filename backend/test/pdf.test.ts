@@ -9,7 +9,6 @@ import {
 } from '../src/db';
 import {
   NOTE_MAX,
-  PDF_PARSER_VERSION,
   PdfLimits,
   PdfTemplate,
   StatementBalances,
@@ -258,7 +257,8 @@ describe('pdf: bytes to rows', () => {
     const imports = (await listImports()).imports;
     const record = imports.find((i) => i.id === staged.summary.importId)!;
     expect(record.sourceType).toBe('pdf');
-    expect(record.parserVersion).toBe(PDF_PARSER_VERSION);
+    // the literal, not PDF_PARSER_VERSION: a symbol on both sides of this cannot fail
+    expect(record.parserVersion).toBe(6);
   });
 
   it('the amount column decides the sign, and the € decides the currency', async () => {
@@ -2212,18 +2212,24 @@ const refusalOfPdf = async (bytes: Buffer): Promise<string> => {
 };
 
 describe('pdf: the refusals', () => {
-  const cases: [string, () => Buffer, RegExp][] = [
+  // the sentences are pasted whole and never imported: toBe(ENCRYPTED) would commit
+  // the defect this table exists to close, one column over
+  const cases: [string, () => Buffer, string][] = [
     [
       'a password-protected PDF',
       () => buildPdf([[{ x: 50, y: 700, text: 'secret' }]], { encrypted: true }),
-      /this PDF is password-protected - open it with its password/,
+      'this PDF is password-protected - open it with its password and save an unprotected copy, or download the statement again from your online banking',
     ],
     [
       'a file that starts with %PDF and is not one',
       () => Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'),
-      /looks like a PDF but could not be opened as one/,
+      'this file looks like a PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
     ],
-    ['a scan', () => buildImagePdf(), /this looks like a scan - this importer reads the text layer/],
+    [
+      'a scan',
+      () => buildImagePdf(),
+      'this looks like a scan - this importer reads the text layer of a PDF and this one has none; download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
+    ],
     [
       'a statement in a layout nobody has written a template for',
       () =>
@@ -2236,17 +2242,17 @@ describe('pdf: the refusals', () => {
             ...row(680, '02.07.2026', 'REWE SAGT DANKE', { debit: '-5,68' }),
           ],
         ]),
-      /this statement's layout is not one this importer recognises yet/,
+      "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today",
     ],
     [
       'a statement in a layout nobody has written a template for, from a bank it can name',
       () => buildPdf(unknownLayout(2, () => [`IBAN: ${IBANS.c24}`, 'BIC: DEFFDEFFXXX'])),
-      /this looks like a statement from C24 Bank, and its layout is not one this importer recognises yet/,
+      'this looks like a statement from C24 Bank, and its layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today',
     ],
     [
       'a statement in a known layout with no transaction lines in it',
       () => buildPdf([[ISSUER, ...header(700)]]),
-      /this Revolut statement has no transaction lines in it/,
+      'this Revolut statement has no transaction lines in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking',
     ],
   ];
 
@@ -2261,13 +2267,13 @@ describe('pdf: the refusals', () => {
       expect(failed.status).toBe('failed');
       expect(failed.sourceType).toBe('pdf');
       expect(failed.documentAvailable).toBe(true);
-      expect(failed.errorDetail).toMatch(message);
+      expect(failed.errorDetail).toBe(message);
       expect(failed.errorDetail!.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     });
   }
 
   it('every one of them is a different sentence', () => {
-    const sentences = cases.map(([, , message]) => message.source);
+    const sentences = cases.map(([, , message]) => message);
     expect(new Set(sentences).size).toBe(cases.length);
   });
 });
@@ -2382,7 +2388,7 @@ describe('pdf: a statement inside a signed container', () => {
     expect(imported.inserted).toBe(3);
     const record = (await listImports()).imports.find((i) => i.id === imported.importId)!;
     expect(record.sourceType).toBe('pdf');
-    expect(record.parserVersion).toBe(PDF_PARSER_VERSION);
+    expect(record.parserVersion).toBe(6);
   });
 
   it('says a container whose document is broken looks like a PDF, not that it starts with one', async () => {

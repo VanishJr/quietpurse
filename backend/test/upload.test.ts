@@ -45,6 +45,7 @@ let sessionCookie: string;
 const imports = async (): Promise<
   {
     sourceType: string;
+    parserVersion: number;
     originalFilename: string | null;
     status: string;
     documentAvailable: boolean;
@@ -108,7 +109,11 @@ describe('POST /api/imports', () => {
     expect(res.body.summary.importId).toEqual(expect.any(String));
 
     const [latest] = await imports();
-    expect(latest).toMatchObject({ sourceType: 'csv', originalFilename: 'statement.csv' });
+    expect(latest).toMatchObject({
+      sourceType: 'csv',
+      parserVersion: 3,
+      originalFilename: 'statement.csv',
+    });
 
     const confirmed = await confirm(res.body.summary.importId);
     expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
