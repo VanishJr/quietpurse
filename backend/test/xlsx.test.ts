@@ -22,7 +22,7 @@ import { accountFor, importAndConfirm, rejectionOf } from './helpers';
 import { CSV_PRESETS, type CsvMapping } from '../src/providers/csv';
 import { importStatement, readSheet } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
-import { MAX_SHEET_ROWS, XLSX_PARSER_VERSION } from '../src/providers/xlsx';
+import { MAX_SHEET_ROWS } from '../src/providers/xlsx';
 
 const utc = (day: string): Date => new Date(`${day}T00:00:00.000Z`);
 
@@ -341,7 +341,7 @@ describe('xlsx: finding the statement', () => {
     expect(failed[0]).toMatchObject({
       status: 'failed',
       sourceType: 'xlsx',
-      parserVersion: XLSX_PARSER_VERSION,
+      parserVersion: 3,
       transactions: 0,
     });
     expect(await listTransactions({ accountId: await accountFor('Odd Columns Bank') })).toEqual([]);
