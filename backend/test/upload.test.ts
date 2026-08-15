@@ -184,15 +184,18 @@ describe('POST /api/imports', () => {
       'accountId',
       'accountName',
       'alreadyPresent',
+      'filtered',
       'from',
       'importId',
       'newRows',
+      'noMovement',
       'problems',
       'readAs',
       'skipped',
       'to',
       'total',
       'totals',
+      'unreadable',
     ]);
     // without this the key set would also pass in the world where the notice stopped
     // reaching the client at all

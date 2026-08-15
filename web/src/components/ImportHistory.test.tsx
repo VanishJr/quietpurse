@@ -66,7 +66,25 @@ describe('the list', () => {
     expect(screen.getByText(/Imported · no account recorded · 15\.06\.2026/)).toBeInTheDocument();
     expect(
       screen.getByText(
-        "10 rows accepted · 2 couldn't be read · 10 transactions belong to this import",
+        '10 rows accepted · 2 not imported · 10 transactions belong to this import',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * I4 at the call site rather than at the helper: `rowCount` having a singular arm and
+   * this line not calling it renders "1 rows accepted", which is the defect itself.
+   */
+  it('says one row rather than 1 rows in the counts line', async () => {
+    mockFetch({
+      'GET /api/imports': () =>
+        ok(importsResponse([importRecord({ rowsAccepted: 1, rowsRejected: 1, transactions: 1 })])),
+    });
+    mount();
+
+    expect(
+      await screen.findByText(
+        '1 row accepted · 1 not imported · 1 transaction belongs to this import',
       ),
     ).toBeInTheDocument();
   });

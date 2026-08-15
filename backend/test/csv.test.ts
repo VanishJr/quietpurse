@@ -943,6 +943,8 @@ describe("the statement's own running balance, on the sheet path", () => {
     currency?: string;
     state?: string;
     day?: string;
+    /** the date cell this preset reads, where day writes a whole one; '' is a cell no format parses */
+    date?: string;
   }
 
   const line = (r: Row): string =>
@@ -950,7 +952,7 @@ describe("the statement's own running balance, on the sheet path", () => {
       'CARD_PAYMENT',
       r.product ?? 'Current',
       `2026-09-${r.day ?? '01'} 09:00:00`,
-      `2026-09-${r.day ?? '01'} 10:00:00`,
+      r.date ?? `2026-09-${r.day ?? '01'} 10:00:00`,
       r.description,
       r.amount,
       r.fee ?? '0.00',
@@ -1171,6 +1173,38 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
+   * I1 and I2 in one file: three reasons a row is dropped, three different counts, and
+   * the sum the card's own "Read N of M rows" is built on. The values differ because a
+   * count read off the wrong bucket renders identically when they match.
+   *
+   * On the header with no balance column: a stated balance would refuse this file at
+   * the gate over the rows it could not read, and no summary would reach the assertion.
+   */
+  it('the three reasons a row is dropped are counted apart and sum to skipped', async () => {
+    const result = await upload('Drop Buckets', NO_BALANCE, [
+      { description: 'Kept', amount: '-10.00', day: '01' },
+      { description: 'Kept too', amount: '-20.00', day: '02' },
+      { description: 'Pending', amount: '-1.00', state: 'PENDING', day: '03' },
+      { description: 'Pending too', amount: '-2.00', state: 'PENDING', day: '04' },
+      { description: 'Reverted', amount: '-3.00', state: 'REVERTED', day: '05' },
+      { description: 'Fee cell', amount: '-4.00', fee: 'cucumber', day: '06' },
+      { description: 'Date cell', amount: '-5.00', date: '', day: '07' },
+      { description: 'Nothing moved', amount: '0.00', day: '08' },
+    ]);
+    if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+
+    const { total, accepted, skipped, unreadable, filtered, noMovement } = result.summary;
+    expect({ unreadable, filtered, noMovement }).toEqual({
+      unreadable: 2,
+      filtered: 3,
+      noMovement: 1,
+    });
+    expect(unreadable + filtered + noMovement).toBe(skipped);
+    expect(accepted + skipped).toBe(total);
+    expect({ total, accepted, skipped }).toEqual({ total: 8, accepted: 2, skipped: 6 });
+  });
+
+  /**
    * R10's second class, and the case that would otherwise be a regression on the
    * fallback path: the pending row states a balance the import correctly drops, so the
    * run the gate can see has a hole in it that is not missing money. The gate turns
@@ -1302,6 +1336,21 @@ describe("the statement's own running balance, on the sheet path", () => {
     expect(message).toContain(
       'the 1 transaction line this importer could not read are probably where it went',
     );
+  });
+
+  /**
+   * The other site of the same count, and the one nothing held: deleting the second
+   * `unreadable++` left the whole backend suite green (054 D19, re-measured on this
+   * tip). A date cell no format parses is money that did not import for the same
+   * reason an unreadable fee is, and the clause pointing the user at it has to survive
+   * the mapping being wrong rather than only the line being deleted.
+   */
+  it('a row whose date cell cannot be read is named as the cause too', async () => {
+    const message = await refusalOf('Balance Date Unread', CARD, { ...IN, date: '' }, RENT);
+    expect(message).toContain('100.00 EUR is unaccounted for between them');
+    // stops before the hard-coded `are`, which reads "the 1 transaction line ... are" and
+    // is DEBT's to fix: a third assertion pinning it raises the price of that one word
+    expect(message).toContain('the 1 transaction line this importer could not read');
   });
 
   /**

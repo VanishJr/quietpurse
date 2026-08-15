@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { safeFilename, saveBlob } from '../download';
-import { fmtDate } from '../format';
+import { fmtDate, rowCount } from '../format';
 import { importStatusLabel, importStatusNote } from '../imports';
 import { Account, ImportList, ImportRecord } from '../types';
 
@@ -47,8 +47,11 @@ const countsLine = (r: ImportRecord): string => {
         ? '1 transaction belongs'
         : `${r.transactions} transactions belong`;
   return [
-    `${r.rowsAccepted} row${r.rowsAccepted === 1 ? '' : 's'} accepted`,
-    ...(r.rowsRejected > 0 ? [`${r.rowsRejected} couldn't be read`] : []),
+    `${rowCount(r.rowsAccepted)} accepted`,
+    // no cause, because the record has none: rows_rejected is the undifferentiated
+    // total and the three reasons behind it were never stored. "Couldn't be read" was
+    // one of the three, asserted here of all of them
+    ...(r.rowsRejected > 0 ? [`${r.rowsRejected} not imported`] : []),
     `${owned} to this import`,
   ].join(' · ');
 };

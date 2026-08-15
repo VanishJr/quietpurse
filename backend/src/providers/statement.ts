@@ -269,7 +269,14 @@ export interface ImportSummary {
   accountName: string;
   total: number;
   accepted: number;
+  /** dropped rows, the sum of the three below, and what imports.rows_rejected stores */
   skipped: number;
+  /** of those, the ones this importer failed on - an unreadable fee, or no date or amount */
+  unreadable: number;
+  /** read fine, and dropped by a rule: the statement's own status column says so */
+  filtered: number;
+  /** read fine, and moving no money once the fee is taken - nothing to insert */
+  noMovement: number;
   problems: string[];
   /**
    * Of `accepted`, how many are not already in the database - the number the user
@@ -1010,6 +1017,24 @@ function statedFeeOf(
   }
 }
 
+/**
+ * Which bucket a dropped row falls in, as the user reads the cause. A kind is added
+ * here only if one sentence stays true of every site that names it.
+ */
+type DropKind = 'unreadable' | 'filtered' | 'noMovement';
+
+/**
+ * Where each refusal lands. A fourth RowRefusal kind does not compile until it names
+ * a bucket - but the failure this table is really guarding is the WRONG mapping, not
+ * the missing one. `unread: 'noMovement'` type-checks, keeps `skipped` exact, and
+ * empties the clause balanceBreaks composes about the lines this importer could not
+ * read - the one sentence that tells a user where their missing money went.
+ */
+const DROP_OF: Record<RowRefusal['kind'], DropKind> = {
+  unread: 'unreadable',
+  'no-movement': 'noMovement',
+};
+
 async function mapAndStore(
   req: StatementImportRequest,
   parsed: ParsedFile,
@@ -1100,14 +1125,17 @@ async function mapAndStore(
   // what the status filter dropped, by the value the file wrote: a half-recognised
   // vocabulary otherwise produces a partial import that reads as a complete one
   const statusSkips = new Map<string, number>();
-  let skipped = 0;
-  let statusSkipped = 0;
   const coveredButSkipped: { series: string; currency: string }[] = [];
-  // counted where the rows are dropped rather than subtracted from `skipped` after the
-  // loop: a row the status filter took and a row dropped for a zero movement were both
-  // read perfectly, and a refusal naming either as a line it could not read names a
-  // cause that is not the cause
-  let unreadable = 0;
+  // One tally, and `skipped` derived from it after the loop rather than incremented
+  // beside it: there is no mutable total in scope while the loop runs, so a drop site
+  // reaches the count only through `drop` and only by naming its bucket. A row the
+  // status filter took and a row dropped for a zero movement were both read perfectly,
+  // and a refusal naming either as a line it could not read names a cause that is not
+  // the cause
+  const dropped: Record<DropKind, number> = { unreadable: 0, filtered: 0, noMovement: 0 };
+  const drop = (kind: DropKind): void => {
+    dropped[kind]++;
+  };
   // read the same way for a row that is dropped as for one that is kept: the two have
   // to agree on which running balance a row belongs to, and a dropped row that read
   // its currency differently would name a run that does not exist
@@ -1128,8 +1156,7 @@ async function mapAndStore(
     if (onlyWhen) {
       const value = cellText(row[onlyWhen.col]).trim();
       if (!onlyWhen.accepted.has(fold(value))) {
-        skipped++;
-        statusSkipped++;
+        drop('filtered');
         statusSkips.set(value, (statusSkips.get(value) ?? 0) + 1);
         // recorded and nothing more: no sentence, no MAX_PROBLEMS slot, and the filter
         // stays first in the loop. A row the bank has not finished which nevertheless
@@ -1153,8 +1180,7 @@ async function mapAndStore(
         ? statedFeeOf(row, feeSource, mapping.decimal)
         : NOT_STATED;
     if (!statedFee.ok) {
-      skipped++;
-      unreadable++;
+      drop('unreadable');
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
         rowProblems.push(feeRefused(sheet, i, statedFee.text));
       }
@@ -1171,8 +1197,7 @@ async function mapAndStore(
       rawAmount === null ? { amount: null, fee: null } : applyFee(rawAmount, statedFee.fee);
     const verdict = rowVerdict(date, amount, statedFee.fee);
     if (verdict.kind !== 'import') {
-      skipped++;
-      if (date === null || amount === null) unreadable++;
+      drop(DROP_OF[verdict.kind]);
       if (notices.length + rowProblems.length < MAX_PROBLEMS) {
         const cols = { dateCol, amountCol, feeCol: statedFeeCol };
         rowProblems.push(describeRow(sheet, i, cols, verdict));
@@ -1206,9 +1231,21 @@ async function mapAndStore(
   }
 
   const txs = accepted.map((a) => a.tx);
+  // reduced rather than summed term by term: a fourth DropKind joins the total here on
+  // the day it is declared, where a three-term sum would compile and leave it out
+  const skipped = Object.values(dropped).reduce((a, b) => a + b, 0);
+  // The last hole `drop` cannot close: a continue added later that counts nothing at
+  // all. It can fire only on a bug in this file - never on a cell of the user's - and
+  // it is what makes the card's own "Read N of M rows" true rather than merely
+  // consistent with the three counts printed under it.
+  if (txs.length + skipped !== total) {
+    throw new Error(
+      `internal: ${total} rows read as ${txs.length} accepted and ${skipped} dropped`,
+    );
+  }
   const status: StatusSkips | null =
     onlyWhen && statusSkips.size
-      ? { column: onlyWhen.column, counts: statusSkips, skipped: statusSkipped }
+      ? { column: onlyWhen.column, counts: statusSkips, skipped: dropped.filtered }
       : null;
 
   if (txs.length === 0) {
@@ -1229,7 +1266,7 @@ async function mapAndStore(
           kind: 'stated',
           rows: accepted.map((a) => a.stated),
           coveredButSkipped,
-          unreadable,
+          unreadable: dropped.unreadable,
         },
   );
 
@@ -1262,6 +1299,9 @@ async function mapAndStore(
       total,
       accepted: txs.length,
       skipped,
+      // spread, not three transcribed fields: the tally and the wire cannot come apart,
+      // and a fourth kind reaches the response rather than being dropped in silence
+      ...dropped,
     // the aggregate sits ahead of the row problems and inside the few the client
     // renders: a further per-row reason refines a picture the user already has, where
     // "some of your rows were dropped, and these are the values that did it" is the
