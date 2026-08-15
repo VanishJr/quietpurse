@@ -19,11 +19,15 @@ import {
 } from '../src/db';
 import { logImport } from '../src/logger';
 import { accountFor, importAndConfirm, rejectionOf } from './helpers';
-import { importStatement } from '../src/providers/statement';
+import { CSV_PRESETS, type CsvMapping } from '../src/providers/csv';
+import { importStatement, readSheet } from '../src/providers/statement';
 import { MAX_DATA_ROWS } from '../src/providers/sheet';
-import { XLSX_PARSER_VERSION } from '../src/providers/xlsx';
+import { MAX_SHEET_ROWS, XLSX_PARSER_VERSION } from '../src/providers/xlsx';
 
 const utc = (day: string): Date => new Date(`${day}T00:00:00.000Z`);
+
+/** The one mark both cuts in xlsx.ts carry, spelled out here rather than imported. */
+const MARK = '…';
 
 async function xlsx(build: (wb: ExcelJS.Workbook) => void): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
@@ -194,8 +198,8 @@ describe('xlsx: cells that are not scalars', () => {
 
     const r = await importFile('Forged Error Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([2, 1, 1]);
-    // 20 A's: the cut spelled out independently of ERROR_TEXT_MAX, ellipsis included
-    expect(r.problems[0]).toBe(`row 3: the amount cell contains #${'A'.repeat(20)}...`);
+    // 22 A's: the cut spelled out independently of ERROR_TEXT_MAX, mark included
+    expect(r.problems[0]).toBe(`row 3: the amount cell contains #${'A'.repeat(22)}${MARK}`);
     expect(r.problems[0].length).toBeLessThanOrEqual(159);
   });
 });
@@ -638,8 +642,12 @@ describe('the row guard', () => {
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain(' - skipped as too large to read: Huge (600000 rows)');
     expect(thrown.message).toMatch(
-      / - the closest row \(sheet "Statement", row 1\) does not match: .*\.\.\.$/,
+      new RegExp(` - the closest row \\(sheet "Statement", row 1\\) does not match: .*${MARK}$`),
     );
+    // and it names only columns the workbook has: the cut falls between two entries,
+    // which is what the `...` this used to pin said nothing whatever about
+    const listed = thrown.message.slice(thrown.message.lastIndexOf(': ') + 2);
+    expect(header).toEqual(expect.arrayContaining(listed.slice(0, -MARK.length).split(', ')));
 
     // nothing was cut on the way into the database, which is the whole point
     const failed = (await listImports()).imports.filter((i) =>
@@ -1059,5 +1067,337 @@ describe('the workbook size cap', () => {
     const r = await importFile('Fat Csv Bank', Buffer.from(csv, 'utf8'));
     expect([r.total, r.inserted, r.skipped]).toEqual([3, 3, 0]);
     expect((await rowsOf(r.accountId)).map((row) => row[2])).toEqual(['one', 'two', 'three']);
+  });
+});
+
+/**
+ * Where a refusal is cut (ROADMAP 21). The closest-row clause carries a reason
+ * composed for a budget it does not know about, and the cut used to land wherever
+ * the 300 characters ran out: inside a quoted accepted name, inside an unquoted
+ * header cell, or through the dump noColumnMatched appends whole or not at all.
+ * What reached the user then named a column called `S`.
+ *
+ * Swept over the PREFIX rather than sampled over the reason, because the prefix is
+ * the variable: ` - the closest row (sheet "…", row …) does not match: ` is 52
+ * characters of fixed prose plus the user's sheet name plus up to six digits of row
+ * label, and every one of those pushes the cut one character further in. Row 20's
+ * holder in csv.test.ts - "no preset composes an xlsx refusal that is cut through a
+ * column name" - asserts an even quote count over both headers and every preset and
+ * was green while all of this was live, because its workbook is named `Statement`
+ * with the header at row 1 and so pins the one input the invariant is about. It
+ * stays exactly as written; this is its generalisation, not its successor.
+ */
+describe('a refusal is cut at a boundary or not at all', () => {
+  /** Excel's own ceiling for a worksheet name: the widest prefix a sheet can buy. */
+  const SHEET_NAME_MAX = 31;
+  const LONG_SHEET = 'Kontoauszug-2026-Januar-Umsatze';
+  /** 1 digit, 2 digits, 6 - the label reaches the message as its digits and nothing else. */
+  const ROW_LABELS = [1, 12, 100_000];
+  const REASON = ' does not match: ';
+  const HEADERS = [
+    ['date', 'amount', 'description'],
+    ['nothing', 'matches', 'here'],
+  ];
+  /** Every preset, and the arm a user reaches without having chosen anything. */
+  const ARMS = [...Object.keys(CSV_PRESETS), null];
+  /** The one pair that is not a refusal at all: the generic mapper reads this header. */
+  const reads = (key: string | null, header: string[]): boolean =>
+    key === null && header[0] === 'date';
+
+  const named = (key: string) => ({ key, ...CSV_PRESETS[key] });
+
+  /**
+   * One visible sheet named to `length`, carrying a candidate header row at `label`
+   * and nothing else. Header-only deliberately: a data row under a header at
+   * MAX_SHEET_ROWS puts rowCount one past the cap, the sheet is skipped as too large
+   * and no closest-row clause is composed at all.
+   */
+  const candidateSheet = async (length: number, label: number, header: string[]): Promise<Buffer> =>
+    xlsx((wb) => {
+      const row = wb.addWorksheet(LONG_SHEET.slice(0, length)).getRow(label);
+      header.forEach((cell, i) => {
+        row.getCell(i + 1).value = cell;
+      });
+    });
+
+  /**
+   * What the parser composes for these bytes, or null when it finds a header row.
+   * Through readSheet rather than importStatement: only a delivered message says
+   * where it was cut, this path never reads the destination, and the sweep below is
+   * then a parse each rather than a database round trip each.
+   */
+  async function refusalFor(
+    bytes: Buffer,
+    key: string | null,
+    mapping?: Partial<CsvMapping>,
+  ): Promise<string | null> {
+    try {
+      const preset = key === null ? null : named(key);
+      await readSheet({ accountId: 'unread on this path', bytes, mapping }, 'xlsx', preset);
+      return null;
+    } catch (e) {
+      return (e as Error).message;
+    }
+  }
+
+  /**
+   * The reason itself, whole. The same function composes it from the same header and
+   * the same preset on the CSV path, where it is thrown as it stands instead of being
+   * carried inside a clause with a budget - which is the asymmetry this row closes,
+   * and which makes that path the oracle every cut below is checked against.
+   */
+  async function wholeReason(key: string | null, header: string[]): Promise<string> {
+    const delimiter = key === null ? ',' : (CSV_PRESETS[key].mapping.delimiter ?? ',');
+    const rows = [header.join(delimiter), header.map(() => 'x').join(delimiter)];
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor(`Reason ${key ?? 'generic'} ${header[0]}`),
+        preset: key ?? undefined,
+        bytes: Buffer.from(rows.join('\n'), 'utf8'),
+      }),
+    );
+    return thrown.message;
+  }
+
+  /**
+   * The names a preset would try, spelled as noColumnMatched quotes them. Fee and
+   * balance are resolved without ever being reported, so no refusal names them.
+   */
+  function acceptedNames(key: string | null): string[] {
+    if (key === null) return [];
+    const m = CSV_PRESETS[key].mapping;
+    return [
+      ...m.date,
+      ...m.amount,
+      ...m.description.flat(),
+      ...(m.currency ?? []),
+      ...(m.onlyWhen?.column ?? []),
+    ];
+  }
+
+  /**
+   * The unquoted comma lists a refusal carries, found by the prose introducing each:
+   * the generic arm's header and the dump. The slot list beside them is prose and
+   * not names - `amount (tried "Betrag"` states something true about a column that
+   * exists, and the paren it leaves dangling fabricates nothing.
+   */
+  function headerList(message: string): string[] {
+    const lists: [string, string | null][] = [
+      ['columns in the header: ', ' - set a mapping or pick a preset'],
+      ['; the header reads: ', null],
+    ];
+    const entries: string[] = [];
+    for (const [lead, tail] of lists) {
+      const at = message.indexOf(lead);
+      if (at < 0) continue;
+      const listed = message.slice(at + lead.length);
+      const end = tail === null ? -1 : listed.indexOf(tail);
+      const text = end < 0 ? listed : listed.slice(0, end);
+      entries.push(...text.replace(new RegExp(`${MARK}$`), '').split(', '));
+    }
+    return entries;
+  }
+
+  /**
+   * Everything the message names, against everything the workbook has. Both halves
+   * are owed and neither holds it alone: a quoted run cut short is still a real
+   * accepted name, so membership waves `status (tried "State` through, and the
+   * generic arm's list carries no quotes at all for the parity to see.
+   */
+  function misnamed(message: string, allowed: Set<string>): string[] {
+    const found: string[] = [];
+    const parts = message.split('"');
+    if (parts.length % 2 === 0) found.push('a quoted run that never closed');
+    for (let i = 1; i < parts.length; i += 2) {
+      if (!allowed.has(parts[i])) found.push(`quoted "${parts[i]}"`);
+    }
+    for (const entry of headerList(message)) {
+      if (!allowed.has(entry)) found.push(`listed "${entry}"`);
+    }
+    return found;
+  }
+
+  /**
+   * The whole reason, or a prefix of it stopping exactly where a separator did, with
+   * the mark. Nothing else: a cut anywhere else delivers half of whatever it landed
+   * in, and a clause carrying no whole unit at all is a fragment however long it is.
+   */
+  function cutAtBoundary(delivered: string, whole: string): boolean {
+    if (delivered === whole) return true;
+    if (!delivered.endsWith(MARK)) return false;
+    const kept = delivered.slice(0, -MARK.length);
+    return whole.startsWith(kept) && /^[,;] /.test(whole.slice(kept.length));
+  }
+
+  const clauseOf = (message: string): string =>
+    message.slice(message.indexOf(REASON) + REASON.length);
+
+  it('no sheet name and no row label cuts a refusal through a name', async () => {
+    expect(LONG_SHEET).toHaveLength(SHEET_NAME_MAX);
+    const oracle = new Map<string, string>();
+    for (const header of HEADERS) {
+      for (const key of ARMS) {
+        if (reads(key, header)) continue;
+        oracle.set(`${key} ${header[0]}`, await wholeReason(key, header));
+      }
+    }
+
+    const bad: string[] = [];
+    let cut = 0;
+    let entire = 0;
+    let notRefused = 0;
+    for (let length = 1; length <= SHEET_NAME_MAX; length++) {
+      const sheet = LONG_SHEET.slice(0, length);
+      for (const label of ROW_LABELS) {
+        for (const header of HEADERS) {
+          const bytes = await candidateSheet(length, label, header);
+          for (const key of ARMS) {
+            const message = await refusalFor(bytes, key);
+            const where = `${key ?? 'generic'} sheet=${length} row=${label} ${header[0]}`;
+            if (reads(key, header)) {
+              expect(message, where).toBeNull();
+              notRefused++;
+              continue;
+            }
+            // trap 3: the clause is there at all, before anything is said about its
+            // shape, or every assertion under this one passes by vacancy
+            if (message === null || !message.includes(REASON)) {
+              bad.push(`${where}: no closest-row clause`);
+              continue;
+            }
+            expect(message.length, where).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
+            expect(message, where).toContain(`(looked at: ${sheet})`);
+            const allowed = new Set([...header, ...acceptedNames(key), sheet]);
+            for (const m of misnamed(message, allowed)) bad.push(`${where}: ${m}`);
+            const delivered = clauseOf(message);
+            const whole = oracle.get(`${key} ${header[0]}`) ?? '';
+            if (!cutAtBoundary(delivered, whole)) bad.push(`${where}: ...${delivered.slice(-48)}`);
+            if (delivered === whole) entire++;
+            else cut++;
+          }
+        }
+      }
+    }
+
+    expect(notRefused).toBe(SHEET_NAME_MAX * ROW_LABELS.length);
+    // both arms of cutAtBoundary are exercised, so neither is green by never running
+    expect(entire).toBeGreaterThan(0);
+    expect(cut).toBeGreaterThan(0);
+    const report = `${bad.length} findings over ${entire + cut} refusals`;
+    expect(bad.length, `${report}:\n${bad.slice(0, 6).join('\n')}`).toBe(0);
+  });
+
+  /**
+   * A column name the REQUEST spelled, with a separator inside it. resolveColumns is
+   * the header scan's predicate as well as the mapper's, so a mapping reaches this
+   * clause quoted - and both of the separators the cut looks for are legal inside a
+   * name. Nothing else in the sentence puts one there: no accepted name in
+   * CSV_PRESETS carries a comma or a semicolon, which is why a cutter that reads
+   * neither quote passes every other case in this file.
+   */
+  it('a separator inside a quoted name is not a place to cut', async () => {
+    const header = HEADERS[1];
+    const bytes = await candidateSheet(SHEET_NAME_MAX, 12, header);
+
+    for (const separator of [', ', '; ']) {
+      const spelling = (slot: string): string =>
+        `${slot} der Buchung${separator}wie die Bank es schreibt`;
+      const mapping = {
+        date: spelling('Datum'),
+        amount: spelling('Betrag'),
+        description: spelling('Zweck'),
+      };
+
+      const message = (await refusalFor(bytes, null, mapping)) ?? '';
+      expect(message, separator).toContain(`(tried "${mapping.date}")`);
+      const allowed = new Set([...header, ...Object.values(mapping), LONG_SHEET]);
+      expect(misnamed(message, allowed), separator).toEqual([]);
+    }
+  });
+
+  /**
+   * The widest row label a sheet can carry, from the constant that bounds it rather
+   * than from a literal beside the assertion. Six digits of prefix is what pushed
+   * the cut two characters into `"State"` and delivered a column called `S`.
+   */
+  it(`a row label at MAX_SHEET_ROWS still names only real columns`, async () => {
+    const header = HEADERS[1];
+    const bytes = await candidateSheet(SHEET_NAME_MAX, MAX_SHEET_ROWS, header);
+    const message = await refusalFor(bytes, 'revolut');
+
+    expect(message).toContain(`row ${MAX_SHEET_ROWS})${REASON}`);
+    const allowed = new Set([...header, ...acceptedNames('revolut'), LONG_SHEET]);
+    expect(misnamed(message ?? '', allowed)).toEqual([]);
+    expect(cutAtBoundary(clauseOf(message ?? ''), await wholeReason('revolut', header))).toBe(true);
+  });
+
+  /**
+   * noColumnMatched appends the header dump whole or not at all, and says so in its
+   * own comment; on this path it was appended and then cut by someone else. The seam
+   * is the first thing the clause gives up and it gives it up entire.
+   */
+  it('the header dump is dropped whole rather than cut through', async () => {
+    // Two headers, because the rule is not "stop at the last separator that fits".
+    // Four long cells is the shape this defect was measured on and it puts the dump's
+    // first comma out of the budget's reach; twenty short ones put it inside, which is
+    // where a cutter treating the seam as one more entry stops - and delivers a dump
+    // that is neither absent nor whole
+    const headers = [
+      Array.from({ length: 4 }, (_, i) => `Spalte-sehr-ausfuehrlich-${i}`),
+      Array.from({ length: 20 }, (_, i) => `Feld${String(i).padStart(2, '0')}`),
+    ];
+
+    for (const header of headers) {
+      const bytes = await xlsx((wb) => {
+        const row = wb.addWorksheet('Statement').getRow(1);
+        header.forEach((cell, i) => {
+          row.getCell(i + 1).value = cell;
+        });
+      });
+
+      // the dump WAS composed for this header - the same reason, off the path that
+      // carries it whole - so its absence below is a drop and not a coincidence
+      expect(await wholeReason('dkb', header)).toContain('; the header reads: ');
+
+      const message = (await refusalFor(bytes, 'dkb')) ?? '';
+      expect(message, header[0]).not.toContain('; the header reads');
+      expect(message, header[0]).toMatch(
+        new RegExp(`- pick a different preset or set a mapping${MARK}$`),
+      );
+    }
+  });
+
+  /**
+   * A clause whose own prose no longer fits is dropped, not delivered headless.
+   * CLOSEST_CLAUSE_MIN's 60 was measured against one shape of the sentence: the
+   * prefix is 52 characters plus the sheet name plus the row label, so 62 at
+   * `Statement`/row 1 and 85 at Excel's ceiling and row 12, and between those two the
+   * constant guarded nothing at all. Three oversized sheets spend the budget down to
+   * where the difference shows.
+   *
+   * The pair is what keeps the numbers honest: the same workbook, the same oversized
+   * sheets, the same candidate row, and a candidate sheet named 4 characters instead
+   * of 31.
+   */
+  it('a clause that cannot carry its reason is absent, not headless', async () => {
+    const build = async (candidate: string): Promise<Buffer> =>
+      xlsx((wb) => {
+        for (let i = 1; i <= 3; i++) {
+          wb.addWorksheet(`Kontoauszug-2026-Monat0${i}`).getRow(600_000).height = 20;
+        }
+        const row = wb.addWorksheet(candidate).getRow(12);
+        HEADERS[1].forEach((cell, i) => {
+          row.getCell(i + 1).value = cell;
+        });
+      });
+
+    const roomy = (await refusalFor(await build(LONG_SHEET.slice(0, 4)), 'revolut')) ?? '';
+    const tight = (await refusalFor(await build(LONG_SHEET), 'revolut')) ?? '';
+
+    expect(roomy).toContain(`${REASON}no column matched for date (tried "Completed Date"`);
+    expect(tight).toContain(' - skipped as too large to read: Kontoauszug-2026-Monat01');
+    expect(tight).toContain(`${LONG_SHEET})`);
+    expect(tight).not.toContain(REASON);
+    expect(tight.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
   });
 });

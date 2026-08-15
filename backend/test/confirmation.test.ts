@@ -17,6 +17,7 @@ import path from 'path';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import {
+  ERROR_DETAIL_MAX,
   type ResolvedAccountId,
   confirmImport,
   createAccount,
@@ -651,6 +652,27 @@ describe('a failed import leaves no staged rows behind', () => {
     expect(await importRow(summary.importId)).toMatchObject({ status: 'failed' });
     // the document is kept either way - that is what a failed import is retained for
     expect(await blobExists(summary.importId)).toBe(true);
+  });
+
+  /**
+   * The last cut between a composed refusal and the screen (ROADMAP 21). It was a
+   * bare slice, so what error_detail kept ended wherever 500 characters ran out and
+   * read as a finished sentence - the client renders the whole of it and adds no
+   * cut of its own. Both messages are built from ERROR_DETAIL_MAX and not from a
+   * literal past it: exactly the cap is not a cut and carries no mark.
+   */
+  it('a message past what error_detail keeps is marked where it was cut', async () => {
+    const fits = await upload('Marked Cut Bank', csvFile('2026-08-21,-14.00,Kept whole'));
+    const over = await upload('Marked Cut Bank', csvFile('2026-08-22,-15.00,Cut short'));
+    const whole = 'x'.repeat(ERROR_DETAIL_MAX);
+
+    await failImport(fits.importId, whole);
+    await failImport(over.importId, `${whole} and there was more behind it`);
+
+    const detail = async (id: string): Promise<string | null | undefined> =>
+      (await listImports()).imports.find((i) => i.id === id)?.errorDetail;
+    expect(await detail(fits.importId)).toBe(whole);
+    expect(await detail(over.importId)).toBe(`${'x'.repeat(ERROR_DETAIL_MAX - 1)}…`);
   });
 });
 

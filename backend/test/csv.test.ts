@@ -1577,11 +1577,13 @@ describe('what the new refusals may spend', () => {
 
   /**
    * The other cap, and the one that binds first: on the XLSX path this refusal is
-   * carried inside closestClause, whose 300 characters are cut mid-token. Every cut
-   * lands in prose today, so nothing reaching a user names a column the file has not
-   * got - but that is held by a measurement rather than by margin, and each accepted
-   * name added to a slot ahead of the cut spends its own length plus 4 of it. An odd
-   * number of quotes in the delivered message is exactly a quoted name cut in half.
+   * carried inside closestClause, whose cut is cutBounded's since row 021 and lands
+   * on a separator or not at all. This case stays as the cheap parity check that
+   * could not see the defect that row fixed: its workbook names the sheet Statement
+   * and puts the header at row 1, which pins the prefix width - sheet name plus row
+   * label - that the defect needed 27 to 31 characters of. The sweep in
+   * xlsx.test.ts is what varies it. An odd number of quotes in the delivered message
+   * is exactly a quoted name cut in half.
    *
    * Through a real workbook, because the cap lives in xlsx.ts and only a delivered
    * message says what was cut. Both headers, because which preset composes the

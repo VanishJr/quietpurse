@@ -1116,7 +1116,16 @@ export async function failImport(id: string, message: string): Promise<void> {
   await getDb().transaction(async (tx) => {
     await tx
       .update(s.imports)
-      .set({ status: 'failed', errorDetail: message.slice(0, ERROR_DETAIL_MAX) })
+      // the last cut between a composed refusal and the screen, and marked: the
+      // client renders the whole of what is stored and adds no cut of its own, so an
+      // unmarked one arrives reading like a sentence that finished
+      .set({
+        status: 'failed',
+        errorDetail:
+          message.length <= ERROR_DETAIL_MAX
+            ? message
+            : `${message.slice(0, ERROR_DETAIL_MAX - 1)}…`,
+      })
       .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
     await tx
       .delete(s.stagedTransactions)
