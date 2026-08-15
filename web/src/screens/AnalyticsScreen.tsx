@@ -209,8 +209,9 @@ export function AnalyticsScreen() {
       )}
 
       <p className="hint">
-        All amounts in {baseCurrency} at the NBU rate on the transaction date. Transfers between
-        your own accounts aren't counted, refunds are subtracted from expenses.
+        All amounts in {baseCurrency}. Anything in another currency is converted at its own date's
+        rate, or the last one published before it. Transfers between your own accounts aren't
+        counted, refunds are subtracted from expenses.
       </p>
 
       {range === 'year' && total > 0 && (
