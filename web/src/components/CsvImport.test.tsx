@@ -197,6 +197,7 @@ describe('the summary panel', () => {
             newRows: 7,
             alreadyPresent: 5,
             skipped: 2,
+            unreadable: 2,
             supersededImportId: 'imp-0',
           }),
         ),
@@ -208,6 +209,67 @@ describe('the summary panel', () => {
     expect(screen.getByText(/are already in the database/)).toBeInTheDocument();
     expect(screen.getByText(/rows couldn't be read/)).toBeInTheDocument();
     expect(screen.getByText(/An earlier upload of this same file/)).toBeInTheDocument();
+  });
+
+  /**
+   * I5, and the whole reason row 22 exists: the card used to print `skipped` under one
+   * cause, above the backend's own line saying those same rows were read perfectly and
+   * dropped by a rule. Every sentence on the card is asserted, in order, so a second
+   * count of the filtered rows fails here as loudly as a missing one.
+   *
+   * Three DIFFERENT values, because a sentence reading the wrong bucket renders
+   * identically when they match.
+   */
+  it('gives each reason a row was dropped its own sentence, and the filtered rows one', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            accepted: 8,
+            newRows: 8,
+            skipped: 6,
+            unreadable: 2,
+            filtered: 3,
+            noMovement: 1,
+            problems: [
+              '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+            ],
+          }),
+        ),
+    });
+    const { container } = mount();
+    await upload(container);
+
+    const card = (await screen.findByText(/Read 8 of 14 rows/)).parentElement as HTMLElement;
+    expect([...card.querySelectorAll('p.hint')].map((p) => p.textContent)).toEqual([
+      expect.stringContaining("which found the columns in the file's own header"),
+      expect.stringContaining('in total'),
+      "2 rows couldn't be read. If it's the whole file, the column layout is probably" +
+        " wrong — discard this and try your bank's preset above.",
+      '1 row moved no money, so there was nothing to import.',
+      '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+    ]);
+    // the pre-fix render, and the one the backend's line contradicts word for word
+    expect(screen.queryByText(/6 rows couldn't be read/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * I4 at the boundary that made this a row: "1 rows couldn't be read" shipped for a
+   * fortnight. Both client sentences at n = 1, because a correct helper with one call
+   * site not using it is the defect itself.
+   */
+  it('says one row rather than 1 rows, in every sentence that counts rows', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(summaryResult({ accepted: 12, skipped: 2, unreadable: 1, noMovement: 1 })),
+    });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/^1 row couldn't be read\./)).toBeInTheDocument();
+    expect(screen.getByText('1 row moved no money, so there was nothing to import.')).toBeInTheDocument();
   });
 
   /**
@@ -488,6 +550,27 @@ describe('confirm', () => {
     // two events, not one: the account was created by the upload press, the rows
     // landed by this one, and each fires its own callback exactly once
     expect(onAccountCreated).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * This panel reads imports.rows_rejected, which is the three reasons added up and
+   * nothing else — so it may count the rows and may not say why. The advice it used to
+   * carry was doubly dead: the import is committed and there is no Discard here.
+   */
+  it('counts the rows that did not import after the confirm, and claims no cause', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({ accepted: 13, skipped: 1, noMovement: 1 })),
+      'POST /api/imports/imp-1/confirm': () => ok({ ...CONFIRMED, inserted: 13, total: 14, skipped: 1 }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/Imported 13 of 14 rows/)).toBeInTheDocument();
+    expect(screen.getByText("1 row didn't import.")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/preset/)).not.toBeInTheDocument();
   });
 
   /**

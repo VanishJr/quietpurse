@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { fmtDate, fmtDay, fmtMoney } from '../format';
+import { fmtDate, fmtDay, fmtMoney, rowCount } from '../format';
 import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
 import {
   Account,
@@ -337,6 +337,37 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    */
   const balances = summary?.balances ?? null;
   const balanceLine = balances ? balanceClaim(balances.series) : null;
+  /**
+   * One sentence per reason that dropped a row, and the sentence is built after the
+   * filter rather than inside the literal: a server older than these fields sends
+   * none of them, `undefined > 0` is false, and the card says nothing instead of
+   * "undefined rows couldn't be read".
+   *
+   * The filtered rows are missing from here on purpose. The backend's own line in
+   * `problems` counts them AND names the status values that did it, which is file text
+   * this client never sees — a second count beside it would describe the same rows
+   * twice, which is what this card did for a fortnight while contradicting itself.
+   */
+  const drops = summary
+    ? [
+        {
+          key: 'unreadable',
+          n: summary.unreadable,
+          // the one bucket the advice is true for: nothing to pick for a row a rule
+          // filtered, and nothing wrong with one that moved no money
+          say: (n: number) =>
+            `${rowCount(n)} couldn't be read. If it's the whole file, the column layout is` +
+            ` probably wrong — discard this and try your bank's preset above.`,
+        },
+        {
+          key: 'noMovement',
+          n: summary.noMovement,
+          // no cause clause: the movement is what is zero, after the fee, so a row whose
+          // amount cell reads 5.00 against a 5.00 fee lands here with no zero on screen
+          say: (n: number) => `${rowCount(n)} moved no money, so there was nothing to import.`,
+        },
+      ].filter((d) => d.n > 0)
+    : [];
 
   return (
     <section>
@@ -605,12 +636,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
               {BALANCES_NOT_SHOWN[summary.balancesNotShown]}
             </p>
           )}
-          {/*
-            The backend counts `skipped` for rows it couldn't read. Rows it read fine but
-            has already stored aren't counted anywhere — they're dropped by their contents
-            on insert — so duplicates are whatever is left over. Without spelling that out,
-            an overlapping export just reads as "0 new" and looks broken.
-          */}
           {summary.alreadyPresent > 0 && (
             <p className="hint" style={{ marginTop: 6 }}>
               {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
@@ -618,12 +643,11 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
               duplicated.
             </p>
           )}
-          {summary.skipped > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {summary.skipped} rows couldn't be read. If it's the whole file, the column
-              layout is probably wrong — discard this and try your bank's preset above.
+          {drops.map((d) => (
+            <p key={d.key} className="hint" style={{ marginTop: 6 }}>
+              {d.say(d.n)}
             </p>
-          )}
+          ))}
           {summary.supersededImportId && (
             <p className="hint" style={{ marginTop: 6 }}>
               An earlier upload of this same file was still waiting to be confirmed. It has
@@ -651,6 +675,18 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           <div className="switch-label">
             Imported {confirmed.inserted} of {confirmed.total} rows
           </div>
+          {/*
+            A count and no cause, and that is the honest limit rather than an omission:
+            this panel reads imports.rows_rejected, which is the undifferentiated total,
+            and the three reasons behind it are not stored. The breakdown was on the
+            summary card seconds ago; repeating a cause from memory here would be a
+            claim about rows this panel cannot see.
+          */}
+          {confirmed.skipped > 0 && (
+            <p className="hint" style={{ marginTop: 6 }}>
+              {rowCount(confirmed.skipped)} didn't import.
+            </p>
+          )}
           {alreadyPresent > 0 && (
             <p className="hint" style={{ marginTop: 6 }}>
               {alreadyPresent} were already in the database — this export overlaps one you
@@ -661,12 +697,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             <p className="hint" style={{ marginTop: 6 }}>
               {shortfall} of the rows this summary called new were written by another import
               while it waited here. They're in your data — under that import, not this one.
-            </p>
-          )}
-          {confirmed.skipped > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {confirmed.skipped} rows couldn't be read. If it's the whole file, the column
-              layout is probably wrong — try your bank's preset above.
             </p>
           )}
         </div>

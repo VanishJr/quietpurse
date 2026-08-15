@@ -301,8 +301,20 @@ export interface ImportSummary {
   total: number;
   /** rows that could be read */
   accepted: number;
-  /** rows the parser could not use */
+  /**
+   * Rows that did not import, for three different reasons — the sum of the three
+   * below, and the only one of the four the database keeps. Required like `readAs`
+   * and for the same reason: a card that renders `skipped` under one cause is the
+   * defect row 22 exists to remove, so a mirror missing a bucket is a compile error
+   * rather than a sentence that quietly stops appearing.
+   */
   skipped: number;
+  /** of those, the ones the parser failed on — an unreadable fee, or no date or amount */
+  unreadable: number;
+  /** read fine, and dropped by a rule: the statement's own status column says so */
+  filtered: number;
+  /** read fine, and moving no money once the fee is taken — nothing to insert */
+  noMovement: number;
   problems: string[];
   /**
    * Of `accepted`, how many are not already in the database. A snapshot: another
