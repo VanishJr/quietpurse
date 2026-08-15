@@ -39,6 +39,8 @@ const NOTHING_SPENT: Summary = {
   incomeByCategory: [],
 };
 
+const MONTH_UAH: Summary = { ...MONTH, baseCurrency: 'UAH' };
+
 const YEAR: Summary = {
   scope: 'workspace',
   from: '2026-01-01',
@@ -185,5 +187,34 @@ describe('the year range', () => {
     expect(await screen.findByText(EMPTY_YEAR)).toBeInTheDocument();
     expect(screen.queryByText(EMPTY_MONTH)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+});
+
+/** Built from the currency the fixture was given, so a hardcoded label cannot pass. */
+const caption = (currency: string) =>
+  `All amounts in ${currency}. Anything in another currency is converted at its own date's rate, ` +
+  `or the last one published before it. Transfers between your own accounts aren't counted, ` +
+  `refunds are subtracted from expenses.`;
+
+/** The caption is three text nodes, so it is read whole rather than matched whole. */
+const captionText = () =>
+  screen.getByText(/^All amounts in/).textContent?.replace(/\s+/g, ' ').trim();
+
+describe('the caption under the totals', () => {
+  it('says what the numbers are without naming what converted them', async () => {
+    mockFetch(ANALYTICS_ROUTES);
+    mount();
+
+    // the anchor: before the summary arrives the caption reads the default currency
+    expect(await screen.findByText('420.50 EUR')).toBeInTheDocument();
+    expect(captionText()).toBe(caption('EUR'));
+  });
+
+  it("names the workspace's own base currency, not EUR", async () => {
+    mockFetch({ ...ANALYTICS_ROUTES, 'GET /api/summary': () => ok(MONTH_UAH) });
+    mount();
+
+    expect(await screen.findByText('420.50 UAH')).toBeInTheDocument();
+    expect(captionText()).toBe(caption('UAH'));
   });
 });
