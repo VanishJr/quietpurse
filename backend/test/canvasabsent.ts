@@ -39,6 +39,7 @@ const TEMPLATE: PdfTemplate = {
   },
   rows: { kind: 'one-line' },
   fee: { kind: 'none' },
+  mcc: { kind: 'none' },
   balances: {
     scope: { kind: 'whole-document' },
     kind: 'one-line',
