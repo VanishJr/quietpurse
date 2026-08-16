@@ -26,8 +26,10 @@ import {
   getImportDocumentInfo,
   getSetting,
   listAccounts,
+  listCharts,
   listImports,
   listIncomeSources,
+  replaceCharts,
   recordImportDocument,
   resolveUploadAccount,
   runWithWorkspace,
@@ -120,6 +122,12 @@ describe('workspace scoping', () => {
       await expect(summaryIncomeBySource(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
       await expect(summaryMonthlyTotals(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
       await expect(accountOtherCurrencies(scope)).rejects.toThrow(/no workspace context/);
+      // the saved chart list, both halves. The inventory value of these two lines is
+      // all they have: replaceCharts ends by reading the list back, so its throw fires
+      // whatever happened to the predicates on the delete and the insert above it -
+      // tenant-isolation.test.ts is what holds those
+      await expect(listCharts()).rejects.toThrow(/no workspace context/);
+      await expect(replaceCharts(0, [])).rejects.toThrow(/no workspace context/);
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
       setWorkspaceFallback(TEST_WORKSPACE_ID);

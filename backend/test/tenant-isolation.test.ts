@@ -48,6 +48,11 @@ import {
   listBaselineItems,
   listBudgets,
   listCategoryRules,
+  type Chart,
+  listCharts,
+  parseBackup,
+  replaceCharts,
+  restoreBackup,
   listIncomeSources,
   listRecurringGroups,
   listTransactions,
@@ -74,7 +79,7 @@ import { getDocument, putDocument } from '../src/documents';
 import { ACCOUNT_NOT_FOUND, importStatement } from '../src/providers/statement';
 import { accountFor, markImportCommitted } from './helpers';
 import { buildPdf } from './pdffixture';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
 import { NewTransaction } from '../src/types';
 
 /** The neighbour: a second workspace, populated with its own conflicting data. */
@@ -119,6 +124,26 @@ const FX_CURRENCY = 'CHF';
 
 /** The description both workspaces' recurring payment carries - one recurringKey. */
 const SHARED_RECURRING = 'Shared Subscription Ltd';
+
+/** The chart id both workspaces' first chart carries - the composite key allows it. */
+const SHARED_CHART_ID = 'cshared01';
+
+const chart = (over: Partial<Chart>): Chart => ({
+  id: SHARED_CHART_ID,
+  kind: 'line',
+  title: 'untitled',
+  accountId: null,
+  metrics: ['net'],
+  breakdown: 'expense-categories',
+  range: '12m',
+  ...over,
+});
+
+/** A workspace of its own for the chart write, so nothing it clears is asserted elsewhere. */
+const CHART_WRITER = 'chart-writer-workspace';
+
+/** And one for the restore, which replaces every table it is pointed at. */
+const CHART_RESTORE_TARGET = 'chart-restore-workspace';
 
 /** Both workspaces import a file with the same hash - see the imports test below. */
 const SHARED_FILE_HASH = 'the-same-statement-pdf';
@@ -173,6 +198,8 @@ beforeAll(async () => {
     await addTransferRule('shared description', 'acc-shared-id');
     await upsertIncomeSource({ id: 'freelance', label: 'Mine freelance', kind: 'own' });
     await saveFxRate(FX_DAY, FX_CURRENCY, 1.25);
+    // one write, so this workspace's counter stands at 1 while the neighbour's is at 2
+    await replaceCharts(0, [chart({ title: 'mine: spending' })]);
     myImportId = await importOf('mine');
   });
 
@@ -197,6 +224,11 @@ beforeAll(async () => {
     await addTransferRule('shared description', 'acc-shared-id');
     await upsertIncomeSource({ id: 'freelance', label: 'Theirs freelance', kind: 'external' });
     await saveFxRate(FX_DAY, FX_CURRENCY, 42);
+    await replaceCharts(0, [chart({ title: 'theirs: income', kind: 'donut' })]);
+    await replaceCharts(1, [
+      chart({ title: 'theirs: income', kind: 'donut' }),
+      chart({ id: 'ctheirs02', title: 'theirs: second' }),
+    ]);
     theirImportId = await importOf('theirs');
   });
 
@@ -408,6 +440,59 @@ describe('workspace isolation', () => {
       expect(await baselineTotal()).toBe(3000);
       const freelance = (await listIncomeSources()).find((s) => s.id === 'freelance');
       expect(freelance).toMatchObject({ label: 'Theirs freelance', kind: 'external' });
+    });
+  });
+
+  /**
+   * The read half of the chart list, and its version counter beside it. Both
+   * workspaces' first chart carries the same id, so a read filtered by id alone
+   * would answer the neighbour's.
+   *
+   * The counter is the half worth spelling out: it lives in `meta`, which is
+   * workspace-scoped like everything else, and a version read that lost its
+   * workspace would make the two workspaces share one number - the second one to
+   * save would be refused against a version it had never seen, for ever. The two
+   * are asserted at different values so no single wrong row can satisfy both.
+   */
+  it('saved charts and their version counter are per workspace', async () => {
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      const mine = await listCharts();
+      expect(mine.charts.map((c) => c.title)).toEqual(['mine: spending']);
+      expect(mine.version).toBe(1);
+    });
+    await runWithWorkspace(OTHER, async () => {
+      const theirs = await listCharts();
+      expect(theirs.charts.map((c) => c.title)).toEqual(['theirs: income', 'theirs: second']);
+      expect(theirs.version).toBe(2);
+    });
+  });
+
+  /**
+   * The write half, and the sharpest statement in this pair: replacing a list
+   * DELETEs the workspace's rows before inserting the new ones, and that delete
+   * unscoped empties every workspace on the server. Written from a third workspace
+   * so that neither list asserted above is this test's to disturb.
+   *
+   * The versions are asserted too, and not for symmetry: the compare-and-swap is an
+   * UPDATE on meta whose predicate, unscoped, moves every counter that happens to
+   * hold the same value.
+   */
+  it('a chart list written in one workspace clears no other workspace list', async () => {
+    await createWorkspace(dbInstance(), CHART_WRITER);
+    await runWithWorkspace(CHART_WRITER, async () => {
+      const written = await replaceCharts(0, [chart({ title: 'the third workspace' })]);
+      expect(written).toMatchObject({ ok: true, version: 1 });
+    });
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect(await listCharts()).toMatchObject({
+        version: 1,
+        charts: [{ title: 'mine: spending' }],
+      });
+    });
+    await runWithWorkspace(OTHER, async () => {
+      const theirs = await listCharts();
+      expect(theirs.charts.map((c) => c.title)).toEqual(['theirs: income', 'theirs: second']);
+      expect(theirs.version).toBe(2);
     });
   });
 
@@ -1022,6 +1107,27 @@ describe('workspace isolation', () => {
         expect(row).not.toHaveProperty('workspaceId');
       }
     }
+  });
+
+  /**
+   * "My data is mine" for the chart list, and the only thing that can see
+   * BACKUP_TABLES being one entry short: the suite stays green either way, and a
+   * reader finds out when they restore and their charts are not there.
+   *
+   * Into a workspace of its own, because a restore replaces every table it is
+   * pointed at.
+   */
+  it('a chart list is in the backup, and restores into another workspace', async () => {
+    const file = await runWithWorkspace(TEST_WORKSPACE_ID, () =>
+      exportBackup().then((d) => JSON.parse(JSON.stringify(d))),
+    );
+    await createWorkspace(dbInstance(), CHART_RESTORE_TARGET);
+    await runWithWorkspace(CHART_RESTORE_TARGET, async () => {
+      await restoreBackup(parseBackup(file));
+      expect((await listCharts()).charts).toEqual([
+        chart({ title: 'mine: spending' }),
+      ]);
+    });
   });
 
   /**

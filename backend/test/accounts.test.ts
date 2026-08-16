@@ -572,11 +572,15 @@ describe('deleting an account', () => {
 
   /**
    * The compile-time census has a hole `satisfies` cannot close - it proves an entry
-   * exists, not that it is executed - so a fifth account-scoped table must also make
-   * a test fail, not only the type checker. Four names, spelled out.
+   * exists, not that it is executed - so a sixth account-scoped table must also make
+   * a test fail, not only the type checker. Five names, spelled out.
+   *
+   * analyticsCharts is in the census and is the one entry the delete does NOT act
+   * on: a chart naming a deleted account stays, and says so on the card.
    */
   it('accounts for every account-scoped table in the schema', () => {
     expect([...ACCOUNT_CASCADE_TABLES].sort()).toEqual([
+      'analyticsCharts',
       'imports',
       'stagedTransactions',
       'transactions',
