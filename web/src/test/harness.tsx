@@ -3,13 +3,10 @@ import React from 'react';
 import { ThemeProvider } from '../theme';
 import {
   ACCOUNTS,
-  accountSummary,
   APP_SETTINGS,
-  BUDGETS,
   INCOME_SOURCES,
   INDEPENDENCE,
   RECURRING,
-  SUMMARY,
   TRANSACTIONS,
   TRANSFER_RULES,
   USER,
@@ -145,13 +142,17 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * test against an empty table and reading the guard's list - not by reading the
  * screens. A row that adds a first-paint request is told so by a red test.
  *
- * /api/imports/presets (once CsvImport mounts) is deliberately absent, and so is
- * /api/summary/months. It is not absent because no screen would ask: Analytics asks
- * only in its 'year' range, and Overview asks for every account that HAS a
- * transaction - but TRANSACTIONS here is empty, so Overview short-circuits on
- * `recent.length === 0` and fires neither summary request. Give that fixture a row and
+ * /api/imports/presets (once CsvImport mounts) is deliberately absent: it is not first
+ * paint.
+ *
+ * Neither is any summary request, and that is now true from both directions. Overview
+ * asks for every account that HAS a transaction - but TRANSACTIONS here is empty, so it
+ * short-circuits on `recent.length === 0` and fires neither. Give that fixture a row and
  * Overview fires both; the guard then names the missing one, which is this mechanism
- * working rather than a hole in it.
+ * working rather than a hole in it. And Analytics, which used to ask for the workspace
+ * summary and the budgets on first paint, is a workspace of charts the reader builds
+ * now: an empty one asks for nothing but the account list. /api/summary is a chart that
+ * exists, /api/budgets the Budgets tab once it is the one showing.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),
@@ -161,14 +162,6 @@ export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(TRANSACTIONS),
-  // Analytics asks for the workspace on first paint; Overview would ask for one
-  // account. One key, two shapes, and api.ts throws on the wrong one - so the stub
-  // answers the arm the URL asked for rather than the one it was written for.
-  'GET /api/summary': (_init, url) => {
-    const id = askedFor(url);
-    return ok(id ? accountSummary(id) : SUMMARY);
-  },
-  'GET /api/budgets': () => ok(BUDGETS),
   'GET /api/independence': () => ok(INDEPENDENCE),
 };
 

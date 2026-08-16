@@ -140,9 +140,11 @@ textarea {
  * App.tsx renders a `.screen` outside it. `auth.css` needs nothing from here, having
  * no motion of its own at all.
  *
- * No `scroll-behavior`, which the landing's block does carry: nothing in the app
- * scrolls smoothly, so a rule turning that off would be switching off a thing that
- * is not on.
+ * `scroll-behavior` IS here, which it did not used to be: the note that stood in its
+ * place said nothing in the app scrolled smoothly, and that stopped being true when the
+ * Analytics dock grew arrows. `.dock-tabs` is the one element that sets it, and this is
+ * where it is taken back off — the same argument as the `*` above, which is that a rule
+ * written later should be covered by something nobody has to remember.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -151,6 +153,7 @@ textarea {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -2016,60 +2019,549 @@ textarea {
   }
 }
 
-/* ---------- analytics ---------- */
+/* ---------- analytics: the chart workspace ---------- */
 
-.period-row {
+/*
+ * The screen is a column with a strip pinned to the foot of it, so it has to be at
+ * least as tall as the scroll container whatever is in it: without `min-height`, a
+ * workspace holding one short chart puts the dock halfway up the page, and the whole
+ * point of the dock is that it is where you look for it.
+ *
+ * The bottom gutter `.screen-inner` gives every other screen is taken off here and
+ * paid by the dock itself. 32px of page underneath a strip that is supposed to sit
+ * against the bottom edge is 32px of it not sitting there.
+ */
+.analytics-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding-bottom: 0;
+}
+
+.chart-stage {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 20px;
+}
+
+/* the same card the Overview draws, at this screen's measure */
+.chart-card {
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  box-shadow: var(--ov-card-shadow);
+  padding: 20px 22px 22px;
+}
+
+/* the heading and then the chart, with nothing between them: no controls (they are on
+   the tab — see ChartDock.tsx) and no line restating the spec in words */
+.chart-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The figures above the plot.
+ *
+ * `1 1 150px` rather than a fixed count: a series chart shows one box per measure and
+ * a share chart shows two, and the row is the same shape at one, two or three.
+ */
+.chart-figs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 4px;
+}
+
+.chart-fig {
+  flex: 1 1 150px;
+  min-width: 0;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+
+.chart-fig-label {
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-fig-value {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.chart-fig-pct {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+/* Every plot's key. The shape of the swatch is the chart's to choose and follows the
+   rule `.swatch` states: squares where the key names series, discs where it names the
+   sectors of a donut, because those are two different questions. */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+
+.chart-plot {
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.chart-empty {
+  margin: 28px 0;
+  text-align: center;
+}
+
+.chart-loading {
+  margin: 12px 0 0;
+}
+
+/* ---------- the workspace before anything is on it ---------- */
+
+/*
+ * Dashed, and that is the whole of the difference from a card: the border says "this
+ * is where a chart would be" without the panel pretending to be one. It is the same
+ * device `.dropzone` uses one screen over, for the same sentence.
+ *
+ * Three things in it now — a mark, a line and a button — where it used to hold two
+ * paragraphs as well, so the gaps are set for a stack that short: the heading close
+ * under the mark, and the button clear of it.
+ */
+.chart-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: clamp(36px, 7vw, 64px) 24px;
+  border: 1px dashed var(--ink-border);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+  text-align: center;
+}
+
+.chart-blank-mark {
+  display: block;
+  width: 96px;
+  margin-bottom: -4px;
+  color: var(--ink-muted);
+}
+
+.chart-blank-mark svg,
+.kind-shape svg,
+.dock-glyph svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chart-blank-title {
+  margin: 0;
+}
+
+/* ---------- the dock ---------- */
+
+/*
+ * Sticky rather than fixed: it belongs to this screen and not to the window, and the
+ * app already has something fixed to the bottom edge on a phone — the navigation. A
+ * fixed strip here would be laid over that one.
+ *
+ * The negative margins run the strip's ground out to the gutters `.screen-inner`
+ * holds, so the line above it reads as the foot of the page rather than as the foot of
+ * the column of cards.
+ */
+.chart-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin: 8px 0;
+  gap: 10px;
+  margin: 0 -16px;
+  padding: 10px 16px 14px;
+  background: var(--ink-page);
+  border-top: 1px solid var(--ink-grid);
 }
 
-.period-btn {
-  font-size: 26px;
+/*
+ * ...but staying off the navigation takes this as well. A sticky offset is resolved
+ * against the scrollport, which is `.screen`'s PADDING box — so the foot that screen
+ * gives itself on a phone (60px, so the last row of every other screen clears the tab
+ * bar) is inside the box and does not lift this strip out of the way. At `bottom: 0`
+ * the dock parks flush against the bottom of the window, where the tab bar is fixed and
+ * wins on z-index: the tabs, both arrows and New chart are all under it until the reader
+ * scrolls to the very end of the page. The offset is that same foot, which is also where
+ * the dock comes to rest once the page is scrolled out — so it does not move.
+ */
+@media (max-width: 899px) {
+  .chart-dock {
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.dock-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* the focus ring on the first and last tab has somewhere to be drawn */
+  padding: 3px;
+  margin: -3px;
+  /* the arrows either side of this move it, and a jump of most of a row with no travel
+     is hard to follow; the reduced-motion block at the top of this file turns it off */
+  scroll-behavior: smooth;
+}
+
+.dock-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * What moves the row. They exist because the scrollbar does not: this strip hides its
+ * own, and a mouse with one wheel cannot scroll sideways — so past four or five charts
+ * the rest of them were reachable by touch, by a trackpad and by the Tab key, and by no
+ * other means at all.
+ *
+ * Rendered only when there is something off the end, and disabled at each end, which is
+ * the pair of rules `.rail-arrow` already follows on the account rail above.
+ */
+.dock-arrow {
+  flex: none;
+  width: 30px;
+  height: 34px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
   color: var(--ink-accent);
-  padding: 4px 20px;
+  font-size: 18px;
   line-height: 1;
+  transition: background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
 }
 
-.period-btn:disabled {
-  opacity: 0.3;
+.dock-arrow:hover:not(:disabled) {
+  background: var(--ink-grid);
+  border-color: var(--ink-muted);
 }
 
-.period-label {
-  font-size: 16px;
+.dock-arrow:disabled {
+  opacity: 0.35;
+}
+
+/*
+ * The rectangle is the wrapper, and the two controls inside it share it: the name,
+ * which switches to the chart, and the ⋮, which acts on it. Two buttons rather than
+ * one with a second inside it, which is not a thing HTML allows — and they are separate
+ * questions anyway, so a keyboard reaching the menu without going through the tab is
+ * the right behaviour rather than a compromise.
+ */
+.dock-tab {
+  display: inline-flex;
+  align-items: stretch;
+  flex: none;
+  max-width: 250px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+.dock-tab:hover {
+  border-color: var(--ink-muted);
+  color: var(--ink-primary);
+}
+
+/*
+ * The current one is a FILLED tab and not a coloured word: a fill survives a reader
+ * who gets no colour at all, which is the same argument the navigation's pill makes
+ * two files up. The weight is the second marker and the shape's own is the third.
+ *
+ * A class on the wrapper rather than the `aria-current` this used to key on — the
+ * attribute belongs on the button that navigates, which is now a child.
+ */
+.dock-tab.is-current {
+  background: var(--ink-brand);
+  border-color: var(--ink-brand);
+  color: var(--ink-onBrand);
   font-weight: 600;
 }
 
-.totals-row {
-  display: flex;
-  gap: 12px;
-  margin: 8px 0;
+.dock-tab.is-current:hover {
+  border-color: var(--ink-brand);
+  color: var(--ink-onBrand);
 }
 
-.total-box {
-  flex: 1;
+/* built-in rather than one the reader made: set apart, and drawn in a broken line
+   until it is the one showing */
+.dock-tab.is-pinned {
+  margin-left: 12px;
+  border-style: dashed;
+}
+
+.dock-tab.is-pinned.is-current {
+  border-style: solid;
+}
+
+.dock-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 5px 8px 13px;
+  color: inherit;
+  font: inherit;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+}
+
+/* nothing to the right of the name on a tab with no ⋮ */
+.dock-tab.is-pinned .dock-open {
+  padding-right: 13px;
+  border-radius: var(--r-sm);
+}
+
+.dock-glyph {
+  display: block;
+  width: 22px;
+  flex: none;
+  opacity: 0.75;
+}
+
+.dock-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the app's ⋮, at the app's opacity — the same control `.fig-menu` draws on the
+   balance card, sized for a tab rather than for a card heading */
+.dock-more {
+  flex: none;
+  width: 26px;
+  color: inherit;
+  opacity: 0.55;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  transition: opacity var(--dur-1) var(--ease-out);
+}
+
+.dock-more:hover,
+.dock-more[aria-expanded='true'] {
+  opacity: 1;
+}
+
+/*
+ * `fixed`, and measured off the ⋮ in JS.
+ *
+ * The strip it belongs to is `overflow-x: auto`, which clips an absolutely positioned
+ * child — and giving up that scroll to keep a popover would cost the tenth chart its
+ * place on the row. Nothing in this element's ancestry sets `transform`, `filter` or
+ * `contain`, so `fixed` really is the viewport here and the two numbers hold.
+ */
+.dock-menu {
+  position: fixed;
+  z-index: var(--z-raised);
+  min-width: 176px;
+  padding: 6px;
   border: 1px solid var(--ink-grid);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: var(--r-md);
   background: var(--ink-surface);
-  text-align: left;
+  box-shadow: var(--ov-card-shadow);
 }
 
-.total-box[aria-selected='true'] {
+.dock-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--r-xs);
+  text-align: left;
+  font-size: 14px;
+  color: var(--ink-primary);
+}
+
+.dock-menu-item:hover {
+  background: var(--ink-page);
+}
+
+.dock-menu-item.is-danger {
+  color: var(--ink-bad);
+}
+
+.dock-menu-ask {
+  margin: 0;
+  padding: 6px 8px 2px;
+  font-size: 13px;
+  color: var(--ink-secondary);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.dock-menu-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dock-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 8px 15px;
+  border: 1px solid var(--ink-accent);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+  color: var(--ink-accent);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+.dock-new:hover {
+  background: var(--ink-grid);
+}
+
+/* ---------- the wizard ---------- */
+
+/* wider than every other sheet in the app, which is a question and two controls; this
+   one is a grid of six shapes, or a form beside a live plot */
+.backdrop-center .sheet-wide {
+  max-width: 460px;
+}
+
+/*
+ * Three across at every width, which is what six of anything wants. It was an
+ * `auto-fill` of a minimum width back when a tile carried a paragraph and needed the
+ * room to set it; a tile is a drawing and a word now, and a fixed three columns is a
+ * grid rather than a reflow that lands on five and leaves one on a row of its own.
+ */
+.kind-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+/* the drawing over its name, centred: with the blurb gone there is no line of text for
+   a left edge to line up with, and a glyph pushed into a corner reads as an icon */
+.kind-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 10px 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+  background: var(--ink-surface);
+  transition: border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+
+.kind-tile:hover {
+  border-color: var(--ink-accent);
+}
+
+.kind-tile[aria-pressed='true'] {
   border-color: var(--ink-accent);
   box-shadow: inset 0 0 0 1px var(--ink-accent);
 }
 
-.total-label {
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-bottom: 4px;
+/* the drawing takes the tile it is in, up to a cap. It was a fixed 62px, set when a
+   paragraph underneath was doing the explaining and the glyph was a marker beside it —
+   with the words gone the picture is the whole tile's content and has to look like it */
+.kind-shape {
+  display: block;
+  width: 100%;
+  max-width: 84px;
+  color: var(--ink-accent);
 }
 
-.total-value {
-  font-size: 16px;
+.kind-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-primary);
+}
+
+.wiz-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 12px;
+}
+
+.wiz-form {
+  min-width: 0;
+}
+
+/* a `<fieldset>`, stripped: every block here is a group of controls and wants the
+   grouping in the a11y tree, and none of them wants the browser's box around it */
+.wiz-field {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  border: none;
+}
+
+.wiz-field:last-child {
+  margin-bottom: 0;
+}
+
+.wiz-legend,
+.wiz-preview-label {
+  padding: 0;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* straight under the legend: there is no line of explanation between them any more */
+.wiz-chips {
+  margin-top: 7px;
+}
+
+/* under the chips it is about, not at the foot of the form beside the button it
+   disables: the reader is looking at the thing they just switched off */
+.wiz-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.wiz-preview {
+  min-width: 0;
+  align-self: start;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+  background: var(--ink-page);
+}
+
+.wiz-preview-label {
+  display: block;
+  margin: 0 0 4px;
+}
+
+.wiz-preview-note {
+  margin: 28px 0;
+  text-align: center;
 }
 
 .chart-wrap {
@@ -2374,12 +2866,33 @@ details > summary::marker {
     padding-right: 3%;
   }
 
-  /* the analytics donut and its legend sit side by side */
-  .analytics-split {
-    display: grid;
-    grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
-    gap: 32px;
-    align-items: start;
+  /*
+   * The Analytics workspace keeps no bottom gutter of its own at this width either —
+   * the rule above resets `.screen-inner` to 40px and would otherwise put the page's
+   * margin back under a strip that is meant to sit on the bottom edge. The dock takes
+   * the same 40px sideways, so its ground runs the full width of the column.
+   */
+  .analytics-screen {
+    padding-bottom: 0;
+  }
+
+  .chart-dock {
+    margin: 0 -40px;
+    padding: 12px 40px 18px;
+  }
+
+  .chart-card {
+    padding: 24px 28px 26px;
+  }
+
+  /* the wizard's form and the live plot of what it is describing, side by side */
+  .wiz-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 26px;
+  }
+
+  .backdrop-center .sheet-wide {
+    max-width: 900px;
   }
 
   /* the goal screen's hero and its month chart, likewise */
