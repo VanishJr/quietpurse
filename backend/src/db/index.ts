@@ -1869,11 +1869,20 @@ type AccountScoped = {
 const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
 
 /**
+ * The other kind of answer: rows that stay. A chart naming an account that is gone
+ * is a state the client draws deliberately - the tab remains and says the account
+ * is no longer here - so deleting the chart with the account would take a tab away
+ * with nothing said, and blanking its account would silently turn one account's
+ * chart into the whole workspace's under its old title.
+ */
+const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
+
+/**
  * What deleteAccount does to each of them, and `satisfies` rather than an
  * annotation: a missing key and an excess key are both compile errors, while each
  * statement keeps its own type at the call site. What it does NOT prove is that an
  * entry is executed - the body consumes these by name, in an order that is not
- * interchangeable - so a fifth table added here and never called would compile.
+ * interchangeable - so a table added here and never called would compile.
  * ACCOUNT_CASCADE_TABLES is the other half of that, and the docstring is the rest.
  */
 const ACCOUNT_CASCADE = {
@@ -1885,7 +1894,11 @@ const ACCOUNT_CASCADE = {
   stagedTransactions: CASCADES_FROM_IMPORTS,
   transferRules: (id: string): SQL =>
     sql`DELETE FROM transfer_rules WHERE ${WS()} AND account_id = ${id}`,
-} satisfies Record<AccountScoped, ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS>;
+  analyticsCharts: OUTLIVES_THE_ACCOUNT,
+} satisfies Record<
+  AccountScoped,
+  ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS | typeof OUTLIVES_THE_ACCOUNT
+>;
 
 export const ACCOUNT_CASCADE_TABLES = Object.keys(ACCOUNT_CASCADE);
 
@@ -2498,6 +2511,168 @@ export async function setBudget(category: string, monthly: number | null): Promi
   }
 }
 
+// ---------- the Analytics dock: the saved chart list ----------
+
+export { CHART_BREAKDOWNS, CHART_KINDS, CHART_METRICS, CHART_RANGES } from './schema';
+
+export type ChartKind = (typeof s.CHART_KINDS)[number];
+export type ChartRange = (typeof s.CHART_RANGES)[number];
+export type ChartBreakdown = (typeof s.CHART_BREAKDOWNS)[number];
+export type ChartMetric = (typeof s.CHART_METRICS)[number];
+
+export const CHARTS_MAX = 100;
+export const CHART_TITLE_MAX = 120;
+export const CHART_ID_MAX = 64;
+export const CHART_ACCOUNT_ID_MAX = 64;
+
+/**
+ * One saved chart, as both routes carry it: the dock's order is array position, so `sort`
+ * is not on this type. It IS in a downloaded backup, which selects the columns rather than
+ * this shape - say "not on the charts API", never "never leaves".
+ */
+export interface Chart {
+  id: string;
+  kind: ChartKind;
+  title: string;
+  accountId: string | null;
+  metrics: ChartMetric[];
+  breakdown: ChartBreakdown;
+  range: ChartRange;
+}
+
+export interface ChartList {
+  version: number;
+  charts: Chart[];
+}
+
+export type ChartsWrite =
+  | { ok: true; version: number; charts: Chart[] }
+  | { ok: false; reason: 'stale'; version: number; charts: Chart[] };
+
+const CHARTS_VERSION_KEY = 'analytics_charts_version';
+
+/**
+ * meta.value is text, so the counter comes back a string on both drivers. Parsed
+ * here and nowhere else: a route comparing '1' to 1 would answer 409 to every
+ * write after the first, for ever. Anything unparseable reads as 0 rather than
+ * throwing - restoreBackup is a door that inserts values nothing validated.
+ */
+const parseChartsVersion = (raw: string | undefined): number => {
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+};
+
+const chartsVersionRow = async (d: Db, w: string): Promise<string | undefined> =>
+  (
+    await d
+      .select({ value: s.meta.value })
+      .from(s.meta)
+      .where(and(eq(s.meta.workspaceId, w), eq(s.meta.key, CHARTS_VERSION_KEY)))
+  )[0]?.value;
+
+type ChartRow = typeof s.analyticsCharts.$inferSelect;
+
+const KNOWN_METRICS = new Set<string>(s.CHART_METRICS);
+
+function rowToChart(r: ChartRow): Chart {
+  let metrics: ChartMetric[] = [];
+  try {
+    const v = JSON.parse(r.metrics);
+    if (Array.isArray(v)) metrics = v.filter((m): m is ChartMetric => KNOWN_METRICS.has(m));
+  } catch {
+    // corrupted JSON - a chart with no measures, which the client draws a sentence for
+  }
+  return {
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    accountId: r.accountId,
+    metrics,
+    breakdown: r.breakdown,
+    range: r.range,
+  };
+}
+
+/**
+ * The version is read BEFORE the charts, and the order is the guarantee rather
+ * than a formality: read the other way round, a write committing between the two
+ * statements hands the caller an old list under the new version, and the caller's
+ * next write then matches and silently overwrites it. This way the caller can only
+ * ever hold a version older than its list, which the next write refuses out loud.
+ */
+async function chartListOn(d: Db, w: string): Promise<ChartList> {
+  const version = parseChartsVersion(await chartsVersionRow(d, w));
+  const rows = await d
+    .select()
+    .from(s.analyticsCharts)
+    .where(eq(s.analyticsCharts.workspaceId, w))
+    .orderBy(s.analyticsCharts.sort, s.analyticsCharts.id);
+  return { version, charts: rows.map(rowToChart) };
+}
+
+export async function listCharts(): Promise<ChartList> {
+  return chartListOn(getDb(), currentWorkspaceId());
+}
+
+/**
+ * Replaces the whole list, or refuses. One transaction: a crash anywhere in it
+ * leaves the previous list standing.
+ *
+ * The compare-and-swap matches the bytes that were read, not String(expected):
+ * a stored '007' parses to 7, so a caller sending 7 gets past the comparison and
+ * would then match no row for ever. Matching what was read accepts it and writes
+ * the canonical value back.
+ */
+export async function replaceCharts(expected: number, charts: Chart[]): Promise<ChartsWrite> {
+  const w = currentWorkspaceId();
+  return getDb().transaction(async (tx) => {
+    await tx
+      .insert(s.meta)
+      .values({ workspaceId: w, key: CHARTS_VERSION_KEY, value: '0' })
+      .onConflictDoNothing();
+    const raw = await chartsVersionRow(tx, w);
+    const stale = async (): Promise<ChartsWrite> => ({
+      ok: false,
+      reason: 'stale',
+      ...(await chartListOn(tx, w)),
+    });
+    if (parseChartsVersion(raw) !== expected) return stale();
+    const bumped = await tx
+      .update(s.meta)
+      .set({ value: String(expected + 1) })
+      .where(
+        and(
+          eq(s.meta.workspaceId, w),
+          eq(s.meta.key, CHARTS_VERSION_KEY),
+          eq(s.meta.value, raw ?? '0'),
+        ),
+      )
+      .returning({ key: s.meta.key });
+    // another writer moved the counter between the read and this statement: under
+    // READ COMMITTED the predicate is re-evaluated against their committed row
+    if (bumped.length === 0) return stale();
+    await tx.delete(s.analyticsCharts).where(eq(s.analyticsCharts.workspaceId, w));
+    if (charts.length > 0) {
+      await tx.insert(s.analyticsCharts).values(
+        charts.map((c, i) => ({
+          workspaceId: w,
+          id: c.id,
+          sort: i,
+          title: c.title,
+          kind: c.kind,
+          range: c.range,
+          breakdown: c.breakdown,
+          accountId: c.accountId,
+          metrics: JSON.stringify(c.metrics),
+        })),
+      );
+    }
+    // read back inside the writing transaction, never the request echoed: a route
+    // that answers with what it was sent reports a write that did not happen as 200
+    return { ok: true, ...(await chartListOn(tx, w)) };
+  });
+}
+
 export interface BaselineItem {
   id: number;
   label: string;
@@ -2609,6 +2784,7 @@ const BACKUP_TABLES = {
   income_sources: s.incomeSources,
   settings: s.settings,
   meta: s.meta,
+  analytics_charts: s.analyticsCharts,
 } as const;
 
 /**

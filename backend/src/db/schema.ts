@@ -489,6 +489,70 @@ export const incomeSources = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.id] })],
 );
 
+/**
+ * The three closed vocabularies a saved chart is built from, and the only place
+ * they are written. The route's z.enum and the CHECK constraints below are both
+ * built from these arrays - but the constraint the database applies is the one in
+ * the migration, so a member added here without db:generate widens the door and
+ * leaves the column where it was.
+ *
+ * They are in the database and not only at the door because the client
+ * SUBSTITUTES rather than refuses: chartKind() (web/src/analytics.ts) falls back
+ * to the first kind, so a restored "pie" would draw as a line chart under the
+ * reader's own title. Length bounds get no constraint - an over-long title
+ * substitutes nothing.
+ */
+export const CHART_KINDS = ['line', 'column', 'area', 'donut', 'ranking', 'radar'] as const;
+export const CHART_RANGES = ['3m', '6m', '12m', '24m', '3y', '5y'] as const;
+export const CHART_BREAKDOWNS = [
+  'expense-categories',
+  'income-categories',
+  'income-sources',
+] as const;
+export const CHART_METRICS = ['income', 'expense', 'net'] as const;
+
+// sql.raw, not a parameter: drizzle-kit serialises a check into DDL, where a
+// bound $1 is not a thing. The values are this file's own literals.
+const inList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
+
+/**
+ * The Analytics dock: one row per saved chart, ordered by `sort` (the position in
+ * the array the client PUT, never on the wire). The list is replaced whole, so
+ * `sort` is assigned 0..n-1 on every write.
+ */
+export const analyticsCharts = pgTable(
+  'analytics_charts',
+  {
+    workspaceId: workspaceId(),
+    // the client's own id, and ?chart= in the URL names it - never minted here
+    id: text('id').notNull(),
+    sort: integer('sort').notNull(),
+    title: text('title').notNull(),
+    kind: text('kind', { enum: CHART_KINDS }).notNull(),
+    range: text('range', { enum: CHART_RANGES }).notNull(),
+    breakdown: text('breakdown', { enum: CHART_BREAKDOWNS }).notNull(),
+    /**
+     * NULL = every account together. Deliberately not a foreign key: a chart
+     * naming an account that has been deleted is a state the client draws on
+     * purpose ("that account is no longer here"). A cascade would take the
+     * reader's tab away with nothing said, and SET NULL would silently turn a
+     * chart of one account into a chart of the whole workspace under its old
+     * title.
+     */
+    accountId: text('account_id'),
+    metrics: text('metrics').notNull().default('[]'), // JSON array of measure keys
+  },
+  (t) => [
+    primaryKey({ columns: [t.workspaceId, t.id] }),
+    check('analytics_charts_kind', sql`${t.kind} IN (${sql.raw(inList(CHART_KINDS))})`),
+    check('analytics_charts_range', sql`${t.range} IN (${sql.raw(inList(CHART_RANGES))})`),
+    check(
+      'analytics_charts_breakdown',
+      sql`${t.breakdown} IN (${sql.raw(inList(CHART_BREAKDOWNS))})`,
+    ),
+  ],
+);
+
 export const settings = pgTable(
   'settings',
   {

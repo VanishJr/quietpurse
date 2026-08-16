@@ -40,6 +40,9 @@ const TABLES = [
   'income_sources',
   'settings',
   'meta',
+  // CASCADE would reach it through workspace_id, as it would every table above;
+  // listed for the same reason staged_transactions is
+  'analytics_charts',
   // auth/workspace tables
   'organization',
   'member',

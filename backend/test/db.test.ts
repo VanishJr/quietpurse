@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type Chart,
+  type ChartBreakdown,
+  type ChartKind,
+  type ChartRange,
+  type ChartsWrite,
+  CHART_BREAKDOWNS,
+  CHART_KINDS,
+  CHART_RANGES,
   applyClassification,
   createImport,
   getTransaction,
   insertTransactions,
+  listCharts,
   listRecurringGroups,
+  replaceCharts,
   resolveUploadAccount,
   setOneOff,
   setRecurringIgnored,
@@ -195,5 +205,80 @@ describe('a negative fee is refused by the column', () => {
 
     // the sign is refused, not the column: a stated zero is a fact a file can carry
     expect(await insertTransactions([tx({ fee: 0, description: 'zero fee' })])).toBe(1);
+  });
+});
+
+/**
+ * The same shape one row down, and the reason is the client rather than a producer:
+ * chartKind() SUBSTITUTES an unknown kind for the first one in its list, so a chart
+ * restored from a hand-edited backup carrying "pie" would draw as a line chart under
+ * the reader's own title. The route's z.enum reads the same arrays these constraints
+ * are generated from, but a restore does not go through the route.
+ *
+ * Through the data layer rather than raw SQL, and by each constraint's own name: a
+ * NOT NULL violation and a bad vocabulary both throw, and only one of them is this
+ * guard. Whether drizzle-kit still emits a check into the migration is otherwise a
+ * fact somebody read once, on the afternoon the table was added.
+ *
+ * Both directions, because the door and the column are generated from one array and
+ * applied at different times: the second case is what fails when a member is added
+ * to schema.ts and the migration is not regenerated.
+ */
+describe('the chart vocabularies are the column and not only the door', () => {
+  const chart = (over: Partial<Chart>): Chart => ({
+    id: 'cvocab01',
+    kind: 'line',
+    title: 'Vocabulary',
+    accountId: null,
+    metrics: [],
+    breakdown: 'expense-categories',
+    range: '12m',
+    ...over,
+  });
+
+  it('a value outside them is refused, on kind, on range and on breakdown alike', async () => {
+    // the casts are the point: the door refuses these three with a 400, and this is
+    // about the write that never sees the door
+    expect(await violated(replaceCharts(0, [chart({ kind: 'pie' as ChartKind })]))).toEqual({
+      code: '23514',
+      constraint: 'analytics_charts_kind',
+    });
+    expect(await violated(replaceCharts(0, [chart({ range: '7m' as ChartRange })]))).toEqual({
+      code: '23514',
+      constraint: 'analytics_charts_range',
+    });
+    expect(
+      await violated(
+        replaceCharts(0, [chart({ breakdown: 'everything' as ChartBreakdown })]),
+      ),
+    ).toEqual({ code: '23514', constraint: 'analytics_charts_breakdown' });
+
+    // and the same write with a kind from the list is stored, so the three above
+    // failed on their vocabulary and not on something else in the row
+    expect(await replaceCharts(0, [chart({})])).toMatchObject({ ok: true });
+  });
+
+  // iterated rather than listed, so a member added tomorrow is written the day it
+  // appears - which is the drift this case exists for: the door and the type move
+  // with the array in schema.ts, the applied CHECK only with db:generate
+  it('and every member of the three lists is admitted', async () => {
+    const replace = async (charts: Chart[]): Promise<ChartsWrite> =>
+      replaceCharts((await listCharts()).version, charts);
+
+    const kinds = await replace(CHART_KINDS.map((kind, i) => chart({ id: `ckind${i}`, kind })));
+    expect(kinds).toMatchObject({ ok: true });
+    expect(kinds.charts.map((c) => c.kind)).toEqual([...CHART_KINDS]);
+
+    const ranges = await replace(
+      CHART_RANGES.map((range, i) => chart({ id: `crange${i}`, range })),
+    );
+    expect(ranges).toMatchObject({ ok: true });
+    expect(ranges.charts.map((c) => c.range)).toEqual([...CHART_RANGES]);
+
+    const breakdowns = await replace(
+      CHART_BREAKDOWNS.map((breakdown, i) => chart({ id: `cbreak${i}`, breakdown })),
+    );
+    expect(breakdowns).toMatchObject({ ok: true });
+    expect(breakdowns.charts.map((c) => c.breakdown)).toEqual([...CHART_BREAKDOWNS]);
   });
 });

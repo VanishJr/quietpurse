@@ -15,6 +15,14 @@ import { reclassifyAll } from './classify';
 import { config } from './config';
 import {
   ACCOUNT_NAME_MAX,
+  CHARTS_MAX,
+  CHART_ACCOUNT_ID_MAX,
+  CHART_BREAKDOWNS,
+  CHART_ID_MAX,
+  CHART_KINDS,
+  CHART_METRICS,
+  CHART_RANGES,
+  CHART_TITLE_MAX,
   type ConfirmOutcome,
   ImportNotConfirmable,
   ImportStatus,
@@ -61,6 +69,8 @@ import {
   listRecurringGroups,
   listTransactions,
   listTransferRules,
+  listCharts,
+  replaceCharts,
   setBudget,
   setCategoryOverride,
   setIncomeSourceOverride,
@@ -711,6 +721,114 @@ app.get('/api/summary/months', async (req, res) => {
     months: await summaryMonthlyTotals(scope, fromIso, toIso),
   };
   res.json(months);
+});
+
+// ---------- analytics: the saved chart list ----------
+
+/**
+ * One chart, exactly as the Analytics dock remembers it. Nothing here is coupled
+ * to `kind`: `metrics` and `breakdown` are both present whatever the shape is, and
+ * a donut whose measures were cleared before the shape was switched is a state the
+ * builder reaches on purpose. A door that refused it would refuse the reader's
+ * whole list rather than one chart.
+ */
+const chartSchema = z.strictObject({
+  id: z
+    .string({ error: 'chart id must be text' })
+    .min(1, { error: 'chart id must not be empty' })
+    .max(CHART_ID_MAX, { error: `chart id must be at most ${CHART_ID_MAX} characters` })
+    // the id is the client's and the URL names a chart by it, so it may carry
+    // nothing that would have to be escaped to get there
+    .regex(/^[A-Za-z0-9._~-]+$/, {
+      error: 'chart id may contain only letters, digits, and . _ ~ -',
+    }),
+  kind: z.enum(CHART_KINDS, { error: `chart kind must be one of: ${CHART_KINDS.join(', ')}` }),
+  // no minimum: an untitled chart is legal, and the dock falls back to a suggestion
+  title: z
+    .string({ error: 'chart title must be text' })
+    .max(CHART_TITLE_MAX, { error: `chart title must be at most ${CHART_TITLE_MAX} characters` }),
+  // null is every account together. An id naming no account is accepted: the chart
+  // says so on the card, and refusing it here would refuse a whole list because one
+  // chart points at an account deleted last week
+  accountId: z
+    .string({ error: 'chart accountId must be text or null' })
+    .max(CHART_ACCOUNT_ID_MAX, {
+      error: `chart accountId must be at most ${CHART_ACCOUNT_ID_MAX} characters`,
+    })
+    .nullable(),
+  metrics: z
+    .array(
+      z.enum(CHART_METRICS, { error: `chart metrics must be from: ${CHART_METRICS.join(', ')}` }),
+      { error: 'chart metrics must be a list' },
+    )
+    // uniqueness over a closed vocabulary is what bounds this at three; the .max()
+    // is what chooses the sentence a longer list is refused with, since its issue is
+    // raised before the refinement's and badRequest reads the first one
+    .max(CHART_METRICS.length, { error: 'a chart may not repeat a measure' })
+    .superRefine((metrics, ctx) => {
+      const seen = new Set<string>();
+      for (const m of metrics) {
+        if (seen.has(m)) {
+          ctx.addIssue({ code: 'custom', message: `chart metrics: "${m}" is listed twice` });
+          return;
+        }
+        seen.add(m);
+      }
+    }),
+  breakdown: z.enum(CHART_BREAKDOWNS, {
+    error: `chart breakdown must be one of: ${CHART_BREAKDOWNS.join(', ')}`,
+  }),
+  range: z.enum(CHART_RANGES, { error: `chart range must be one of: ${CHART_RANGES.join(', ')}` }),
+});
+
+const chartsPutSchema = z.strictObject({
+  // required, and there is no force flag: a way to overwrite by default is a way to
+  // lose another device's work by default
+  version: z
+    .int({ error: 'version must be a whole number' })
+    .min(0, { error: 'version must not be negative' }),
+  charts: z
+    .array(chartSchema, { error: 'charts must be a list' })
+    .max(CHARTS_MAX, { error: `at most ${CHARTS_MAX} charts can be saved` })
+    .superRefine((charts, ctx) => {
+      const seen = new Set<string>();
+      for (const c of charts) {
+        if (seen.has(c.id)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `two charts share the id "${c.id}" - the URL names a chart by its id, so it can only name one`,
+          });
+          return;
+        }
+        seen.add(c.id);
+      }
+    }),
+});
+
+export const CHARTS_STALE =
+  'These charts were changed somewhere else after this list was loaded. What you see now is the current version - save again and it will go through.';
+
+app.get('/api/analytics/charts', async (_req, res) => {
+  res.json(await listCharts());
+});
+
+/**
+ * The whole list at once, or nothing: reorder, duplicate-at-position and delete are
+ * all one array the screen already computes. The 409 carries the current state so a
+ * client refused for staleness needs no second request to show the truth.
+ */
+app.put('/api/analytics/charts', async (req, res) => {
+  const parsed = chartsPutSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: badRequest(parsed.error) });
+    return;
+  }
+  const result = await replaceCharts(parsed.data.version, parsed.data.charts);
+  if (!result.ok) {
+    res.status(409).json({ error: CHARTS_STALE, version: result.version, charts: result.charts });
+    return;
+  }
+  res.json({ version: result.version, charts: result.charts });
 });
 
 // ---------- income sources / one-off / recurring ----------
