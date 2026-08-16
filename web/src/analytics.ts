@@ -30,7 +30,7 @@
  * in accounts.ts, which is imported rather than copied for exactly that reason. Every
  * sum below is accumulated as an integer and divided once at the end.
  */
-import { monthOf, toCents, totals } from './accounts';
+import { monthOf, toCents } from './accounts';
 import { categoryLabel } from './categories';
 import { isoDay, MONTHS_SHORT } from './format';
 import { MonthTotals, Summary, Transaction } from './types';
@@ -210,7 +210,7 @@ export const CHART_TX_LIMIT = 5_000;
  * year one.
  *
  * They end at the tick `today` is in and not at the newest tick with data in it,
- * which is the opposite of what `monthlyTotals` does on the Overview and is the right
+ * which is the opposite of what `windowMonths` does on the Overview and is the right
  * answer here for the opposite reason: this axis is a window the reader chose, so a
  * month with nothing in it is part of the answer ("we spent nothing in June"), where
  * there the window is derived from the data and a leading empty bar would be a claim
@@ -316,10 +316,10 @@ export interface SeriesPoint {
   income: number;
   expense: number;
   /**
-   * Income minus expenses, and NOT what `totals().net` answers. That one sums every
-   * row including transfers, because it exists to be compared against a balance; this
-   * is the bottom line of a period, and a transfer between two of your own accounts
-   * must not move it.
+   * Income minus expenses, and NOT the `net` the summary endpoints answer with. That
+   * one sums every row including transfers, because it exists to be compared against a
+   * balance; this is the bottom line of a period, and a transfer between two of your
+   * own accounts must not move it.
    */
   net: number;
 }
@@ -360,15 +360,44 @@ export function seriesFromMonths(
 }
 
 /**
- * The same series for one account, summed on the client because the two summary
- * endpoints take a date range and nothing else — the same gap `accounts.ts` exists to
- * cover, and `totals()` is imported from there so both sides apply one set of rules:
- * transfers between your own accounts are neither income nor an expense, and a refund
- * subtracts from expenses in the period it landed in.
+ * What one bucket of rows earned and spent, in cents.
  *
- * The account's own currency, not the base one, for the reason that module gives: one
- * account is one currency, so there is nothing to convert and nothing to lose to a
- * missing rate.
+ * These rules used to live in `accounts.ts` as `totals()`, back when the Overview summed
+ * one account's transactions in the client because `/api/summary` took a date range and
+ * nothing else. Both endpoints take an `accountId` now, that mirror is gone with the
+ * module's arithmetic, and this is its last caller — so the rules travel here rather than
+ * keeping a function alive elsewhere for one import. They are unchanged, and they are the
+ * SQL's: a transfer between your own accounts is neither income nor an expense, and a
+ * refund subtracts from expenses in the period it landed in rather than adding to income.
+ *
+ * Cents in and cents out, never back through the doubles. The call it replaces divided by
+ * a hundred and `toCents` multiplied straight back — a round trip past the residue the
+ * header is about, for no reader's benefit.
+ */
+const bucketCents = (txs: Transaction[]): { income: number; expense: number } => {
+  let income = 0;
+  let expense = 0;
+  for (const t of txs) {
+    if (t.transfer) continue;
+    const c = toCents(t.amount);
+    if (c < 0 || t.refund) expense += -c;
+    else if (c > 0) income += c;
+  }
+  return { income, expense };
+};
+
+/**
+ * The same series for one account, summed on the client off `/api/transactions`.
+ *
+ * It sums rows because when this was written the summary endpoints took a date range and
+ * nothing else. They take an `accountId` now, so this arm COULD read `/api/summary/months`
+ * the way the workspace arm does — and it is not a one-line swap: that endpoint answers
+ * `AccountMonthTotals`, which is deliberately not assignable to the `MonthTotals` above,
+ * and only the months that have rows. Left as it is, and named here so that it reads as a
+ * row of its own rather than as a gap nobody noticed.
+ *
+ * The account's own currency, not the base one, and there is nothing to convert: one
+ * account is one currency, so nothing here can be lost to a missing rate.
  */
 export function seriesFromTransactions(
   txs: Transaction[],
@@ -384,8 +413,8 @@ export function seriesFromTransactions(
   }
   const withYear = spansYears(ticks);
   return ticks.map((t) => {
-    const sums = totals(buckets.get(t) ?? []);
-    return point(t, grain, withYear, toCents(sums.income), toCents(sums.expense));
+    const sums = bucketCents(buckets.get(t) ?? []);
+    return point(t, grain, withYear, sums.income, sums.expense);
   });
 }
 
@@ -450,8 +479,8 @@ export function shareFromTransactions(txs: Transaction[], breakdown: Breakdown):
   for (const t of txs) {
     if (t.transfer) continue;
     const c = toCents(t.amount);
-    // the rules of `categorySpend`/`totals`, read from both sides: a refund is a
-    // negative expense and never income, whichever way it is signed
+    // the rules `bucketCents` states, read from both sides: a refund is a negative
+    // expense and never income, whichever way it is signed
     const isExpense = c < 0 || t.refund;
     if (isExpense !== wantsExpenses) continue;
     const delta = wantsExpenses ? -c : c;

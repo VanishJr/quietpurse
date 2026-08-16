@@ -1,17 +1,10 @@
 /**
- * The data layer: every query the app makes, ported from better-sqlite3 raw SQL
- * to Drizzle on PostgreSQL. Function names and result types are unchanged from
- * the SQLite era - only the signatures went async.
+ * The data layer: every query the app makes.
  *
  * EVERY query in this module is scoped to the current workspace (see
  * ./workspace.ts): the workspace id comes from AsyncLocalStorage, set by the
  * session middleware for requests and by the scheduler for background jobs.
  * A call outside a workspace context throws instead of leaking data.
- *
- * Two kinds of queries live here on purpose:
- *  - plain CRUD goes through the query builder (typed rows, camelCase);
- *  - the analytical aggregates keep their raw SQL via sql`` - they are the heart
- *    of the app and easier to review as SQL than as builder chains.
  *
  * PG gotchas encoded here so callers never see them:
  *  - SUM()/COUNT() return bigint/numeric and the driver hands them over as
@@ -22,25 +15,27 @@
  */
 import crypto from 'crypto';
 import path from 'path';
-import { and, asc, eq, getTableColumns, inArray, isNotNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { recurringKey } from '../categorizer';
+import { type Category, recurringKey } from '../categorizer';
 import { config } from '../config';
 import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
 import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
 import {
   Account,
+  AccountMonthTotals,
   CategorySummary,
   IncomeSourceDef,
   IncomeSourceKind,
+  IncomeSourceTotal,
   MonthTotals,
   NewTransaction,
-  Summary,
+  SummaryTotals,
   Transaction,
   TransferRule,
 } from '../types';
@@ -58,15 +53,10 @@ import { currentWorkspaceId } from './workspace';
 
 export { currentWorkspaceId, runWithWorkspace, setWorkspaceFallback } from './workspace';
 
-/**
- * Any Drizzle PG database: production passes node-postgres, tests pass PGlite.
- * The schema/HKT generics are erased - this module never uses db.query.*.
- */
 export type Db = PgDatabase<PgQueryResultHKT, any, any>;
 
 let db: Db | undefined;
 
-/** Injection point: tests hand over a migrated PGlite instance (see test/setup.ts). */
 export function initDb(instance: Db): void {
   db = instance;
 }
@@ -76,20 +66,12 @@ function getDb(): Db {
   return db;
 }
 
-/** The raw db handle - for the better-auth adapter, which manages its own tables. */
 export function dbInstance(): Db {
   return getDb();
 }
 
-/** Where drizzle-kit puts the generated SQL migrations (shared with the test setup). */
 export const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'drizzle');
 
-/**
- * Production startup: connect to DATABASE_URL and apply pending SQL migrations.
- * Must complete before the HTTP server starts listening. Seeding is per-workspace
- * now: it runs at registration (see auth.ts) and idempotently at startup for every
- * existing workspace (see main() in index.ts).
- */
 export async function connectDatabase(): Promise<void> {
   const pool = new Pool({ connectionString: config.databaseUrl });
   const instance = drizzle(pool, { schema: s });
@@ -98,22 +80,6 @@ export async function connectDatabase(): Promise<void> {
   logDb.info('database connected, migrations applied');
 }
 
-/**
- * The seed every fresh workspace gets (formerly the old SQLite migration 001):
- * builtin income sources and the initial settings. Idempotent - the tables are
- * the source of truth after the first run (see appsettings.ts). Runs at
- * registration and, as an upgrade path, at startup for every workspace.
- *
- * OWNER_NAMES and FAMILY_NAMES are the *server operator's* own household names,
- * and they are personal data: seeding them into every workspace would both
- * mis-tag a stranger's transactions and show them the operator's relatives in
- * the settings screen. So env personal data seeds ONLY the owner workspace (the
- * first one ever created); everyone else starts empty and fills these in from
- * the app.
- *
- * base_currency is not personal - it is this deployment's sensible starting
- * value - so every workspace gets it.
- */
 export async function seedDefaults(): Promise<void> {
   const w = currentWorkspaceId();
   const d = getDb();
@@ -145,9 +111,6 @@ export async function seedDefaults(): Promise<void> {
     .onConflictDoNothing();
 }
 
-// ---------- workspaces (the organization table is owned by better-auth) ----------
-
-/** Every workspace on the server, oldest first (the first one is the server owner's). */
 export async function listWorkspaceIds(): Promise<string[]> {
   const rows = await getDb()
     .select({ id: s.organization.id })
@@ -156,7 +119,6 @@ export async function listWorkspaceIds(): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-/** The user's workspaces in join order - the first one is their personal workspace. */
 export async function listUserWorkspaceIds(userId: string): Promise<string[]> {
   const rows = await getDb()
     .select({ id: s.member.organizationId })
@@ -166,15 +128,11 @@ export async function listUserWorkspaceIds(userId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-// ---------- raw-SQL helpers ----------
-
-/** Rows of a raw sql`` query; both drivers expose them as `.rows`. */
 async function rowsOf<T>(q: SQL): Promise<T[]> {
   const res = (await getDb().execute(q)) as unknown as { rows: T[] };
   return res.rows;
 }
 
-/** Affected-row count of a raw sql`` statement (node-postgres and PGlite spell it differently). */
 async function execCount(q: SQL): Promise<number> {
   const res = (await getDb().execute(q)) as unknown as {
     rowCount?: number | null;
@@ -183,7 +141,6 @@ async function execCount(q: SQL): Promise<number> {
   return Number(res.rowCount ?? res.affectedRows ?? 0);
 }
 
-/** PG parameter limit is 65535 per statement - large inserts go in chunks. */
 function chunked<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -198,6 +155,13 @@ const WS = (): SQL => sql`workspace_id = ${currentWorkspaceId()}`;
  * Transfer transactions count as neither income nor spending.
  */
 const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
+
+/**
+ * The effective category: the user's own answer for this row beats the categorizer's.
+ * Two arms and not three - `category` is NOT NULL DEFAULT 'other', so there is no
+ * third case to fall through to.
+ */
+const CATEGORY = sql`COALESCE(category_manual, category)`;
 
 /**
  * Transactions of hidden accounts are neither shown nor counted. They aren't
@@ -240,8 +204,6 @@ const HOLDS_STAGED_ROWS = (accountId: string): SQL =>
 const NO_ROWS = (accountId: string): SQL =>
   sql`NOT ${HOLDS_TRANSACTIONS(accountId)} AND NOT ${HOLDS_STAGED_ROWS(accountId)}`;
 
-// ---------- settings (key/value, source of truth, see appsettings.ts) ----------
-
 export async function getSetting(key: string): Promise<string | undefined> {
   const rows = await getDb()
     .select()
@@ -257,16 +219,9 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: [s.settings.workspaceId, s.settings.key], set: { value } });
 }
 
-/**
- * Base currency from settings (falls back to env/config default until seedDefaults
- * has run). Needed inside the db layer too: inserting transactions fills base_amount
- * straight away for rows already in the base currency.
- */
 export async function currentBaseCurrency(): Promise<string> {
   return (await getSetting('base_currency')) ?? config.baseCurrency;
 }
-
-// ---------- meta ----------
 
 export async function getMeta(key: string): Promise<string | undefined> {
   const rows = await getDb()
@@ -283,17 +238,10 @@ export async function setMeta(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: [s.meta.workspaceId, s.meta.key], set: { value } });
 }
 
-// ---------- accounts ----------
-
 export async function upsertAccount(a: Account): Promise<void> {
   await upsertAccountOn(getDb(), a);
 }
 
-/**
- * The body, on a caller-supplied executor. The confirm step needs the account to
- * appear in the same transaction as the rows that join it (see confirmImport), and
- * a nested getDb().transaction() would take a second pooled connection.
- */
 export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
   await d
     .insert(s.accounts)
@@ -308,43 +256,23 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
     })
     .onConflictDoUpdate({
       target: [s.accounts.workspaceId, s.accounts.id],
-      // `hidden` is deliberately not in the set below, and for the reason it always
-      // was: an import must never silently un-hide an account the user removed.
-      // What is no longer a consequence of that is landing rows in one - both gates
-      // ahead of here refuse first (row 26a). The upload resolves its destination
-      // and throws before any `imports` row is written, and the confirm re-reads the
-      // account under FOR UPDATE and rolls back.
-      //
-      // That covers a holder that EXISTS when the confirm's guard reads it, which is
-      // what the lock is over. It does not cover one that does not: an id no accounts
-      // row answers to locks nothing, so a row inserted hidden between that read and
-      // this statement is reached here - the create path, a second import branch (b)
-      // handed the same minted id, and a PATCH {hidden:true}, all inside one window.
-      // Narrow, and nothing in the suite can go red on it (PGlite is
-      // single-connection), so this sentence is the whole of what holds it.
-      //
-      // The dedup keys of the rows already in a hidden account are row 11's - a real
-      // account delete, taking the transactions and their imports.
+      // `hidden` is deliberately not in the set below: nothing here may silently
+      // un-hide an account the user removed.
       //
       // `name` is out of it too, and for a different reason: the account's name is
-      // now the user's to change (updateAccount) and the id is what an import is
-      // recorded against, so writing imports.account_name back over it would revert
-      // every rename on the next upload - and uploading "revolut" into an account
-      // the user called "Revolut" would rename it. It is also what keeps this
+      // the user's to change (updateAccount) and the id is what an import is
+      // recorded against, so writing a remembered name back over it would revert
+      // every rename made since the backup was taken. It is also what keeps this
       // statement clear of accounts_name_unique: the conflict arm never touches the
       // indexed column.
       //
-      // `currency` is out of it for a reason of the same kind (row 65). It is the
-      // account's own now - updateAccount writes it, and only while the account
-      // holds no rows - and imports.account_currency is what a FILE was uploaded
-      // as, not what the account is. Left in the set, the confirm would write that
-      // snapshot back and revert a correction made while the import waited, at 200
-      // and with nothing said; and every arm that hands a typed currency to an
-      // account it never read (uploadDestination's name arm) would re-denominate
-      // it. Out of the set there is no application branch to drop later.
+      // `currency` is out of it for a reason of the same kind. It is the account's
+      // own now - updateAccount writes it, and only while the account holds no rows
+      // - so writing a remembered one back would revert a correction with nothing
+      // said. Out of the set there is no application branch to drop later.
       //
-      // The INSERT above keeps it: the name arm's account is created here, and it
-      // has to be denominated in something.
+      // The INSERT above keeps both: an account created here has to have a name and
+      // be denominated in something.
       set: {
         balanceCents: sql`excluded.balance_cents`,
         iban: sql`excluded.iban`,
@@ -359,10 +287,6 @@ export async function updateAccountBalance(id: string, balance: number): Promise
     .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
 }
 
-/**
- * Balance = the sum of the account's transactions. An uploaded statement carries
- * no balance, so this is the best approximation (exact with full history).
- */
 export async function recalcAccountBalanceFromTransactions(accountId: string): Promise<void> {
   await recalcAccountBalanceFromTransactionsOn(getDb(), accountId);
 }
@@ -392,7 +316,6 @@ function rowToAccount(r: AccountRow): Account {
   };
 }
 
-/** Visible accounts only by default. */
 export async function listAccounts(includeHidden = false): Promise<Account[]> {
   const ws = eq(s.accounts.workspaceId, currentWorkspaceId());
   const rows = await getDb()
@@ -416,12 +339,11 @@ export async function getAccount(id: string): Promise<Account | undefined> {
  * The account a name refers to, folded the way accounts_name_unique folds it - so a
  * name this misses is a name the index would also let through, and the lookup can
  * never be followed by an insert that collides. Folding in JS instead is what makes
- * those two disagree ('İSTANBUL'.toLowerCase() is nine code units, lower() gives
- * eight), and the disagreement surfaces as a 500 on the upload path.
+ * those two disagree - toLowerCase() and lower() do not agree on every alphabet -
+ * and the disagreement surfaces as a 500 on the upload path.
  *
  * Hidden accounts are included deliberately: an upload naming a removed account has
- * always landed in it, and narrowing that here would fix half of a defect that has
- * its own row (see upsertAccountOn's note on `hidden`).
+ * always landed in it, and narrowing that here would fix half of a defect.
  */
 export async function findAccountByName(name: string): Promise<Account | undefined> {
   const rows = await getDb()
@@ -439,20 +361,17 @@ export async function findAccountByName(name: string): Promise<Account | undefin
 declare const resolved: unique symbol;
 
 /**
- * An account id an upload may be staged against. The brand is the point: this type
- * cannot be produced outside this module without writing the assertion that says
- * so, and StagedAccount.id requires one - so a second way of turning a request into
- * an id is a compile error rather than a review finding. That is the whole subject
- * of row 25; a name was an id once, through a slug function, and two callers
- * deriving it differently put a statement's rows in an account its own summary did
- * not name.
+ * An account id proved to be a row of this workspace. The brand is the point: this
+ * type cannot be produced without writing the assertion that says so, and both
+ * StagedAccount.id and AccountScope.id require one - so a second way of turning a
+ * request into an id is a compile error rather than a review finding. A name was an
+ * id once, through a slug function, and two callers deriving it differently put a
+ * statement's rows in an account its own summary did not name.
  *
- * There are exactly two producers and they are the same kind of thing:
- * resolveUploadAccountId, for an upload that names its account, and
- * resolveUploadAccount, for one that picks it by id. Each reads the id out of this
- * workspace's own rows or mints it here; neither brands a string that arrived off
- * the wire unread. Row 26b deletes the first with the name arm, and this goes back
- * to being one place.
+ * Two producers, each branding an id it has just read out of this workspace's own
+ * rows and never a string that arrived off the wire unread: resolveUploadAccount
+ * below, for an upload that picks its account by id, and app.ts's summaryScope, for
+ * a summary that asks about one account.
  *
  * Phantom, and it stops at the data layer: nothing that crosses the wire carries it
  * (ImportRecord.accountId, ImportSummary.accountId and Account.id stay plain
@@ -460,28 +379,11 @@ declare const resolved: unique symbol;
  */
 export type ResolvedAccountId = string & { readonly [resolved]: true };
 
-/**
- * What an upload that picked its account by id may be staged against, or why not.
- * Two refusals rather than a boolean: they are two different sentences, and only one
- * of them tells the user their account is still there.
- */
 export type UploadAccount =
   | { ok: true; account: StagedAccount }
-  /** no account with that id in this workspace */
   | { ok: false; reason: 'not-found' }
-  /** it is there and the user removed it from the app */
   | { ok: false; reason: 'hidden' };
 
-/**
- * The account an upload picked, proved to be here and not removed. It answers the
- * whole StagedAccount rather than the id, so the name and the currency an id-arm
- * import records are the account's OWN (ROADMAP 26(b), 26(d)) by the return type
- * instead of by the caller remembering to read the row a second time.
- *
- * The id handed back is the one this read out of the row, never the string that was
- * passed in: that is what makes branding it here the same guarantee
- * resolveUploadAccountId gives.
- */
 export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
   const rows = await getDb()
     .select()
@@ -496,76 +398,13 @@ export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
   };
 }
 
-/**
- * Where an upload's rows are going, decided once. The upload and the confirm are two
- * requests apart and must agree on one account, and the id is opaque - one bank
- * uploaded as CSV one month and as PDF the next lands in one account, because both
- * uploads resolve the same name to the same account.
- *
- * (a) before (b) is load-bearing, not tidiness. When a confirm is refused because
- * something took the name (see ConfirmOutcome 'account-name-taken'), the outstanding
- * import is still awaiting_confirmation and still carries the id that collided - so
- * (b) would match it, mint nothing, and collide again on every retry, making the
- * refusal's own advice ("upload the file again") a promise the server breaks. With
- * (a) first the account holding the name is found and the rows land there.
- */
-export async function resolveUploadAccountId(name: string): Promise<ResolvedAccountId> {
-  const existing = await findAccountByName(name);
-  if (existing) return existing.id as ResolvedAccountId;
-  // (b) An outstanding import of the same name already minted an id: two statements
-  // for one NEW bank must land in one account, and neither has created it yet. That
-  // last clause is checked, not assumed - the account may have been created and then
-  // renamed since, and (a) having just missed means it now answers to a DIFFERENT
-  // name, so returning its id here would attach this upload to an account it did not
-  // name and merge two banks' history behind a 200. The check is inside the query so
-  // the ordering below still picks the oldest ELIGIBLE import: read after LIMIT 1
-  // instead and three uploads of one name mint a third id, splitting the two that
-  // branch (b) exists to keep together.
-  //
-  // The window this closes is upload-to-upload once the first has staged. The one it
-  // does NOT close is upload-to-staging: a row is not awaiting_confirmation until
-  // stageImport, and the whole parse sits between here and there - seconds for a PDF.
-  // Two uploads of one new name overlapping in that window both mint, and the second
-  // confirm meets accounts_name_unique. That is a 409 that imports nothing and names
-  // the way out, not a lock, and no reader should take it for one.
-  const outstanding = await getDb()
-    .select({ accountId: s.imports.accountId })
-    .from(s.imports)
-    .where(
-      and(
-        eq(s.imports.workspaceId, currentWorkspaceId()),
-        eq(s.imports.status, 'awaiting_confirmation'),
-        isNotNull(s.imports.accountId),
-        sql`lower(${s.imports.accountName}) = lower(${name})`,
-        sql`not exists (select 1 from ${s.accounts} a
-              where a.workspace_id = ${currentWorkspaceId()} and a.id = ${s.imports.accountId})`,
-      ),
-    )
-    // oldest first: the earliest outstanding import is the one most likely to be
-    // confirmed first and therefore to become the account, so the answer here agrees
-    // with the account that will exist. The id tiebreak is supersedeStagedImports'.
-    .orderBy(asc(s.imports.uploadedAt), asc(s.imports.id))
-    .limit(1);
-  const minted = outstanding[0]?.accountId;
-  if (minted) return minted as ResolvedAccountId;
-  return crypto.randomUUID() as ResolvedAccountId;
-}
-
-/** The longest account name the app accepts, at every door that writes one. */
 export const ACCOUNT_NAME_MAX = 60;
 
 export type AccountWrite =
   | { ok: true; account: Account }
-  /**
-   * accounts_name_unique refused it. `taken` is a second read, so it can miss - the
-   * holder may have been renamed again between the violation and the lookup - and
-   * the type says so rather than defaulting `hidden` and printing a wrong sentence.
-   */
   | { ok: false; reason: 'name-taken'; taken: Account | undefined }
   | { ok: false; reason: 'not-found' }
-  /** NO_ROWS refused the currency: the account's balance is a sum of these. */
   | { ok: false; reason: 'has-transactions' }
-  /** NO_ROWS refused the currency: an outstanding import already stamped its rows. */
   | { ok: false; reason: 'staged-import' };
 
 /**
@@ -575,7 +414,6 @@ export type AccountWrite =
  */
 export type AccountCreate = Extract<AccountWrite, { ok: true } | { reason: 'name-taken' }>;
 
-/** An empty account, with nothing in it and no import behind it. */
 export async function createAccount(input: {
   name: string;
   currency: string;
@@ -600,31 +438,11 @@ export async function createAccount(input: {
   }
 }
 
-/**
- * Rename an account, remove it from the app, bring it back, or correct the currency
- * it was created in - one UPDATE, because two functions writing the same row is how
- * the next change updates one of them. The union is what refuses a patch that
- * changes nothing: `{}` is assignable to none of the three arms, so a caller cannot
- * construct one.
- *
- * `id` is never written here and must not be: the dedup index is
- * (workspace_id, account_id, dedup_key) and transfer_rules.account_id has no foreign
- * key, so moving an id un-deduplicates one and orphans the other, silently.
- */
 export type AccountPatch =
   | { name: string; hidden?: boolean; currency?: string }
   | { name?: string; hidden: boolean; currency?: string }
   | { name?: string; hidden?: boolean; currency: string };
 
-/**
- * Which clause of NO_ROWS refused the write, or undefined when there is no such
- * account. Asked only after the UPDATE matched nothing, so it decides a sentence
- * and never a write.
- *
- * A patch that raced the confirm's cleanup - the rows gone from both tables between
- * the UPDATE and this read - lands on the staged arm, which of the two is the one
- * that says "try again" rather than "delete something".
- */
 async function currencyRefusal(
   id: string,
 ): Promise<'has-transactions' | 'staged-import' | undefined> {
@@ -674,14 +492,12 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
   }
 }
 
-// ---------- transactions ----------
-
 /**
  * Inserts a batch of transactions, silently skipping ones already there. Returns
  * the number of genuinely new rows.
  *
- * Identity and deduplication are two different things here (see ROADMAP 4.2):
- * `id` is a fresh UUID that never changes, and duplicates are caught by the
+ * Identity and deduplication are two different things here: `id` is a fresh UUID
+ * that never changes, and duplicates are caught by the
  * UNIQUE (workspace_id, account_id, dedup_key) index instead.
  *
  * A source with a stable reference of its own can supply it as dedupKey; none
@@ -703,12 +519,11 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
  *
  * A duplicate is skipped, never merged: the existing row keeps its description,
  * its category and the user's manual marks. Correcting facts on a re-parse is
- * the imports table's job (ROADMAP 4.4), not this one's.
+ * the imports table's job, not this one's.
  *
  * importId is the provenance of the rows this call actually inserts, and only
  * those - a skipped duplicate keeps whatever import first wrote it (see
- * transactions.import_id in ./schema.ts). It is optional because the deleted
- * bank integrations passed nothing; every production caller left supplies one.
+ * transactions.import_id in ./schema.ts).
  */
 export async function insertTransactions(
   txs: NewTransaction[],
@@ -817,7 +632,6 @@ export interface TxFilter {
   limit?: number;
 }
 
-/** Raw-SQL row shape (snake_case): the aggregate queries below select * from transactions. */
 interface TxRow {
   id: string;
   account_id: string;
@@ -829,6 +643,7 @@ interface TxRow {
   description: string;
   mcc: number | null;
   category: string;
+  category_manual: string | null;
   transfer: boolean;
   transfer_manual: boolean | null;
   refund: boolean;
@@ -851,7 +666,8 @@ function rowToTx(r: TxRow): Transaction {
     date: r.date,
     description: r.description,
     mcc: r.mcc ?? undefined,
-    category: r.category,
+    category: r.category_manual ?? r.category,
+    categoryManual: r.category_manual !== null,
     transfer: r.transfer_manual ?? r.transfer,
     transferManual: r.transfer_manual,
     refund: r.refund,
@@ -872,7 +688,7 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
   // include the whole "to" day when a date without a time is given
   if (f.to) where.push(sql`date <= ${f.to.length === 10 ? `${f.to}T23:59:59.999Z` : f.to}`);
   if (f.accountId) where.push(sql`account_id = ${f.accountId}`);
-  if (f.category) where.push(sql`category = ${f.category}`);
+  if (f.category) where.push(sql`${CATEGORY} = ${f.category}`);
   const limit = f.limit && f.limit > 0 ? f.limit : 1000;
   const rows = await rowsOf<TxRow>(sql`
     SELECT * FROM transactions
@@ -885,68 +701,110 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
  * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
  * summaries - otherwise we would be adding euros to hryvnias. After backfillBaseAmounts
  * (which runs on every recompute) there are normally no such rows.
+ *
+ * The workspace arm's clause, and scopeSql below is the only thing that may name it:
+ * per account it drops a real transaction from its own account's total - an import
+ * short by a row, in the account's own currency, that nothing reports.
  */
 const CONVERTED = sql`base_amount_cents IS NOT NULL`;
 
-/**
- * Spending by category in the base currency, net: a refund ("Bolt, cancelled")
- * subtracts from spending in its own category, so a total can go negative if the
- * purchase was in a previous period and the refund arrived in this one. Categories
- * that collapse to exactly zero are not shown.
- */
-export async function summaryByCategory(from: string, to: string): Promise<CategorySummary[]> {
-  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-base_amount_cents) AS total_cents
-    FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
-      AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
-    GROUP BY category
-    HAVING SUM(-base_amount_cents) <> 0
-    ORDER BY total_cents DESC`);
-  return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
+export interface WorkspaceScope {
+  kind: 'workspace';
 }
 
-/** Income by category: transfers between your own accounts and refunds excluded. */
-export async function summaryIncomeByCategory(
+export interface AccountScope {
+  kind: 'account';
+  id: ResolvedAccountId;
+  currency: string;
+}
+
+export type SummaryScope = WorkspaceScope | AccountScope;
+
+/**
+ * The rows a scope is about and the column its money lives in - together, from one
+ * value, because picking the filter of one arm and the column of the other is what
+ * puts two currencies in one sum. Every summary query below goes through this and
+ * none of them names CONVERTED, VISIBLE_ACCOUNT() or base_amount_cents itself.
+ *
+ * NOT_TRANSFER is in the WHERE on both arms (transfers between your own accounts
+ * are neither income nor spending, per account exactly as workspace-wide). The one
+ * exception is accountMonths, which needs the month to survive even when every row
+ * in it is a transfer and therefore spells its own WHERE - see the note there.
+ *
+ * The workspace clause is table-qualified: summaryIncomeBySource joins
+ * income_sources, which has a workspace_id of its own, and an unqualified one is
+ * ambiguous there. Qualifying costs the other four nothing.
+ */
+const scopeSql = (scope: SummaryScope): { where: SQL; money: SQL } =>
+  scope.kind === 'account'
+    ? {
+        where: sql`transactions.${WS()} AND account_id = ${scope.id} AND ${NOT_TRANSFER}`,
+        money: sql`amount_cents`,
+      }
+    : {
+        where: sql`transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}`,
+        money: sql`base_amount_cents`,
+      };
+
+/**
+ * Spending by category, net: a refund ("Bolt, cancelled") subtracts from spending
+ * in its own category, so a total can go negative if the purchase was in a previous
+ * period and the refund arrived in this one. Categories that collapse to exactly
+ * zero are not shown.
+ */
+export async function summaryByCategory(
+  scope: SummaryScope,
   from: string,
   to: string,
 ): Promise<CategorySummary[]> {
+  const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(base_amount_cents) AS total_cents
+    SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
-      AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
-    GROUP BY category
+    WHERE ${where}
+      AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    HAVING SUM(-${money}) <> 0
     ORDER BY total_cents DESC`);
   return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
 }
 
-/** Effective income source: a manual mark beats auto-detection, empty = other. */
+export async function summaryIncomeByCategory(
+  scope: SummaryScope,
+  from: string,
+  to: string,
+): Promise<CategorySummary[]> {
+  const { where, money } = scopeSql(scope);
+  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
+    SELECT ${CATEGORY} AS category, SUM(${money}) AS total_cents
+    FROM transactions
+    WHERE ${where}
+      AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY total_cents DESC`);
+  return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
+}
+
 const INCOME_SOURCE = sql`COALESCE(income_source_manual, income_source, 'other')`;
 
-/**
- * External source (kind = external)? A source deleted from income_sources (or an
- * unknown id) counts as your own - same as the default other.
- */
 const IS_EXTERNAL = (): SQL =>
   sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external' AND workspace_id = ${currentWorkspaceId()})`;
 
-/** Income by source in the base currency (id + label + kind). */
 export async function summaryIncomeBySource(
+  scope: SummaryScope,
   from: string,
   to: string,
-): Promise<Summary['incomeBySource']> {
-  const rows = await rowsOf<
-    Omit<Summary['incomeBySource'][number], 'total'> & { total_cents: string }
-  >(sql`
+): Promise<IncomeSourceTotal[]> {
+  const { where, money } = scopeSql(scope);
+  const rows = await rowsOf<Omit<IncomeSourceTotal, 'total'> & { total_cents: string }>(sql`
     SELECT ${INCOME_SOURCE} AS source,
            COALESCE(i.label, ${INCOME_SOURCE}) AS label,
            COALESCE(i.kind, 'own') AS kind,
-           SUM(base_amount_cents) AS total_cents
+           SUM(${money}) AS total_cents
     FROM transactions
     LEFT JOIN income_sources i
       ON i.id = ${INCOME_SOURCE} AND i.workspace_id = transactions.workspace_id
-    WHERE transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}
+    WHERE ${where}
       AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
     GROUP BY 1, 2, 3
     ORDER BY total_cents DESC`);
@@ -954,14 +812,16 @@ export async function summaryIncomeBySource(
 }
 
 export async function summaryTotals(
+  scope: SummaryScope,
   from: string,
   to: string,
-): Promise<{ expense: number; income: number }> {
+): Promise<SummaryTotals> {
+  const { where, money } = scopeSql(scope);
   const rows = await rowsOf<{ expense_cents: string | null; income_cents: string | null }>(sql`
-    SELECT SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense_cents,
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income_cents
+    SELECT SUM(CASE WHEN amount_cents < 0 OR refund THEN -${money} ELSE 0 END) AS expense_cents,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN ${money} ELSE 0 END) AS income_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}`);
+    WHERE ${where} AND date >= ${from} AND date <= ${to}`);
   const row = rows[0];
   return {
     expense: fromCents(Number(row?.expense_cents ?? 0)),
@@ -969,15 +829,8 @@ export async function summaryTotals(
   };
 }
 
-/**
- * Spending/income by month in the base currency - for the "over the year" chart and
- * the independence calculation. Same rules as summaryTotals: transfers between your
- * own accounts excluded, refunds subtracted from spending. On top of that:
- *  - expenseOneOff - the share of spending flagged as one-off (amortized);
- *  - incomeOwn - income from your own sources (kind = own);
- *  - incomeExternal - help from external sources (kind = external).
- */
-export async function summaryMonthlyTotals(from: string, to: string): Promise<MonthTotals[]> {
+async function workspaceMonths(from: string, to: string): Promise<MonthTotals[]> {
+  const { where, money } = scopeSql({ kind: 'workspace' });
   // camelCase aliases must be quoted: PG folds unquoted identifiers to lowercase
   const rows = await rowsOf<{
     month: string;
@@ -988,13 +841,13 @@ export async function summaryMonthlyTotals(from: string, to: string): Promise<Mo
     incomeExternal: string;
   }>(sql`
     SELECT SUBSTR(date, 1, 7) AS month,
-           SUM(CASE WHEN amount_cents < 0 OR refund THEN -base_amount_cents ELSE 0 END) AS expense,
-           SUM(CASE WHEN (amount_cents < 0 OR refund) AND one_off THEN -base_amount_cents ELSE 0 END) AS "expenseOneOff",
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN base_amount_cents ELSE 0 END) AS income,
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND NOT ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeOwn",
-           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeExternal"
+           SUM(CASE WHEN amount_cents < 0 OR refund THEN -${money} ELSE 0 END) AS expense,
+           SUM(CASE WHEN (amount_cents < 0 OR refund) AND one_off THEN -${money} ELSE 0 END) AS "expenseOneOff",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund THEN ${money} ELSE 0 END) AS income,
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND NOT ${IS_EXTERNAL()} THEN ${money} ELSE 0 END) AS "incomeOwn",
+           SUM(CASE WHEN amount_cents > 0 AND NOT refund AND ${IS_EXTERNAL()} THEN ${money} ELSE 0 END) AS "incomeExternal"
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND date >= ${from} AND date <= ${to}
+    WHERE ${where} AND date >= ${from} AND date <= ${to}
     GROUP BY 1
     ORDER BY 1 ASC`);
   // the SUMs above are in cents (bigint strings from the driver) - convert every
@@ -1010,23 +863,78 @@ export async function summaryMonthlyTotals(from: string, to: string): Promise<Mo
 }
 
 /**
- * Average monthly spending by category over the window [from, to] in the base
- * currency: SUM per category / number of months with any money movement. One-off
- * purchases are excluded - the independence screen amortizes them separately.
+ * The same chart for one account, in that account's own currency.
+ *
+ * This is the one summary query that does not take its WHERE from scopeSql, and the
+ * reason is the GROUP BY: it is the only query here that can lose a whole bucket, so
+ * a WHERE excluding transfers deletes a month whose every row is a transfer from the
+ * chart - which reads as "nothing happened" rather than "nothing is shown". So
+ * NOT_TRANSFER moves into the income and expense CASEs, where it excludes transfers
+ * from those two figures exactly as everywhere else, and the month survives.
+ *
+ * `net` carries no NOT_TRANSFER at all: it is a balance movement, summed by
+ * recalcAccountBalanceFromTransactions' rule (every row of the account, transfers
+ * and unconverted rows included), which is the only thing that makes these months
+ * add up to the balance printed beside them.
+ *
+ * Moving NOT_TRANSFER out of a WHERE anywhere else counts a transfer out of the
+ * account as spending in its category.
  */
+async function accountMonths(
+  scope: AccountScope,
+  from: string,
+  to: string,
+): Promise<AccountMonthTotals[]> {
+  const rows = await rowsOf<{
+    month: string;
+    expense: string;
+    income: string;
+    net: string;
+  }>(sql`
+    SELECT SUBSTR(date, 1, 7) AS month,
+           SUM(CASE WHEN ${NOT_TRANSFER} AND (amount_cents < 0 OR refund) THEN -amount_cents ELSE 0 END) AS expense,
+           SUM(CASE WHEN ${NOT_TRANSFER} AND amount_cents > 0 AND NOT refund THEN amount_cents ELSE 0 END) AS income,
+           SUM(amount_cents) AS net
+    FROM transactions
+    WHERE transactions.${WS()} AND account_id = ${scope.id} AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY 1 ASC`);
+  return rows.map((r) => ({
+    month: r.month,
+    income: fromCents(Number(r.income)),
+    expense: fromCents(Number(r.expense)),
+    net: fromCents(Number(r.net)),
+  }));
+}
+
+export function summaryMonthlyTotals(
+  scope: WorkspaceScope,
+  from: string,
+  to: string,
+): Promise<MonthTotals[]>;
+export function summaryMonthlyTotals(
+  scope: AccountScope,
+  from: string,
+  to: string,
+): Promise<AccountMonthTotals[]>;
+export function summaryMonthlyTotals(scope: SummaryScope, from: string, to: string) {
+  return scope.kind === 'account' ? accountMonths(scope, from, to) : workspaceMonths(from, to);
+}
+
 export async function avgMonthlyByCategory(
   from: string,
   to: string,
   months: number,
 ): Promise<CategorySummary[]> {
   if (months <= 0) return [];
+  const { where, money } = scopeSql({ kind: 'workspace' });
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT category, SUM(-base_amount_cents) AS total_cents
+    SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
     FROM transactions
-    WHERE ${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED} AND NOT one_off
+    WHERE ${where} AND NOT one_off
       AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
-    GROUP BY category
-    HAVING SUM(-base_amount_cents) > 0
+    GROUP BY 1
+    HAVING SUM(-${money}) > 0
     ORDER BY total_cents DESC`);
   // the sum is exact; the division by months is a genuine fraction - round to whole cents
   return rows.map((r) => ({
@@ -1035,7 +943,15 @@ export async function avgMonthlyByCategory(
   }));
 }
 
-// ---------- imports (provenance, ROADMAP 4.4) ----------
+export async function accountOtherCurrencies(scope: AccountScope): Promise<string[]> {
+  const rows = await rowsOf<{ currency: string }>(sql`
+    SELECT DISTINCT currency FROM transactions
+    WHERE ${WS()} AND account_id = ${scope.id} AND currency <> ${scope.currency}
+    ORDER BY 1`);
+  return rows.map((r) => r.currency);
+}
+
+// ---------- imports (provenance) ----------
 
 type ImportRow = typeof s.imports.$inferSelect;
 
@@ -1047,7 +963,6 @@ export interface ImportRecord {
   fileHash: string;
   sourceType: ImportSourceType;
   originalFilename: string | null;
-  /** what the upload asked for - NULL before the parse and on every older row */
   accountName: string | null;
   /**
    * The account the rows are going to, resolved at staging. NULL wherever
@@ -1059,11 +974,9 @@ export interface ImportRecord {
   uploadedAt: string;
   parserVersion: number;
   status: ImportStatus;
-  /** rows the parser accepted / could not use */
   rowsAccepted: number;
   rowsRejected: number;
   errorDetail: string | null;
-  /** transactions this import still owns - see transactions.import_id (first writer) */
   transactions: number;
   /**
    * Whether a document can be READ for this row, which is not whether bytes exist
@@ -1075,7 +988,6 @@ export interface ImportRecord {
   documentAvailable: boolean;
 }
 
-/** Long enough for any message the parsers produce; the rest is noise in a backup. */
 export const ERROR_DETAIL_MAX = 500;
 
 const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => ({
@@ -1146,7 +1058,7 @@ export async function createImport(input: {
 /**
  * The bytes are on disk: the row may now claim them. A separate write rather than
  * a field on createImport/failImport, because the put happens between the two - and
- * a FAILED import keeps its document, which is the case ROADMAP 4.5 wants it for.
+ * a FAILED import keeps its document, which is what makes a miss diagnosable.
  *
  * Never called before the put: a row claiming a document that is not there is the
  * state every read would have to distrust.
@@ -1171,13 +1083,6 @@ export async function clearImportDocument(id: string): Promise<void> {
     .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
 }
 
-/**
- * What the document routes need beside the ref: whether this workspace holds the
- * import at all, the name to offer the browser, and what the row claims about its
- * document. The existence answer deliberately does not come from the pointer - a
- * row whose pointer is NULL may still have bytes, and those are exactly the rows
- * a retention policy has to be able to act on.
- */
 export interface ImportDocumentInfo {
   keyVersion: number | null;
   originalFilename: string | null;
@@ -1196,12 +1101,6 @@ export async function getImportDocumentInfo(id: string): Promise<ImportDocumentI
   return rows[0];
 }
 
-/**
- * What getDocument needs to open this import's stored document, or undefined when
- * the row is absent, belongs to another workspace, or records no readable one.
- * The only honest way to obtain a DocumentRef, which is what stops the hash check
- * in getDocument from being skippable.
- */
 export async function getImportDocumentRef(id: string): Promise<DocumentRef | undefined> {
   const rows = await getDb()
     .select({ fileHash: s.imports.fileHash, keyVersion: s.imports.documentKeyVersion })
@@ -1212,24 +1111,21 @@ export async function getImportDocumentRef(id: string): Promise<DocumentRef | un
   return { importId: id, keyVersion: row.keyVersion, fileHash: row.fileHash };
 }
 
-/**
- * The import did not complete - the parse threw, or an insert after it did. The
- * message only, truncated: it ends up in the JSON backup.
- *
- * The staged rows go with it, and here rather than in the caller's catch so that no
- * future caller has to remember. A throw *after* the stage committed - the supersede,
- * a read, anything - would otherwise leave a `failed` import holding rows that
- * nothing can reach: `failed` is neither confirmable nor discardable, so they would
- * sit until deleteImport, which has no button until roadmap item 10. A no-op for
- * every import that never staged anything, and the document is kept either way -
- * that is the artefact a failed import is retained for (ROADMAP 4.5).
- */
 export async function failImport(id: string, message: string): Promise<void> {
   const w = currentWorkspaceId();
   await getDb().transaction(async (tx) => {
     await tx
       .update(s.imports)
-      .set({ status: 'failed', errorDetail: message.slice(0, ERROR_DETAIL_MAX) })
+      // the last cut between a composed refusal and the screen, and marked: the
+      // client renders the whole of what is stored and adds no cut of its own, so an
+      // unmarked one arrives reading like a sentence that finished
+      .set({
+        status: 'failed',
+        errorDetail:
+          message.length <= ERROR_DETAIL_MAX
+            ? message
+            : `${message.slice(0, ERROR_DETAIL_MAX - 1)}…`,
+      })
       .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
     await tx
       .delete(s.stagedTransactions)
@@ -1240,7 +1136,6 @@ export async function failImport(id: string, message: string): Promise<void> {
 /** Counts over the whole filtered set, never over the page (see listImports). */
 export interface ImportTotals {
   imports: number;
-  /** those with a READABLE document - the predicate behind ImportRecord.documentAvailable */
   documents: number;
   /**
    * Transactions those imports own (transactions.import_id, "first wrote"), which
@@ -1335,8 +1230,6 @@ export async function listImportAccountIds(importId: string): Promise<string[]> 
   return rows.map((r) => r.accountId).sort();
 }
 
-// ---------- the confirmation step (ROADMAP 5.3) ----------
-
 type StagedRow = typeof s.stagedTransactions.$inferSelect;
 
 /**
@@ -1413,7 +1306,6 @@ export async function stageImport(
   });
 }
 
-/** Candidate (account, key) pairs joined in as VALUES for the preview count. */
 const keyPairs = (pairs: { accountId: string; dedupKey: string }[]): SQL =>
   sql.join(
     pairs.map((p) => sql`(${p.accountId}::text, ${p.dedupKey}::text)`),
@@ -1459,7 +1351,7 @@ const SUPERSEDED_BY_REUPLOAD =
 /**
  * Clears the way for a re-upload of the same bytes: an *older* import of this hash
  * still awaiting confirmation is discarded, and its ids come back so the summary can
- * say so. There is no imports-history screen until roadmap item 10, which makes
+ * say so. There is no imports-history screen, which makes re-uploading the file the
  * re-uploading the file the only way back to an import whose tab was closed.
  *
  * Nothing is deleted to do this - a staged import owns no transactions - and the
@@ -1511,14 +1403,11 @@ export async function supersedeStagedImports(
     }
     return claimed;
   });
-  // newest first: the summary carries one id, and the one the user was looking at
-  // when they re-uploaded is the last one they staged
   return rows
     .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt) || b.id.localeCompare(a.id))
     .map((r) => r.id);
 }
 
-/** The status and hash of an import in this workspace, for the refusals below. */
 async function importStateOf(
   id: string,
 ): Promise<{ status: ImportStatus; fileHash: string } | undefined> {
@@ -1529,22 +1418,12 @@ async function importStateOf(
   return rows[0];
 }
 
-/** Rolls the confirm back when its conditional update matched nothing. */
 class NotAwaitingConfirmation extends Error {}
 
-/** Rolls the confirm back when the account its rows go to has been removed. */
 class AccountRemoved extends Error {}
 
-/**
- * A guard inside the confirm refused it: the staged set is not what the import says
- * it is, the account it was staged for is not recorded, or the rows and that record
- * disagree. None of these is anything the user did, so the route keeps a 5xx for it -
- * a refusal caused by the server must stay distinguishable from one caused by the
- * file (ROADMAP 6.4). What the type is for is the body: `internal error` on the one
- * screen whose job is telling a person whether their data landed reads as transient,
- * so they press Confirm again and get it again. Named, the route can log the real
- * message for the operator and answer with the way out.
- */
+class AccountMissing extends Error {}
+
 export class ImportNotConfirmable extends Error {}
 
 const UNIQUE_VIOLATION = '23505';
@@ -1579,57 +1458,15 @@ export type ConfirmOutcome =
       rowsAccepted: number;
       rowsRejected: number;
     }
-  /** not awaiting confirmation (already confirmed, discarded, a corpse) */
   | { confirmed: false; reason: 'status'; status: ImportStatus }
-  /** another import of the same bytes won the race to `committed` */
   | { confirmed: false; reason: 'file-committed'; heldBy: string }
-  /**
-   * The account staged for this import does not exist yet and another one has since
-   * taken its name. Nothing was imported: landing the rows in whoever holds the name
-   * would merge two banks' history, and there is no account delete to undo it.
-   * `accountName` is what the import recorded; `taken` is the holder if it is still
-   * there to be read.
-   */
-  | {
-      confirmed: false;
-      reason: 'account-name-taken';
-      accountName: string;
-      taken: Account | undefined;
-    }
-  /**
-   * The account these rows go to was removed from the app between the upload and
-   * the confirm. Nothing was imported: a hidden account's transactions are kept out
-   * of every list, summary and export, so landing them would report a success that
-   * nothing displays. No payload - the caller picked this account seconds ago and
-   * the screen names it, so quoting a stored name buys a bound and says nothing.
-   */
+  | { confirmed: false; reason: 'account-missing' }
   | { confirmed: false; reason: 'account-hidden' };
 
-/**
- * Makes a staged import real: its rows go into `transactions` through the same
- * insert every provider uses, and the import becomes `committed`. Answers what
- * actually landed - `inserted` is the database's own count, not an echo of the
- * preview - or why nothing did. undefined = no such import in this workspace.
- *
- * The conditional UPDATE is the first statement and it is the whole concurrency
- * story: two confirms serialise on the row lock it takes, and the second
- * re-evaluates its WHERE under READ COMMITTED, matches nothing and never reaches
- * the insert. A row count, not a read-then-write.
- *
- * **Inside the transaction there is no getDb().** Every statement runs on `tx`, and
- * the base currency is read before it opens: a data-layer call that reached for the
- * pool under an open transaction would hold one connection while waiting for a
- * second, and with pg's default pool (10, no connection timeout) ten concurrent
- * confirms would wait on each other with nothing logged. deleteImport is the
- * precedent - it reads outside and hands `tx` down.
- */
 export async function confirmImport(id: string): Promise<ConfirmOutcome | undefined> {
   const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
   let accountId = '';
-  // read back out here after a rollback: the transaction undoes the database, not a
-  // JS binding, and the name is what the refusal below is composed from
-  let accountName = '';
   let inserted = 0;
   let rowsAccepted = 0;
   let rowsRejected = 0;
@@ -1656,13 +1493,15 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       if (!row) throw new NotAwaitingConfirmation();
       // the columns are nullable because every import from before the confirmation
       // step is. Confirming one anyway means inventing the account it goes to, and
-      // reporting that as a success
+      // reporting that as a success. accountName and accountCurrency are CHECKED and
+      // not read - nothing below reads either - and they stay checked because a row
+      // missing them is a row from before this step, which must not become
+      // confirmable just because the reader that used them went away
       if (row.accountName === null || row.accountCurrency === null || row.accountId === null) {
         throw new ImportNotConfirmable(
           `import ${id} is awaiting confirmation but records no account name, currency or id`,
         );
       }
-      accountName = row.accountName;
       const staged = await tx
         .select()
         .from(s.stagedTransactions)
@@ -1675,8 +1514,8 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
         // description ends up on the row that survives deduplication
         .orderBy(asc(s.stagedTransactions.rowNo));
       // without this the invariant would rest on stageImport never being reordered
-      // by a later change, and its failure would read as "Imported 300 rows" under a
-      // summary that promised 500
+      // by a later change, and its failure would read as a confirmed row count under
+      // a summary that promised a larger one
       if (staged.length !== row.rowsAccepted) {
         throw new ImportNotConfirmable(
           `import ${id} was staged with ${row.rowsAccepted} rows and ${staged.length} are present - refusing to confirm a partial import`,
@@ -1695,10 +1534,8 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
           `import ${id} is recorded against account ${accountId} but staged a row for ${stray.accountId}`,
         );
       }
-      // The second gate on row 26a's defect. The account was there and visible when
-      // the file was uploaded; the user removed it while the summary sat on screen.
-      // A missing row is NOT an error - the name arm's common case is an account
-      // this upsert is about to create.
+      // The account was there and visible when the file was uploaded; the user
+      // removed it while the summary sat on screen.
       //
       // FOR UPDATE, and it is load-bearing rather than decoration: under READ
       // COMMITTED a plain read here can be overtaken by a
@@ -1709,30 +1546,32 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       // then sees hidden = true. Deleting `.for('update')` leaves every test in the
       // suite green: PGlite is single-connection, so nothing here can hold this
       // transaction open while a second one commits.
-      const [holder] = await tx
-        .select({ hidden: s.accounts.hidden })
-        .from(s.accounts)
-        .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
-        .for('update');
-      if (holder?.hidden) throw new AccountRemoved();
-      await upsertAccountOn(tx, {
-        id: accountId,
-        provider: 'upload',
-        name: row.accountName,
-        currency: row.accountCurrency,
-        balance: 0,
-      });
+      //
+      // `.at(0)` rather than a destructure so that deleting the throw below is a
+      // compile error. This tsconfig has no noUncheckedIndexedAccess, and `strict`
+      // does not imply it: NO index form is guarded - `rows[0]` is exactly as silent
+      // as `const [holder] =` - so both would type non-optional and the resurrection
+      // would come back unannounced. `.at(0)`'s `T | undefined` comes from
+      // lib.es2022 instead, which no config here can turn off.
+      const holder = (
+        await tx
+          .select({ hidden: s.accounts.hidden })
+          .from(s.accounts)
+          .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
+          .for('update')
+      ).at(0);
+      if (!holder) throw new AccountMissing();
+      if (holder.hidden) throw new AccountRemoved();
       inserted = await insertTransactionsOn(tx, staged.map(stagedToNew), baseCurrency, id);
       await tx
         .delete(s.stagedTransactions)
         .where(
           and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
         );
-      // inside the transaction, unlike the old import path: that window used to end
-      // in a `pending` import, which every reader distrusts, and now ends in a
-      // committed one. Nothing else ever recomputes an account's balance, so a crash
-      // between the inserts and this would leave Overview showing 0 for an account
-      // full of rows, indefinitely, with every status saying the import succeeded
+      // inside the transaction. Nothing else ever recomputes an account's balance, so
+      // a crash between the inserts and this would leave Overview showing 0 for an
+      // account full of rows, indefinitely, with every status saying the import
+      // succeeded
       await recalcAccountBalanceFromTransactionsOn(tx, accountId);
       rowsAccepted = row.rowsAccepted;
       rowsRejected = row.rowsRejected;
@@ -1742,12 +1581,10 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       const state = await importStateOf(id);
       return state && { confirmed: false, reason: 'status', status: state.status };
     }
-    // the rollback has already put the import back to awaiting_confirmation with its
-    // staged rows intact, so restoring the account and pressing Confirm again is the
-    // whole way out - which is what the refusal tells the user to do
     if (e instanceof AccountRemoved) return { confirmed: false, reason: 'account-hidden' };
+    if (e instanceof AccountMissing) return { confirmed: false, reason: 'account-missing' };
     // two uploads of one file overlapping in time both reach awaiting_confirmation
-    // (the partial index only blocks `committed`, ROADMAP 4.3), so the second
+    // (the partial index only blocks `committed`), so the second
     // confirm meets the index rather than the status check. Its rows are identical
     // to the ones that landed, so nothing is lost - what must not happen is a 500 on
     // the one screen whose job is telling the user whether their data arrived
@@ -1755,19 +1592,6 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       const state = await importStateOf(id);
       const held = state && (await findCommittedImportByHash(state.fileHash));
       if (held) return { confirmed: false, reason: 'file-committed', heldBy: held.id };
-    }
-    // the id staged for this import was minted for an account that did not exist,
-    // and by now something else holds the name - a create, a rename, or another
-    // import that confirmed first. The rollback has already put the import back to
-    // awaiting_confirmation and taken the insert with it, so nothing landed and the
-    // bytes stay re-uploadable
-    if (isUniqueViolation(e, 'accounts_name_unique')) {
-      return {
-        confirmed: false,
-        reason: 'account-name-taken',
-        accountName,
-        taken: await findAccountByName(accountName),
-      };
     }
     throw e;
   }
@@ -1783,22 +1607,8 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
 
 export type DiscardOutcome =
   | { discarded: true }
-  /** a committed import is not discardable: deleteImport is that path (ROADMAP 4.4) */
   | { discarded: false; status: ImportStatus };
 
-/**
- * The user looked at the numbers and said no. Nothing is removed from
- * `transactions` - a staged import never wrote any - so this is not a second
- * destructive path; the row stays at `discarded`, keeping the stored statement
- * referenced and the bytes re-uploadable.
- *
- * Idempotent on an import that is already `discarded`: the requested state holds,
- * and answering with an error about a goal already achieved is not refusing loudly,
- * it is misreporting the result. `committed` is the opposite case and answers 409 -
- * its transactions are in the database and on every screen, and reporting
- * "discarded" for that would be a destructive-sounding request reported as done
- * with nothing done.
- */
 export async function discardImport(id: string): Promise<DiscardOutcome | undefined> {
   const w = currentWorkspaceId();
   const claimed = await getDb().transaction(async (tx) => {
@@ -1828,7 +1638,6 @@ export async function discardImport(id: string): Promise<DiscardOutcome | undefi
   return state.status === 'discarded' ? { discarded: true } : { discarded: false, status: state.status };
 }
 
-/** Anything that can run a raw statement: the pool, or an open transaction. */
 type Executor = { execute: (q: SQL) => Promise<unknown> };
 
 async function rowsVia<T>(d: Executor, q: SQL): Promise<T[]> {
@@ -1874,14 +1683,12 @@ async function computedGroupsOf(
   return [...seen.values()];
 }
 
-/** Rows are matched by (account, group prefix) pairs joined in as VALUES. */
 const groupPairs = (groups: { accountId: string; prefix: string }[]): SQL =>
   sql.join(
     groups.map((g) => sql`(${g.accountId}::text, ${g.prefix}::text)`),
     sql`, `,
   );
 
-/** id -> new dedup_key, applied in one statement per chunk. */
 const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
   sql.join(
     rows.map((r) => sql`(${r.id}::text, ${r.key}::text)`),
@@ -1891,8 +1698,8 @@ const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
 /**
  * Rewrites the ordinals of every group the delete touched back to a dense 1..n,
  * in the order they already had. Nothing here touches identity: `id` is the
- * surrogate every annotation and foreign key points at, and dedup_key is the
- * column ROADMAP 4.2 made recomputable precisely so this is allowed.
+ * surrogate every annotation and foreign key points at, and dedup_key is
+ * recomputable precisely so this is allowed.
  *
  * Two passes over the rows that actually move, because the final key of one row
  * is often the current key of another. Between them the affected slots are all
@@ -1901,9 +1708,9 @@ const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
  * rather than corrupting anything. Fail-safe, and acceptable while a workspace is
  * one person uploading files.
  *
- * The statement count is bounded by the chunk size, not by the size of the
- * deleted import: rolling back a bad 2000-row statement is the thing this whole
- * feature is for, and it must not cost 2000 round trips.
+ * The statement count is bounded by the chunk size and not by the size of the
+ * deleted import: rolling back a large statement is the thing this whole feature
+ * is for, and it must not cost one round trip per row.
  */
 async function renumberGroups(
   d: Executor,
@@ -1965,10 +1772,10 @@ async function renumberGroups(
  * balance is recomputed afterwards.
  *
  * The ordinals of whatever survives in the affected groups are renumbered in the
- * same transaction - see renumberGroup, and ROADMAP 4.4 for what a hole does.
+ * same transaction - see renumberGroup for what a hole would do.
  *
- * It is also the only path that deletes a stored source document (ROADMAP 4.5),
- * for the same reason and with the same visibility.
+ * It is also the only path that deletes a stored source document, for the same
+ * reason and with the same visibility.
  */
 export async function deleteImport(
   id: string,
@@ -2006,7 +1813,7 @@ export async function deleteImport(
   // A failure here is logged rather than raised: the rows really are deleted, and
   // reporting otherwise would send the user to press the button again. It is logged
   // in a form an operator can act on, because "delete my data" that quietly leaves
-  // the bank statement on disk is ROADMAP 6.1's failure.
+  // the bank statement on disk is the failure a data-deletion promise cannot have.
   try {
     await deleteDocument(id);
   } catch (e) {
@@ -2028,26 +1835,17 @@ export async function deleteImport(
   return { removed, accountIds };
 }
 
-/** Rolls the delete back when this workspace has no account of that id. */
 class NoSuchAccount extends Error {}
 
-/** Rolls the delete back when the account still holds an outstanding import's rows. */
 class AccountHoldsStagedRows extends Error {}
 
-/** What deleteAccount destroyed, counted by the statements that destroyed it. */
 export interface DeletedByAccount {
   transactions: number;
   imports: number;
-  /** of those imports, the ones claiming a READABLE document - see deleteAccount */
   documents: number;
   transferRules: number;
 }
 
-/**
- * An allow-list rather than a subtraction, for AccountCreate's reason: a refusal
- * added to AccountWrite is then an outcome DELETE is never silently made to answer
- * for.
- */
 export type AccountDelete =
   | { ok: true; deleted: DeletedByAccount }
   | Extract<AccountWrite, { reason: 'not-found' } | { reason: 'staged-import' }>;
@@ -2057,8 +1855,7 @@ export type AccountDelete =
  * tables a deleted account leaves rows in. Derived from the schema module rather
  * than remembered, so a new one is a compile error at ACCOUNT_CASCADE instead of a
  * table nobody's delete reaches. There is no foreign key from any of them to
- * `accounts` and there must not be (resolveUploadAccountId mints an id for an
- * account that does not exist yet), so this is the whole of the enumeration.
+ * `accounts`, so this is the whole of the enumeration.
  *
  * Both conditions are load-bearing: `auth_account` has an accountId and a userId
  * and no workspaceId, and it is better-auth's, not an account of the user's.
@@ -2069,7 +1866,6 @@ type AccountScoped = {
     : never;
 }[keyof typeof s];
 
-/** The answer for a table whose rows go with their import's, by foreign key. */
 const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
 
 /**
@@ -2091,77 +1887,8 @@ const ACCOUNT_CASCADE = {
     sql`DELETE FROM transfer_rules WHERE ${WS()} AND account_id = ${id}`,
 } satisfies Record<AccountScoped, ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS>;
 
-/** The census as data, so a table added to it is a test failure as well as a type. */
 export const ACCOUNT_CASCADE_TABLES = Object.keys(ACCOUNT_CASCADE);
 
-/**
- * Deletes an account and everything attributed to it: its transactions, its
- * imports (and, by the foreign key on staged_transactions.import_id, whatever they
- * had staged), its transfer rules, and the stored source document of every import
- * destroyed. **This is the second sanctioned path that deletes a user's
- * transactions and the second that deletes stored documents** (ROADMAP 4.4, 4.5) -
- * deleteImport above is the first, and anything else that ever needs to must be as
- * visible as these two.
- *
- * Transactions are removed on account_id and NOT through the import cascade alone:
- * a row whose import_id is NULL - a restored backup, or the deleted bank providers
- * - is matched by no other clause, and left behind it is a transaction whose
- * account does not exist, in no summary and reachable by nothing.
- *
- * What it deliberately does not reach: an import whose account_id is NULL. An
- * upload that died before staging holds a real bank statement and belongs to no
- * account (resolveUploadAccountId resolves the destination before createImport, and
- * stageImport writes the column only after the parse), so there is no honest way to
- * attribute it here. Its bytes stay on disk and its row stays in the workspace-wide
- * history; see DEBT.md.
- *
- * Refused while the account holds staged rows, which is settled row 11 decision 2
- * and not the same case as holding committed imports: an account worth deleting is
- * precisely one that holds those. The guard is a clause of the two statements it
- * protects rather than a count taken before them, and it is on BOTH because the
- * imports delete cascades the staged rows away - read only on the `accounts`
- * statement it would be answering a question whose evidence it had just destroyed,
- * and could never fire.
- *
- * What it prevents, measured rather than assumed: without the clause this delete
- * takes the outstanding import with everything else, and the summary card still on
- * the user's screen answers "import not found" when they press Confirm. The
- * resurrection Trap 1 names - confirmImport upserting the account back, with its
- * rows, behind a 200 - needs an import this delete does NOT match, and there is
- * one: an upload still parsing, whose account_id is NULL until stageImport writes
- * it. It reaches the resurrection serially, with no concurrency anywhere - create
- * the account, create the import, delete the account, then stage and confirm, and
- * the account is back holding the statement. Neither this guard nor the lock below
- * closes that window. See DEBT.md.
- *
- * The FOR UPDATE read at the top takes the same row lock confirmImport takes
- * (see its `.for('update')` on `accounts`), and that is what the lock is for: with
- * a plain read a confirm can commit BETWEEN the imports delete and the accounts
- * delete - its rows landing in an account this has already emptied, its import row
- * inserted after this swept them, its cleanup leaving no staged rows for the last
- * guard to see - and the account is then deleted with orphaned transactions and a
- * surviving import behind it. With the lock a confirm commits entirely before or
- * entirely after. **Nothing in the suite covers that**: PGlite is single-connection
- * (test/pglite.ts), so no test here can hold this transaction open while a second
- * one commits, and this paragraph is the whole of what holds it.
- *
- * The ordinals of the dedup groups need no repair, because dedupGroup includes the
- * account id: deleting the whole of one account removes whole 1..n groups rather
- * than punching holes in them. That premise has exactly one violator - an `imports`
- * row attributed to this account owning rows in ANOTHER one, which restoreBackup
- * can insert because nothing validates the two against each other - and it is
- * probed for, repaired, and logged rather than refused, on deleteImport's reasoning:
- * the rows' provenance is being destroyed, so the rows go, and an account nobody can
- * delete over a state nobody can see is Article 17 blocked by a corrupt backup.
- *
- * `documents` counts the destroyed imports that claimed a READABLE document
- * (document_key_version IS NOT NULL - the predicate behind ImportTotals.documents,
- * so the number a user was shown and the number they are told was destroyed are one
- * fact). The blobs themselves are removed for EVERY destroyed import whatever its
- * pointer said, exactly as deleteImport does and for the reason its comment gives.
- * The two are not in conflict: the pointer records what can be read, never what is
- * on disk.
- */
 export async function deleteAccount(id: string): Promise<AccountDelete> {
   const deleted: DeletedByAccount = {
     transactions: 0,
@@ -2185,8 +1912,7 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
       // after the delete above, so every row this can still see is another
       // account's by construction. Empty in every state a product path produces -
       // confirmImport refuses a staged set whose rows disagree with the import's
-      // account - and a semi-join over this account's imports (idx_tx_import at
-      // best, a transactions scan if the planner prefers one) is what proves that
+      // account - and a semi-join over this account's imports is what proves that
       // instead of assuming it
       const strays = await rowsVia<{ import_id: string; account_id: string }>(
         tx,
@@ -2280,13 +2006,6 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
   return { ok: true, deleted };
 }
 
-// ---------- classification (transfers / refunds / categories) ----------
-
-/**
- * All transactions in chronological order - the input for classify.ts.
- * Hidden accounts are deliberately NOT filtered out (see VISIBLE_ACCOUNT above):
- * their transactions remain the other leg of a pair.
- */
 export async function allTransactions(): Promise<Transaction[]> {
   const rows = await rowsOf<TxRow>(
     sql`SELECT * FROM transactions WHERE ${WS()} ORDER BY date ASC`,
@@ -2299,9 +2018,7 @@ export interface Classification {
   category: string;
   transfer: boolean;
   refund: boolean;
-  /** income source (income only), null for spending */
   incomeSource: string | null;
-  /** recurring payment (see the detector in classify.ts) */
   recurring: boolean;
 }
 
@@ -2334,7 +2051,6 @@ export async function getTransaction(id: string): Promise<Transaction | undefine
   return rows[0] ? rowToTx(rows[0]) : undefined;
 }
 
-/** Manual "this is a transfer between my own accounts" mark. null - hand the decision back to auto-detection. */
 export async function setTransferOverride(
   id: string,
   value: boolean | null,
@@ -2347,9 +2063,21 @@ export async function setTransferOverride(
 }
 
 /**
- * Manual income source mark (an id from income_sources - validated at the API
- * level). null - hand the decision back to auto-detection.
+ * The user's own category for one transaction; null hands the decision back to
+ * auto-detection. Takes a Category rather than a string: an unvalidated slug here is
+ * a bucket every summary answers and no client dictionary can label.
  */
+export async function setCategoryOverride(
+  id: string,
+  category: Category | null,
+): Promise<Transaction | undefined> {
+  await getDb()
+    .update(s.transactions)
+    .set({ categoryManual: category })
+    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+  return getTransaction(id);
+}
+
 export async function setIncomeSourceOverride(
   id: string,
   source: string | null,
@@ -2361,7 +2089,6 @@ export async function setIncomeSourceOverride(
   return getTransaction(id);
 }
 
-/** Manual "one-off large purchase" mark - amortized in average spending. */
 export async function setOneOff(id: string, value: boolean): Promise<Transaction | undefined> {
   await getDb()
     .update(s.transactions)
@@ -2369,8 +2096,6 @@ export async function setOneOff(id: string, value: boolean): Promise<Transaction
     .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
   return getTransaction(id);
 }
-
-// ---------- income sources ----------
 
 type IncomeSourceRow = typeof s.incomeSources.$inferSelect;
 
@@ -2409,10 +2134,6 @@ export async function getIncomeSource(id: string): Promise<IncomeSourceDef | und
   return rows[0] ? rowToIncomeSource(rows[0]) : undefined;
 }
 
-/**
- * Creates or edits a source. The kind of a builtin source can be changed (the user
- * is entitled to decide that "other" is not their own earnings), the id cannot.
- */
 export async function upsertIncomeSource(
   def: Pick<IncomeSourceDef, 'id' | 'label' | 'kind'> &
     Partial<Pick<IncomeSourceDef, 'patterns' | 'sort'>>,
@@ -2472,8 +2193,6 @@ export async function deleteIncomeSource(id: string): Promise<boolean> {
   return true;
 }
 
-// ---------- "description + account = transfer" rules ----------
-
 type RuleRow = typeof s.transferRules.$inferSelect;
 
 const rowToRule = (r: RuleRow): TransferRule => ({
@@ -2492,7 +2211,6 @@ export async function listTransferRules(): Promise<TransferRule[]> {
   return rows.map(rowToRule);
 }
 
-/** Idempotent: a rule for the same description + account pair is simply returned. */
 export async function addTransferRule(
   description: string,
   accountId: string,
@@ -2523,7 +2241,6 @@ export async function deleteTransferRule(id: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** How many transactions the rule covers - for the caption in the app. */
 export async function countRuleMatches(description: string, accountId: string): Promise<number> {
   const rows = await rowsOf<{ n: string }>(
     sql`SELECT COUNT(*) AS n FROM transactions
@@ -2542,8 +2259,6 @@ export async function clearManualForRule(description: string, accountId: string)
     UPDATE transactions SET transfer_manual = NULL
     WHERE description = ${description} AND account_id = ${accountId} AND ${WS()}`);
 }
-
-// ---------- exchange rates and the base amount ----------
 
 export async function getFxRate(day: string, currency: string): Promise<number | undefined> {
   const rows = await getDb()
@@ -2569,7 +2284,6 @@ export async function saveFxRate(day: string, currency: string, rate: number): P
     });
 }
 
-/** Rows already in the base currency need no rate: base_amount = amount. Returns the number updated. */
 export async function setBaseForBaseCurrency(baseCurrency: string): Promise<number> {
   return execCount(sql`
     UPDATE transactions SET base_amount_cents = amount_cents, fx_rate = 1
@@ -2586,7 +2300,6 @@ export async function resetBaseAmounts(): Promise<number> {
   );
 }
 
-/** "Day + currency" pairs that still need a rate (across all accounts, hidden included). */
 export async function listUnconvertedDays(): Promise<{ day: string; currency: string }[]> {
   return rowsOf<{ day: string; currency: string }>(sql`
     SELECT DISTINCT SUBSTR(date, 1, 10) AS day, currency
@@ -2606,24 +2319,17 @@ export async function applyBaseRate(day: string, currency: string, k: number): P
     WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day} AND ${WS()}`);
 }
 
-// ---------- recurring payments ----------
-
 export interface RecurringGroup {
   description: string;
   category: string;
-  /** in how many calendar months it appears */
   months: number;
   count: number;
-  /** average size of a single payment in the base currency */
   avgAmount: number;
-  /** what the group costs per month (total / months) */
   monthlyAvg: number;
   lastDate: string;
-  /** the user hid the group from the Overview; excluded from the monthly total */
   ignored: boolean;
 }
 
-/** Hide/restore a group of recurring payments (the key is the normalized description). */
 export async function setRecurringIgnored(description: string, ignored: boolean): Promise<void> {
   const key = recurringKey(description);
   const w = currentWorkspaceId();
@@ -2651,7 +2357,7 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
     date: string;
     base_amount_cents: number;
   }>(sql`
-    SELECT description, category, date, base_amount_cents
+    SELECT description, ${CATEGORY} AS category, date, base_amount_cents
     FROM transactions
     WHERE ${WS()} AND recurring AND amount_cents < 0 AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()}
       AND base_amount_cents IS NOT NULL AND date >= ${sinceIso}
@@ -2696,8 +2402,6 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
     .sort((a, b) => b.monthlyAvg - a.monthlyAvg);
 }
 
-// ---------- "description contains X -> category Y" rules ----------
-
 export interface CategoryRule {
   id: number;
   pattern: string;
@@ -2719,7 +2423,6 @@ export async function listCategoryRules(): Promise<CategoryRule[]> {
   }));
 }
 
-/** Idempotent: a rule with the same pattern updates the category. */
 export async function addCategoryRule(pattern: string, category: string): Promise<CategoryRule> {
   const w = currentWorkspaceId();
   await getDb()
@@ -2745,20 +2448,26 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** How many transactions the pattern covers - for the caption in the app. */
-export async function countCategoryRuleMatches(pattern: string): Promise<number> {
-  const rows = await rowsOf<{ n: string }>(
-    sql`SELECT COUNT(*) AS n FROM transactions
+/**
+ * How many transactions the pattern covers, and how many of those the rule cannot
+ * change because the user set the category by hand. One WHERE computing both, so the
+ * two can never be taken through different filters and matches - overridden go wrong
+ * for a workspace with a hidden account.
+ */
+export async function countCategoryRuleMatches(
+  pattern: string,
+): Promise<{ matches: number; overridden: number }> {
+  const rows = await rowsOf<{ matches: string; overridden: string }>(
+    sql`SELECT COUNT(*) AS matches,
+               COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
+        FROM transactions
         WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0 AND ${WS()}`,
   );
-  return Number(rows[0].n);
+  return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
 }
-
-// ---------- budgets ----------
 
 export interface Budget {
   category: string;
-  /** limit for a calendar month in the base currency */
   monthly: number;
 }
 
@@ -2771,7 +2480,6 @@ export async function listBudgets(): Promise<Budget[]> {
   return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthlyCents) }));
 }
 
-/** monthly = null removes the budget from the category. */
 export async function setBudget(category: string, monthly: number | null): Promise<void> {
   const w = currentWorkspaceId();
   if (monthly === null) {
@@ -2789,8 +2497,6 @@ export async function setBudget(category: string, monthly: number | null): Promi
       });
   }
 }
-
-// ---------- baseline minimum ----------
 
 export interface BaselineItem {
   id: number;
@@ -2867,15 +2573,12 @@ export async function deleteBaselineItem(label: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-/** The sum of all line items is the baseline minimum before any buffer. */
 export async function baselineTotal(): Promise<number> {
   const rows = await rowsOf<{ total_cents: string }>(
     sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items WHERE ${WS()}`,
   );
   return fromCents(Number(rows[0].total_cents));
 }
-
-// ---------- backup / restore (application-level JSON) ----------
 
 /**
  * "My data is mine": one button in the app. The backup is a JSON dump of the
@@ -2945,15 +2648,10 @@ const backupEnvelope = z.object({
   }),
   version: z.literal(1, { error: (issue) => `unsupported backup version: ${String(issue.input)}` }),
   exportedAt: z.string().optional(),
-  // the per-table arrays are checked below, where the table's name is in hand and
-  // can go into the message - "accounts is not an array" beats "expected array"
   tables: z.record(z.string(), z.unknown(), { error: 'backup file has no tables' }),
 });
 
-/** Validates an uploaded backup file's envelope. Throws with a human-readable reason. */
 export function parseBackup(input: unknown): BackupData {
-  // handled ahead of the schema so that "this is not a backup file at all" keeps
-  // its own wording instead of zod's generic "expected object, received null"
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('not a Finto backup file (expected JSON with format: "finto-backup")');
   }
@@ -3002,12 +2700,6 @@ const NEVER_RESTORED = new Set<string>([
  */
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
-/**
- * Why a restored import is `discarded`. On that status error_detail is what
- * separates the two ways it can be reached - a user discard leaves it NULL - so a
- * screen listing imports can say "the server did this" instead of accusing someone
- * of rejecting an import they never saw.
- */
 const RESTORED_UNCONFIRMABLE =
   'restored from a backup: this import was still awaiting confirmation when the backup was taken, and a backup carries no staged rows, so it can never be confirmed here';
 
@@ -3074,12 +2766,12 @@ function sanitizeRow(
  * restoring, the caller runs a full reclassification - same as after any bulk import.
  *
  * What it leaves behind, and what is accepted: this deletes the workspace's
- * `imports` rows, and every source document those rows had stays on disk (ROADMAP
- * 4.5 - the backup is JSON and carries no documents). The ones whose import id
- * comes back in the file are still removable, because deleteImport addresses a
- * document without consulting the pointer this strips; the ones whose row is not
- * reinstated are referenced by nothing and no sweeper is in scope. Both are
- * data-subject-deletion lines written up for ROADMAP 6.1, not bugs to fix here.
+ * `imports` rows, and every source document those rows had stays on disk (the
+ * backup is JSON and carries no documents). The ones whose import id comes back in
+ * the file are still removable, because deleteImport addresses a document without
+ * consulting the pointer this strips; the ones whose row is not reinstated are
+ * referenced by nothing and no sweeper is in scope. Both are data-subject-deletion
+ * lines, not bugs to fix here.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const w = currentWorkspaceId();

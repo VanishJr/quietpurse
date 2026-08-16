@@ -13,6 +13,13 @@ export function fmtMoney(n: number, currency?: string): string {
   return `${sign}${grouped}${fracPart}${currency ? ' ' + currency : ''}`;
 }
 
+/**
+ * "1 row" / "2 rows". The backend solves the same problem in `statement.ts`, on the
+ * other side of a wire neither side can import across, and this is that helper's shape
+ * verbatim so the two sentences read alike.
+ */
+export const rowCount = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
+
 /** Compact, for chart axes: 950 → "950", 1,200 → "1.2k", 30,500 → "31k", 1,200,000 → "1.2M". */
 export function fmtShort(n: number): string {
   const abs = Math.abs(n);

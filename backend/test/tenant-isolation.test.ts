@@ -17,7 +17,9 @@ import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import {
+  type AccountScope,
   type ResolvedAccountId,
+  accountOtherCurrencies,
   addCategoryRule,
   createAccount,
   findAccountByName,
@@ -33,6 +35,7 @@ import {
   deleteImport,
   exportBackup,
   findCommittedImportByHash,
+  getAccount,
   getFxRate,
   getImportDocumentRef,
   listImports,
@@ -50,17 +53,18 @@ import {
   listTransactions,
   listTransferRules,
   recordImportDocument,
-  resolveUploadAccountId,
   runWithWorkspace,
   saveFxRate,
   seedDefaults,
   setBudget,
+  setCategoryOverride,
   setMeta,
   setOneOff,
   setRecurringIgnored,
   setSetting,
   setTransferOverride,
   summaryByCategory,
+  summaryMonthlyTotals,
   summaryTotals,
   upsertAccount,
   upsertBaselineItem,
@@ -68,7 +72,7 @@ import {
 } from '../src/db';
 import { getDocument, putDocument } from '../src/documents';
 import { ACCOUNT_NOT_FOUND, importStatement } from '../src/providers/statement';
-import { markImportCommitted } from './helpers';
+import { accountFor, markImportCommitted } from './helpers';
 import { buildPdf } from './pdffixture';
 import { TEST_WORKSPACE_ID } from './pglite';
 import { NewTransaction } from '../src/types';
@@ -285,30 +289,6 @@ describe('workspace isolation', () => {
         expect(await runWithWorkspace(TEST_WORKSPACE_ID, () => listAccounts(true))).toHaveLength(1);
       });
 
-      // Branch (b) of the resolver, which no other case in the suite reaches with two
-      // workspaces: an outstanding import's minted id is offered to a later upload of
-      // the same name - within one workspace only. Without the clause on that query,
-      // the neighbour's unconfirmed preview would decide where these rows land.
-      const outstanding = await runWithWorkspace(TEST_WORKSPACE_ID, () =>
-        createImport({
-          fileHash: 'cross-workspace-resolution',
-          sourceType: 'csv',
-          parserVersion: 1,
-        }),
-      );
-      outstandingId = outstanding.id;
-      const minted = crypto.randomUUID() as ResolvedAccountId;
-      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-        await stageImport(outstanding.id, [], 0, {
-          id: minted,
-          name: 'Unbanked',
-          currency: 'EUR',
-        });
-        expect(await resolveUploadAccountId('Unbanked')).toBe(minted);
-      });
-      await runWithWorkspace(OTHER, async () => {
-        expect(await resolveUploadAccountId('Unbanked')).not.toBe(minted);
-      });
     } finally {
       // put all three fixture mutations back, so no test added to this file has to
       // know this one ran. Each is guarded, because a failure above can leave any of
@@ -333,11 +313,15 @@ describe('workspace isolation', () => {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
         await setOneOff(SHARED_TX_ID, true);
         await setTransferOverride(SHARED_TX_ID, true);
+        await setCategoryOverride(SHARED_TX_ID, 'food');
       });
       await runWithWorkspace(OTHER, async () => {
         const theirs = (await getTransaction(SHARED_TX_ID))!;
         expect(theirs.oneOff).toBe(false);
         expect(theirs.transfer).toBe(false);
+        // the neighbour's row keeps the categorizer's answer, and says nobody chose it
+        expect(theirs.category).not.toBe('food');
+        expect(theirs.categoryManual).toBe(false);
       });
     } finally {
       // put the row back: a transfer flag would drop it out of the aggregates the
@@ -345,6 +329,7 @@ describe('workspace isolation', () => {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
         await setOneOff(SHARED_TX_ID, false);
         await setTransferOverride(SHARED_TX_ID, null);
+        await setCategoryOverride(SHARED_TX_ID, null);
       });
     }
   });
@@ -362,16 +347,47 @@ describe('workspace isolation', () => {
 
   it('aggregates only add up the current workspace', async () => {
     await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
-      const totals = await summaryTotals(JAN, DEC);
+      const totals = await summaryTotals({ kind: 'workspace' }, JAN, DEC);
       expect(totals.expense).toBe(100);
       expect(totals.income).toBe(500);
-      const byCategory = await summaryByCategory(JAN, DEC);
+      const byCategory = await summaryByCategory({ kind: 'workspace' }, JAN, DEC);
       expect(byCategory.reduce((s, c) => s + c.total, 0)).toBe(100);
     });
     await runWithWorkspace(OTHER, async () => {
-      const totals = await summaryTotals(JAN, DEC);
+      const totals = await summaryTotals({ kind: 'workspace' }, JAN, DEC);
       expect(totals.expense).toBe(7777);
       expect(totals.income).toBe(4242);
+    });
+  });
+
+  /**
+   * The same aggregates asked about one account, and the sharpest case this file
+   * has: both workspaces hold an account with the id 'acc-shared-id'. An account
+   * arm that filtered by account_id and forgot the workspace would answer the
+   * neighbour's money to a caller who named their own account.
+   */
+  it('an aggregate about one account is still about one workspace', async () => {
+    const scope = (currency: string): AccountScope => ({
+      kind: 'account',
+      id: 'acc-shared-id' as ResolvedAccountId,
+      currency,
+    });
+    await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+      expect(await summaryTotals(scope('EUR'), JAN, DEC)).toEqual({ expense: 100, income: 500 });
+      expect(await summaryMonthlyTotals(scope('EUR'), JAN, DEC)).toEqual([
+        { month: '2026-03', expense: 100, income: 500, net: 400 },
+      ]);
+      expect(await accountOtherCurrencies(scope('EUR'))).toEqual([]);
+    });
+    await runWithWorkspace(OTHER, async () => {
+      expect(await summaryTotals(scope('USD'), JAN, DEC)).toEqual({ expense: 7777, income: 4242 });
+      // its rows are in EUR and the account is denominated in USD: a mixture is read
+      // against the account's own currency, which is why this answers ['EUR'] where
+      // the EUR account above answers []. Neither line can see a lost workspace
+      // filter - both workspaces' rows here are EUR - and neither is what guards it:
+      // the totals above catch it by arithmetic, and workspace-scope.test.ts catches
+      // it in accountOtherCurrencies itself
+      expect(await accountOtherCurrencies(scope('USD'))).toEqual(['EUR']);
     });
   });
 
@@ -540,6 +556,15 @@ describe('workspace isolation', () => {
         sourceType: 'csv',
         parserVersion: 1,
       });
+      // the account first: since row 26b the confirm refuses an import whose account
+      // is not there rather than creating it
+      await upsertAccount({
+        id: 'csv:theirs-staged',
+        provider: 'upload',
+        name: 'Theirs Staged',
+        currency: 'EUR',
+        balance: 0,
+      });
       await stageImport(
         record.id,
         [tx({ accountId: 'csv:theirs-staged', provider: 'upload', description: 'theirs: staged' })],
@@ -572,10 +597,11 @@ describe('workspace isolation', () => {
    * account decides this confirm: the read finds it and these rows are refused for
    * an account this workspace never removed.
    *
-   * Only one row carries the id, so there is nothing for the engine to choose
-   * between: with the clause the read misses and the ordinary create path runs,
-   * without it the read hits the neighbour's. The guard firing for a workspace's
-   * own hidden account is confirmation.test.ts's, and is not repeated here.
+   * Both workspaces hold a row under that id and only the neighbour's is hidden, so
+   * with the clause this read finds this workspace's visible one and the rows land;
+   * without it the neighbour's is reachable and the confirm refuses rows this
+   * workspace never removed an account for. The guard firing for a workspace's own
+   * hidden account is confirmation.test.ts's, and is not repeated here.
    */
   it('a neighbour hidden account cannot refuse this workspace confirm', async () => {
     const shared = crypto.randomUUID();
@@ -593,6 +619,13 @@ describe('workspace isolation', () => {
       });
 
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Mine Fresh',
+          currency: 'EUR',
+          balance: 0,
+        });
         const record = await createImport({
           fileHash: 'neighbour-hidden-account',
           sourceType: 'csv',
@@ -618,6 +651,77 @@ describe('workspace isolation', () => {
       // both accounts and the import go back, so the counts every case above and
       // below asserts are the ones the fixture set up. Guarded, because a failure
       // above must not be hidden by a cleanup that throws.
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        if (importId) await deleteImport(importId);
+      });
+      await dbInstance().execute(
+        sql`DELETE FROM accounts WHERE workspace_id IN (${TEST_WORKSPACE_ID}, ${OTHER})
+            AND id = ${shared}`,
+      );
+    }
+  });
+
+  /**
+   * The sibling that holds the same clause by construction rather than by luck. The
+   * case above puts a row under the shared id in BOTH workspaces, and the read it
+   * guards has no ORDER BY and no LIMIT - so with the clause dropped, `.at(0)` takes
+   * whichever of the two the scan yields first, and the case fails only while
+   * physical order happens to put the neighbour's ahead of this one. Here the
+   * neighbour's row is the only one under that id, so dropping the clause has exactly
+   * one row to find: `account-missing` becomes `account-hidden`, deterministically and
+   * for no reason to do with the heap.
+   *
+   * The missing account is set up by never creating one, which the delete-after-stage
+   * of confirmation.test.ts cannot do - and the id is a fresh UUID, so this workspace
+   * having no row under it is a fact and not a hope.
+   */
+  it('a neighbour account cannot answer for one this workspace does not have', async () => {
+    const shared = crypto.randomUUID();
+    let importId: string | undefined;
+    try {
+      await runWithWorkspace(OTHER, async () => {
+        await upsertAccount({
+          id: shared,
+          provider: 'upload',
+          name: 'Theirs Alone',
+          currency: 'USD',
+          balance: 0,
+        });
+        // hidden, so that a read reaching it answers with the OTHER refusal: two
+        // distinguishable reasons are what makes the sabotage readable
+        expect(await updateAccount(shared, { hidden: true })).toMatchObject({ ok: true });
+      });
+
+      await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
+        expect(await getAccount(shared)).toBeUndefined();
+        const record = await createImport({
+          fileHash: 'neighbour-only-account',
+          sourceType: 'csv',
+          parserVersion: 1,
+        });
+        importId = record.id;
+        await stageImport(
+          record.id,
+          [
+            tx({
+              accountId: shared,
+              provider: 'upload',
+              description: 'mine: into an account only the neighbour has',
+              date: '2026-10-12T00:00:00.000Z',
+            }),
+          ],
+          0,
+          { id: shared as ResolvedAccountId, name: 'Gone Already', currency: 'EUR' },
+        );
+
+        expect(await confirmImport(record.id)).toEqual({
+          confirmed: false,
+          reason: 'account-missing',
+        });
+        // and the neighbour's account was not written to on the way past it
+        expect(await listTransactions({ accountId: shared })).toHaveLength(0);
+      });
+    } finally {
       await runWithWorkspace(TEST_WORKSPACE_ID, async () => {
         if (importId) await deleteImport(importId);
       });
@@ -1052,8 +1156,7 @@ describe('workspace isolation', () => {
           balance: 0,
         });
         const staged = await importStatement({
-          accountName: 'Pdf Isolation',
-          currency: 'EUR',
+          accountId: await accountFor('Pdf Isolation'),
           bytes,
         });
         if (staged.outcome !== 'awaiting_confirmation') throw new Error('not staged');

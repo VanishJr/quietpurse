@@ -12,17 +12,23 @@ import {
   parseCsv,
   parseCsvDate,
 } from '../src/providers/csv';
-import { MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
-import { importAndConfirm } from './helpers';
+import { Cell, MAX_DATA_ROWS, Sheet } from '../src/providers/sheet';
+import { NOTE_MAX } from '../src/providers/pdf';
+import { MAX_SHEET_ROWS } from '../src/providers/xlsx';
+import { accountFor, importAndConfirm, rejectionOf } from './helpers';
 import {
   CURRENCY_CODE_MAX,
   ImportSummary,
   ParsedFile,
+  RowRefusal,
+  RowVerdict,
   balanceBreaks,
+  describeRow,
   feeRefused,
   importStatement,
   noRowsParsed,
   reconcile,
+  rowVerdict,
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
 
@@ -135,8 +141,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
   it('sparkasse preset: parses, categorizes, and does not duplicate files', async () => {
     const r1 = await importAndConfirm({
-      accountName: 'Sparkasse Giro',
-      currency: 'EUR',
+      accountId: await accountFor('Sparkasse Giro'),
       preset: 'sparkasse',
       bytes: Buffer.from(sparkasse, 'utf8'),
     });
@@ -154,8 +159,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     // re-uploading the same file is caught by its hash before any parsing
     // happens at all (ROADMAP 4.3); see imports.test.ts for that layer
     const r2 = await importAndConfirm({
-      accountName: 'Sparkasse Giro',
-      currency: 'EUR',
+      accountId: await accountFor('Sparkasse Giro'),
       preset: 'sparkasse',
       bytes: Buffer.from(sparkasse, 'utf8'),
     });
@@ -183,8 +187,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
       'CARD_PAYMENT,Current,2026-02-03 10:00:00,,Pending Stuff,-5.00,0,EUR,PENDING,95',
     ].join('\n');
     const r = await importAndConfirm({
-      accountName: 'Revolut',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut'),
       preset: 'revolut',
       bytes: Buffer.from(revolut, 'utf8'),
     });
@@ -212,16 +215,14 @@ describe('a CSV statement: pipeline and deduplication', () => {
       ['date,amount,description', ...keys.map((k) => rows[k])].join('\n');
 
     const first = await importAndConfirm({
-      accountName: 'Overlap Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Overlap Bank'),
       bytes: Buffer.from(file('mar05', 'mar20', 'mar28'), 'utf8'),
     });
     expect(first.inserted).toBe(3);
 
     // Mar 15 - Apr 15: repeats Mar 20 and Mar 28, adds two April rows
     const second = await importAndConfirm({
-      accountName: 'Overlap Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Overlap Bank'),
       bytes: Buffer.from(file('mar20', 'mar28', 'apr02', 'apr10'), 'utf8'),
     });
     expect(second.inserted).toBe(2);
@@ -235,16 +236,14 @@ describe('a CSV statement: pipeline and deduplication', () => {
       ['date,amount,description', `2026-05-04,-23.45,${description}`].join('\n');
 
     const first = await importAndConfirm({
-      accountName: 'Reparse Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Reparse Bank'),
       bytes: Buffer.from(statement('REWE SAGT DANKE'), 'utf8'),
     });
     expect(first.inserted).toBe(1);
 
     // the same statement through an improved parser: one more field extracted
     const second = await importAndConfirm({
-      accountName: 'Reparse Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Reparse Bank'),
       bytes: Buffer.from(statement('REWE SAGT DANKE 12345'), 'utf8'),
     });
     expect(second.inserted).toBe(0);
@@ -257,8 +256,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   it('generic: column auto-detection; an unreadable file gives a clear error', async () => {
     const generic = ['Date,Amount,Description', '2026-03-01,-10,Something'].join('\n');
     const r = await importAndConfirm({
-      accountName: 'Bank X',
-      currency: 'USD',
+      accountId: await accountFor('Bank X', 'USD'),
       bytes: Buffer.from(generic, 'utf8'),
     });
     expect(r.inserted).toBe(1);
@@ -267,8 +265,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
     await expect(
       importStatement({
-        accountName: 'Bad',
-        currency: 'EUR',
+        accountId: await accountFor('Bad'),
         bytes: Buffer.from('foo,bar\n1,2', 'utf8'),
       }),
     ).rejects.toThrow(/could not find date\/amount\/description columns/);
@@ -283,14 +280,36 @@ describe('a CSV statement: pipeline and deduplication', () => {
    */
   it('nothing parsed: the CSV message is the row reason and nothing else', async () => {
     const unreadable = ['date,amount,description', 'not a date,not a number,broken'].join('\n');
-    const thrown = await importStatement({
-      accountName: 'Unreadable Bank',
-      currency: 'EUR',
-      bytes: Buffer.from(unreadable, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Unreadable Bank'),
+        bytes: Buffer.from(unreadable, 'utf8'),
+      }),
+    );
 
     expect(thrown.message).toBe(
       'no row could be parsed (1 skipped): row 2: could not parse the date "not a date" or the amount "not a number"',
+    );
+  });
+
+  /**
+   * The same sentence with a cell that has no width at all - which is what a CSV
+   * field is. Unbounded, this reason alone composed ~395 characters and pushed a
+   * workbook's unused-sheet notice off a message that had nothing to do with it,
+   * because noRowsParsed appends the notice whole or not at all. Both quotes are cut
+   * here, so neither can be the one holding the bound up.
+   */
+  it('a CSV cell with no width of its own is quoted inside the budget', async () => {
+    const wide = 'Ruecklastschrift wegen Widerspruch '.repeat(12).slice(0, 400);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Wide Cell Bank'),
+        bytes: Buffer.from(`date,amount,description\n${wide},${wide},broken`, 'utf8'),
+      }),
+    );
+
+    expect(thrown.message).toBe(
+      'no row could be parsed (1 skipped): row 2: could not parse the date "Ruecklastschrift wegen …" or the amount "Ruecklastschrift wegen …"',
     );
   });
 });
@@ -325,8 +344,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut RU',
-      currency: 'USD',
+      accountId: await accountFor('Revolut RU', 'USD'),
       preset: 'revolut',
       bytes: Buffer.from(ru, 'utf8'),
     });
@@ -371,8 +389,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut Reverted',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Reverted'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     });
@@ -395,12 +412,13 @@ describe('a bank export in a language the preset also accepts', () => {
       'CARD_PAYMENT,Current,2026-04-02 10:00:00,2026-04-02 10:00:00,Two,-20.00,0,EUR,ЗАВЕРШЕНО,120',
     ].join('\n');
 
-    const thrown = await importStatement({
-      accountName: 'Revolut Unknown Status',
-      currency: 'EUR',
-      preset: 'revolut',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Unknown Status'),
+        preset: 'revolut',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     // the value, because no preset chip fixes a status nobody has listed - which is
     // exactly what the bare "(2 skipped)" sentence used to send the user off to try
@@ -424,8 +442,7 @@ describe('a bank export in a language the preset also accepts', () => {
     ].join('\n');
 
     const r = await importAndConfirm({
-      accountName: 'Revolut Crowded Problems',
-      currency: 'EUR',
+      accountId: await accountFor('Revolut Crowded Problems'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     });
@@ -442,12 +459,13 @@ describe('a bank export in a language the preset also accepts', () => {
   it('a header matching no accepted name names the slots and what was tried', async () => {
     const file = ['Дата,Сумма операции,Назначение', '2026-06-01,-1.00,тест'].join('\n');
 
-    const thrown = await importStatement({
-      accountName: 'Revolut Unlisted Language',
-      currency: 'EUR',
-      preset: 'revolut',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Unlisted Language'),
+        preset: 'revolut',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     // every unresolved slot, the names tried, then the header - in that order,
     // because the header dump is unbounded and the cap cuts the tail
@@ -470,12 +488,13 @@ describe('a bank export in a language the preset also accepts', () => {
   it('a preset named after an Object.prototype member is refused like any other', async () => {
     const file = ['Дата выполнения,Сумма,Описание', '2026-06-01,-1.00,тест'].join('\n');
 
-    const thrown = await importStatement({
-      accountName: 'Revolut Prototype Preset',
-      currency: 'EUR',
-      preset: 'toString',
-      bytes: Buffer.from(file, 'utf8'),
-    }).catch((e) => e as Error);
+    const thrown = await rejectionOf(
+      importStatement({
+        accountId: await accountFor('Revolut Prototype Preset'),
+        preset: 'toString',
+        bytes: Buffer.from(file, 'utf8'),
+      }),
+    );
 
     expect(thrown.message).toBe('unknown preset: toString');
   });
@@ -500,13 +519,9 @@ describe('a bank export in a language the preset also accepts', () => {
       'TOPUP,Current,2026-02-04 08:00:00,2026-02-04 08:30:00,Перевод на счёт,100.00,0.50,EUR,ВЫПОЛНЕНО,195.30',
       'CARD_PAYMENT,Current,2026-02-05 12:00:00,,Ожидает обработки,-9.99,0.00,EUR,В ОБРАБОТКЕ,',
     ].join('\n');
+    const accountId = await accountFor('Revolut Named Reader');
     const upload = (preset?: string) =>
-      importStatement({
-        accountName: 'Revolut Named Reader',
-        currency: 'EUR',
-        preset,
-        bytes: Buffer.from(ru, 'utf8'),
-      });
+      importStatement({ accountId, preset, bytes: Buffer.from(ru, 'utf8') });
 
     const named = await upload('revolut');
     const auto = await upload();
@@ -568,13 +583,9 @@ describe('the summary names the columns the parser settled on', () => {
   ].join('\n');
 
   it("names the file's own header cells, and they differ by reader", async () => {
+    const accountId = await accountFor('Two Date Columns');
     const upload = (preset?: string) =>
-      importStatement({
-        accountName: 'Two Date Columns',
-        currency: 'EUR',
-        preset,
-        bytes: Buffer.from(TWO_DATES, 'utf8'),
-      });
+      importStatement({ accountId, preset, bytes: Buffer.from(TWO_DATES, 'utf8') });
 
     const named = await upload('sparkasse');
     const auto = await upload();
@@ -614,13 +625,9 @@ describe('the summary names the columns the parser settled on', () => {
       '2026-04-01,-5.00,Card payment,Kiosk am Bahnhof',
       '2026-04-02,-6.00,Card payment,Baecker Mueller',
     ].join('\n');
+    const accountId = await accountFor('Mapping Sent With The Upload');
     const upload = (mapping?: Partial<CsvMapping>) =>
-      importStatement({
-        accountName: 'Mapping Sent With The Upload',
-        currency: 'EUR',
-        mapping,
-        bytes: Buffer.from(file, 'utf8'),
-      });
+      importStatement({ accountId, mapping, bytes: Buffer.from(file, 'utf8') });
 
     const sent = await upload({ description: 'note' });
     const auto = await upload();
@@ -668,10 +675,9 @@ describe('a fee the statement states beside the amount', () => {
   const withoutFee = (description: string, amount: string, day = '01'): string =>
     `CARD_PAYMENT,Current,2026-08-${day} 09:00:00,2026-08-${day} 10:00:00,${description},${amount},EUR,COMPLETED`;
 
-  const importRevolut = (accountName: string, ...rows: string[]) =>
+  const importRevolut = async (name: string, ...rows: string[]) =>
     importAndConfirm({
-      accountName,
-      currency: 'EUR',
+      accountId: await accountFor(name),
       preset: 'revolut',
       bytes: Buffer.from(rows.join('\n'), 'utf8'),
     });
@@ -717,8 +723,14 @@ describe('a fee the statement states beside the amount', () => {
    * fee eats the whole of it moved nothing, and importing it as a zero would put a
    * transaction in the history the statement does not show. Note the sign: the fee is
    * always taken, so a -5.00 row with a 5.00 fee is a -10.00 movement, not a zero.
+   *
+   * And the sentence names the subtraction rather than saying the two cancel: a fee
+   * cell reading 0.00 is a stated zero, not an absent fee (readFee returns null only
+   * for an EMPTY cell), so "Nothing Moved" is an on-top row whose fee cancelled
+   * nothing. Both rows are told which two cells the movement came out of and in which
+   * direction, which is the sign the comment above exists to protect.
    */
-  it('a row with no movement at all is still skipped', async () => {
+  it('a row with no movement at all is still skipped, and told why', async () => {
     const r = await importRevolut(
       'Fee No Movement',
       WITH_FEE,
@@ -730,6 +742,51 @@ describe('a fee the statement states beside the amount', () => {
     expect(r.skipped).toBe(2);
     expect((await listTransactions({ accountId: r.accountId })).map((t) => t.description)).toEqual([
       'Kept',
+    ]);
+    expect(r.problems).toEqual([
+      'row 2: the amount cell "0.00" less the fee cell "0.00" is zero - the row is skipped rather than imported as a zero',
+      'row 3: the amount cell "5.00" less the fee cell "5.00" is zero - the row is skipped rather than imported as a zero',
+    ]);
+  });
+
+  /**
+   * The shape observed live: a real charge whose money sits in a column this file has
+   * not got. Told what is known - the amount cell read zero and nothing stated a fee -
+   * and not that the export is missing a column, which is a guess a genuine 0.00 row
+   * would make false.
+   *
+   * What it must never say again is that neither cell could be read. Both parsed.
+   */
+  it('a zero amount with no fee column names the zero, not an unreadable cell', async () => {
+    const r = await importRevolut(
+      'Fee Column Deleted',
+      WITHOUT_FEE,
+      withoutFee('Kept', '-1.00', '07'),
+      withoutFee('Premium plan fee', '0.00', '08'),
+    );
+    expect(r.inserted).toBe(1);
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 3: the amount cell reads "0.00" and no fee is stated - the row is skipped rather than imported as a zero',
+    ]);
+  });
+
+  /**
+   * And the quote is bounded, on the path where a cell has no width at all. 25
+   * characters of zero parse to zero, so this reaches the same arm as the row above
+   * with a cell one character past CELL_QUOTE_MAX - the shortest cell that proves the
+   * cut happened rather than that it was not needed.
+   */
+  it('a zero amount cell wider than the quote budget is cut', async () => {
+    const r = await importRevolut(
+      'Fee Wide Zero',
+      WITHOUT_FEE,
+      withoutFee('Kept', '-1.00', '09'),
+      withoutFee('Long Zero', `0.${'0'.repeat(23)}`, '10'),
+    );
+    expect(r.skipped).toBe(1);
+    expect(r.problems).toEqual([
+      'row 3: the amount cell reads "0.000000000000000000000…" and no fee is stated - the row is skipped rather than imported as a zero',
     ]);
   });
 
@@ -822,8 +879,7 @@ describe('a fee the statement states beside the amount', () => {
     ]);
 
     const r = await importAndConfirm({
-      accountName: 'Fee Workbook',
-      currency: 'EUR',
+      accountId: await accountFor('Fee Workbook'),
       preset: 'revolut',
       bytes: Buffer.from(await wb.xlsx.writeBuffer()),
     });
@@ -849,8 +905,7 @@ describe('a fee the statement states beside the amount', () => {
     expect(first.inserted).toBe(1);
 
     const second = await importAndConfirm({
-      accountName: 'Fee Two Statements',
-      currency: 'EUR',
+      accountId: await accountFor('Fee Two Statements'),
       preset: 'revolut',
       bytes: Buffer.from([WITHOUT_FEE, withoutFee('One Payment', '-10.00', '11')].join('\n'), 'utf8'),
     });
@@ -888,6 +943,8 @@ describe("the statement's own running balance, on the sheet path", () => {
     currency?: string;
     state?: string;
     day?: string;
+    /** the date cell this preset reads, where day writes a whole one; '' is a cell no format parses */
+    date?: string;
   }
 
   const line = (r: Row): string =>
@@ -895,7 +952,7 @@ describe("the statement's own running balance, on the sheet path", () => {
       'CARD_PAYMENT',
       r.product ?? 'Current',
       `2026-09-${r.day ?? '01'} 09:00:00`,
-      `2026-09-${r.day ?? '01'} 10:00:00`,
+      r.date ?? `2026-09-${r.day ?? '01'} 10:00:00`,
       r.description,
       r.amount,
       r.fee ?? '0.00',
@@ -904,24 +961,23 @@ describe("the statement's own running balance, on the sheet path", () => {
       r.balance ?? '',
     ].join(',');
 
-  const upload = (accountName: string, header: string, rows: Row[]) =>
+  const upload = async (name: string, header: string, rows: Row[]) =>
     importStatement({
-      accountName,
-      currency: 'EUR',
+      accountId: await accountFor(name),
       preset: 'revolut',
       bytes: Buffer.from([header, ...rows.map(line)].join('\n'), 'utf8'),
     });
 
-  const summaryOf = async (accountName: string, ...rows: Row[]) => {
-    const result = await upload(accountName, HEADER, rows);
+  const summaryOf = async (name: string, ...rows: Row[]) => {
+    const result = await upload(name, HEADER, rows);
     if (result.outcome !== 'awaiting_confirmation') {
       throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
     }
     return result.summary;
   };
 
-  const refusalOf = async (accountName: string, ...rows: Row[]): Promise<string> => {
-    const thrown = await summaryOf(accountName, ...rows).then(
+  const refusalOf = async (name: string, ...rows: Row[]): Promise<string> => {
+    const thrown = await summaryOf(name, ...rows).then(
       () => null,
       (e: Error) => e,
     );
@@ -1117,6 +1173,38 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
+   * I1 and I2 in one file: three reasons a row is dropped, three different counts, and
+   * the sum the card's own "Read N of M rows" is built on. The values differ because a
+   * count read off the wrong bucket renders identically when they match.
+   *
+   * On the header with no balance column: a stated balance would refuse this file at
+   * the gate over the rows it could not read, and no summary would reach the assertion.
+   */
+  it('the three reasons a row is dropped are counted apart and sum to skipped', async () => {
+    const result = await upload('Drop Buckets', NO_BALANCE, [
+      { description: 'Kept', amount: '-10.00', day: '01' },
+      { description: 'Kept too', amount: '-20.00', day: '02' },
+      { description: 'Pending', amount: '-1.00', state: 'PENDING', day: '03' },
+      { description: 'Pending too', amount: '-2.00', state: 'PENDING', day: '04' },
+      { description: 'Reverted', amount: '-3.00', state: 'REVERTED', day: '05' },
+      { description: 'Fee cell', amount: '-4.00', fee: 'cucumber', day: '06' },
+      { description: 'Date cell', amount: '-5.00', date: '', day: '07' },
+      { description: 'Nothing moved', amount: '0.00', day: '08' },
+    ]);
+    if (result.outcome !== 'awaiting_confirmation') throw new Error('expected a summary');
+
+    const { total, accepted, skipped, unreadable, filtered, noMovement } = result.summary;
+    expect({ unreadable, filtered, noMovement }).toEqual({
+      unreadable: 2,
+      filtered: 3,
+      noMovement: 1,
+    });
+    expect(unreadable + filtered + noMovement).toBe(skipped);
+    expect(accepted + skipped).toBe(total);
+    expect({ total, accepted, skipped }).toEqual({ total: 8, accepted: 2, skipped: 6 });
+  });
+
+  /**
    * R10's second class, and the case that would otherwise be a regression on the
    * fallback path: the pending row states a balance the import correctly drops, so the
    * run the gate can see has a hole in it that is not missing money. The gate turns
@@ -1251,6 +1339,21 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
+   * The other site of the same count, and the one nothing held: deleting the second
+   * `unreadable++` left the whole backend suite green (054 D19, re-measured on this
+   * tip). A date cell no format parses is money that did not import for the same
+   * reason an unreadable fee is, and the clause pointing the user at it has to survive
+   * the mapping being wrong rather than only the line being deleted.
+   */
+  it('a row whose date cell cannot be read is named as the cause too', async () => {
+    const message = await refusalOf('Balance Date Unread', CARD, { ...IN, date: '' }, RENT);
+    expect(message).toContain('100.00 EUR is unaccounted for between them');
+    // stops before the hard-coded `are`, which reads "the 1 transaction line ... are" and
+    // is DEBT's to fix: a third assertion pinning it raises the price of that one word
+    expect(message).toContain('the 1 transaction line this importer could not read');
+  });
+
+  /**
    * Trap 4, and it needs no special case: a row whose movement is zero is dropped
    * before it becomes a transaction, and its balance equals its predecessor's - so the
    * step it would have been is a loop on one value, and removing it changes no degree
@@ -1365,8 +1468,7 @@ describe("the statement's own running balance, on the sheet path", () => {
 
     it('reconciles off numeric balance cells', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book card', -5.68, 66.72, 3),
@@ -1391,8 +1493,7 @@ describe("the statement's own running balance, on the sheet path", () => {
      */
     it('counts a single-row product beside a multi-row one as checked once', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook Two Series',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook Two Series'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book savings', 130, 445, 2, 'Savings'),
@@ -1417,8 +1518,7 @@ describe("the statement's own running balance, on the sheet path", () => {
      */
     it('claims nothing for a workbook every run of which is one row', async () => {
       const result = await importStatement({
-        accountName: 'Balance Workbook No Interior',
-        currency: 'EUR',
+        accountId: await accountFor('Balance Workbook No Interior'),
         preset: 'revolut',
         bytes: await workbook([
           sheetRow('Book savings', 130, 445, 2, 'Savings'),
@@ -1435,16 +1535,17 @@ describe("the statement's own running balance, on the sheet path", () => {
     });
 
     it('and refuses the same workbook with a row taken out', async () => {
-      const thrown = await importStatement({
-        accountName: 'Balance Workbook Broken',
-        currency: 'EUR',
-        preset: 'revolut',
-        bytes: await workbook([
-          sheetRow('Book card', -5.68, 66.72, 3),
-          sheetRow('Book rent', -31.87, 134.85, 5),
-        ]),
-      }).catch((e) => e as Error);
-      expect((thrown as Error).message).toContain('100.00 EUR is unaccounted for between them');
+      const thrown = await rejectionOf(
+        importStatement({
+          accountId: await accountFor('Balance Workbook Broken'),
+          preset: 'revolut',
+          bytes: await workbook([
+            sheetRow('Book card', -5.68, 66.72, 3),
+            sheetRow('Book rent', -31.87, 134.85, 5),
+          ]),
+        }),
+      );
+      expect(thrown.message).toContain('100.00 EUR is unaccounted for between them');
     });
   });
 });
@@ -1457,12 +1558,13 @@ describe("the statement's own running balance, on the sheet path", () => {
 describe('what the new refusals may spend', () => {
   it('every preset composes a refusal error_detail keeps whole', async () => {
     for (const key of Object.keys(CSV_PRESETS)) {
-      const thrown = await importStatement({
-        accountName: `Budget ${key}`,
-        currency: 'EUR',
-        preset: key,
-        bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
-      }).catch((e) => e as Error);
+      const thrown = await rejectionOf(
+        importStatement({
+          accountId: await accountFor(`Budget ${key}`),
+          preset: key,
+          bytes: Buffer.from(`nothing,matches,here\n${key},2,3`, 'utf8'),
+        }),
+      );
 
       expect(thrown.message).toMatch(/^no column matched for /);
       expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
@@ -1475,11 +1577,13 @@ describe('what the new refusals may spend', () => {
 
   /**
    * The other cap, and the one that binds first: on the XLSX path this refusal is
-   * carried inside closestClause, whose 300 characters are cut mid-token. Every cut
-   * lands in prose today, so nothing reaching a user names a column the file has not
-   * got - but that is held by a measurement rather than by margin, and each accepted
-   * name added to a slot ahead of the cut spends its own length plus 4 of it. An odd
-   * number of quotes in the delivered message is exactly a quoted name cut in half.
+   * carried inside closestClause, whose cut is cutBounded's since row 021 and lands
+   * on a separator or not at all. This case stays as the cheap parity check that
+   * could not see the defect that row fixed: its workbook names the sheet Statement
+   * and puts the header at row 1, which pins the prefix width - sheet name plus row
+   * label - that the defect needed 27 to 31 characters of. The sweep in
+   * xlsx.test.ts is what varies it. An odd number of quotes in the delivered message
+   * is exactly a quoted name cut in half.
    *
    * Through a real workbook, because the cap lives in xlsx.ts and only a delivered
    * message says what was cut. Both headers, because which preset composes the
@@ -1498,12 +1602,13 @@ describe('what the new refusals may spend', () => {
         ws.addRow(header);
         ws.addRow([new Date('2026-09-01T00:00:00.000Z'), -5, 'one']);
 
-        const thrown = await importStatement({
-          accountName: `Cut ${key} ${header[0]}`,
-          currency: 'EUR',
-          preset: key,
-          bytes: Buffer.from(await wb.xlsx.writeBuffer()),
-        }).catch((e) => e as Error);
+        const thrown = await rejectionOf(
+          importStatement({
+            accountId: await accountFor(`Cut ${key} ${header[0]}`),
+            preset: key,
+            bytes: Buffer.from(await wb.xlsx.writeBuffer()),
+          }),
+        );
 
         // the refusal is in there at all, so an even count cannot pass by vacancy
         expect(thrown.message).toContain('no column matched for ');
@@ -1560,6 +1665,145 @@ describe('what the new refusals may spend', () => {
   });
 
   /**
+   * The 159 itself - the number the three sweeps around this one are all derived
+   * against, and the one describeRow spends. The derivation is written whole above
+   * CELL_QUOTE_MAX in statement.ts; this is the assertion underneath it, and until
+   * this row there was none: the fall-through interpolated two CSV cells raw, and a
+   * CSV field has no width of its own.
+   *
+   * Through describeRow rather than through an import, for feeRefused's reason above:
+   * the extremes are row labels no file this suite can build reaches.
+   *
+   * Each arm is paired with the labels that can REACH it, which is a departure from
+   * the feeRefused sweep above - a flat 1_048_576, conservative for that one sentence
+   * and wrong as a general habit. The pairing is the only reason 159 is true: a
+   * NOTE_MAX-length note belongs to the PDF reader, whose rowLabel is `i` and so at
+   * most MAX_DATA_ROWS, and the same note under Excel's own ceiling would compose 161
+   * for a combination no path produces. 1_048_576 appears below only where it sits
+   * ABOVE the reachable label and is therefore the stricter test.
+   */
+  it('every reason describeRow composes stays under the number NOTICE_MAX is derived from', () => {
+    // a worksheet with more rows than this is skipped before readRows walks it, so it
+    // is the widest label any sheet can carry. Imported and not restated: a second
+    // copy goes on measuring the old ceiling, green, after xlsx.ts moves this one
+    const SHEET_LABEL = MAX_SHEET_ROWS;
+    const EXCEL_LABEL = 1_048_576;
+    // what the 159 leaves a note: the arm quoting one spends 22 of fixed prose, so the
+    // budget is 159 - 22 - the label. Swept to the BUDGET rather than to the widest
+    // literal xlsx.ts happens to hold, so this is a bound on describeRow rather than a
+    // measurement of that file - what keeps xlsx.ts's own two producers inside it is
+    // UNCACHED_FORMULA's length and errorNote's cut, held there and not here. pdf's
+    // budget is NOTE_MAX itself, which is why that import is the one carrying it
+    const XLSX_NOTE_MAX = 159 - 22 - String(SHEET_LABEL).length;
+
+    const cols = { dateCol: 0, amountCol: 1, feeCol: 2 };
+    const sheetOf = (label: number, row: Cell[], note?: string): Sheet => ({
+      rows: [[], row],
+      rowLabel: () => label,
+      note: () => note,
+    });
+
+    const composed: string[] = [];
+    const reason = (sheet: Sheet, verdict: RowVerdict): string => {
+      // the sweep is over refusals; an import arm here would mean a case asserting the
+      // budget of a sentence nobody is composing
+      if (verdict.kind === 'import') throw new Error('the sweep reached the import arm');
+      return describeRow(sheet, 1, cols, verdict);
+    };
+    const take = (sheet: Sheet, verdict: RowVerdict): void => {
+      composed.push(reason(sheet, verdict));
+    };
+
+    // 0 to well past CELL_QUOTE_MAX, and then two cells with no width of their own,
+    // which is what a CSV field is. Both halves are load-bearing: 40 characters twice
+    // composes 137 and never approaches the bound at all, so a sweep that stopped
+    // there would be asserting a budget it could not overspend.
+    const cells = [
+      ...Array.from({ length: 41 }, (_, w) => 'Ф'.repeat(w)),
+      'Ф'.repeat(200),
+      'Ф'.repeat(400),
+    ];
+    // every shape String(n) takes, including either side of 1e21 where it stops being
+    // decimal and turns exponential, and its widest form at 25 characters
+    const numbers = [
+      0, -0, 1e20, -1e20, 1e21, -1e21, -1e22, -3e22, 20260106, 1234567890123456,
+      Number.MAX_VALUE, -Number.MAX_VALUE, Number.MIN_VALUE, -Number.MIN_VALUE,
+      -0.0000010352999999999999,
+    ];
+    const DATE = '2026-01-01T00:00:00.000Z';
+
+    // the unread arm with no note: the numeric-date branch and the fall-through, both
+    // quoted cells swept, and the doubly-bad row that must keep the date's sentence
+    for (const dateCell of [...cells, ...numbers]) {
+      for (const amountCell of cells) {
+        for (const [date, amount] of [
+          [null, null],
+          [null, 0],
+          [DATE, null],
+        ] as const) {
+          const sheet = sheetOf(EXCEL_LABEL, [dateCell, amountCell, '']);
+          take(sheet, rowVerdict(date, amount, { kind: 'not-stated' }));
+        }
+      }
+    }
+
+    // the note branches, each path's budget under the widest label it can emit. The
+    // CSV reader supplies no `note` at all, so only two of the three are here
+    for (const [label, widest] of [
+      [MAX_DATA_ROWS, NOTE_MAX],
+      [SHEET_LABEL, XLSX_NOTE_MAX],
+    ]) {
+      for (let width = 0; width <= widest; width++) {
+        const note = 'ы'.repeat(width);
+        for (const [date, amount] of [
+          [null, null],
+          [DATE, null],
+        ] as const) {
+          const sheet = sheetOf(label, ['x', 'x', ''], note);
+          take(sheet, rowVerdict(date, amount, { kind: 'not-stated' }));
+        }
+      }
+    }
+
+    // the no-movement arm, each convention under the widest label that can reach it:
+    // on-top is a sheet's, included is a PDF's, not-stated is every path's
+    for (const amountCell of cells) {
+      for (const feeCell of cells) {
+        const row = [DATE, amountCell, feeCell];
+        take(sheetOf(EXCEL_LABEL, row), rowVerdict(DATE, 0, { kind: 'not-stated' }));
+        take(sheetOf(SHEET_LABEL, row), rowVerdict(DATE, 0, { kind: 'on-top', fee: 0 }));
+        take(sheetOf(MAX_DATA_ROWS, row), rowVerdict(DATE, 0, { kind: 'included', fee: 0 }));
+      }
+    }
+
+    // every arm was actually walked: a sweep that quietly stopped reaching one would
+    // otherwise pass on the strength of the arms it still reached
+    for (const arm of [
+      'the date cell ы',
+      'the date cell holds the number ',
+      'the amount cell ы',
+      'could not parse the date ',
+      'and no fee is stated',
+      'less the fee cell ',
+      'and it already carries the fee',
+    ]) {
+      expect(composed.some((s) => s.includes(arm)), arm).toBe(true);
+    }
+
+    const longest = composed.reduce((a, b) => (a.length >= b.length ? a : b));
+    expect(longest.length).toBeLessThanOrEqual(159);
+    expect(noRowsParsed(MAX_DATA_ROWS, [longest], [], null).length).toBeLessThanOrEqual(199);
+
+    // the on-top arm spends the budget to the character, so <= cannot tell "still
+    // exactly fits" from "about to stop fitting"
+    const onTop = reason(
+      sheetOf(SHEET_LABEL, [DATE, 'Ф'.repeat(40), 'Ф'.repeat(40)]),
+      rowVerdict(DATE, 0, { kind: 'on-top', fee: 0 }),
+    );
+    expect(onTop.length).toBe(159);
+  });
+
+  /**
    * And row 54's, against ERROR_DETAIL_MAX rather than against 199: it is a throw from
    * reconcile, not a clause of noRowsParsed, so xlsx.ts's NOTICE_MAX is untouched by
    * it. Built FROM the bounds rather than beside them (row 6b, D10) - the currency
@@ -1597,6 +1841,49 @@ describe('what the new refusals may spend', () => {
 });
 
 /**
+ * The whole point of the reason travelling as a union: the mapper knows why it dropped
+ * a row and describeRow is told, instead of re-deriving it from two nullables out of
+ * which "the movement was zero" is not expressible. Neither `never` below is worth
+ * anything unless something has watched it throw, which is the fee dispatch's own
+ * reason for existing (pdf.test.ts).
+ */
+describe('the row-refusal dispatch', () => {
+  it('has no default that quietly names a cause', () => {
+    expect(() =>
+      describeRow(
+        { rows: [[], ['x', 'x']], rowLabel: () => 1 },
+        1,
+        { dateCol: 0, amountCol: 1, feeCol: -1 },
+        { kind: 'filtered' } as unknown as RowRefusal,
+      ),
+    ).toThrow(/unhandled row refusal/);
+
+    expect(() =>
+      describeRow(
+        { rows: [[], ['x', 'x']], rowLabel: () => 1 },
+        1,
+        { dateCol: 0, amountCol: 1, feeCol: -1 },
+        { kind: 'no-movement', stated: { kind: 'guessed' } } as unknown as RowRefusal,
+      ),
+    ).toThrow(/unhandled fee convention/);
+  });
+
+  /**
+   * And the ordering Trap 3 asks for is a compile error rather than a convention. A
+   * hand-built refusal is how a caller would come to claim a zero movement for a row
+   * whose date never parsed; the brand stops it, and rowVerdict tests nullness first,
+   * once. Remove the brand and this directive becomes TS2578 under
+   * tsconfig.test.json - which is the half of `npm run typecheck` that reads this
+   * tree, and is what holds the rule.
+   */
+  it('cannot be built anywhere but rowVerdict', () => {
+    // @ts-expect-error the brand is private to statement.ts
+    const forged: RowRefusal = { kind: 'no-movement', stated: { kind: 'not-stated' } };
+    expect(forged.kind).toBe('no-movement');
+  });
+});
+
+/**
  * The server now holds bytes where the browser used to hand over a decoded string.
  * Two decoders and no detection: a BOM is believed, valid UTF-8 is never second-
  * guessed, and only a hard UTF-8 failure falls back to windows-1252.
@@ -1619,13 +1906,11 @@ describe('decodeCsv', () => {
   it('a UTF-16LE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-01,-12.00,Utf16 bakery'].join('\n');
     const wide = await importAndConfirm({
-      accountName: 'Utf16 Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf16 Bank'),
       bytes: Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
     });
     const narrow = await importAndConfirm({
-      accountName: 'Utf8 Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf8 Bank'),
       bytes: Buffer.from(text, 'utf8'),
     });
     expect(wide.inserted).toBe(1);
@@ -1644,13 +1929,11 @@ describe('decodeCsv', () => {
   it('a UTF-16BE statement imports the same rows as the UTF-8 one', async () => {
     const text = ['date,amount,description', '2026-06-02,-13.00,Utf16be bakery'].join('\n');
     const wide = await importAndConfirm({
-      accountName: 'Utf16be Bank',
-      currency: 'EUR',
+      accountId: await accountFor('Utf16be Bank'),
       bytes: Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(text, 'utf16le').swap16()]),
     });
     const narrow = await importAndConfirm({
-      accountName: 'Utf8 Big Endian Twin',
-      currency: 'EUR',
+      accountId: await accountFor('Utf8 Big Endian Twin'),
       bytes: Buffer.from(text, 'utf8'),
     });
     expect(wide.inserted).toBe(1);

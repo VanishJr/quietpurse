@@ -10,7 +10,7 @@ import multer from 'multer';
 import { z } from 'zod';
 import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { ensureWorkspace, getAuth } from './auth';
-import { CATEGORIES } from './categorizer';
+import { CATEGORIES, type Category } from './categorizer';
 import { reclassifyAll } from './classify';
 import { config } from './config';
 import {
@@ -18,6 +18,9 @@ import {
   type ConfirmOutcome,
   ImportNotConfirmable,
   ImportStatus,
+  type ResolvedAccountId,
+  type SummaryScope,
+  accountOtherCurrencies,
   addCategoryRule,
   addTransferRule,
   clearImportDocument,
@@ -39,6 +42,7 @@ import {
   restoreBackup,
   deleteIncomeSource,
   deleteTransferRule,
+  getAccount,
   getImportDocumentInfo,
   getImportDocumentRef,
   getIncomeSource,
@@ -58,6 +62,7 @@ import {
   listTransactions,
   listTransferRules,
   setBudget,
+  setCategoryOverride,
   setIncomeSourceOverride,
   setOneOff,
   setRecurringIgnored,
@@ -85,7 +90,7 @@ import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { type StatementDestination, importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
-import { Account, Summary } from './types';
+import { Account, AccountMonthlySummary, AccountSummary, MonthlySummary, Summary } from './types';
 
 export const app = express();
 
@@ -218,6 +223,13 @@ app.use(withWorkspace(express.json({ limit: '25mb' })));
 
 const q = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
+
+/**
+ * The narrowing half of the check `POST /api/category-rules` and `PUT /api/budgets`
+ * already make: `CATEGORIES.includes(v)` answers a boolean and leaves the value a
+ * string, which is no use to a writer that takes a Category.
+ */
+const isCategory = (v: unknown): v is Category => (CATEGORIES as readonly unknown[]).includes(v);
 
 // Open endpoint: also tells the web client whether registration needs an invite
 // code, so the sign-up form can ask for one (see AuthScreen).
@@ -489,6 +501,25 @@ app.patch('/api/transactions/:id/transfer', async (req, res) => {
   res.json(tx);
 });
 
+/**
+ * The category of this one transaction, and of no other: null hands the row back to
+ * auto-detection and is the only thing that ever clears the mark. No reclassifyAll -
+ * nothing derived reads the manual category, and a manual mark is not a rule.
+ */
+app.patch('/api/transactions/:id/category', async (req, res) => {
+  const category = (req.body as { category?: unknown }).category;
+  if (category !== null && !isCategory(category)) {
+    res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
+    return;
+  }
+  const tx = await setCategoryOverride(req.params.id, category);
+  if (!tx) {
+    res.status(404).json({ error: 'transaction not found' });
+    return;
+  }
+  res.json(tx);
+});
+
 // ---------- "all transactions like this are transfers" rules ----------
 
 /** matches: how many transactions each rule covers (the caption next to the switch). */
@@ -546,13 +577,60 @@ app.delete('/api/transfer-rules/:id', async (req, res) => {
   res.json({ deleted: true });
 });
 
+type ScopeResult =
+  | { ok: true; scope: SummaryScope }
+  | { ok: false; status: number; error: string };
+
 /**
- * The current calendar month by default, or an explicit ?from=&to=. All amounts
- * are in the base currency: transfers between your own accounts are excluded from
- * every figure, refunds are subtracted from spending in their own category
- * (see classify.ts).
+ * Which summary a request is asking for, written once so the two routes below
+ * cannot drift.
+ *
+ * Not q(): it maps both '' and a repeated parameter to undefined, and undefined
+ * here means the whole workspace in the base currency - so a caller building
+ * `?accountId=${account?.id ?? ''}` would be handed every account's money labelled
+ * as one account's. Presence first, then the type, then the trimmed string, and
+ * each of the two refusals says its own cause: `?accountId=` was sent exactly once
+ * (Express 5's simple parser hands it over as ''), so answering it with the
+ * repeated-parameter sentence names something that did not happen.
+ *
+ * An unresolvable id is a 404 rather than a 200 of zeroes: a per-account body has
+ * to state a currency and there is no currency without an account. getAccount is
+ * workspace-scoped, so another workspace's id and a nonexistent one produce the
+ * same answer. A hidden account resolves like any other - the caller named it by
+ * id, and VISIBLE_ACCOUNT() keeps hidden accounts out of workspace totals, not out
+ * of their own.
+ */
+async function summaryScope(raw: unknown): Promise<ScopeResult> {
+  if (raw === undefined) return { ok: true, scope: { kind: 'workspace' } };
+  if (typeof raw !== 'string') {
+    return { ok: false, status: 400, error: 'accountId must be sent once, as a single value' };
+  }
+  const id = raw.trim();
+  if (!id) return { ok: false, status: 400, error: 'accountId must not be empty' };
+  const account = await getAccount(id);
+  if (!account) return { ok: false, status: 404, error: 'account not found' };
+  // branded here and only here on this path: the id is the one read off the row, so
+  // no string that arrived in the query can reach a summary query unproven
+  return {
+    ok: true,
+    scope: { kind: 'account', id: account.id as ResolvedAccountId, currency: account.currency },
+  };
+}
+
+/**
+ * The current calendar month by default, or an explicit ?from=&to=. Without
+ * ?accountId= this is the whole workspace in the base currency; with one it is that
+ * account alone, in the account's own currency, and the body says which by its
+ * `scope` field. Transfers between your own accounts are excluded from every figure
+ * on both arms, refunds are subtracted from spending in their own category (see
+ * classify.ts).
  */
 app.get('/api/summary', async (req, res) => {
+  const picked = await summaryScope(req.query.accountId);
+  if (!picked.ok) {
+    res.status(picked.status).json({ error: picked.error });
+    return;
+  }
   const now = new Date();
   let from = q(req.query.from);
   let to = q(req.query.to);
@@ -562,29 +640,77 @@ app.get('/api/summary', async (req, res) => {
   }
   const fromIso = `${from}T00:00:00.000Z`;
   const toIso = `${to}T23:59:59.999Z`;
+  const scope = picked.scope;
+  if (scope.kind === 'account') {
+    const summary: AccountSummary = {
+      scope: 'account',
+      from,
+      to,
+      accountId: scope.id,
+      currency: scope.currency,
+      otherCurrencies: await accountOtherCurrencies(scope),
+      totals: await summaryTotals(scope, fromIso, toIso),
+      byCategory: await summaryByCategory(scope, fromIso, toIso),
+      incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
+      incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
+    };
+    res.json(summary);
+    return;
+  }
   const summary: Summary = {
+    scope: 'workspace',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
-    totals: await summaryTotals(fromIso, toIso),
-    byCategory: await summaryByCategory(fromIso, toIso),
-    incomeByCategory: await summaryIncomeByCategory(fromIso, toIso),
-    incomeBySource: await summaryIncomeBySource(fromIso, toIso),
+    totals: await summaryTotals(scope, fromIso, toIso),
+    byCategory: await summaryByCategory(scope, fromIso, toIso),
+    incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
+    incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
   };
   res.json(summary);
 });
 
-/** Spending/income by month in the base currency - the "over the year" chart. */
+/**
+ * Spending/income by month - the "over the year" chart, for the workspace in the
+ * base currency or for one ?accountId= in its own. The account arm answers `net`
+ * as well, every row of the month summed, so over a window covering the account's
+ * whole history the bars add up to the balance shown beside them; over a shorter
+ * one - the calendar year this route defaults to, for instance - they add up to
+ * that window's movement and the balance does not.
+ */
 app.get('/api/summary/months', async (req, res) => {
+  const picked = await summaryScope(req.query.accountId);
+  if (!picked.ok) {
+    res.status(picked.status).json({ error: picked.error });
+    return;
+  }
   const now = new Date();
   const from = q(req.query.from) ?? `${now.getUTCFullYear()}-01-01`;
   const to = q(req.query.to) ?? `${now.getUTCFullYear()}-12-31`;
-  res.json({
+  const fromIso = `${from}T00:00:00.000Z`;
+  const toIso = `${to}T23:59:59.999Z`;
+  const scope = picked.scope;
+  if (scope.kind === 'account') {
+    const months: AccountMonthlySummary = {
+      scope: 'account',
+      from,
+      to,
+      accountId: scope.id,
+      currency: scope.currency,
+      otherCurrencies: await accountOtherCurrencies(scope),
+      months: await summaryMonthlyTotals(scope, fromIso, toIso),
+    };
+    res.json(months);
+    return;
+  }
+  const months: MonthlySummary = {
+    scope: 'workspace',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
-    months: await summaryMonthlyTotals(`${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`),
-  });
+    months: await summaryMonthlyTotals(scope, fromIso, toIso),
+  };
+  res.json(months);
 });
 
 // ---------- income sources / one-off / recurring ----------
@@ -827,7 +953,7 @@ app.get('/api/category-rules', async (_req, res) => {
   const rules = await listCategoryRules();
   res.json(
     await Promise.all(
-      rules.map(async (r) => ({ ...r, matches: await countCategoryRuleMatches(r.pattern) })),
+      rules.map(async (r) => ({ ...r, ...(await countCategoryRuleMatches(r.pattern)) })),
     ),
   );
 });
@@ -858,7 +984,7 @@ app.post('/api/category-rules', async (req, res) => {
   }
   const rule = await addCategoryRule(pattern, category);
   await reclassifyAll();
-  res.json({ rule, matches: await countCategoryRuleMatches(rule.pattern) });
+  res.json({ rule, ...(await countCategoryRuleMatches(rule.pattern)) });
 });
 
 app.delete('/api/category-rules/:id', async (req, res) => {
@@ -882,7 +1008,9 @@ app.get('/api/budgets', async (_req, res) => {
   const now = new Date();
   const from = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
   const to = now.toISOString();
-  const spent = new Map((await summaryByCategory(from, to)).map((c) => [c.category, c.total]));
+  const spent = new Map(
+    (await summaryByCategory({ kind: 'workspace' }, from, to)).map((c) => [c.category, c.total]),
+  );
   const dayOfMonth = now.getUTCDate();
   const daysInMonth = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
@@ -1143,66 +1271,49 @@ app.get('/api/imports/presets', (_req, res) => {
  */
 app.post('/api/imports', uploadFile, async (req, res) => {
   const body = req.body as Record<string, unknown>;
-  // The runtime half of StatementDestination's exclusive union. Multipart fields
-  // carry no type, so nothing above this route can hold it, and this route is where
-  // curl and a mobile client meet it. Presence is "the field arrived", never "the
-  // field is a string": multer turns a repeated field into an array, so a typeof test
-  // reads an accountId sent twice as absent and answers a request carrying BOTH arms
-  // as the name arm - staging the upload against a freshly minted id for an account
-  // the caller never picked, one Confirm from existing, with no account delete to
-  // undo it. A non-string is refused rather than normalised: taking the first or the
-  // last picks between two values the caller may not agree on, which is the guess the
-  // exclusivity refusal exists to prevent. A blank accountName is present, and still
-  // reaches accountNameSchema for the refusal it has today.
-  const hasId = body.accountId !== undefined;
-  const hasName = body.accountName !== undefined;
-  if (hasId && hasName) {
+  // The runtime half of a StatementDestination that has one member now. Multipart
+  // fields carry no type, so nothing above this route can hold it, and this route is
+  // where curl and a mobile client meet it.
+  //
+  // The two retired fields are refused rather than ignored: a request carrying
+  // accountName states a destination, and dropping it silently is exactly the guess
+  // the exclusivity refusal used to be here to prevent. Refused ahead of accountId,
+  // so a request carrying only currency reads the sentence about currency rather
+  // than one about a field it did not send.
+  if (body.accountName !== undefined) {
     res.status(400).json({
-      error: 'send accountId or accountName, not both - an upload goes to one account',
+      error:
+        'an upload goes to an account that already exists - create it with POST /api/accounts, then send its accountId',
     });
     return;
   }
-  let destination: StatementDestination;
-  if (hasId) {
-    if (typeof body.accountId !== 'string') {
-      res.status(400).json({ error: 'accountId must be sent once, as a single value' });
-      return;
-    }
-    const pickedId = body.accountId.trim();
-    if (!pickedId) {
-      res.status(400).json({ error: 'accountId must not be empty' });
-      return;
-    }
-    // no shape check beyond that, deliberately: an id restored from a backup or
-    // written before row 25 is not a UUID, and the lookup is what decides whether an
-    // id is real
-    if (body.currency !== undefined) {
-      res.status(400).json({
-        error: 'an account keeps its own currency - send currency only with accountName',
-      });
-      return;
-    }
-    destination = { accountId: pickedId };
-  } else if (hasName) {
-    // the same schema the two account routes use: this name reaches accounts.name
-    // through the confirm, and a name only one of the three doors accepts is a name
-    // its own rename endpoint would refuse. Both schemas refuse a non-string
-    // themselves, so this arm needs no repeat check of its own.
-    const named = accountNameSchema.safeParse(body.accountName);
-    if (!named.success) {
-      res.status(400).json({ error: badRequest(named.error) });
-      return;
-    }
-    const parsedCurrency = currencyCode.safeParse(body.currency);
-    if (!parsedCurrency.success) {
-      res.status(400).json({ error: badRequest(parsedCurrency.error) });
-      return;
-    }
-    destination = { accountName: named.data, currency: parsedCurrency.data };
-  } else {
-    res.status(400).json({ error: 'accountId or accountName field required' });
+  if (body.currency !== undefined) {
+    res.status(400).json({
+      error:
+        'an account keeps its own currency - it is set when the account is created (POST /api/accounts) and corrected with PATCH /api/accounts/:id',
+    });
     return;
   }
+  if (body.accountId === undefined) {
+    res.status(400).json({ error: 'accountId field required' });
+    return;
+  }
+  // Presence is "the field arrived", never "the field is a string": multer turns a
+  // repeated field into an array. Refused rather than normalised - taking the first
+  // or the last picks between two values the caller may not agree on.
+  if (typeof body.accountId !== 'string') {
+    res.status(400).json({ error: 'accountId must be sent once, as a single value' });
+    return;
+  }
+  const pickedId = body.accountId.trim();
+  if (!pickedId) {
+    res.status(400).json({ error: 'accountId must not be empty' });
+    return;
+  }
+  // no shape check beyond that, deliberately: an id restored from a backup or
+  // written before row 25 is not a UUID, and the lookup is what decides whether an
+  // id is real
+  const destination: StatementDestination = { accountId: pickedId };
   if (!req.file) {
     res.status(400).json({ error: 'file field required (the statement itself)' });
     return;
@@ -1267,13 +1378,8 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
       return confirmRefusal(result.status);
     case 'file-committed':
       return `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`;
-    case 'account-name-taken': {
-      // the holder's stored name, for the reason nameTaken quotes it
-      const holder = result.taken?.name ?? result.accountName;
-      return result.taken?.hidden
-        ? `nothing was imported: another account already uses the name "${holder}", and that account has been removed from the app - restore it or rename it, then upload the file again`
-        : `nothing was imported: another account already uses the name "${holder}", and this import was staged for a different one. Upload the file again and its rows will join that account`;
-    }
+    case 'account-missing':
+      return 'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
     case 'account-hidden':
       return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
     default: {

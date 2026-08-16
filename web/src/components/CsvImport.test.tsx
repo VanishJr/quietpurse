@@ -179,28 +179,13 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Read 12 of 14 rows/)).toHaveTextContent(
       /nothing imported yet/,
     );
-    // the account was created by the press that uploaded, so it exists by the time the
-    // summary names it — the fixture's default arm since row 26b
+    // an upload goes to an account that already exists, so the sentence has one arm:
+    // row 26b retired the other, on the wire as well as here
     expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
 
     expect(screen.queryByText(/are already in the database/)).not.toBeInTheDocument();
     expect(screen.queryByText(/rows couldn't be read/)).not.toBeInTheDocument();
     expect(screen.queryByText(/An earlier upload of this same file/)).not.toBeInTheDocument();
-  });
-
-  /**
-   * The other arm, asked for by name because nothing this client does produces it any
-   * more: every upload it builds carries an id for an account it has already created,
-   * so `accountExists` comes back true. It stays reachable over HTTP through the name
-   * arm of POST /api/imports, which 026b left alive and 026c retires (D7) — and this
-   * is the case that says so out loud rather than letting the arm rot unread.
-   */
-  it('still names an account that does not exist yet, for the arm HTTP can still reach', async () => {
-    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult({ accountExists: false })) });
-    const { container } = mount();
-    await upload(container);
-
-    expect(await screen.findByText(/a new account "statement"/)).toBeInTheDocument();
   });
 
   it('adds the overlap, skipped and superseded sentences when those fields are set', async () => {
@@ -212,6 +197,7 @@ describe('the summary panel', () => {
             newRows: 7,
             alreadyPresent: 5,
             skipped: 2,
+            unreadable: 2,
             supersededImportId: 'imp-0',
           }),
         ),
@@ -223,6 +209,67 @@ describe('the summary panel', () => {
     expect(screen.getByText(/are already in the database/)).toBeInTheDocument();
     expect(screen.getByText(/rows couldn't be read/)).toBeInTheDocument();
     expect(screen.getByText(/An earlier upload of this same file/)).toBeInTheDocument();
+  });
+
+  /**
+   * I5, and the whole reason row 22 exists: the card used to print `skipped` under one
+   * cause, above the backend's own line saying those same rows were read perfectly and
+   * dropped by a rule. Every sentence on the card is asserted, in order, so a second
+   * count of the filtered rows fails here as loudly as a missing one.
+   *
+   * Three DIFFERENT values, because a sentence reading the wrong bucket renders
+   * identically when they match.
+   */
+  it('gives each reason a row was dropped its own sentence, and the filtered rows one', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(
+          summaryResult({
+            accepted: 8,
+            newRows: 8,
+            skipped: 6,
+            unreadable: 2,
+            filtered: 3,
+            noMovement: 1,
+            problems: [
+              '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+            ],
+          }),
+        ),
+    });
+    const { container } = mount();
+    await upload(container);
+
+    const card = (await screen.findByText(/Read 8 of 14 rows/)).parentElement as HTMLElement;
+    expect([...card.querySelectorAll('p.hint')].map((p) => p.textContent)).toEqual([
+      expect.stringContaining("which found the columns in the file's own header"),
+      expect.stringContaining('in total'),
+      "2 rows couldn't be read. If it's the whole file, the column layout is probably" +
+        " wrong — discard this and try your bank's preset above.",
+      '1 row moved no money, so there was nothing to import.',
+      '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+    ]);
+    // the pre-fix render, and the one the backend's line contradicts word for word
+    expect(screen.queryByText(/6 rows couldn't be read/)).not.toBeInTheDocument();
+  });
+
+  /**
+   * I4 at the boundary that made this a row: "1 rows couldn't be read" shipped for a
+   * fortnight. Both client sentences at n = 1, because a correct helper with one call
+   * site not using it is the defect itself.
+   */
+  it('says one row rather than 1 rows, in every sentence that counts rows', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () =>
+        ok(summaryResult({ accepted: 12, skipped: 2, unreadable: 1, noMovement: 1 })),
+    });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/^1 row couldn't be read\./)).toBeInTheDocument();
+    expect(screen.getByText('1 row moved no money, so there was nothing to import.')).toBeInTheDocument();
   });
 
   /**
@@ -478,6 +525,13 @@ describe('the summary panel', () => {
 });
 
 describe('confirm', () => {
+  /**
+   * The server's refusal when the account was deleted while this summary sat here —
+   * row 26b's headline failure, and the one whose advice is a button on this card.
+   */
+  const ACCOUNT_MISSING =
+    'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
+
   it('requests the confirm once, replaces the summary, and tells the caller once', async () => {
     mockFetch({
       ...BASE,
@@ -496,6 +550,27 @@ describe('confirm', () => {
     // two events, not one: the account was created by the upload press, the rows
     // landed by this one, and each fires its own callback exactly once
     expect(onAccountCreated).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * This panel reads imports.rows_rejected, which is the three reasons added up and
+   * nothing else — so it may count the rows and may not say why. The advice it used to
+   * carry was doubly dead: the import is committed and there is no Discard here.
+   */
+  it('counts the rows that did not import after the confirm, and claims no cause', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({ accepted: 13, skipped: 1, noMovement: 1 })),
+      'POST /api/imports/imp-1/confirm': () => ok({ ...CONFIRMED, inserted: 13, total: 14, skipped: 1 }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/Imported 13 of 14 rows/)).toBeInTheDocument();
+    expect(screen.getByText("1 row didn't import.")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/preset/)).not.toBeInTheDocument();
   });
 
   /**
@@ -556,6 +631,40 @@ describe('confirm', () => {
 
     expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
     expect(screen.getByText(/"Foo" was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  /**
+   * A confirm that is refused, which until now no test in this package made happen —
+   * every other one here answers 200. Two things are held, and neither by anything
+   * else: the server's sentence arrives whole, and the control it tells the user to
+   * press is still under it.
+   *
+   * Both are one edit away from silence. Replace runConfirm's catch with a no-op and
+   * the refusal reaches nobody; clear `result` in it and the card goes with the
+   * error, taking the only Discard on the screen — and on this refusal there is no
+   * second attempt to fall back on, since the account is not coming back and every
+   * retry answers the same 409.
+   */
+  it('prints a refused confirm whole and leaves Discard standing beneath it', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/confirm': () => fail(409, { error: ACCOUNT_MISSING }),
+    });
+    const { container, onImported } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    // the server's own sentence and all of it: its last clause is the way out, so a
+    // message this client cut or classified would lose exactly the half that acts
+    expect(await screen.findByText(/^Error:/)).toHaveTextContent(ACCOUNT_MISSING);
+    // the control the sentence points at, still there and still pressable, on a card
+    // the refused confirm left standing
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+    expect(screen.getByText(/nothing imported yet/)).toBeInTheDocument();
+    // nothing landed, so nothing may tell the caller it did
+    expect(onImported).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
   });
 });
 
@@ -680,7 +789,8 @@ describe('the account picker', () => {
     await screen.findByText(/Read 12 of 14 rows/);
 
     expect(captured.sent!.get('accountId')).toBe('acc-3');
-    // both arms at once is a 400, so a client that sent them would be refused
+    // there is no name arm to be exclusive with any more: since row 26b either field
+    // on its own is a 400, so a client that sent one would be refused outright
     expect(captured.sent!.get('accountName')).toBeNull();
     expect(captured.sent!.get('currency')).toBeNull();
     // an account that exists is not created again on the way past it

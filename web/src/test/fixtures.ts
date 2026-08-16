@@ -1,6 +1,8 @@
 import { SessionUser } from '../api';
 import {
   Account,
+  AccountMonthlySummary,
+  AccountSummary,
   AppSettings,
   BudgetsResponse,
   CsvImportResult,
@@ -60,6 +62,7 @@ export const TRANSACTIONS: Transaction[] = [];
  * and complains about it on stderr, and chasing that is not this suite's business.
  */
 export const SUMMARY: Summary = {
+  scope: 'workspace',
   from: '2026-07-01',
   to: '2026-07-31',
   baseCurrency: 'EUR',
@@ -68,6 +71,48 @@ export const SUMMARY: Summary = {
   incomeByCategory: [],
   incomeBySource: [],
 };
+
+/**
+ * The account arm of the same two endpoints, built around the id the request named.
+ *
+ * The id is a parameter and not a constant because api.ts refuses a body answering
+ * about a different account than the one asked for — which is the whole point of the
+ * check — so a fixed fixture would be a refusal in every test that loads a second
+ * account. `askedFor` in the harness is what reads it off the URL.
+ *
+ * byCategory stays empty by default for the reason SUMMARY's does: a non-empty one
+ * mounts the donut, and recharts measures a 0x0 box in jsdom.
+ */
+export const accountSummary = (
+  accountId: string,
+  patch: Partial<AccountSummary> = {},
+): AccountSummary => ({
+  scope: 'account',
+  from: '2026-08-01',
+  to: '2026-08-31',
+  accountId,
+  currency: 'EUR',
+  otherCurrencies: [],
+  totals: { expense: 0, income: 0 },
+  byCategory: [],
+  incomeByCategory: [],
+  incomeBySource: [],
+  ...patch,
+});
+
+export const accountMonths = (
+  accountId: string,
+  patch: Partial<AccountMonthlySummary> = {},
+): AccountMonthlySummary => ({
+  scope: 'account',
+  from: '2026-03-01',
+  to: '2026-08-31',
+  accountId,
+  currency: 'EUR',
+  otherCurrencies: [],
+  months: [],
+  ...patch,
+});
 
 export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
 
@@ -126,13 +171,12 @@ export const summaryResult = (patch: Partial<ImportSummary> = {}): CsvImportResu
     importId: IMPORT_ID,
     accountId: 'acc-9',
     accountName: 'statement',
-    // the arm this client can now produce, and the only one: the account exists before
-    // the upload is sent. `false` is still reachable over HTTP through the name arm and
-    // is asked for by name in the one case that covers it
-    accountExists: true,
     total: 14,
     accepted: 12,
     skipped: 0,
+    unreadable: 0,
+    filtered: 0,
+    noMovement: 0,
     problems: [],
     newRows: 12,
     alreadyPresent: 0,

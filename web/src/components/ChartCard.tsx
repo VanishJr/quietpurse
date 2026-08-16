@@ -20,10 +20,19 @@
  * Nothing else is written on it
  *
  * A subtitle spelling out the spec in words ("All accounts · Income and Expenses · 12
- * monthly ticks") and a footnote about NBU rates and transfers both used to sit here,
- * and both were paragraphs restating what the card already shows. The title names the
- * chart, the figures carry the currency code, the legend names the series, and the
- * account — the one fact none of those held — is in the suggested title instead.
+ * monthly ticks") used to sit here, and it was a paragraph restating what the card
+ * already shows: the title names the chart, the figures carry the currency code, the
+ * legend names the series, and the account — the one fact none of those held — is in
+ * the suggested title instead.
+ *
+ * The screen this replaces also carried a footnote at its foot, saying how amounts are
+ * converted and that transfers are not counted while refunds subtract from expenses.
+ * That one was NOT a restatement of anything on screen, and it is deliberately not
+ * reinstated here: it belonged to a page with one set of figures on it, where this is a
+ * strip of charts that do not share a unit — a per-account chart answers in its own
+ * account's currency. A rule stated once at the foot would be a rule about whichever
+ * chart happened to be showing. Where that sentence belongs now is an open question
+ * rather than an oversight.
  *
  * What stays is what a reader cannot see: the two refusals above, and the table below.
  * The table is the same idiom `AccountFlows` uses and is there for the same reason: the

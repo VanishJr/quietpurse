@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { withWorkspace } from '../src/app';
 import {
   type ResolvedAccountId,
+  accountOtherCurrencies,
   clearImportDocument,
   confirmImport,
   createAccount,
@@ -29,11 +30,16 @@ import {
   listIncomeSources,
   recordImportDocument,
   resolveUploadAccount,
-  resolveUploadAccountId,
   runWithWorkspace,
   seedDefaults,
+  setCategoryOverride,
   setWorkspaceFallback,
   stageImport,
+  summaryByCategory,
+  summaryIncomeByCategory,
+  summaryIncomeBySource,
+  summaryMonthlyTotals,
+  summaryTotals,
   updateAccount,
 } from '../src/db';
 import { deleteDocument, getDocument, putDocument } from '../src/documents';
@@ -48,6 +54,12 @@ describe('workspace scoping', () => {
       // workspace clause matches whatever row holds that id, and no other test
       // in the suite would notice
       await expect(recordImportDocument('scope-import', 1)).rejects.toThrow(
+        /no workspace context/,
+      );
+      // an annotation write, which is the same shape and worse to lose: the id comes
+      // off a list the caller was handed, and unscoped it would write one workspace's
+      // correction onto whichever row anywhere on the server carries that id
+      await expect(setCategoryOverride('scope-transaction', 'food')).rejects.toThrow(
         /no workspace context/,
       );
       // and the other half of that pointer: clearing it unscoped would land on
@@ -75,7 +87,6 @@ describe('workspace scoping', () => {
       // new query is invisible to it until someone adds it - and an unscoped name
       // lookup would resolve an upload onto another workspace's account
       await expect(findAccountByName('Scope')).rejects.toThrow(/no workspace context/);
-      await expect(resolveUploadAccountId('Scope')).rejects.toThrow(/no workspace context/);
       // unscoped, this one either lets another workspace's account receive an upload
       // or lets another workspace's hidden row refuse one
       await expect(resolveUploadAccount('scope-account')).rejects.toThrow(/no workspace context/);
@@ -89,6 +100,26 @@ describe('workspace scoping', () => {
       // statements over five tables, each of which unscoped would match whatever
       // rows anywhere on the server carry that account id
       await expect(deleteAccount('scope-account')).rejects.toThrow(/no workspace context/);
+      // the summary queries on their account arm, which narrows by account_id: two
+      // workspaces may hold an account with the same id, so unscoped these would sum
+      // the neighbour's rows into an answer about your own account. Their workspace
+      // arm is deliberately absent: losing WS() there merges the two workspaces'
+      // figures, which tenant-isolation.test.ts reads apart
+      const scope = {
+        kind: 'account',
+        id: 'scope-account' as ResolvedAccountId,
+        currency: 'EUR',
+      } as const;
+      const JAN = '2026-01-01T00:00:00.000Z';
+      const DEC = '2026-12-31T23:59:59.999Z';
+      await expect(summaryTotals(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
+      await expect(summaryByCategory(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
+      await expect(summaryIncomeByCategory(scope, JAN, DEC)).rejects.toThrow(
+        /no workspace context/,
+      );
+      await expect(summaryIncomeBySource(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
+      await expect(summaryMonthlyTotals(scope, JAN, DEC)).rejects.toThrow(/no workspace context/);
+      await expect(accountOtherCurrencies(scope)).rejects.toThrow(/no workspace context/);
     } finally {
       // the fallback is process-wide: leaving it cleared would break the rest of the run
       setWorkspaceFallback(TEST_WORKSPACE_ID);

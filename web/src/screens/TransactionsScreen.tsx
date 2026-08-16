@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { CATEGORIES, categoryLabel } from '../categories';
+import { CATEGORIES, Category, categoryLabel, categoryRuleCaption } from '../categories';
 import { Chips } from '../components/Chips';
 import { Sheet } from '../components/Sheet';
 import { fmtDate, fmtMoney, isoDay } from '../format';
@@ -14,38 +14,40 @@ import {
   TxFocus,
 } from '../types';
 
-type PeriodKey = 'month' | '30d' | '90d' | 'year';
+/**
+ * The window each chip names, carried on the entry rather than derived from the key a
+ * second time — a label and the window under it cannot then drift apart. `days: null`
+ * is unbounded, which is what keeps the Overview's "All transactions" link honest.
+ */
+const PERIODS = [
+  { key: '7d', label: '7 days', days: 7 },
+  { key: '30d', label: '30 days', days: 30 },
+  { key: '90d', label: '90 days', days: 90 },
+  { key: 'all', label: 'All', days: null },
+] as const;
 
-const PERIODS: { key: PeriodKey; label: string }[] = [
-  { key: 'month', label: 'This month' },
-  { key: '30d', label: '30 days' },
-  { key: '90d', label: '90 days' },
-  { key: 'year', label: 'Year' },
-];
+type PeriodKey = (typeof PERIODS)[number]['key'];
 
-function periodBounds(p: PeriodKey): { from: string; to: string } {
+function periodBounds(p: PeriodKey): { from?: string; to: string } {
   const now = new Date();
   const to = isoDay(now);
-  if (p === 'month') {
-    return { from: isoDay(new Date(now.getFullYear(), now.getMonth(), 1)), to };
-  }
-  if (p === 'year') {
-    return { from: isoDay(new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())), to };
-  }
-  const days = p === '30d' ? 30 : 90;
+  const { days } = PERIODS.find((x) => x.key === p)!;
+  if (days === null) return { to };
   return { from: isoDay(new Date(now.getTime() - days * 86_400_000)), to };
 }
 
 export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const { categoryColor } = useTheme();
 
-  const [period, setPeriod] = useState<PeriodKey>('month');
+  const [period, setPeriod] = useState<PeriodKey>('30d');
   const [accountId, setAccountId] = useState('all');
   const [category, setCategory] = useState('all');
   const [accounts, setAccounts] = useState<Account[]>([]);
   /** A failed request used to render as "No transactions in the selected period". */
   const [txs, setTxs] = useState<Transaction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** What a category rule just did — read after the sheet that started it has closed. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
   const [rules, setRules] = useState<TransferRule[]>([]);
@@ -96,8 +98,10 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
           to,
           accountId: accountId === 'all' ? undefined : accountId,
           category: category === 'all' ? undefined : category,
-          // a year can easily exceed the backend's default limit (1000)
-          limit: period === 'year' ? 5000 : undefined,
+          // an unbounded window can exceed the backend's default limit (1000), and it
+          // truncates with nothing on the wire saying so. Tied to the missing lower
+          // bound rather than to a key, so a later arm cannot inherit that silently.
+          limit: from === undefined ? 5000 : undefined,
         }),
       );
     } catch (e) {
@@ -127,7 +131,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
     ],
     [],
   );
-  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? id;
+  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name;
 
   /**
    * How many of the loaded transactions the pattern covers. Counted on the client and
@@ -139,6 +143,21 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
     if (!p) return 0;
     return (txs ?? []).filter((t) => t.description.toLowerCase().includes(p)).length;
   }, [catPattern, txs]);
+
+  /**
+   * The category filter as of the last render. A decision taken when a PATCH settles
+   * cannot read the chip the handler was created under: by then it may not be the chip
+   * the list in state answers.
+   */
+  const currentCategory = useRef(category);
+  currentCategory.current = category;
+
+  /**
+   * The caption sits above the list, and the row a rule is built from is often one the
+   * reader scrolled down to reach — so the sentence this screen keeps alive past the
+   * sheet renders a screenful or more above the viewport unless it is brought back.
+   */
+  const noticeRef = useRef<HTMLDivElement>(null);
 
   /** Transfer flag: null hands the decision back to the backend's auto-detection. */
   const applyTransfer = async (tx: Transaction, value: boolean | null) => {
@@ -186,19 +205,60 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   };
 
   /**
-   * Changing the category = a rule "description contains <pattern> -> category" + a
-   * full base recompute on the backend, so the list is reloaded in full.
+   * This row's category and no other's; null hands it back to auto-detection. Clicking
+   * the category the row already has is not a no-op — it pins the row against any rule.
+   *
+   * A row that no longer answers the category chip leaves the list, and the sheet goes
+   * with it: the alternative is a sheet open on a row the list does not contain, where
+   * a second pick lands on nothing and the row is gone until a chip is touched.
    */
-  const applyCategory = async (next: string) => {
+  const applyCategory = async (tx: Transaction, next: Category | null) => {
+    setSaving(true);
+    try {
+      setError(null);
+      setNotice(null);
+      const updated = await api.setCategory(tx.id, next);
+      const chip = currentCategory.current;
+      const stays = chip === 'all' || updated.category === chip;
+      setTxs((list) =>
+        list === null
+          ? null
+          : stays
+            ? list.map((t) => (t.id === updated.id ? updated : t))
+            : list.filter((t) => t.id !== updated.id),
+      );
+      setSelected(stays ? updated : null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /**
+   * The group: a rule "description contains <pattern> -> category" + a full base
+   * recompute on the backend, so the list is reloaded in full.
+   *
+   * The caption is the reason the answer is kept. A rule cannot move a row whose
+   * category was set by hand, so a user who corrected three rows and then re-tagged
+   * the group watches three refuse to move; `overridden` is the only explanation there
+   * is, and it goes on the screen because this function closes the sheet.
+   */
+  const applyCategoryRule = async (next: Category) => {
     const pattern = catPattern.trim();
     if (!pattern) return;
     setSaving(true);
     try {
       setError(null);
-      await api.addCategoryRule({ pattern }, next);
+      setNotice(null);
+      const res = await api.addCategoryRule({ pattern }, next);
       await load();
+      setNotice(categoryRuleCaption(res.rule.pattern, next, res));
       setSelected(null);
       setCatPicker(false);
+      // the wrapper is unconditional, so it is in the DOM before the sentence paints
+      // and this needs no ordering against the commit
+      noticeRef.current?.scrollIntoView({ block: 'nearest' });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -246,49 +306,59 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
       <Chips label="Account" options={accountOptions} selected={accountId} onSelect={setAccountId} />
       <Chips label="Category" options={categoryOptions} selected={category} onSelect={setCategory} />
 
-      {error && <p className="error">Error: {error}</p>}
+      <div aria-live="polite" ref={noticeRef}>
+        {error && <p className="error">Error: {error}</p>}
+        {notice && <p className="hint">{notice}</p>}
+      </div>
 
-      {txs?.map((item) => (
-        <button
-          key={item.id}
-          className="row"
-          style={{ gap: 10 }}
-          onClick={() => {
-            setCatPicker(false);
-            setCatPattern(item.description);
-            setSelected(item);
-          }}
-        >
-          <span className="dot" style={{ background: categoryColor(item.category) }} />
-          <span className="row-main">
-            <span className={`row-title${item.transfer ? ' muted-strike' : ''}`}>
-              {item.description || '(no description)'}
+      {txs?.map((item) => {
+        // hidden while the Account chip already states the answer; undefined while the
+        // accounts load is outstanding or was refused, and the separator sits inside
+        // the conditional so neither leaves a dangling middot
+        const account = accountId === 'all' ? accountName(item.accountId) : undefined;
+        return (
+          <button
+            key={item.id}
+            className="row"
+            style={{ gap: 10 }}
+            onClick={() => {
+              setCatPicker(false);
+              setCatPattern(item.description);
+              setSelected(item);
+            }}
+          >
+            <span className="dot" style={{ background: categoryColor(item.category) }} />
+            <span className="row-main">
+              <span className={`row-title${item.transfer ? ' muted-strike' : ''}`}>
+                {item.description || '(no description)'}
+              </span>
+              <span
+                className="row-sub"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+              >
+                <span>
+                  {fmtDate(item.date)} · {categoryLabel(item.category)}
+                  {account ? ` · ${account}` : ''}
+                </span>
+                {item.transfer && <span className="badge">transfer</span>}
+                {item.refund && <span className="badge">refund</span>}
+                {item.oneOff && <span className="badge">one-off</span>}
+                {/* outside help (family, stipend...) — a badge with the source name */}
+                {!item.transfer && sourceById(item.incomeSource)?.kind === 'external' && (
+                  <span className="badge">{sourceById(item.incomeSource)!.label}</span>
+                )}
+              </span>
             </span>
             <span
-              className="row-sub"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+              className={`row-value${item.transfer ? ' muted-strike' : ''}`}
+              style={{ fontSize: 14, color: item.amount > 0 ? 'var(--ink-good)' : undefined }}
             >
-              <span>
-                {fmtDate(item.date)} · {categoryLabel(item.category)}
-              </span>
-              {item.transfer && <span className="badge">transfer</span>}
-              {item.refund && <span className="badge">refund</span>}
-              {item.oneOff && <span className="badge">one-off</span>}
-              {/* outside help (family, stipend...) — a badge with the source name */}
-              {!item.transfer && sourceById(item.incomeSource)?.kind === 'external' && (
-                <span className="badge">{sourceById(item.incomeSource)!.label}</span>
-              )}
+              {item.amount > 0 ? '+' : ''}
+              {fmtMoney(item.amount, item.currency)}
             </span>
-          </span>
-          <span
-            className={`row-value${item.transfer ? ' muted-strike' : ''}`}
-            style={{ fontSize: 14, color: item.amount > 0 ? 'var(--ink-good)' : undefined }}
-          >
-            {item.amount > 0 ? '+' : ''}
-            {fmtMoney(item.amount, item.currency)}
-          </span>
-        </button>
-      ))}
+          </button>
+        );
+      })}
 
       {txs !== null && txs.length === 0 && (
         <p className="empty">No transactions in the selected period.</p>
@@ -313,7 +383,42 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             </div>
             <div className="sheet-meta">{accountName(selected.accountId)}</div>
 
-            {/* change category: a rule by description substring + base recompute */}
+            {/* this row alone. Outside the description gate below it: a rule needs a
+                pattern to hang on and an empty description is exactly the row no rule
+                can ever reach */}
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--ink-grid)' }}>
+              <div className="switch-label">Category</div>
+              <div className="switch-hint">
+                This transaction only
+                {selected.categoryManual ? ' · set manually' : ' · auto-detected'}
+              </div>
+              <div className="chip-wrap">
+                {CATEGORIES.map((c) => (
+                  <button
+                    key={c}
+                    className="chip-cat"
+                    aria-label={`${categoryLabel(c)}, this transaction only`}
+                    aria-pressed={c === selected.category}
+                    disabled={saving}
+                    onClick={() => applyCategory(selected, c)}
+                  >
+                    <span className="dot" style={{ background: categoryColor(c) }} />
+                    {categoryLabel(c)}
+                  </button>
+                ))}
+              </div>
+              {selected.categoryManual && (
+                <button
+                  className="btn-link"
+                  disabled={saving}
+                  onClick={() => applyCategory(selected, null)}
+                >
+                  Category: back to auto-detection
+                </button>
+              )}
+            </div>
+
+            {/* the group: a rule by description substring + base recompute */}
             {selected.description !== '' && (
               <div style={{ marginTop: 12 }}>
                 <button
@@ -351,9 +456,9 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                         <button
                           key={c}
                           className="chip-cat"
-                          aria-pressed={c === selected.category}
+                          aria-label={`${categoryLabel(c)}, every transaction whose description contains this text`}
                           disabled={saving || !catPattern.trim()}
-                          onClick={() => applyCategory(c)}
+                          onClick={() => applyCategoryRule(c)}
                         >
                           <span className="dot" style={{ background: categoryColor(c) }} />
                           {categoryLabel(c)}

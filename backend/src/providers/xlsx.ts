@@ -35,17 +35,40 @@ const HEADER_SCAN_ROWS = 20;
  * Cheap early-out only, deliberately far above MAX_DATA_ROWS: rowCount counts rows
  * carrying nothing but formatting, and formatting a whole column is something
  * people do. The cap that decides an import is the mapper's, over kept data rows.
+ *
+ * Exported because it is also the widest row LABEL a sheet can carry, and every
+ * xlsx figure in the derivation above statement.ts's CELL_QUOTE_MAX is read at that
+ * ceiling: the budget sweep imports this rather than keeping a second copy, or it
+ * goes on measuring the old ceiling, green, after this one moves.
  */
-const MAX_SHEET_ROWS = 10 * MAX_DATA_ROWS;
+export const MAX_SHEET_ROWS = 10 * MAX_DATA_ROWS;
 
 /** The reason the closest row was rejected is the user's, but not at any length. */
 const CLOSEST_CLAUSE_MAX = 300;
 
-/** Under this what is left buys a fragment, not a clause - and a fragment misnames. */
-const CLOSEST_CLAUSE_MIN = 60;
+/**
+ * One mark for both cuts in this file, and the one bounded() marks with over in
+ * statement.ts: a message that was shortened must not read as a finished one. One
+ * code unit rather than three, because every character the mark costs is a character
+ * of the list it just cut.
+ */
+const CUT_MARK = '…';
 
 /** A twelve-month workbook would name every month; the rest becomes a count. */
 const UNUSED_LIST_MAX = 150;
+
+/**
+ * What an error cell's own text may spend, cut here rather than trusted.
+ * CellErrorValue['error'] is seven string literals at compile time and the loader
+ * never checks the file it read against them, so String(v.error) is whatever the
+ * bytes say - a workbook no spreadsheet wrote is still a workbook this parser opens.
+ * The note errorNote composes is `contains ` plus this, 33, against the 131 an xlsx
+ * note may spend (derived above statement.ts's CELL_QUOTE_MAX), and THIS CUT is what
+ * holds that number: neither the union nor the two `as ExcelJS.CellErrorValue` casts
+ * hold anything about the file. 24 because every error code a spreadsheet writes is
+ * 7 characters or fewer, and a cell's own text is quoted at 24 across this parser.
+ */
+const ERROR_TEXT_MAX = 24;
 
 /**
  * What the whole notice may spend. noRowsParsed appends it behind the row's own
@@ -53,12 +76,16 @@ const UNUSED_LIST_MAX = 150;
  * well as the unused one - and that clause reached the user before this one existed.
  * What ERROR_DETAIL_MAX leaves after the longest reason the parser composes from
  * fixed prose, the 3 characters that join the two, and 8 of margin. That reason is
- * 199, measured at the extreme of every number it carries: a row label at Excel's
- * own ceiling, MAX_DATA_ROWS skipped, and -Number.MAX_VALUE in the date cell at 24
- * characters. 298 is therefore the exact bound - the margin is there because this
- * number has been derived three times and been wrong twice. The too-large list is
- * not bounded by it and predates it, so when the two together do not fit it is the
- * unused clause that yields.
+ * 199 - MAX_DATA_ROWS skipped, plus the 159 derived in full above statement.ts's
+ * CELL_QUOTE_MAX, which is the one place that number is now written whole. 298 is
+ * therefore the exact bound - the margin is there because this number has been
+ * derived three times and been wrong twice.
+ *
+ * Both premises this comment used to state were among those wrongs, and they cancelled:
+ * the row label cannot reach Excel's own ceiling (MAX_SHEET_ROWS above stops it at
+ * six digits), and -Number.MAX_VALUE is not the widest String(n). Read the
+ * derivation there, not here. The too-large list is not bounded by this number and
+ * predates it, so when the two together do not fit it is the unused clause that yields.
  */
 const NOTICE_MAX = ERROR_DETAIL_MAX - 210;
 
@@ -233,7 +260,7 @@ function sheetNotice(
 
 /**
  * Why the workbook yielded nothing, composed to the length error_detail keeps: past
- * that, failImport's slice cuts the tail, and the tail is where the clauses are.
+ * that, failImport's own cut takes the tail, and the tail is where the clauses are.
  * The fixed prose is never shortened - only the sheet lists and the closest-row
  * clause, in that order of preference. A sheet that was never read is a refusal
  * cause with no other channel; the closest row only refines a sentence that is
@@ -291,18 +318,63 @@ function joinBounded(names: string[], budget: number): string {
 const sheetCount = (n: number): string => `${n} sheet${n === 1 ? '' : 's'}`;
 
 /**
+ * The longest prefix of `text` that fits `budget` and stops where a reader cannot be
+ * misled, marked - or null, when there is no such prefix and the caller has to drop
+ * what it was about to say.
+ *
+ * joinBounded above composes its own list and so never has to ask whether a comma
+ * separates two entries or sits inside one; this is handed a sentence somebody else
+ * composed and can only cut at a separator it can see. Hence the preference order,
+ * which is the one noColumnMatched states for that same sentence one level up:
+ * everything behind the first `; ` yields first and yields whole, then whole entries
+ * off the end, then the lot. A `"` in these sentences is a name delimiter that
+ * noColumnMatched does not escape, so the tracking holds only while no name carries
+ * one; the unquoted header lists it cannot see at all (DEBT.md, "A header cell
+ * containing `, ` is one entry to the reader and two to the cutter").
+ *
+ * It cannot split a surrogate pair either, and that is structural rather than
+ * promised: it never cuts anywhere but immediately before an ASCII separator.
+ */
+function cutBounded(text: string, budget: number): string | null {
+  if (text.length <= budget) return text;
+  const room = budget - CUT_MARK.length;
+  if (room <= 0) return null;
+  let quoted = false;
+  let entry = -1;
+  for (let i = 0; i <= room; i++) {
+    if (text[i] === '"') quoted = !quoted;
+    else if (!quoted && text[i + 1] === ' ') {
+      if (text[i] === ';') return text.slice(0, i) + CUT_MARK;
+      if (text[i] === ',') entry = i;
+    }
+  }
+  return entry < 0 ? null : text.slice(0, entry) + CUT_MARK;
+}
+
+/**
  * Why the nearest thing to a header was not one. Without it a mismatched preset
  * reads as "pick a preset", which is what the user just did - the CSV of the same
- * statement names the missing column, and this is where that sentence went. Dropped
- * whole when what is left buys only a fragment: ` - the closest row (sheet "Umsä`
- * names a sheet that does not exist.
+ * statement names the missing column, and this is where that sentence went.
+ *
+ * Both halves of the budget are measured rather than guessed at. The prose in front
+ * of the reason is fixed and its WIDTH is not - the sheet name is the user's and the
+ * row label is up to six digits - so what the reason may spend is what composing that
+ * prose leaves, and a clause whose own prose no longer fits is dropped before a
+ * reason is cut to go in it. That `room <= 0` reads as redundant and is not:
+ * cutBounded answers null for the same inputs, so deleting it would leave this
+ * clause's own precondition resting on another function's null semantics. Then
+ * cutBounded answers a whole unit of that reason or nothing: ` - the closest row
+ * (sheet "Umsä` names a sheet the workbook has not got and `does not match: no `
+ * carries none of the reason it promised, and neither of those is a number of
+ * characters that a constant could have stood for.
  */
 function closestClause(candidate: Candidate | null, budget: number): string {
   if (!candidate) return '';
-  const clause = ` - the closest row (sheet "${candidate.sheet}", row ${candidate.sheetRow}) does not match: ${candidate.error}`;
-  const room = Math.min(CLOSEST_CLAUSE_MAX, budget);
-  if (room < CLOSEST_CLAUSE_MIN) return '';
-  return clause.length <= room ? clause : `${clause.slice(0, room - 3)}...`;
+  const prefix = ` - the closest row (sheet "${candidate.sheet}", row ${candidate.sheetRow}) does not match: `;
+  const room = Math.min(CLOSEST_CLAUSE_MAX, budget) - prefix.length;
+  if (room <= 0) return '';
+  const reason = cutBounded(candidate.error, room);
+  return reason === null ? '' : prefix + reason;
 }
 
 /** Rows that carry something, in sheet order, each remembering where it came from. */
@@ -364,4 +436,11 @@ function fromResult(result: unknown): Normalised {
 const joinRichText = (v: ExcelJS.CellRichTextValue): string =>
   v.richText.map((part) => part.text).join('');
 
-const errorNote = (v: ExcelJS.CellErrorValue): string => `contains ${String(v.error)}`;
+const errorNote = (v: ExcelJS.CellErrorValue): string => {
+  const text = String(v.error);
+  const cut =
+    text.length <= ERROR_TEXT_MAX
+      ? text
+      : `${text.slice(0, ERROR_TEXT_MAX - CUT_MARK.length)}${CUT_MARK}`;
+  return `contains ${cut}`;
+};

@@ -1,16 +1,21 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
+import { RECENT_LIMIT } from '../components/RecentTransactions';
 import {
   ACCOUNTS,
+  accountMonths,
+  accountSummary,
   APP_SETTINGS,
   importRecord,
   importsResponse,
   PRESETS,
   summaryResult,
+  SUMMARY,
   USER,
 } from '../test/fixtures';
 import {
+  askedFor,
   fail,
   mockFetch,
   ok,
@@ -20,9 +25,16 @@ import {
   Routes,
 } from '../test/harness';
 import { fmtWeekday } from '../format';
-import { Account, AccountDeleted, Transaction } from '../types';
+import {
+  Account,
+  AccountDeleted,
+  AccountMonthlySummary,
+  AccountMonthTotals,
+  AccountSummary,
+  Transaction,
+} from '../types';
 import { setUrl } from '../url';
-import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
+import { OverviewScreen } from './OverviewScreen';
 
 /**
  * The Overview dashboard: the tab rail on the hero, and the four cells under it —
@@ -38,9 +50,10 @@ import { OverviewScreen, WINDOW_TX_LIMIT } from './OverviewScreen';
  * and is what a screen reader gets.
  *
  * Note on the route table: the harness keys on method and path and discards the query,
- * so the two transaction reads this screen makes — the recent seven, then the chart's
- * window — are one entry. The fixture below is short enough and recent enough to be a
- * true answer to both.
+ * so a handler is given the URL as its second argument. The two summary bodies below
+ * are built from it — the account they answer for and the window they cover are the
+ * ones that were asked for, which is both what api.ts insists on and what makes a
+ * request for the wrong month show up as a card labelled with it.
  */
 
 /** Newest first: the endpoint orders by date DESC, and the recent list trusts it. */
@@ -66,10 +79,44 @@ const TXS: Transaction[] = [
   txn('2026-07-20T00:00:00.000Z', -60, { description: 'Netflix', category: 'subscriptions' }),
 ];
 
+/** The window the request named, so a body cannot claim a month nobody asked about. */
+const asked = (url = '') => {
+  const q = new URL(url, 'http://localhost').searchParams;
+  return { from: q.get('from') ?? '', to: q.get('to') ?? '' };
+};
+
+/**
+ * What the server would answer for TXS above, transcribed once: July is the one −60
+ * row, August is +900 salary and −120 food with the −300 transfer out of both sides
+ * and inside `net`. Those are the figures every assertion in this file was written
+ * against when the screen added the rows up itself.
+ */
+const MONTHS: AccountMonthTotals[] = [
+  { month: '2026-07', income: 0, expense: 60, net: -60 },
+  { month: '2026-08', income: 900, expense: 120, net: 480 },
+];
+
+const monthsBody = (
+  url?: string,
+  months = MONTHS,
+  patch: Partial<AccountMonthlySummary> = {},
+): AccountMonthlySummary => accountMonths(askedFor(url), { ...asked(url), months, ...patch });
+
+const summaryBody = (url?: string, patch: Partial<AccountSummary> = {}): AccountSummary =>
+  accountSummary(askedFor(url), {
+    ...asked(url),
+    totals: { income: 900, expense: 120 },
+    byCategory: [{ category: 'food', total: 120 }],
+    incomeByCategory: [{ category: 'salary', total: 900 }],
+    ...patch,
+  });
+
 const OVERVIEW_ROUTES: Routes = {
   'GET /api/accounts': () => ok(ACCOUNTS),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
   'GET /api/transactions': () => ok(TXS),
+  'GET /api/summary': (_init, url) => ok(summaryBody(url)),
+  'GET /api/summary/months': (_init, url) => ok(monthsBody(url)),
 };
 
 const onOpenTransactions = vi.fn();
@@ -105,9 +152,9 @@ const param = (key: string): string | null =>
 const tab = (name: string) => screen.findByRole('button', { name });
 
 /**
- * The anchor for everything under the rail. It arrives two requests later than the
- * tab does — the recent seven, and then the window they date — so a synchronous query
- * after `tab()` is a query run before the panel exists.
+ * The anchor for everything under the rail. It arrives three requests later than the
+ * tab does — the recent seven, and then the two summaries they anchor — so a
+ * synchronous query after `tab()` is a query run before the panel exists.
  */
 const panel = (name: string) => screen.findByRole('region', { name });
 
@@ -339,7 +386,7 @@ describe('the balance card', () => {
 });
 
 describe('income against expenses', () => {
-  it('reads the month off the account’s own transactions', async () => {
+  it('reads the month off the account’s own figures', async () => {
     mount();
 
     // the flows region, not the account panel around it: the chart's accessible table
@@ -353,10 +400,22 @@ describe('income against expenses', () => {
   it('does not print two minus signs for a month the refunds outweighed', async () => {
     // a refund for a purchase made in an earlier month is honestly negative spending,
     // and "−" written in front of it read as "−−60 EUR"
+    const refunded: AccountMonthTotals[] = [
+      { month: '2026-08', income: 0, expense: -60, net: 60 },
+    ];
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/transactions': () =>
         ok([txn('2026-08-04T00:00:00.000Z', 60, { refund: true, category: 'shopping' })]),
+      'GET /api/summary/months': (_init, url) => ok(monthsBody(url, refunded)),
+      'GET /api/summary': (_init, url) =>
+        ok(
+          summaryBody(url, {
+            totals: { income: 0, expense: -60 },
+            byCategory: [{ category: 'shopping', total: -60 }],
+            incomeByCategory: [],
+          }),
+        ),
     });
 
     const flows = await panel('Income and expenses for Sparkasse Giro');
@@ -412,14 +471,43 @@ describe('income against expenses', () => {
   it('narrows the window without asking the server again', async () => {
     mount();
     await panel('Sparkasse Giro');
-    const before = requests().filter((r) => r === 'GET /api/transactions').length;
+    const before = requests();
 
     fireEvent.click(screen.getByRole('button', { name: '3 months' }));
 
-    // the chips are the only thing that moved: the months came out of a window already
-    // fetched, and narrowing it is arithmetic rather than a request
+    // the chips are the only thing that moved: the longest window is fetched once and
+    // 3 and 6 are cuts of it, so narrowing is arithmetic rather than a request. The
+    // whole list and not the transaction reads alone — the request this toggle would
+    // tempt somebody into making is a summary one.
     expect(await screen.findByRole('button', { name: '3 months', pressed: true })).toBeInTheDocument();
-    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(before);
+    expect(requests()).toEqual(before);
+  });
+
+  it('refuses on an account holding a second unit, in both the claims it can make', async () => {
+    // the endpoint's list is all time and the figures beside it are one window, so this
+    // sentence carries two claims of unequal strength and each is asserted: the balance
+    // adds the foreign rows in and IS wrong, while a figure here is wrong only if one of
+    // them falls in a month it covers — which the client was not told and says so. The
+    // second half is the one a later edit flattens into the first, and the absence of
+    // the paragraph is green against a card that never draws it, so this asserts text.
+    // Its scope is asserted with it: the donut's total sums the same unconverted rows
+    // and carries no sentence of its own, so narrowing this one to the card it sits on
+    // takes the donut out of coverage without turning anything red.
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, MONTHS, { otherCurrencies: ['USD'] })),
+    });
+
+    const flows = await panel('Income and expenses for Sparkasse Giro');
+    expect(flows).toHaveTextContent('This account holds transactions in USD, not EUR');
+    expect(flows).toHaveTextContent(
+      "The account's balance adds them in as though they were EUR, so it is wrong",
+    );
+    expect(flows).toHaveTextContent(
+      'So is any other figure on this screen covering a month one of them falls in',
+    );
+    expect(flows).toHaveTextContent(/nothing here knows which months those are/);
   });
 });
 
@@ -428,10 +516,8 @@ describe('spending by category', () => {
   const legend = (name = 'Biggest categories, Aug 2026') =>
     screen.findByRole('list', { name });
 
-  it('breaks the month’s expenses down without asking the server for them', async () => {
+  it('breaks the month’s expenses down, and agrees with the card beside it', async () => {
     mount();
-    await panel('Sparkasse Giro');
-    const asked = requests().filter((r) => r === 'GET /api/transactions').length;
 
     const card = await panel('Spending by category, Aug 2026');
     // August spent 120 in Food and nothing else — the 300 to savings is a transfer and
@@ -439,20 +525,28 @@ describe('spending by category', () => {
     const rows = within(await legend());
     expect(rows.getByText('Food')).toBeInTheDocument();
     expect(rows.getByText('100%')).toBeInTheDocument();
-    // and the middle of the ring is that same Expenses figure
+    // the middle of the ring is `totals.expense` off the body this breakdown came
+    // from, and the flows card's figure is the same month out of the months body: two
+    // requests, one number, and the screen would be contradicting itself if not
     expect(within(card).getByText('120')).toBeInTheDocument();
-    // the window it is computed from was already in hand
-    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(asked);
+    const flows = await panel('Income and expenses for Sparkasse Giro');
+    expect(within(flows).getByText('−120 EUR')).toBeInTheDocument();
   });
 
   it('carries every category in a table, not only the three it names', async () => {
-    const many: Transaction[] = [
-      txn('2026-08-04T00:00:00.000Z', -400, { category: 'housing' }),
-      txn('2026-08-03T00:00:00.000Z', -300, { category: 'food' }),
-      txn('2026-08-02T00:00:00.000Z', -200, { category: 'transport' }),
-      txn('2026-08-01T00:00:00.000Z', -100, { category: 'health' }),
+    const many: AccountSummary['byCategory'] = [
+      { category: 'housing', total: 400 },
+      { category: 'food', total: 300 },
+      { category: 'transport', total: 200 },
+      { category: 'health', total: 100 },
     ];
-    mount({ ...OVERVIEW_ROUTES, 'GET /api/transactions': () => ok(many) });
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/summary': (_init, url) =>
+        ok(summaryBody(url, { totals: { income: 0, expense: 1000 }, byCategory: many })),
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 1000, net: -1000 }])),
+    });
 
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
@@ -469,8 +563,10 @@ describe('spending by category', () => {
   it('says so rather than drawing an empty ring when the month spent nothing', async () => {
     mount({
       ...OVERVIEW_ROUTES,
-      'GET /api/transactions': () =>
-        ok([txn('2026-08-04T00:00:00.000Z', 900, { category: 'salary' })]),
+      'GET /api/summary': (_init, url) =>
+        ok(summaryBody(url, { totals: { income: 900, expense: 0 }, byCategory: [] })),
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, [{ month: '2026-08', income: 900, expense: 0, net: 900 }])),
     });
 
     const card = await panel('Spending by category, Aug 2026');
@@ -533,11 +629,14 @@ describe('switching tabs while a read is in flight', () => {
     release(ok(TXS));
     await settle();
 
-    // Slow's answer must not start Slow's second read, and must not reach `data`: an
+    // Slow's answer must not start Slow's summaries, and must not reach `data`: an
     // id the render then rejects is no dashboard, no error and no reason to fetch
     // again — the effect's deps did not move, so the screen stays empty until the
-    // reader clicks a third tab
-    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(3);
+    // reader clicks a third tab. Two recent reads, one for each tab, and one pair of
+    // summaries — Quick's.
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
+    expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1);
+    expect(requests().filter((r) => r === 'GET /api/summary/months')).toHaveLength(1);
     expect(screen.getByRole('region', { name: 'Balance of Quick' })).toBeInTheDocument();
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
@@ -567,66 +666,112 @@ describe('switching tabs while a read is in flight', () => {
   });
 });
 
-describe('a window that came back at its limit', () => {
-  /**
-   * The endpoint is `date DESC` with a bare limit and no cap of its own, so a response
-   * exactly this long has dropped its far end — the oldest rows in the window, and with
-   * them whole months the chart then draws no bar for.
-   */
-  const atLimit: Transaction[] = Array.from({ length: WINDOW_TX_LIMIT }, (_, i) =>
-    txn(i % 2 === 0 ? '2026-08-10T00:00:00.000Z' : '2026-07-10T00:00:00.000Z', -1),
-  );
+describe('what the dashboard asks the server for', () => {
+  it('reads the recent list and the two summaries of this account, and nothing else', async () => {
+    mount();
+    await panel('Sparkasse Giro');
 
-  const mountTruncated = () => {
-    let calls = 0;
-    // the recent seven first, then the window: one path, so the ordinal tells them
-    // apart. Only the second is at the limit — the first asked for seven.
-    return mount({
+    // the whole list and in order, so the window fetch this row deleted comes back as
+    // a fourth entry rather than as a screen that is merely slower than it was
+    expect(requests()).toEqual([
+      'GET /api/accounts',
+      'GET /api/app-settings',
+      'GET /api/transactions',
+      'GET /api/summary',
+      'GET /api/summary/months',
+    ]);
+    // and the transaction read is still the seven for the list under the cards
+    expect(requestUrls()).toContain(
+      `GET /api/transactions?accountId=acc-1&limit=${RECENT_LIMIT}`,
+    );
+  });
+
+  it('names the account on both summary requests', async () => {
+    mount(OVERVIEW_ROUTES, '/?account=acc-1');
+    await panel('Sparkasse Giro');
+
+    // requests() cannot see this — keyOf drops the query — and the failure it guards
+    // against is silent: an id that never reaches the wire is answered with the whole
+    // workspace's money, printed under this account's name and currency code
+    const summaries = requestUrls().filter((u) => u.includes('/api/summary'));
+    expect(summaries).toHaveLength(2);
+    for (const url of summaries) expect(url).toContain('accountId=acc-1');
+  });
+
+  it('asks for the whole of the newest month, its last day included', async () => {
+    mount();
+    await panel('Sparkasse Giro');
+
+    // `to` is inclusive of the day it names, and August has 31 of them: one day short
+    // drops the 31st out of the donut, out of both figures and off the end of the
+    // chart at once, and every one of them still looks like a month
+    expect(requestUrls()).toContain(
+      'GET /api/summary?accountId=acc-1&from=2026-08-01&to=2026-08-31',
+    );
+    expect(requestUrls()).toContain(
+      'GET /api/summary/months?accountId=acc-1&from=2025-09-01&to=2026-08-31',
+    );
+  });
+
+  it('refuses rather than printing the workspace’s money under one account’s name', async () => {
+    mount({
+      // what a query-builder edit that drops the accountId produces: 200, a body of
+      // the right shape for the OTHER arm, and every figure in the base currency
       ...OVERVIEW_ROUTES,
-      'GET /api/transactions': () => ok((calls += 1) === 1 ? TXS : atLimit),
+      'GET /api/summary': () => ok(SUMMARY),
     });
-  };
+    await tab('Sparkasse Giro');
 
-  it('refuses the chart rather than drawing a total it cannot stand behind', async () => {
-    mountTruncated();
-    await panel('Sparkasse Giro');
-
-    // the chart is the one place a cut window is invisible: it draws whatever survived
-    // and looks exactly like a complete one
-    expect(screen.getByText(/Nothing here is safe to read as a total/)).toBeInTheDocument();
-  });
-
-  it('shows no comparison it cannot stand behind, on either card', async () => {
-    mountTruncated();
-    await panel('Sparkasse Giro');
-
-    // the month a percentage is measured against may be a part of a month, and the
-    // balance's derived opening figure short by whatever was dropped — so neither the
-    // balance card nor the flows card draws one. Asserted as the absence of a
-    // percentage rather than of `.fig-delta`: what must not be on screen is the claim,
-    // not the element that would carry it.
-    const balance = await panel('Balance of Sparkasse Giro');
-    const flows = await panel('Income and expenses for Sparkasse Giro');
-    expect(within(balance).queryByText(/%/)).not.toBeInTheDocument();
-    expect(within(flows).queryByText(/\d\.\d%/)).not.toBeInTheDocument();
+    const error = await screen.findByText(/^Error:/);
+    expect(error).toHaveTextContent(/the whole workspace/);
+    // the dashboard's own refusal, under a rail that loaded — not a blank screen
     expect(
-      screen.getByText(/no comparison with the month before is shown/),
-    ).toBeInTheDocument();
-    // the balance itself is the server's sum of every row and is not read off the
-    // window, so it stays on screen
-    expect(within(balance).getByText('1,234.50 EUR')).toBeInTheDocument();
+      screen.queryByRole('region', { name: 'Income and expenses for Sparkasse Giro' }),
+    ).not.toBeInTheDocument();
+    expect(await tab('Sparkasse Giro')).toBeInTheDocument();
   });
+});
 
-  it('still breaks the newest month down, which a cap at the far end cannot have cut', async () => {
-    // the endpoint orders `date DESC`, so what a response at its limit dropped is the
-    // OLDEST rows. The newest month is the one part of the window that survives whole,
-    // and it is the only part the donut is about.
-    mountTruncated();
+describe('a month the account has nothing in', () => {
+  /** The server answers only the months that HAVE rows, so June is simply absent. */
+  const GAP: AccountMonthTotals[] = [
+    { month: '2026-05', income: 0, expense: 60, net: -60 },
+    { month: '2026-07', income: 0, expense: 120, net: -120 },
+  ];
 
-    await panel('Spending by category, Aug 2026');
-    const rows = within(await screen.findByRole('list', { name: /Biggest categories/ }));
-    expect(rows.getByText('Other')).toBeInTheDocument();
-    expect(rows.getByText('100%')).toBeInTheDocument();
+  const mountGap = () =>
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () =>
+        ok([txn('2026-07-20T00:00:00.000Z', -120, { category: 'food' })]),
+      'GET /api/summary/months': (_init, url) => ok(monthsBody(url, GAP)),
+      'GET /api/summary': (_init, url) =>
+        ok(
+          summaryBody(url, {
+            totals: { income: 0, expense: 120 },
+            byCategory: [{ category: 'food', total: 120 }],
+            incomeByCategory: [],
+          }),
+        ),
+    });
+
+  it('draws the empty month and compares the newest against it, not against May', async () => {
+    mountGap();
+    const flows = await panel('Income and expenses for Sparkasse Giro');
+
+    // three points and not two
+    const table = within(flows).getByRole('table', { name: /Income and expenses by month/ });
+    expect(within(table).getAllByRole('rowheader').map((r) => r.textContent)).toEqual([
+      'May 2026',
+      'Jun 2026',
+      'Jul 2026',
+    ]);
+    // June spent nothing, so there is no base and no percentage at all. An
+    // implementation reading the server's array straight through compares July with
+    // May instead and prints "up 100.0% vs May" — right-looking, two calendar months
+    // out, and with nothing on screen saying so.
+    expect(within(flows).queryByText(/\d\.\d%/)).not.toBeInTheDocument();
+    expect(within(flows).queryByText(/vs May/)).not.toBeInTheDocument();
   });
 });
 
@@ -970,17 +1115,17 @@ describe('the account menu', () => {
   });
 
   it('will not print a count that is really the limit', async () => {
-    let calls = 0;
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/imports': () => ok(importsResponse()),
-      // the dashboard's two reads, then the dialog's count — which comes back exactly
-      // as long as it asked for. The rows are never read, only counted, so they are
-      // not built: what is under test is the length.
-      'GET /api/transactions': () => {
-        calls += 1;
-        return ok(calls <= 2 ? TXS : new Array(COUNT_LIMIT).fill(null));
-      },
+      // the dashboard's recent seven against the dialog's count, told apart by the
+      // limit each asks for rather than by their ordinal — the ordinal was one number
+      // that moved when the dashboard stopped making a second read. The counted rows
+      // are never looked at, only measured, so they are not built.
+      'GET /api/transactions': (_init, url) =>
+        ok(
+          url?.includes(`limit=${COUNT_LIMIT}`) ? new Array(COUNT_LIMIT).fill(null) : TXS,
+        ),
     });
     const menu = await openMenu();
 
@@ -1079,14 +1224,27 @@ describe('deleting an account', () => {
       txn('2026-08-03T00:00:00.000Z', -120, { description: 'Rewe', category: 'food' }),
       txn('2026-08-02T00:00:00.000Z', -300, { description: 'To savings', transfer: true }),
     ];
-    // the same two rows after the server re-classified them: the surviving leg has no
-    // partner left, so it stops being a transfer and starts counting as spending
-    const REPAIRED = PAIRED.map((t) => ({ ...t, transfer: false }));
+    // the same month after the server re-classified those rows: the surviving leg has
+    // no partner left, so it stops being a transfer and starts counting as spending.
+    // `net` does not move — a transfer was always inside it.
+    const augustSpent = (spent: number): AccountMonthTotals[] => [
+      { month: '2026-08', income: 0, expense: spent, net: -420 },
+    ];
     let gone = false;
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/accounts': () => ok(gone ? [A] : [A, B]),
-      'GET /api/transactions': () => ok(gone ? REPAIRED : PAIRED),
+      'GET /api/transactions': () => ok(PAIRED),
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, augustSpent(gone ? 420 : 120))),
+      'GET /api/summary': (_init, url) =>
+        ok(
+          summaryBody(url, {
+            totals: { income: 0, expense: gone ? 420 : 120 },
+            byCategory: [{ category: 'food', total: gone ? 420 : 120 }],
+            incomeByCategory: [],
+          }),
+        ),
       'GET /api/imports': () => ok(importsResponse([])),
       'DELETE /api/accounts/acc-2': () => {
         gone = true;

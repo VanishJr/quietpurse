@@ -47,12 +47,22 @@ interface Uploaded {
   bytes: Buffer;
 }
 
+/**
+ * An empty account over the door that creates one - the only one since row 26b, and
+ * the data-layer helper cannot stand in here: this file clears the process-wide
+ * workspace fallback, so createAccount outside a request throws.
+ */
+const makeAccount = async (name: string): Promise<string> => {
+  const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  return res.body.id as string;
+};
+
 async function upload(label: string, filename = 'statement.csv'): Promise<Uploaded> {
   const bytes = csvFor(label);
   const res = await agent
     .post('/api/imports')
-    .field('accountName', label)
-    .field('currency', 'EUR')
+    .field('accountId', await makeAccount(label))
     .field('preset', 'generic')
     .attach('file', bytes, filename);
   expect(res.status, `upload failed: ${JSON.stringify(res.body)}`).toBe(200);
@@ -152,8 +162,7 @@ describe('GET /api/imports/:id/document', () => {
     const unparseable = Buffer.from(['col a;col b;col c', '05.02.2026;-11,00;Kiosk'].join('\n'), 'utf8');
     const failed = await agent
       .post('/api/imports')
-      .field('accountName', 'Failed Bank')
-      .field('currency', 'EUR')
+      .field('accountId', await makeAccount('Failed Bank'))
       .field('preset', 'generic')
       .attach('file', unparseable, 'broken.csv');
     expect(failed.status).toBe(400);
@@ -338,23 +347,23 @@ describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
   const statement = (amount: string, label: string): Buffer =>
     Buffer.from(['date,amount,description', `2026-03-01,${amount},${label}`].join('\n'), 'utf8');
 
-  const commitInto = async (accountName: string, bytes: Buffer) => {
+  const commitInto = async (accountId: string, bytes: Buffer) => {
     const res = await agent
       .post('/api/imports')
-      .field('accountName', accountName)
-      .field('currency', 'EUR')
+      .field('accountId', accountId)
       .field('preset', 'generic')
       .attach('file', bytes, 'statement.csv');
     expect(res.status, `upload failed: ${JSON.stringify(res.body)}`).toBe(200);
-    const { importId, accountId } = res.body.summary as { importId: string; accountId: string };
-    const confirmed = await agent.post(`/api/imports/${importId}/confirm`);
+    const summary = res.body.summary as { importId: string; accountId: string };
+    const confirmed = await agent.post(`/api/imports/${summary.importId}/confirm`);
     expect(confirmed.status, `confirm failed: ${JSON.stringify(confirmed.body)}`).toBe(200);
-    return { importId, accountId };
+    return summary;
   };
 
   it('removes the bytes of a readable document and of one whose pointer is gone', async () => {
-    const readable = await commitInto('Blob Account', statement('-21.00', 'blob one'));
-    const pointerless = await commitInto('Blob Account', statement('-22.00', 'blob two'));
+    const account = await makeAccount('Blob Account');
+    const readable = await commitInto(account, statement('-21.00', 'blob one'));
+    const pointerless = await commitInto(account, statement('-22.00', 'blob two'));
     expect(pointerless.accountId).toBe(readable.accountId);
 
     // the pointer alone, leaving the bytes where they are: what a restored backup

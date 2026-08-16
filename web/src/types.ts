@@ -65,7 +65,18 @@ export interface CategoryRule {
   pattern: string;
   category: string;
   createdAt: string;
+}
+
+/**
+ * How many transactions a pattern covers, and how many of those the rule cannot move
+ * because the category was set by hand. One type and both required: CATEGORY is
+ * COALESCE(category_manual, category), neither number may be read without the other.
+ *
+ * Workspace-wide and period-blind — hidden accounts included, no filter applied.
+ */
+export interface CategoryRuleCounts {
   matches: number;
+  overridden: number;
 }
 
 export interface Transaction {
@@ -78,6 +89,8 @@ export interface Transaction {
   description: string;
   mcc?: number;
   category: string;
+  /** true = the category above was set by hand, and no recompute will change it */
+  categoryManual?: boolean;
   /** transfer between own accounts — neither income nor expense */
   transfer: boolean;
   /** manual override; null — the flag was decided by auto-detection */
@@ -112,21 +125,61 @@ export interface TxFocus {
   nonce: number;
 }
 
-/** Category total in the base currency. */
+/** Category total. The body carrying it names the currency, never this. */
 export interface CategorySummary {
   category: string;
   total: number;
 }
 
-/** All amounts in the base currency. Transfers excluded, refunds subtracted. */
+export interface SummaryTotals {
+  expense: number;
+  income: number;
+}
+
+/** Income by source: the id, its label and kind from income_sources, and the total. */
+export interface IncomeSourceTotal {
+  source: string;
+  label: string;
+  kind: IncomeSourceKind;
+  total: number;
+}
+
+/**
+ * All amounts in the base currency. Transfers excluded, refunds subtracted.
+ *
+ * `scope` is a literal rather than a field that happens to be there: the account
+ * bodies below carry `currency` and no `baseCurrency`, so the unit of every number
+ * in a body is named by that body, once, and a reader picking the wrong one is a
+ * compile error instead of a UAH figure labelled EUR.
+ */
 export interface Summary {
+  scope: 'workspace';
   from: string;
   to: string;
   baseCurrency: string;
-  totals: { expense: number; income: number };
+  totals: SummaryTotals;
   byCategory: CategorySummary[];
   incomeByCategory: CategorySummary[];
-  incomeBySource: { source: string; label: string; kind: IncomeSourceKind; total: number }[];
+  incomeBySource: IncomeSourceTotal[];
+}
+
+/** One named account, every amount in that account's own currency. */
+export interface AccountSummary {
+  scope: 'account';
+  from: string;
+  to: string;
+  accountId: string;
+  currency: string;
+  /**
+   * The currencies among this account's rows that are not its own — all time, not
+   * the window. Normally empty; required rather than optional, because [] means
+   * "checked, and there are none" where undefined means nobody looked.
+   */
+  otherCurrencies: string[];
+  totals: SummaryTotals;
+  byCategory: CategorySummary[];
+  incomeByCategory: CategorySummary[];
+  incomeBySource: IncomeSourceTotal[];
 }
 
 /** One month's totals in the base currency. */
@@ -143,11 +196,45 @@ export interface MonthTotals {
   incomeExternal: number;
 }
 
+/**
+ * One month of an account's own transactions, in that account's currency.
+ *
+ * `net` is every row of the month summed, transfers included — the rule the server
+ * computes a balance by, and the only reason a month can be compared with the balance
+ * printed beside it. `income` and `expense` exclude transfers, exactly as the
+ * workspace-wide figures do, so `net` is NOT `income - expense` and must never be
+ * reconstructed as one.
+ *
+ * Not MonthTotals and not assignable to it: expenseOneOff, incomeOwn and
+ * incomeExternal are independence figures and independence is a workspace question.
+ */
+export interface AccountMonthTotals {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  expense: number;
+  net: number;
+}
+
 export interface MonthlySummary {
+  scope: 'workspace';
   from: string;
   to: string;
   baseCurrency: string;
   months: MonthTotals[];
+}
+
+/** The same chart for one account, in that account's own currency. */
+export interface AccountMonthlySummary {
+  scope: 'account';
+  from: string;
+  to: string;
+  accountId: string;
+  currency: string;
+  /** as on AccountSummary: all time, and [] is an answer */
+  otherCurrencies: string[];
+  /** only the months that have rows — the anchoring and the gaps are the caller's */
+  months: AccountMonthTotals[];
 }
 
 /** App settings (the settings table). */
@@ -207,16 +294,27 @@ export type ReadAs =
  */
 export interface ImportSummary {
   importId: string;
-  /** where the rows will go: the derived id, the name as typed, and whether it exists */
+  /** where the rows will go: the picked account's id and its stored name */
   accountId: string;
   accountName: string;
-  accountExists: boolean;
   /** data rows in the file */
   total: number;
   /** rows that could be read */
   accepted: number;
-  /** rows the parser could not use */
+  /**
+   * Rows that did not import, for three different reasons — the sum of the three
+   * below, and the only one of the four the database keeps. Required like `readAs`
+   * and for the same reason: a card that renders `skipped` under one cause is the
+   * defect row 22 exists to remove, so a mirror missing a bucket is a compile error
+   * rather than a sentence that quietly stops appearing.
+   */
   skipped: number;
+  /** of those, the ones the parser failed on — an unreadable fee, or no date or amount */
+  unreadable: number;
+  /** read fine, and dropped by a rule: the statement's own status column says so */
+  filtered: number;
+  /** read fine, and moving no money once the fee is taken — nothing to insert */
+  noMovement: number;
   problems: string[];
   /**
    * Of `accepted`, how many are not already in the database. A snapshot: another

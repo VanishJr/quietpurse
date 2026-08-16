@@ -119,7 +119,7 @@ export async function computeIndependence(now = new Date()): Promise<Independenc
 
   const fromIso = amortFrom.toISOString();
   const toIso = to.toISOString();
-  const monthly = await summaryMonthlyTotals(fromIso, toIso);
+  const monthly = await summaryMonthlyTotals({ kind: 'workspace' }, fromIso, toIso);
 
   // one-off amortization: the 12-month total / 12, even with less than a year of data -
   // still divided by 12, so rare purchases don't spike on a short history

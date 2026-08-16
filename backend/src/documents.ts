@@ -1,6 +1,6 @@
 /**
  * Source documents: the uploaded statement itself, kept encrypted at rest
- * (ROADMAP 4.5, 6.1) so that a better parser can re-run it later and so that "my
+ * so that a better parser can re-run it later and so that "my
  * import came out wrong" is diagnosable at all. One document per `imports` row,
  * keyed by the import id and dying with it - never keyed by the file hash, which
  * would let a failed import and a committed one of the same bytes share a blob.
@@ -13,10 +13,10 @@
  *    claims a document that is not there, and deleteImport removes the blob
  *    whatever the pointer says, so it stays collectable;
  *  - a `pending` or a `failed` import holding a document is not a defect. The
- *    failed case is the point (4.5): the input is what support needs;
+ *    failed case is the point: the input is what support needs;
  *  - a blob whose row no longer exists at all - a restore deletes the workspace's
- *    `imports` rows - is reachable by nothing. No sweeper is in scope; it is
- *    written up for ROADMAP 6.1 rather than fixed here.
+ *    `imports` rows - is reachable by nothing. No sweeper is in scope; it is a
+ *    data-deletion line rather than something fixed here.
  */
 import crypto from 'crypto';
 import { config } from './config';
@@ -51,10 +51,8 @@ const DOCUMENT_KEY_LAYOUTS: Record<number, (ctx: DocumentKeyContext) => string> 
 
 const KEY_VERSIONS = Object.keys(DOCUMENT_KEY_LAYOUTS).map(Number);
 
-/** The layout new documents are written under: the newest the registry holds. */
 export const CURRENT_KEY_VERSION = Math.max(...KEY_VERSIONS);
 
-/** Whether a version a row claims is one this server can address at all. */
 export const knowsKeyVersion = (version: number): boolean => version in DOCUMENT_KEY_LAYOUTS;
 
 const ENVELOPE_VERSION = 1;
@@ -66,7 +64,6 @@ const HEADER_BYTES = 2 + IV_BYTES + TAG_BYTES;
 const KEY_SALT = 'finto-document-store-v1';
 
 export interface DocumentKey {
-  /** the AES-256-GCM key */
   key: Buffer;
   /** the byte stamped at offset 1 of the envelope */
   id: number;
@@ -86,10 +83,10 @@ export interface DocumentKey {
  * moves by itself if the salt, the info strings or the derivation ever change; a
  * literal would have to be remembered.
  *
- * The honest limit: one byte is 256 values, so a mismatching id proves the key is
- * wrong and a matching one proves nothing. The GCM tag stays the authority, and in
- * the 1-in-256 case the reader falls through to the integrity message - which is
- * what it would have said anyway.
+ * The honest limit: a one-byte id means a mismatch proves the key is wrong and a
+ * match proves nothing. The GCM tag stays the authority, and on a colliding id the
+ * reader falls through to the integrity message - which is what it would have said
+ * anyway.
  *
  * Rotation's exit, recorded before it is needed: the day a second key is held the
  * reader picks by id, and two keys whose derived ids collide are indistinguishable.
@@ -160,8 +157,7 @@ export function sealDocument(plain: Buffer, storageKey: string, keys = documentK
 /**
  * Everything throws; nothing degrades. The version and key id are checked BEFORE
  * any decrypt is attempted, so the message names the actual problem instead of
- * reporting a tag failure - ROADMAP 6.4 is on the record about what a wrong
- * diagnostic costs here.
+ * reporting a tag failure.
  */
 export function openDocument(sealed: Buffer, storageKey: string, keys = documentKeys()): Buffer {
   if (sealed.length < HEADER_BYTES) {
@@ -207,15 +203,14 @@ export interface DocumentRef {
 }
 
 /**
- * What a user is told when the document cannot be stored. A constant, because the
- * test asserts equality with it: a regex for paths and errnos passes on a message
- * that has been "improved" to splice in a cause chain which happens not to contain
- * a drive letter, and that is how a filesystem path reaches a screen one refactor
- * from now.
+ * What a user is told when the document cannot be stored. A constant, so the sentence
+ * is asserted by equality: a regex over paths and errnos passes on a message that has
+ * been "improved" to splice in a cause chain which happens not to contain a drive
+ * letter, and that is how a filesystem path reaches a screen one refactor from now.
  *
- * It is actionable in the only way this failure is actionable - the bytes are
- * still the user's to re-upload, which is the fact a refusal exists to preserve:
- * committing without the document would claim the file hash forever.
+ * It is actionable in the only way this failure is actionable - the bytes are still the
+ * user's to re-upload, which is the fact a refusal exists to preserve: committing
+ * without the document would claim the file hash forever.
  */
 export const DOCUMENT_STORE_REFUSED =
   "could not store the uploaded file, so the import was refused - nothing was written, and the same file can be uploaded again once the server's storage is working";
@@ -257,7 +252,7 @@ function keyFor(version: number, workspaceId: string, importId: string): string 
  * under - the caller hands that straight to recordImportDocument, so the row
  * cannot claim a version the writer did not use.
  *
- * The cause goes to the log, including the whole chain (ROADMAP 6.4) and at
+ * The cause goes to the log, including the whole chain and at
  * `error`; the user gets a sentence with no path, no errno and no filename in it.
  */
 export async function putDocument(importId: string, bytes: Buffer): Promise<number> {

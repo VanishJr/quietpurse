@@ -34,7 +34,13 @@ import {
  * or polled request, which is when this needs fixing.
  */
 
-type Handler = (init?: RequestInit) => Response | Promise<Response>;
+/**
+ * The URL is the second argument because `keyOf` throws the query string away, and one
+ * path now answers two different shapes: `/api/summary` is the workspace's body or one
+ * account's depending on `?accountId=`, and api.ts throws on the wrong one. Every
+ * handler that does not care ignores it.
+ */
+type Handler = (init?: RequestInit, url?: string) => Response | Promise<Response>;
 
 /** Key: `${METHOD} ${pathname}`. No patterns, no ordering, no fallthrough. */
 export type Routes = Record<string, Handler>;
@@ -80,7 +86,7 @@ export function resetFetch(): void {
       unstubbed.push(key);
       throw new Error(`no route for ${key}`);
     }
-    return handler(init);
+    return handler(init, urlOf(input));
   }) as typeof fetch;
 }
 
@@ -99,6 +105,14 @@ export const requests = (): string[] => [...seen];
  * break every route declared in the suite.
  */
 export const requestUrls = (): string[] => [...seenUrls];
+
+/**
+ * The account a request named, or '' when it named none. For a handler answering a
+ * path whose two arms differ by that parameter: a static account body is a body about
+ * whichever account the fixture was written for, and api.ts refuses it for every other.
+ */
+export const askedFor = (url = ''): string =>
+  new URL(url, 'http://localhost').searchParams.get('accountId') ?? '';
 
 /** Reads and clears, so a throw in the guard cannot leak into the next test. */
 export function takeUnstubbed(): string[] {
@@ -131,10 +145,14 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * /api/imports/presets (once CsvImport mounts) is deliberately absent: it is not first
  * paint.
  *
- * Neither are the two the Analytics screen used to fire and no longer does. It is a
- * workspace of charts the reader builds now, and an empty one asks for nothing but the
- * account list: /api/summary and /api/summary/months are requested by a chart that
- * exists, and /api/budgets by the Budgets tab once it is the one showing.
+ * Neither is any summary request, and that is now true from both directions. Overview
+ * asks for every account that HAS a transaction - but TRANSACTIONS here is empty, so it
+ * short-circuits on `recent.length === 0` and fires neither. Give that fixture a row and
+ * Overview fires both; the guard then names the missing one, which is this mechanism
+ * working rather than a hole in it. And Analytics, which used to ask for the workspace
+ * summary and the budgets on first paint, is a workspace of charts the reader builds
+ * now: an empty one asks for nothing but the account list. /api/summary is a chart that
+ * exists, /api/budgets the Budgets tab once it is the one showing.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),

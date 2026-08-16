@@ -42,7 +42,7 @@ the threat model.
 Run from `backend/` unless stated otherwise.
 
 ```
-npm run typecheck     tsc --noEmit          both packages have this
+npm run typecheck     tsc --noEmit          both packages; backend runs it twice
 npm test              vitest run            both packages have this
 npm run dev           tsx watch src/index.ts
 npm run db:generate   drizzle-kit generate
@@ -52,9 +52,18 @@ cd web && npm run dev
 Verification means both `npm run typecheck` and `npm test` green in `backend/`. A change is not
 finished on a claim that they pass — run them.
 
-`typecheck` covers `src` and `scripts` only — `tsconfig.json`'s `include` does not list `test`, and
-vitest strips types without checking them. So a change confined to test files is verified by the
-suite alone, and "typecheck clean" says nothing about it.
+`typecheck` is two `tsc` runs and reaches every `.ts` file in `backend/` outside `node_modules`.
+`tsconfig.json` takes `src`, `scripts` and the root config files as CommonJS, which is what `tsx`
+runs them as; `tsconfig.test.json` takes `test/` as ESM, which is what vitest runs it as.
+`tsconfig.json` is deny-by-default (an `exclude`, no `include`), so a directory added later is
+checked by it without anybody remembering. `tsconfig.test.json` names `test/` explicitly, so a test
+directory created outside `test/` is checked as CommonJS by the base config — a red, not a silent
+gap. vitest still strips types without checking them, so a green suite is not a type check — but a
+change confined to test files is no longer verified by the suite alone.
+
+**Bare `npx tsc --noEmit` is weaker than `npm run typecheck`**: it reads `tsconfig.json` only and
+never sees `test/`. Nothing can force the second invocation; the script is what holds it, and CI
+runs the script.
 
 ## Invariants
 
@@ -125,9 +134,31 @@ everywhere.
 
 ## Conventions
 
-- **Comments are sparse.** The existing density is low and deliberate — comments explain *why* a
-  non-obvious decision was made (see the header of `src/db/workspace.ts`), never what the code
-  already says. Do not annotate obvious lines.
-- Match the style, naming and idiom of the file being edited.
+- **A comment may not state a fact that something else could check.** Nothing tests prose, so a
+  comment carrying a number, a count, a measurement, a reachability claim or an inventory of what
+  exists is believed long after it stopped being true — comments in this tree have been found
+  measurably false, and in the densest files they outweighed the code. If the fact is worth
+  holding, **assert it in a test and let the comment name the reason instead**: the refusal bound
+  in `pdf.test.ts` survived every rewrite around it because an assertion sits beside the sentence,
+  where `csv.ts`'s "nothing reads it yet" was false the moment something read it and nothing said
+  so.
+  - **Delete** on sight: a number, count, date, percentage, byte size, line number or file
+    inventory; a row number, task id, review round or decision reference; what a test does, what
+    a fixture holds, what a past run produced; anything the line below already says; a section
+    banner or divider.
+  - **Keep** only what cannot be recovered by reading the code *and* would break behaviour if got
+    wrong: **why something is ABSENT** — a missing clause, filter or check that looks like an
+    oversight and is deliberate, which is the most valuable kind here because absence has no
+    syntax; which of two compiling readings is the intended one; a rejected alternative a reader
+    will otherwise re-attempt, stating the reason and not the story; an ordering or coupling
+    constraint between distant parts of the code; a unit, sign or rounding convention the type
+    does not carry.
+  - There should be **far fewer keeps than feels right.** If the keep list for one file runs past
+    a dozen entries, the rule was applied too generously. A loud failure does not justify a
+    comment — the bar is *silent* breakage. Where a comment mixes a kept reason with a checkable
+    claim, rewrite it to the reason alone; do not keep the number "for context".
+  - `src/db/workspace.ts`'s header is the shape to copy.
+- Match the style, naming and idiom of the file being edited — **but never its comment volume.**
+  Matching a dense neighbour is how the density spread.
 - **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
   human commits.

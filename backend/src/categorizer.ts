@@ -15,7 +15,7 @@
  * "translated". Ukrainian banks emit statements in both Ukrainian and Russian.
  */
 
-export const RULES_VERSION = 8;
+export const RULES_VERSION = 9;
 
 export const CATEGORIES = [
   'housing',
@@ -70,10 +70,32 @@ addMcc('cash', [6010, 6011]);
 addMcc('transfers', [4829, 6012, 6536, 6537, 6538, 6540]);
 
 /**
+ * A keyword matches only at the start of a word — the character before it may not be
+ * a letter or a digit in any script. "word" bounds the right-hand side as well, which
+ * is what lets a short generic word ("bar", which would otherwise fire inside
+ * "Barcelona") be a rule at all.
+ *
+ * \b cannot express this: it is defined over [A-Za-z0-9_], so /\bкафе/u reports a
+ * boundary between the Latin "x" and the Cyrillic "к" of "xкафе" and matches. It also
+ * counts "_" as a word character and this rule does not — "ab_bar" is food.
+ */
+type KeywordRule = [keyword: string, category: Category, bound?: 'word'];
+
+const WORDISH = String.raw`[\p{L}\p{N}]`;
+
+function compile(keyword: string, bound?: 'word'): RegExp {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(
+    `(?<!${WORDISH})${escaped}${bound === 'word' ? `(?!${WORDISH})` : ''}`,
+    'u',
+  );
+}
+
+/**
  * Keywords: the first match wins, so the more specific ones ("bolt food") come
  * before the general ones ("bolt").
  */
-const KEYWORD_RULES: [string, Category][] = [
+export const KEYWORD_RULES: KeywordRule[] = [
   // housing: rent
   ['miete', 'housing'],
   ['wohnung', 'housing'],
@@ -109,10 +131,13 @@ const KEYWORD_RULES: [string, Category][] = [
   ['pizza', 'food'],
   ['sushi', 'food'],
   ['coffee', 'food'],
+  ['cafe', 'food'],
   ['кафе', 'food'],
   ['кава', 'food'],
   ['ресторан', 'food'],
   ['restaurant', 'food'],
+  // "BAR A MARQUESA", "Lido Bar" — whole word, or it fires inside "Barcelona"
+  ['bar', 'food', 'word'],
   ['baeckerei', 'food'],
   ['bäckerei', 'food'],
   ['espresso house', 'food'],
@@ -167,7 +192,7 @@ const KEYWORD_RULES: [string, Category][] = [
   ['parking', 'transport'],
   ['паркінг', 'transport'],
   ['паркинг', 'transport'],
-  ['metro ', 'transport'],
+  ['metro', 'transport', 'word'],
   // entertainment
   ['steam', 'entertainment'],
   ['playstation', 'entertainment'],
@@ -184,6 +209,7 @@ const KEYWORD_RULES: [string, Category][] = [
   ['rsg group', 'health'], // gym chain (McFIT and others)
   ['аптека', 'health'],
   ['apteka', 'health'],
+  ['farmacia', 'health'],
   ['pharmacy', 'health'],
   ['clinic', 'health'],
   ['клініка', 'health'],
@@ -200,6 +226,7 @@ const KEYWORD_RULES: [string, Category][] = [
   ['банкомат', 'cash'],
   ['atm', 'cash'],
   ['cash withdrawal', 'cash'],
+  ['снятие наличных', 'cash'],
   ['cash at', 'cash'], // "Cash at Vrb Musterbank eG" — ATM withdrawal (Enable Banking)
   ['переказ', 'transfers'],
   ['перевод', 'transfers'],
@@ -208,17 +235,30 @@ const KEYWORD_RULES: [string, Category][] = [
   ['p2p', 'transfers'],
 ];
 
+const KEYWORD_MATCHERS: [RegExp, Category][] = KEYWORD_RULES.map(
+  ([kw, cat, bound]) => [compile(kw, bound), cat],
+);
+
 /**
  * Refund / cancelled purchase: arrives as a positive amount, but it isn't income —
  * it's a reversed expense. Monobank writes "Скасування. <merchant>", Enable Banking
- * uses refund/reversal.
+ * uses refund/reversal. The same five Universal Bank rows read "Cancellation." in the
+ * English export and "Скасування." in the Ukrainian one.
  */
-const REFUND_MARKERS = ['скасування', 'refund', 'reversal', 'chargeback'];
+export const REFUND_MARKERS = [
+  'скасування',
+  'cancellation',
+  'refund',
+  'reversal',
+  'chargeback',
+];
+
+const REFUND_MATCHERS = REFUND_MARKERS.map((m) => compile(m));
 
 export function isRefund(amount: number, description: string): boolean {
   if (amount <= 0) return false;
   const d = (description || '').toLowerCase();
-  return REFUND_MARKERS.some((m) => d.includes(m));
+  return REFUND_MATCHERS.some((re) => re.test(d));
 }
 
 /**
@@ -231,7 +271,7 @@ export function recurringKey(description: string): string {
 }
 
 /** Income-only rules (refunds excluded — those are categorized as spending). */
-const INCOME_KEYWORD_RULES: [string, Category][] = [
+export const INCOME_KEYWORD_RULES: KeywordRule[] = [
   ['заробітної плати', 'salary'],
   ['заробітна плата', 'salary'],
   ['зарплат', 'salary'],
@@ -248,6 +288,10 @@ const INCOME_KEYWORD_RULES: [string, Category][] = [
   ['от:', 'transfers'],
   ['from:', 'transfers'],
 ];
+
+const INCOME_KEYWORD_MATCHERS: [RegExp, Category][] = INCOME_KEYWORD_RULES.map(
+  ([kw, cat, bound]) => [compile(kw, bound), cat],
+);
 
 const INCOME_MCC: Record<number, Category> = {
   4829: 'transfers',
@@ -272,8 +316,8 @@ export function categorize(
   // income, but not a refund — its own set of rules
   if (amount !== undefined && amount > 0 && !isRefund(amount, description)) {
     if (d) {
-      for (const [kw, cat] of INCOME_KEYWORD_RULES) {
-        if (d.includes(kw)) return cat;
+      for (const [re, cat] of INCOME_KEYWORD_MATCHERS) {
+        if (re.test(d)) return cat;
       }
     }
     if (mcc && INCOME_MCC[mcc]) return INCOME_MCC[mcc];
@@ -282,8 +326,8 @@ export function categorize(
 
   if (mcc && MCC_MAP[mcc]) return MCC_MAP[mcc];
   if (d) {
-    for (const [kw, cat] of KEYWORD_RULES) {
-      if (d.includes(kw)) return cat;
+    for (const [re, cat] of KEYWORD_MATCHERS) {
+      if (re.test(d)) return cat;
     }
   }
   return 'other';

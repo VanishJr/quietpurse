@@ -17,6 +17,7 @@ import path from 'path';
 import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 import {
+  ERROR_DETAIL_MAX,
   type ResolvedAccountId,
   confirmImport,
   createAccount,
@@ -25,7 +26,6 @@ import {
   discardImport,
   exportBackup,
   failImport,
-  findAccountByName,
   getAccount,
   listAccounts,
   listImports,
@@ -41,6 +41,7 @@ import {
 } from '../src/db';
 import { ImportSummary, importStatement } from '../src/providers/statement';
 import { storageRoot } from '../src/storage';
+import { accountFor } from './helpers';
 import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
@@ -49,19 +50,16 @@ const csvFile = (...rows: string[]): string => ['date,amount,description', ...ro
 const repeated = (n: number, row: string, tag = ''): string =>
   csvFile(...Array.from({ length: n }, (_, i) => `${row}${tag ? ` ${tag}${i}` : ''}`));
 
-async function upload(accountName: string, csv: string): Promise<ImportSummary> {
-  const result = await importStatement({
-    accountName,
-    currency: 'EUR',
-    bytes: Buffer.from(csv, 'utf8'),
-  });
-  if (result.outcome !== 'awaiting_confirmation') {
-    throw new Error(`expected a summary, got ${JSON.stringify(result)}`);
-  }
-  return result.summary;
+/**
+ * A statement staged into the account of that name, made first if this workspace has
+ * not got one. Two uploads under one name go to one account, which is what the cases
+ * about superseding and deduplication below are built on.
+ */
+async function upload(name: string, csv: string): Promise<ImportSummary> {
+  return uploadTo(await accountFor(name), csv);
 }
 
-/** The id arm: the account is picked, so the request carries no name and no currency. */
+/** The account is picked, so the request carries no name and no currency. */
 async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> {
   const result = await importStatement({ accountId, bytes: Buffer.from(csv, 'utf8') });
   if (result.outcome !== 'awaiting_confirmation') {
@@ -114,7 +112,6 @@ describe('an unconfirmed import is not the user’s data', () => {
 
     expect(summary).toMatchObject({
       accountName: 'Invisible Bank',
-      accountExists: false,
       total: 2,
       accepted: 2,
       skipped: 0,
@@ -128,13 +125,13 @@ describe('an unconfirmed import is not the user’s data', () => {
     expect(summary.supersededImportId).toBeUndefined();
 
     expect(await listTransactions({ limit: 500 })).toHaveLength(0);
-    expect(await summaryTotals(JAN, DEC)).toEqual({ expense: 0, income: 0 });
-    expect(await summaryMonthlyTotals(JAN, DEC)).toEqual([]);
+    expect(await summaryTotals({ kind: 'workspace' }, JAN, DEC)).toEqual({ expense: 0, income: 0 });
+    expect(await summaryMonthlyTotals({ kind: 'workspace' }, JAN, DEC)).toEqual([]);
     expect(await listRecurringGroups(JAN)).toEqual([]);
-    // no account either: one created at upload would stand on Overview with a
-    // balance of 0 before the user confirmed, and outlive a discard
-    expect(await listAccounts(true)).toHaveLength(0);
-    expect(await getAccount(summary.accountId)).toBeUndefined();
+    // the account is the one the upload picked, and nothing has reached it: no rows
+    // and a balance still at 0, so Overview shows what it showed before the upload
+    expect(await listAccounts(true)).toHaveLength(1);
+    expect((await getAccount(summary.accountId))!.balance).toBe(0);
 
     const backup = await exportBackup();
     expect(backup.tables.transactions).toEqual([]);
@@ -453,8 +450,15 @@ describe('the confirm refuses what it cannot honestly complete', () => {
   });
 
   /**
-   * account_name is nullable because every import from before this step is. Confirming
-   * one anyway means inventing the account it goes to and reporting that as a success.
+   * account_name is nullable because every import from before this step is, and the
+   * confirm checks it without reading it (row 26b took away the create that consumed
+   * it). Dropping the check would make an import from before this step confirmable,
+   * landing rows against an id with no recorded destination.
+   *
+   * The pair of assertions this used to carry - no account under the staged id, none
+   * under the name - guarded "the confirm did not invent one". That guarantee did not
+   * go away, it moved: upsertAccountOn is not called here any more, and a missing
+   * account is the account-missing refusal below.
    */
   it('an import with no recorded account name is refused', async () => {
     const summary = await upload('Nameless Bank', csvFile('2026-08-05,-12.00,Nameless'));
@@ -466,9 +470,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     await expect(confirmImport(summary.importId)).rejects.toThrow(
       /records no account name, currency or id/,
     );
-    // nothing was created under the id the import recorded, nor under the name
-    expect(await getAccount(summary.accountId)).toBeUndefined();
-    expect(await findAccountByName('Nameless Bank')).toBeUndefined();
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(0);
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
     });
@@ -490,8 +492,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     await expect(confirmImport(summary.importId)).rejects.toThrow(
       /records no account name, currency or id/,
     );
-    expect(await getAccount(summary.accountId)).toBeUndefined();
-    expect(await findAccountByName('Idless Bank')).toBeUndefined();
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(0);
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
     });
@@ -518,7 +519,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
         `recorded against account ${summary.accountId} but staged a row for csv:somewhere-else`,
       ),
     );
-    expect(await getAccount(summary.accountId)).toBeUndefined();
+    expect(await listTransactions({ accountId: summary.accountId })).toHaveLength(0);
     expect(await getAccount('csv:somewhere-else')).toBeUndefined();
     expect(await importRow(summary.importId)).toMatchObject({
       status: 'awaiting_confirmation',
@@ -580,6 +581,60 @@ describe('an account removed between the upload and the confirm', () => {
 });
 
 /**
+ * The window DEBT.md recorded on 2026-08-08: the account is deleted while the upload
+ * is still parsing, so the destination was proved before the delete and the staging
+ * happens after it. Until row 26b the confirm's upsert simply created the account
+ * again - a deleted account came back, holding rows, at 200.
+ *
+ * It cannot be set up through the product API, and that is not a gap in the test:
+ * deleteAccount refuses while the account holds staged rows (HOLDS_STAGED_ROWS), and
+ * by the time an import is confirmable it does. The DELETE below is what the real
+ * window produces, and it works because staged_transactions has no foreign key to
+ * accounts - only to imports - so the staged rows outlive the account. Clearing them
+ * too would hit the partial-import throw instead and pass for the wrong reason, which
+ * is why the count is asserted before the confirm as well as after it.
+ */
+describe('an account deleted between the upload and the confirm', () => {
+  it('refuses, creates nothing, and leaves the import to be discarded', async () => {
+    const id = await accountFor('Deleted Bank');
+    const summary = await uploadTo(
+      id,
+      csvFile('2026-10-01,-21.00,Into the deleted', '2026-10-02,-22.00,And this one'),
+    );
+    expect(await stagedCount(summary.importId)).toBe(2);
+
+    await dbInstance().execute(
+      sql`DELETE FROM accounts WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${id}`,
+    );
+    expect(await getAccount(id)).toBeUndefined();
+
+    expect(await confirmImport(summary.importId)).toEqual({
+      confirmed: false,
+      reason: 'account-missing',
+    });
+
+    // the account did not come back - the whole point - and the rollback took the
+    // insert with it: an import back where it was, with its rows still staged
+    expect(await getAccount(id)).toBeUndefined();
+    expect(await listAccounts()).not.toContainEqual(expect.objectContaining({ id }));
+    expect(await listTransactions({ accountId: id })).toHaveLength(0);
+    expect(await importRow(summary.importId)).toMatchObject({
+      status: 'awaiting_confirmation',
+    });
+    expect(await stagedCount(summary.importId)).toBe(2);
+
+    // and every retry refuses the same way: the id is minted server-side, so nothing
+    // the user can do brings that account back. Discard is the only exit
+    expect(await confirmImport(summary.importId)).toEqual({
+      confirmed: false,
+      reason: 'account-missing',
+    });
+    expect(await discardImport(summary.importId)).toEqual({ discarded: true });
+    expect(await stagedCount(summary.importId)).toBe(0);
+  });
+});
+
+/**
  * A throw *after* the stage committed - the supersede, a read, anything between there
  * and the response - leaves a `failed` import. `failed` is neither confirmable nor
  * discardable, so its staged rows would sit unreachable until deleteImport, which has
@@ -597,6 +652,27 @@ describe('a failed import leaves no staged rows behind', () => {
     expect(await importRow(summary.importId)).toMatchObject({ status: 'failed' });
     // the document is kept either way - that is what a failed import is retained for
     expect(await blobExists(summary.importId)).toBe(true);
+  });
+
+  /**
+   * The last cut between a composed refusal and the screen (ROADMAP 21). It was a
+   * bare slice, so what error_detail kept ended wherever 500 characters ran out and
+   * read as a finished sentence - the client renders the whole of it and adds no
+   * cut of its own. Both messages are built from ERROR_DETAIL_MAX and not from a
+   * literal past it: exactly the cap is not a cut and carries no mark.
+   */
+  it('a message past what error_detail keeps is marked where it was cut', async () => {
+    const fits = await upload('Marked Cut Bank', csvFile('2026-08-21,-14.00,Kept whole'));
+    const over = await upload('Marked Cut Bank', csvFile('2026-08-22,-15.00,Cut short'));
+    const whole = 'x'.repeat(ERROR_DETAIL_MAX);
+
+    await failImport(fits.importId, whole);
+    await failImport(over.importId, `${whole} and there was more behind it`);
+
+    const detail = async (id: string): Promise<string | null | undefined> =>
+      (await listImports()).imports.find((i) => i.id === id)?.errorDetail;
+    expect(await detail(fits.importId)).toBe(whole);
+    expect(await detail(over.importId)).toBe(`${'x'.repeat(ERROR_DETAIL_MAX - 1)}…`);
   });
 });
 
@@ -621,8 +697,7 @@ describe('a stated fee survives staging', () => {
     ].join('\n');
 
     const result = await importStatement({
-      accountName: 'Fee Staging',
-      currency: 'EUR',
+      accountId: await accountFor('Fee Staging'),
       preset: 'revolut',
       bytes: Buffer.from(file, 'utf8'),
     });

@@ -26,6 +26,7 @@ const thisMonth = (): string => {
 };
 
 const MONTHS: MonthlySummary = {
+  scope: 'workspace',
   from: '2026-01-01',
   to: '2026-12-31',
   baseCurrency: 'EUR',
@@ -72,6 +73,7 @@ const chart = (id: string, title: string) => ({ ...COLUMN_CHART, id, title });
  * because the purchase was in an earlier window and only the refund landed in this one.
  */
 const REFUNDED: Summary = {
+  scope: 'workspace',
   from: '2026-01-01',
   to: '2026-12-31',
   baseCurrency: 'EUR',
