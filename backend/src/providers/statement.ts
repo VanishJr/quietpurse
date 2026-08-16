@@ -42,7 +42,14 @@ import {
   matchColumn,
   parseCsv,
 } from './csv';
-import { PDF_PARSER_VERSION, PdfFee, PdfLimits, StatementBalances, readPdf } from './pdf';
+import {
+  PDF_PARSER_VERSION,
+  PdfFee,
+  PdfLimits,
+  PdfMcc,
+  StatementBalances,
+  readPdf,
+} from './pdf';
 import { Cell, MAX_DATA_ROWS, Sheet, cellAmount, cellDate, cellText } from './sheet';
 import { XLSX_PARSER_VERSION, readXlsx } from './xlsx';
 
@@ -521,6 +528,7 @@ export type ParsedFile =
       template: string;
       title: string;
       fee: PdfFee;
+      mcc: PdfMcc;
       balances: StatementBalances;
     };
 
@@ -562,6 +570,7 @@ export async function readSheet(
         template: parsed.template,
         title: parsed.title,
         fee: parsed.fee,
+        mcc: parsed.mcc,
         balances: parsed.balances,
       };
     }
@@ -983,6 +992,33 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
 }
 
 /**
+ * What the file stated for one row's merchant category code. undefined is "it stated
+ * nothing this parser will use", and a cell that is not exactly four digits gets the
+ * same answer as an empty one - deliberately, and with nothing refused, noted or
+ * counted.
+ *
+ * An MCC is a categorisation hint whose fallback is exactly today's behaviour,
+ * categorize(undefined, ...). Refusing a file over one would cost the user their whole
+ * import to protect a hint; contrast the fee, which refuses because a misread fee
+ * corrupts the movement and no gate can see it. Nothing about an MCC can corrupt money.
+ *
+ * The rule lives here and not in pdf.ts because "an MCC is four digits" is a fact about
+ * MCCs and not about a layout - the day a preset names an MCC column it is this function
+ * reading a different one. Going through cellText for the same reason: an XLSX column
+ * hands over the number 5411 where a CSV hands over '5411', and both are the same input.
+ *
+ * 0000 is excluded because 0 is not an MCC and a fact column must not carry one this
+ * importer invented. A leading-zero code reads as its number: '0742' is 742, which is
+ * what that MCC is.
+ */
+function readMcc(c: Cell | undefined): number | undefined {
+  const text = cellText(c).trim();
+  if (!/^\d{4}$/u.test(text)) return undefined;
+  const mcc = Number(text);
+  return mcc === 0 ? undefined : mcc;
+}
+
+/**
  * The same cell, tagged with the convention its source declared. Each arm names its
  * own, at the one place that knows it, and an arm added to FeeSource without one is a
  * function that does not return.
@@ -1105,6 +1141,23 @@ async function mapAndStore(
   // importer invented
   const statedFeeCol = feeSource.kind === 'none' ? -1 : feeSource.col;
 
+  // Which cell states a merchant category code, feeSource's shape and for its reason.
+  // The sheet arm is 'none' because no preset declares an MCC column yet: both of this
+  // bank's CSV exports do print one, and neither is importable at all today - a
+  // CsvPresetMapping.mcc built here would be a field with no preset to read it.
+  const mccSource: PdfMcc = ((): PdfMcc => {
+    switch (parsed.kind) {
+      case 'pdf':
+        return parsed.mcc;
+      case 'sheet':
+        return { kind: 'none' };
+      default: {
+        const unreachable: never = parsed;
+        throw new Error(`unhandled parsed file: ${String(unreachable)}`);
+      }
+    }
+  })();
+
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
     throw new Error(
@@ -1210,6 +1263,12 @@ async function mapAndStore(
       .join(' ')
       .replace(/\s+/g, ' ');
     const currency = rowCurrency(row);
+    // One local, two uses, in one edit. The column and the argument to categorize have
+    // to be the same value: reclassifyAll recomputes the category from the stored mcc
+    // on every production path, so a row stored with a category no rule produces is one
+    // two sites disagree about - including for a caller of mapAndStore that does not
+    // reclassify, of which the test helper is already one.
+    const mcc = mccSource.kind === 'none' ? undefined : readMcc(row[mccSource.col]);
 
     accepted.push({
       tx: {
@@ -1219,7 +1278,8 @@ async function mapAndStore(
         currency,
         date: verdict.date,
         description,
-        category: categorize(undefined, description, verdict.amount),
+        mcc,
+        category: categorize(mcc, description, verdict.amount),
         fee,
       },
       stated: {

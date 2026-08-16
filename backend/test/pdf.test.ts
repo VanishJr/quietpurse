@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { categorize } from '../src/categorizer';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
@@ -258,7 +259,7 @@ describe('pdf: bytes to rows', () => {
     const record = imports.find((i) => i.id === staged.summary.importId)!;
     expect(record.sourceType).toBe('pdf');
     // the literal, not PDF_PARSER_VERSION: a symbol on both sides of this cannot fail
-    expect(record.parserVersion).toBe(6);
+    expect(record.parserVersion).toBe(7);
   });
 
   it('the amount column decides the sign, and the € decides the currency', async () => {
@@ -895,6 +896,7 @@ describe('pdf: the reconciliation gate', () => {
       template: 'revolut-ru',
       title: 'Revolut',
       fee: { kind: 'none' },
+      mcc: { kind: 'none' },
       balances: {
         openingCents: 0,
         closingCents: 3000,
@@ -1034,6 +1036,7 @@ const twin = (id: string, title: string): PdfTemplate => ({
   },
   rows: { kind: 'one-line' },
   fee: { kind: 'none' },
+  mcc: { kind: 'none' },
   balances: {
     scope: { kind: 'whole-document' },
     kind: 'two-lines',
@@ -1317,6 +1320,28 @@ const UA_HEADING_SIZE = 0.4;
  */
 const UA_SIZE = 2;
 
+/**
+ * The codes the two locale fixtures print, and every one of them is chosen against what
+ * its row's DESCRIPTION answers on its own:
+ *
+ * - `coffee` and `topUp` answer where the description answers `other`, so they are the
+ *   row's whole categorisation;
+ * - `ukPharmacy` DISAGREES with its description - "Аптека" reads health by keyword and
+ *   5411 reads food - which is the one shape that can tell "the MCC was consulted" from
+ *   "the description happened to agree";
+ * - `enPharmacy` agrees with its description, and is the control for that;
+ * - `enCoffee` and `enPharmacy` differ from the Ukrainian file's codes on the same two
+ *   rows, so a reader answering out of the fixture's own head rather than the document
+ *   cannot pass both locales.
+ */
+const UA_MCC = {
+  coffee: '5812',
+  topUp: '6536',
+  ukPharmacy: '5411',
+  enCoffee: '5814',
+  enPharmacy: '5912',
+} as const;
+
 const ukHeading = (y: number): PlacedText[] => [
   { x: UK.dateHeading, y, text: 'Дата i час', size: UA_HEADING_SIZE },
   { x: U.descriptionHeading, y, text: 'Деталі операції' },
@@ -1348,6 +1373,12 @@ const enHeading = (y: number): PlacedText[] => [
   { x: 233.867, y: y - 20.297, text: '(UAH)' },
 ];
 
+/**
+ * `mcc` is REQUIRED and its "none" is null, so every call site states a code on purpose -
+ * this used to hard-code '4789' on every row, and a reader answering 4789 for everything
+ * passed. No two rows of one locale share a code, and two rows differ between the locales:
+ * a reader off by a line reddens on the first, one that ignores the document on the second.
+ */
 const uaRow = (
   L: typeof UK | typeof EN,
   y: number,
@@ -1355,12 +1386,13 @@ const uaRow = (
   time: string,
   description: string,
   amount: string,
+  mcc: string | null,
   x: number = U.amount,
   tail?: string,
 ): PlacedText[] => [
   { x: L.date, y, text: date },
   { x: U.description, y, text: description, size: UA_SIZE },
-  { x: U.mcc, y, text: '4789', size: UA_SIZE },
+  ...(mcc === null ? [] : [{ x: U.mcc, y, text: mcc, size: UA_SIZE }]),
   { x, y, text: amount },
   { x: U.opAmount, y, text: '-1.00' },
   { x: U.running, y, text: '0.00' },
@@ -1399,13 +1431,13 @@ const ukStatement = (tag: string, closing = '1 624.25 UAH'): PlacedText[][] => [
     ...uaBalance(466.249, 'Сума витрат за період:', UK.grossOut, '575.75 UAH'),
     ...uaBalance(452.749, 'Сума зарахувань за період:', UK.grossIn, '1 200.00 UAH'),
     ...ukHeading(412.112),
-    ...uaRow(UK, 368.631, '28.07.2026', '02:16:38', 'Кавʼярня', '-500.25', U.amount, 'на Хрещатику'),
-    ...uaRow(UK, 341.081, '27.07.2026', '15:50:41', 'Зарахування', '1 200.00', U.amountWide),
+    ...uaRow(UK, 368.631, '28.07.2026', '02:16:38', 'Кавʼярня', '-500.25', UA_MCC.coffee, U.amount, 'на Хрещатику'),
+    ...uaRow(UK, 341.081, '27.07.2026', '15:50:41', 'Зарахування', '1 200.00', UA_MCC.topUp, U.amountWide),
     { x: U.running, y: 15, text: tag, size: UA_SIZE },
   ],
   [
     ...ukHeading(808.506),
-    ...uaRow(UK, 765.025, '26.07.2026', '13:19:38', 'Аптека', '-75.50', U.amountNarrow),
+    ...uaRow(UK, 765.025, '26.07.2026', '13:19:38', 'Аптека', '-75.50', UA_MCC.ukPharmacy, U.amountNarrow),
     ...ukFooter(),
   ],
 ];
@@ -1419,13 +1451,13 @@ const enStatement = (tag: string, closing = '1 624.25 UAH'): PlacedText[][] => [
     ...uaBalance(457.849, 'Amount of expenses for the period:', EN.grossOut, '575.75 UAH'),
     ...uaBalance(444.349, 'Amount of charges for the period:', EN.grossIn, '1 200.00 UAH'),
     ...enHeading(401.737),
-    ...uaRow(EN, 368.631, '28.07.2026', '02:16:38', 'Coffee', '-500.25', U.amount, 'on Khreshchatyk'),
-    ...uaRow(EN, 341.081, '27.07.2026', '15:50:41', 'Transfer', '1 200.00', U.amountWide),
+    ...uaRow(EN, 368.631, '28.07.2026', '02:16:38', 'Coffee', '-500.25', UA_MCC.enCoffee, U.amount, 'on Khreshchatyk'),
+    ...uaRow(EN, 341.081, '27.07.2026', '15:50:41', 'Transfer', '1 200.00', UA_MCC.topUp, U.amountWide),
     { x: U.running, y: 15, text: tag, size: UA_SIZE },
   ],
   [
     ...enHeading(806.531),
-    ...uaRow(EN, 765.025, '26.07.2026', '13:19:38', 'Pharmacy', '-75.50', U.amountNarrow),
+    ...uaRow(EN, 765.025, '26.07.2026', '13:19:38', 'Pharmacy', '-75.50', UA_MCC.enPharmacy, U.amountNarrow),
     ...enFooter(),
   ],
 ];
@@ -1511,6 +1543,55 @@ describe('pdf: the third layout', () => {
     }
   });
 
+  /**
+   * The transaction table's own windows, and deliberately NOT the balance box's.
+   *
+   * The box is a row of a different table: revolut-ru's `balances.opening` [250, 330) sits
+   * INSIDE its own description window [120, 330) and its `closing` [500, 596) past its last
+   * column, which pdf.ts:1105-1112 explains in its own words. Folding them in would redden
+   * this guard on the day it was written, about a layout nobody has measured wrong.
+   */
+  const transactionWindows = (
+    t: PdfTemplate,
+  ): { name: string; span: readonly [number, number] }[] => {
+    const columns = Object.entries(t.columns).map(([name, span]) => ({ name, span }));
+    return t.mcc.kind === 'column' ? [...columns, { name: 'mcc', span: t.mcc.span }] : columns;
+  };
+
+  /**
+   * I2, and the only holder of it that a template added tomorrow inherits. An overlapping
+   * description/MCC pair would put a bank's own identifier into the column the categoriser,
+   * the transfer detector and the export all read - row 38's defect, arriving from a data
+   * literal instead of from a drop list.
+   *
+   * The three counts under it are the non-vacuity literals, canvasabsent's idiom: a
+   * refactor that empties the iteration reddens them rather than passing over nothing.
+   */
+  it('every column window a template declares is disjoint from every other of its own', () => {
+    const overlaps: string[] = [];
+    let examined = 0;
+    let declaringMcc = 0;
+    for (const t of TEMPLATES) {
+      const windows = transactionWindows(t);
+      examined += windows.length;
+      if (t.mcc.kind === 'column') declaringMcc++;
+      for (let i = 0; i < windows.length; i++) {
+        for (let j = i + 1; j < windows.length; j++) {
+          const [a, b] = [windows[i], windows[j]];
+          if (a.span[0] < b.span[1] && b.span[0] < a.span[1]) {
+            overlaps.push(
+              `${t.id}: ${a.name} [${a.span}) overlaps ${b.name} [${b.span})`,
+            );
+          }
+        }
+      }
+    }
+    expect(overlaps).toEqual([]);
+    expect(TEMPLATES).toHaveLength(5);
+    expect(examined).toBe(18);
+    expect(declaringMcc).toBe(2);
+  });
+
   it('imports one inside a signed container, end to end', async () => {
     const imported = await importAndConfirm({
       accountId: await accountFor('Universal Wrapped', 'UAH'),
@@ -1566,6 +1647,141 @@ describe('pdf: the third layout', () => {
     await expect(importPdf('Universal Foreign Balance', pages, undefined, 'UAH')).rejects.toThrow(
       /this АТ «УНІВЕРСАЛ БАНК» statement's opening balance cell reads "1 000.00 USD" on its "Баланс на початок періоду:" line/,
     );
+  });
+
+  /**
+   * Imported and confirmed, then read back off the transactions table - not off the sheet.
+   * The MCC crosses parse, stage and confirm to reach a column, and a case reading the
+   * sheet would be green with any one of those three severed.
+   *
+   * Newest first, which is the order listTransactions answers in: 28.07, 27.07, 26.07.
+   */
+  const uaImported = async (
+    name: string,
+    pages: PlacedText[][],
+  ): Promise<{ description: string; mcc: number | undefined; category: string }[]> => {
+    const r = await importAndConfirm({
+      accountId: await accountFor(name, 'UAH'),
+      bytes: buildPdf(pages),
+    });
+    expect(r.inserted).toBe(3);
+    const rows = await listTransactions({ accountId: r.accountId, limit: 50 });
+    return rows.map((t) => ({ description: t.description, mcc: t.mcc, category: t.category }));
+  };
+
+  /** Every code item of a fixture, moved or rewritten in place. */
+  const withMcc = (
+    pages: PlacedText[][],
+    change: (t: PlacedText) => PlacedText | null,
+  ): PlacedText[][] =>
+    pages.map((page) =>
+      page.flatMap((t) => {
+        if (t.x !== U.mcc) return [t];
+        const moved = change(t);
+        return moved === null ? [] : [moved];
+      }),
+    );
+
+  it('each row carries the code its own line prints, in both locales', async () => {
+    expect(await uaImported('Universal Mcc Uk', ukStatement('mcc uk'))).toEqual([
+      { description: 'Кавʼярня на Хрещатику', mcc: 5812, category: 'food' },
+      { description: 'Зарахування', mcc: 6536, category: 'transfers' },
+      { description: 'Аптека', mcc: 5411, category: 'food' },
+    ]);
+    expect(await uaImported('Universal Mcc En', enStatement('mcc en'))).toEqual([
+      { description: 'Coffee on Khreshchatyk', mcc: 5814, category: 'food' },
+      { description: 'Transfer', mcc: 6536, category: 'transfers' },
+      { description: 'Pharmacy', mcc: 5912, category: 'health' },
+    ]);
+  });
+
+  /**
+   * Both halves of the import-time edit, on the one row whose two answers differ: the
+   * argument categorize was given, and the column the row is stored with. Severing either
+   * one alone reddens exactly one of the two assertions, which is what a check standing in
+   * for a structure has to be able to say.
+   */
+  it('the code decides the category the import stores, and is stored beside it', async () => {
+    // the control: this description on its own answers something else, so a green here
+    // cannot be the description agreeing by luck
+    expect(categorize(undefined, 'Аптека', -75.5)).toBe('health');
+
+    const rows = await uaImported('Universal Mcc Decides', ukStatement('mcc decides'));
+    const pharmacy = rows.find((r) => r.description === 'Аптека')!;
+    expect(pharmacy.category).toBe('food');
+    expect(pharmacy.mcc).toBe(5411);
+  });
+
+  it('a four-digit token left of the MCC window is description text and not a code', async () => {
+    const pages = withMcc(ukStatement('mcc left of the window'), (t) => ({ ...t, x: 189.5 }));
+    const rows = await uaImported('Universal Mcc Left', pages);
+    expect(rows.map((r) => r.mcc)).toEqual([undefined, undefined, undefined]);
+    // and the control that the tokens were drawn at all: the description column is where
+    // an item 0.5 left of the window belongs, and it says so
+    expect(rows.map((r) => r.description)).toEqual([
+      `Кавʼярня ${UA_MCC.coffee} на Хрещатику`,
+      `Зарахування ${UA_MCC.topUp}`,
+      `Аптека ${UA_MCC.ukPharmacy}`,
+    ]);
+  });
+
+  it("a code at the MCC window's own left edge is a code and not description text", async () => {
+    const pages = withMcc(ukStatement('mcc at the edge'), (t) => ({ ...t, x: 190 }));
+    const rows = await uaImported('Universal Mcc Edge', pages);
+    expect(rows.map((r) => r.mcc)).toEqual([5812, 6536, 5411]);
+    expect(rows.map((r) => r.description)).toEqual([
+      'Кавʼярня на Хрещатику',
+      'Зарахування',
+      'Аптека',
+    ]);
+  });
+
+  it('a row that prints no code imports, states none, and keeps the description’s answer', async () => {
+    const pages = withMcc(ukStatement('no mcc drawn'), () => null);
+    expect(await uaImported('Universal Mcc Absent', pages)).toEqual([
+      { description: 'Кавʼярня на Хрещатику', mcc: undefined, category: 'other' },
+      { description: 'Зарахування', mcc: undefined, category: 'other' },
+      { description: 'Аптека', mcc: undefined, category: 'health' },
+    ]);
+  });
+
+  it('a cell that is not four digits states no code, and the row still imports', async () => {
+    const pages = withMcc(ukStatement('short mcc'), (t) => ({ ...t, text: t.text.slice(0, 3) }));
+    const rows = await uaImported('Universal Mcc Short', pages);
+    // undefined and never 581: a reader doing Number(text) with no shape test stores the
+    // truncation as a code, and no gate anywhere can see that it is not one
+    expect(rows.map((r) => r.mcc)).toEqual([undefined, undefined, undefined]);
+    expect(rows.map((r) => r.category)).toEqual(['other', 'other', 'health']);
+  });
+
+  it('a cell reading 0000 states no code, and the row keeps the description’s answer', async () => {
+    const pages = withMcc(ukStatement('zero mcc'), (t) => ({ ...t, text: '0000' }));
+    const rows = await uaImported('Universal Mcc Zero', pages);
+    // undefined and never 0: 0 is a code no network assigned, and a reader storing it
+    // costs a fact column its meaning where nothing downstream can see the loss - the
+    // categories below are the descriptions' own answers either way, because categorize
+    // skips a falsy code
+    expect(rows.map((r) => r.mcc)).toEqual([undefined, undefined, undefined]);
+    expect(rows.map((r) => r.category)).toEqual(['other', 'other', 'health']);
+  });
+
+  it('a template declaring no MCC column reads none out of a document that prints one', async () => {
+    const uk = TEMPLATES.find((t) => t.id === 'universalbank-uk')!;
+    const bytes = buildPdf(ukStatement('template declares none'));
+    const declared = await readPdf(bytes, LIMITS, [uk]);
+    const none = await readPdf(bytes, LIMITS, [{ ...uk, mcc: { kind: 'none' } }]);
+
+    const col = declared.sheet.rows[0].indexOf('pdf:mcc');
+    expect(col).toBeGreaterThanOrEqual(0);
+    expect(declared.mcc).toEqual({ kind: 'column', col });
+    expect(declared.sheet.rows.slice(1).map((r) => r[col])).toEqual([
+      UA_MCC.coffee,
+      UA_MCC.topUp,
+      UA_MCC.ukPharmacy,
+    ]);
+
+    expect(none.mcc).toEqual({ kind: 'none' });
+    expect(none.sheet.rows.slice(1).map((r) => r[col])).toEqual([null, null, null]);
   });
 });
 
@@ -2169,6 +2385,7 @@ describe('pdf: what a template says about its gross totals', () => {
       template: st.template,
       title: st.title,
       fee: st.fee,
+      mcc: st.mcc,
       balances: st.balances,
     };
     const tx = (amount: number): NewTransaction => ({
@@ -2388,7 +2605,7 @@ describe('pdf: a statement inside a signed container', () => {
     expect(imported.inserted).toBe(3);
     const record = (await listImports()).imports.find((i) => i.id === imported.importId)!;
     expect(record.sourceType).toBe('pdf');
-    expect(record.parserVersion).toBe(6);
+    expect(record.parserVersion).toBe(7);
   });
 
   it('says a container whose document is broken looks like a PDF, not that it starts with one', async () => {
@@ -2619,6 +2836,7 @@ describe('the diagnostic budget', () => {
       template: 'revolut-ru',
       title: TITLE,
       fee: { kind: 'none' },
+      mcc: { kind: 'none' },
       balances: { openingCents: 1e22, closingCents: 1e22, gross, currency },
     });
     const refusalOf = (run: () => unknown): string => {

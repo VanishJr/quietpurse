@@ -23,7 +23,7 @@ import { loadPdfjs } from './pdfjsloader';
 import { Cell, Sheet, cellText } from './sheet';
 
 /** Bumped whenever a change here would parse an existing file differently. */
-export const PDF_PARSER_VERSION = 6;
+export const PDF_PARSER_VERSION = 7;
 
 export interface StatementBalances {
   openingCents: number;
@@ -41,10 +41,13 @@ export interface PdfStatement {
   title: string;
   columns: Partial<CsvMapping>;
   fee: PdfFee;
+  mcc: PdfMcc;
   balances: StatementBalances;
 }
 
 export type PdfFee = { kind: 'none' } | { kind: 'included'; col: number };
+
+export type PdfMcc = { kind: 'none' } | { kind: 'column'; col: number };
 
 const MIN_CHARS_PER_PAGE = 50;
 
@@ -208,6 +211,23 @@ type RowExtent =
  */
 type FeeLine = { kind: 'none' } | { kind: 'included'; label: string };
 
+/**
+ * Where this layout prints the merchant category code the card network assigned, if it
+ * prints one at all.
+ *
+ * FeeLine's mechanism and BalanceBox's argument: `none` is a named arm and the field is
+ * required, so a template author who could not find the column has to write the "no" on
+ * purpose. An optional `mcc?: Span` spells "this layout prints none" and "the author did
+ * not look" the same way, and the second is the one that ships a categorisation silently
+ * worse than it could be.
+ *
+ * What it costs when the span is wrong is silent by design and not by oversight: nothing
+ * about an MCC refuses, counts or reaches a gate, so no CHECK and no screen can see a
+ * span pointing at a neighbour - what holds it is the spans guard over TEMPLATES in
+ * pdf.test.ts.
+ */
+type MccColumn = { kind: 'none' } | { kind: 'column'; span: Span };
+
 type GrossSigns = 'signed' | 'magnitudes';
 
 type NoGrossTotals = { kind: 'not-printed' };
@@ -275,6 +295,7 @@ export type PdfTemplate = TableLayout & {
   amount: AmountFormat;
   rows: RowExtent;
   fee: FeeLine;
+  mcc: MccColumn;
   balances: BalanceBox;
 };
 
@@ -458,18 +479,19 @@ function dateReader(template: PdfTemplate, scoped: TextLine[]): DateReader {
  * from the template" silently vacuous. Prefixed, nothing but the override can resolve
  * them and dropping it produces a loud refusal.
  */
-const HEADER = ['pdf:date', 'pdf:amount', 'pdf:description', 'pdf:currency', 'pdf:fee'];
+const HEADER = ['pdf:date', 'pdf:amount', 'pdf:description', 'pdf:currency', 'pdf:fee', 'pdf:mcc'];
 const DATE = 0;
 const AMOUNT = 1;
 const DESCRIPTION = 2;
 const CURRENCY = 3;
 const FEE = 4;
+const MCC = 5;
 
 /**
- * The fee is deliberately absent: COLUMNS is a Partial<CsvMapping> and CsvMapping has no
- * `fee`. The mapper is told which cell carries one by PdfStatement.fee, which carries the
- * convention with it - a name here would be a column resolved twice and a convention
- * resolved nowhere.
+ * The fee and the MCC are deliberately absent: COLUMNS is a Partial<CsvMapping> and
+ * CsvMapping has neither. The mapper is told which cell carries one by PdfStatement.fee
+ * and PdfStatement.mcc, which carry the convention with them - a name here would be a
+ * column resolved twice and a convention resolved nowhere.
  */
 const COLUMNS: Partial<CsvMapping> = {
   date: HEADER[DATE],
@@ -493,6 +515,16 @@ function feeOf(fee: FeeLine): PdfFee {
       return { kind: 'none' };
     case 'included':
       return { kind: 'included', col: FEE };
+  }
+}
+
+/** feeOf's shape and for feeOf's reason: a third MccColumn arm has to be answered here. */
+function mccOf(mcc: MccColumn): PdfMcc {
+  switch (mcc.kind) {
+    case 'none':
+      return { kind: 'none' };
+    case 'column':
+      return { kind: 'column', col: MCC };
   }
 }
 
@@ -604,6 +636,24 @@ const cellAt = (line: TextLine, span: Span): string =>
     .filter((i) => i.x >= span[0] && i.x < span[1])
     .map((i) => i.text)
     .join(' ');
+
+/**
+ * The MCC cell of one dated line, exhaustively over the declaration rather than through a
+ * ternary, so a third MccColumn arm cannot be read here as "none".
+ *
+ * null and never '': an empty string is a cell that was read and was blank, null is a
+ * column the template never declared. readMcc answers undefined to both, so nothing
+ * downstream turns on it - the sheet simply does not assert something the template did
+ * not say.
+ */
+function mccCellOf(mcc: MccColumn, line: TextLine): Cell {
+  switch (mcc.kind) {
+    case 'none':
+      return null;
+    case 'column':
+      return cellAt(line, mcc.span);
+  }
+}
 
 interface ReadAmount {
   value: number | null;
@@ -858,6 +908,9 @@ function readRows(
     row[CURRENCY] = amount.currency;
     // null and never 0: the source stated no fee, which is not a fee of nothing
     row[FEE] = null;
+    // the dated line and nowhere else: the code belongs to the transaction, and a
+    // continuation or a fee line has no business supplying one
+    row[MCC] = mccCellOf(template.mcc, line);
     rows.push(row);
     open = { row, page: line.page, fee: false };
   }
@@ -1040,6 +1093,7 @@ export async function readPdf(
     title: template.title,
     columns: COLUMNS,
     fee: feeOf(template.fee),
+    mcc: mccOf(template.mcc),
     balances,
   };
 }
@@ -1091,6 +1145,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // "Комиссия:" is deliberately NOT in the keep list above and must not be added to
     // it: a fee line is read here and reaches no description.
     fee: { kind: 'included', label: 'Комиссия:' },
+    mcc: { kind: 'none' },
     balances: {
       scope: { kind: 'whole-document' },
       kind: 'one-line',
@@ -1153,6 +1208,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // on the same line goes with it, with nothing refusing and nothing noting it.
     rows: { kind: 'continuations', drop: ['IBAN:'] },
     fee: { kind: 'none' },
+    mcc: { kind: 'none' },
     balances: {
       scope: { kind: 'whole-document' },
       kind: 'two-lines',
@@ -1221,6 +1277,11 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       drop: ['Операційний директор', 'Вклади гарантуються', 'Детальна інформація'],
     },
     fee: { kind: 'none' },
+    // The whole gap between the two windows either side of it, and a literal rather than
+    // a reference to them for the reason the `gross` comment above gives. A tighter span
+    // is not the cautious choice - the column is centred, so a code of narrow glyphs sits
+    // right of one of wide glyphs, and the tight span is the one that misses it.
+    mcc: { kind: 'column', span: [190, 215] },
     balances: {
       scope: { kind: 'whole-document' },
       kind: 'two-lines',
@@ -1261,6 +1322,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       drop: ['Operating Director', 'Deposits are guaranteed', 'Details in the Reference'],
     },
     fee: { kind: 'none' },
+    // It is the code that carries this locale, not a merchant name - the description
+    // column prints the bank's own category label and no merchant at all.
+    mcc: { kind: 'column', span: [190, 215] },
     balances: {
       scope: { kind: 'whole-document' },
       kind: 'two-lines',
@@ -1347,6 +1411,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // can tell them apart, and the span is that rule.
     rows: { kind: 'continuations', drop: [] },
     fee: { kind: 'none' },
+    mcc: { kind: 'none' },
     balances: {
       scope: { kind: 'section', opens: 'Kontoauszug', closes: ['Rechnungsabschluss'] },
       kind: 'two-lines',
