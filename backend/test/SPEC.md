@@ -1,0 +1,57 @@
+# backend/test
+
+Status: reviewed
+
+What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
+`AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
+database it runs against, what jsdom cannot see, what skips on this platform — and the harness files
+carry their own reasoning in their headers. Nothing below repeats them.
+
+## What this module owns
+
+- **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
+  that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
+  before anything reads config, which is why the database modules there are dynamic imports;
+  `backend/test/helpers.ts` is the fixture layer.
+- **The checks that read another file as text** instead of importing it. They exist where an
+  invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
+  to agree with one in a package that shares no build with this one.
+
+## Where the boundary runs
+
+A check here may read any file in the repository, and some do. Every one of them resolves its root
+from `process.cwd()`, which is this package's root — locally, and in CI, where the backend jobs run
+from this directory (`.github/workflows/ci.yml`). `web/src/copy.test.ts` resolves from
+`import.meta.url` instead, and its own header states why: the root of its walk *is* the directory it
+sits in, where a check here reads a target that is not beside it and so needs a package root. The
+two idioms disagree on purpose; do not fix them into agreement.
+
+The checks that read source as text: `backend/test/refusal-set.test.ts` reads the PDF importer and
+requires every refusal it can throw to be composed where the budget case can measure it;
+`backend/test/error-budget.test.ts` reads the client's own cap, because the packages share no build
+and that file is the only place the two numbers meet; `backend/test/summary.test.ts` reads the data
+layer's summary block and refuses a further summary query written with the scoping helper's filters
+rather than through it; `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
+and `web/src/copy.test.ts` does the same thing from the other package. **Nothing holds that list** —
+a check added and not named here is named nowhere, which is the failure the hand-written lists below
+describe in another module.
+
+## The invariants no type and no test holds
+
+**A green default run does not prove a raw `sql` aggregate is read correctly.** PGlite answers a
+`COUNT` as a number and node-postgres answers it as a string, so an aggregate that reaches a caller
+without `Number()` around it is green on every local run and red only in the CI job that sets
+`TEST_DATABASE_URL`. A change that adds a raw `sql` aggregate is run against a real Postgres before
+it is believed.
+
+**`typescript` is declared in `backend/package.json` for the typecheck script, and a test in this
+directory also imports its compiler API as a library.** That import is deliberate rather than a
+transitive accident: an invariant about the *shape* of source has no other reader.
+
+**The lists that are kept equal to the schema by reading** live partly in this directory, and they
+are named and explained once, in `backend/src/db/SPEC.md`, rather than twice.
+
+**`backend/test/specs.test.ts` holds that a spec declares one of two statuses, and holds nothing
+about which one is true.** The flip out of draft follows the owner's review, and no check can tell
+whose hand typed the line: an agent writing the reviewed value is refused by nobody, so a status is
+evidence only to the extent that the person reading it knows where it came from.
