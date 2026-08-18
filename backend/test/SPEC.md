@@ -32,6 +32,9 @@ requires every refusal it can throw to be composed where the budget case can mea
 and that file is the only place the two numbers meet; `backend/test/summary.test.ts` reads the data
 layer's summary block and refuses a further summary query written with the scoping helper's filters
 rather than through it; `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
+`backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
+`node:path` and no other module and to run nothing at its top level, because a test that imported the
+entry point beside it would spawn servers and drop databases to reach one predicate;
 and `web/src/copy.test.ts` does the same thing from the other package. **Nothing holds that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
