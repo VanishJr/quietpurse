@@ -46,6 +46,7 @@ npm run typecheck     tsc --noEmit          both packages; backend runs it twice
 npm test              vitest run            both packages have this
 npm run dev           tsx watch src/index.ts
 npm run db:generate   drizzle-kit generate
+npm run check:stack   tsx scripts/check-stack.ts   up|status|down: a throwaway stack for a check
 cd web && npm run dev
 ```
 
