@@ -20,7 +20,7 @@ const ROOT = path.resolve(process.cwd(), '..');
  * Literal, not a glob: a glob asserts nothing about a spec that was deleted, which is
  * the one edit this whole file is powerless against if it enumerates by looking.
  */
-const SPEC_DIRS = ['backend/src/db', 'backend/test'];
+const SPEC_DIRS = ['backend/src/db', 'backend/src/providers', 'backend/test', 'web/src'];
 
 /** One list, because a path is a path: the citation clause and the existence clause read it. */
 const EXTENSIONS = [

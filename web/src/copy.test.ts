@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
  * in AnalyticsScreen.test.tsx and would be rewritten with the screen.
  *
  * SRC resolves from import.meta.url and not from process.cwd(), diverging on purpose
- * from the two cross-file checks in backend/test: those read a target that is not
+ * from the cross-file checks in backend/test: those read a target that is not
  * beside them, so they need a package root, whereas here the root of the walk is the
  * directory this file sits in.
  */
