@@ -33,6 +33,10 @@ export const logger = pino({
  * message a user sees. The walk is bounded and remembers what it has visited - a
  * wrapper whose cause points back at an ancestor is not exotic, and a log helper
  * that loops is a hang in the failure path.
+ *
+ * Not for a drizzle error: there the outer message is the whole statement with its
+ * bound parameters, so fxrates.ts keeps sqlReason(), which takes the innermost
+ * reason and its SQLSTATE alone.
  */
 export function causeChain(err: unknown, maxDepth = 8): string {
   const parts: string[] = [];

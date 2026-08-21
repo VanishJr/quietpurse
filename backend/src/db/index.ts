@@ -699,8 +699,7 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
 
 /**
  * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
- * summaries - otherwise we would be adding euros to hryvnias. After backfillBaseAmounts
- * (which runs on every recompute) there are normally no such rows.
+ * summaries - otherwise we would be adding euros to hryvnias.
  *
  * The workspace arm's clause, and scopeSql below is the only thing that may name it:
  * per account it drops a real transaction from its own account's total - an import
@@ -2322,13 +2321,16 @@ export async function listUnconvertedDays(): Promise<{ day: string; currency: st
 /**
  * Fills base_amount for every unconverted row of that day in that currency.
  * k - units of the base currency per unit of `currency` on that day.
- * The ::numeric cast matters: ROUND(double) is round-half-to-even in PG, while
- * ROUND(numeric) rounds half away from zero - the same as toCents() in money.ts.
+ * The cast is on the parameter, not on the product: amount_cents is an integer
+ * column, so `amount_cents * $1` types $1 as integer too and every fractional
+ * rate is rejected before a cast on the result can matter. ::numeric and not
+ * ::float8 - ROUND(numeric) is half away from zero, like toCents(); ROUND(double)
+ * is half to even.
  */
 export async function applyBaseRate(day: string, currency: string, k: number): Promise<number> {
   return execCount(sql`
     UPDATE transactions
-    SET base_amount_cents = CAST(ROUND((amount_cents * ${k})::numeric) AS integer), fx_rate = ${k}
+    SET base_amount_cents = CAST(ROUND(amount_cents * ${k}::numeric) AS integer), fx_rate = ${k}
     WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day} AND ${WS()}`);
 }
 
