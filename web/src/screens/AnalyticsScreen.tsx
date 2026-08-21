@@ -8,7 +8,7 @@
  * the shape of the last one" were all outside it, and none of them is exotic.
  *
  * So the screen holds no analysis of its own now. It starts empty, the reader makes the
- * charts they want, and each one is a `ChartSpec` remembered in this browser. Nothing
+ * charts they want, and each one is a `ChartSpec` the workspace keeps. Nothing
  * that the old screen could say has been lost: its yearly bars are a Column of Expenses
  * over 12 months, its donut and legend are a Donut split by category, its income-by-
  * source block is the same donut split by source — all of them reachable, and none of
@@ -26,6 +26,39 @@
  * reader is" fact in this app does since the navigation moved there: a chart is a place
  * you can be sent to and come Back from.
  *
+ * ---------------------------------------------------------------------------
+ * The list is the workspace's, and the server is where it is
+ *
+ * It was this browser's localStorage until row 052, which meant a chart did not follow
+ * the reader to their phone and `AGENTS.md`'s "no state that lives only in the browser"
+ * was crossed by the screen a reader spends the longest on. It is `GET`/`PUT
+ * /api/analytics/charts` now, and three states came with the move that a browser store
+ * never had: the list has not arrived, it could not be read, and the last change was
+ * not saved.
+ *
+ * Everything below turns on one rule. **The version and the list are one value**, and
+ * the version is only ever a number the server answered with. The route refuses a PUT
+ * whose expected version is not the current one, which is what stops two devices
+ * overwriting each other — and a client that keeps the two apart, or computes the next
+ * version itself, defeats that quietly rather than loudly: its writes are ACCEPTED, on
+ * top of work it never read. So `list` is one ref, `commit` is the only thing that
+ * writes it, and `ChartsVersion` is branded so no other number can reach the PUT.
+ *
+ * **One PUT at a time.** Two mutations a few hundred milliseconds apart — build a
+ * chart, rename it; duplicate, delete — would otherwise both carry the version the
+ * screen was holding, and the second would be refused for staleness by the FIRST one's
+ * write. The reader would be told the workspace changed elsewhere, and the thing that
+ * changed it would be their own previous click. `pump` sends one list at a time and
+ * later intents coalesce onto the latest.
+ *
+ * **A failed save does not take the work back off the screen.** The list stays, the
+ * notice says it is not saved, and Try again sends it. The one exception is the
+ * refusal for staleness, where the whole point is that what is on screen is not what
+ * the workspace holds: there the server's list replaces it and the reader is told, in
+ * words, that the change they just made is gone. Re-applying it would resurrect a
+ * chart another device deleted, which is the exact silent wrongness the version exists
+ * to prevent.
+ *
  * The dock is also the only place a chart is acted on. There is no "New chart" beside
  * the heading and no Edit/Duplicate/Delete over the plot: making a chart, choosing one
  * and changing one are all things you do to the LIST, and the list is one strip at the
@@ -41,14 +74,20 @@
  * unchanged. Deleting it along with the layout it happened to sit in would have been a
  * feature removed by accident.
  */
-import { useCallback, useEffect, useState } from 'react';
-import { api } from '../api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api, ChartList, ChartsStaleError } from '../api';
 import {
+  ChartEntry,
+  CHART_TITLE_MAX,
+  CHARTS_MAX,
   ChartSpec,
+  clearLegacyCharts,
+  entrySpecs,
   newChartId,
-  readCharts,
+  normaliseForSave,
+  Normalised,
+  readLegacyCharts,
   suggestedTitle,
-  writeCharts,
 } from '../analytics';
 import { BudgetsBlock } from '../components/BudgetsBlock';
 import { ChartCard } from '../components/ChartCard';
@@ -64,15 +103,238 @@ import { Account } from '../types';
  */
 const BUDGETS_TAB = '#budgets';
 
+/**
+ * What a refusal for staleness says here, which is not what the route says.
+ *
+ * The API's own sentence (`CHARTS_STALE`, backend/src/app.ts) ends "save again and it
+ * will go through", and on this surface there is nothing to save again: the change was
+ * not queued, it was dropped, because re-applying it over a list somebody else wrote
+ * is how a chart deleted on another device comes back. Telling a reader to press a
+ * button that cannot return their edit is worse than telling them nothing.
+ */
+const CHANGED_ELSEWHERE =
+  'These charts were changed somewhere else while you were working — what you see now is the current list, and the change you just made was not saved.';
+
+/** The list, or the two states a list that lives on a server can be in instead. */
+type ChartsState =
+  | { phase: 'loading' }
+  | { phase: 'failed'; message: string }
+  | { phase: 'ready'; list: ChartList };
+
+/** Why the last write did not land. `stale` is the one that replaced what was on screen. */
+interface SaveFailure {
+  stale: boolean;
+  message: string;
+}
+
+/**
+ * What the client changed on its way out, in one sentence, or nothing.
+ *
+ * An edit this client makes to the reader's own content is an edit the reader is told
+ * about — that is the whole difference between normalising and the silent substitution
+ * this row exists to end. The cap is first because it is the only one that loses a
+ * chart.
+ */
+function editsSentence(cleaned: Normalised): string | null {
+  const said: string[] = [];
+  const charts = (n: number) => `${n} chart${n === 1 ? '' : 's'}`;
+  const were = (n: number) => (n === 1 ? 'was' : 'were');
+  if (cleaned.droppedOverCap > 0)
+    said.push(
+      `${charts(cleaned.droppedOverCap)} could not be saved — this workspace holds at most ${CHARTS_MAX}.`,
+    );
+  if (cleaned.titlesShortened > 0)
+    said.push(
+      `${cleaned.titlesShortened} chart title${cleaned.titlesShortened === 1 ? '' : 's'} ${were(cleaned.titlesShortened)} shortened to the ${CHART_TITLE_MAX} characters this workspace stores.`,
+    );
+  if (cleaned.idsReminted > 0)
+    said.push(`${charts(cleaned.idsReminted)} ${were(cleaned.idsReminted)} given a new internal id.`);
+  if (cleaned.accountIdsTruncated > 0)
+    said.push(
+      `${charts(cleaned.accountIdsTruncated)} named an account this workspace cannot store in full.`,
+    );
+  return said.length === 0 ? null : said.join(' ');
+}
+
 export function AnalyticsScreen() {
-  const [charts, setCharts] = useState<ChartSpec[]>(readCharts);
+  const [charts, setCharts] = useState<ChartsState>({ phase: 'loading' });
   /** null while the list is in flight — `useChartData` needs the two apart. */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   /** open, and on what: a spec to edit, or null to build a new one. */
   const [wizard, setWizard] = useState<{ editing: ChartSpec | null } | null>(null);
+  const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
+  const [edits, setEdits] = useState<string | null>(null);
+  const [capReached, setCapReached] = useState(false);
 
   const { chart: urlChart } = useUrl();
+
+  /*
+   * The list and its version as ONE value, in a ref, mirrored into state.
+   *
+   * A ref because a click handler cannot read the state it set a moment ago, and the
+   * write path has to know the version it is at rather than the version of the render
+   * it was created in — which is the difference between two mutations producing
+   * ascending versions and producing the same one twice. `commit` is the only writer
+   * of either, so the mirror cannot drift from the store.
+   */
+  const list = useRef<ChartList | null>(null);
+  /** The latest list the reader wants saved. Later intents replace it rather than queue. */
+  const pending = useRef<ChartEntry[] | null>(null);
+  const inFlight = useRef(false);
+  /** The first PUT is the migration's, and the browser's copy is dropped when it lands. */
+  const migrating = useRef(false);
+
+  const commit = useCallback((next: ChartList) => {
+    list.current = next;
+    setCharts({ phase: 'ready', list: next });
+  }, []);
+
+  /**
+   * Sends the pending list, one at a time, until there is nothing left to send.
+   *
+   * `inFlight` is cleared in a `finally` over the whole loop and not on the success
+   * arm, and the difference is the worst failure this design can have: left set, every
+   * later mutation is committed to the screen and NOTHING is ever sent again, with no
+   * notice, because from the screen's side nothing failed.
+   */
+  const pump = useCallback(async (): Promise<void> => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      while (pending.current !== null && list.current !== null) {
+        const at = list.current;
+        const sending = pending.current;
+        pending.current = null;
+
+        const cleaned = normaliseForSave(sending);
+        setEdits(editsSentence(cleaned));
+        try {
+          const answered = await api.putCharts(at.version, cleaned.entries);
+          setSaveFailure(null);
+          if (migrating.current) {
+            migrating.current = false;
+            clearLegacyCharts();
+          }
+          /*
+           * The reader acted again while this was out, so their newer list wins over
+           * the server's echo of the older one — under the version the server has just
+           * answered with, which is the only version the next PUT may carry. It does
+           * mean a narrowing the server made is invisible on this path where the quiet
+           * one shows it.
+           */
+          commit(
+            pending.current === null
+              ? answered
+              : { version: answered.version, entries: (list.current ?? answered).entries },
+          );
+        } catch (e) {
+          if (e instanceof ChartsStaleError) {
+            // no merge, no re-apply, no retry at the new version: see the header
+            pending.current = null;
+            /*
+             * And the migration, if this was it, is over: the version is no longer 0,
+             * so `migrate` cannot fire again — left set, this flag would have some
+             * later write, carrying nothing of this browser's, delete the only copy of
+             * charts that were never saved anywhere.
+             */
+            migrating.current = false;
+            commit(e.current);
+            setSaveFailure({ stale: true, message: CHANGED_ELSEWHERE });
+            // it described the list that was just thrown away
+            setEdits(null);
+          } else {
+            // put it back so Try again has something to send, unless the reader has
+            // already replaced it with something newer
+            if (pending.current === null) pending.current = sending;
+            setSaveFailure({ stale: false, message: (e as Error).message });
+          }
+          /* Not another turn of the loop. A server that is down would be retried as
+             fast as it can refuse; a fresh press of Try again, or a fresh mutation, is
+             a fresh intent and pumps again. */
+          break;
+        }
+      }
+    } finally {
+      inFlight.current = false;
+    }
+  }, [commit]);
+
+  /**
+   * The reader's new list: on screen at once, on the wire as soon as the wire is free.
+   *
+   * Optimistic because a failed save must not take work off the screen that the reader
+   * can see and did not undo. Unreachable before the list has loaded — a mutation over
+   * a list nobody read is a save at version 0 over a workspace that has one.
+   */
+  const save = useCallback(
+    (next: ChartEntry[]) => {
+      const at = list.current;
+      if (at === null) return;
+      setCapReached(false);
+      commit({ version: at.version, entries: next });
+      pending.current = next;
+      void pump();
+    },
+    [commit, pump],
+  );
+
+  /**
+   * The migration, and the only place `finto.analytics.charts` is read.
+   *
+   * Both halves of the condition, out of the same response: a version above zero with
+   * an empty list is a workspace where somebody deliberately deleted every chart,
+   * possibly on another device, and uploading this browser's stale copy over it
+   * resurrects them and is indistinguishable from a bug. The key is cleared by `pump`
+   * when the PUT comes back 200 and never before, so a migration the server never took
+   * is tried again on the next mount.
+   *
+   * Except after a refusal for staleness, which is the one failure that ends the
+   * migration rather than deferring it: the workspace was written by somebody else
+   * while this PUT was out, its version is no longer 0, and both halves of the
+   * condition above are needed. The browser's copy is left where it is, unread from
+   * here ever again — the alternative is re-applying it over a list another device
+   * wrote, which is S4 and resurrects charts that were deliberately deleted.
+   */
+  const migrate = useCallback(
+    (loaded: ChartList) => {
+      if (loaded.version !== 0 || loaded.entries.length > 0) return;
+      const stored = readLegacyCharts();
+      if (stored.length === 0) return;
+      migrating.current = true;
+      save(stored.map((spec): ChartEntry => ({ known: true, spec })));
+    },
+    [save],
+  );
+
+  const loadCharts = useCallback(() => {
+    // paired with the guard on the answer below: without it a re-run would blank a
+    // screen that is holding a list and then refuse to fill it back in
+    if (list.current !== null) return;
+    setCharts({ phase: 'loading' });
+    api
+      .charts()
+      .then((loaded) => {
+        /*
+         * Only into a screen that is holding nothing. Two reads can be in flight at
+         * once — StrictMode double-invokes this effect in development, and Try again
+         * is a second call by hand — and a later answer to an earlier read carries an
+         * OLDER version. Committing it would lower the version the write path is
+         * holding, and the next save is then refused for staleness against a list
+         * nobody else touched. It would also run the migration twice.
+         */
+        if (list.current !== null) return;
+        commit(loaded);
+        migrate(loaded);
+      })
+      .catch((e: unknown) => {
+        // never a fall back to what this browser happens to hold: that is a list the
+        // reader would edit and then save at version 0, over the one they could not read
+        setCharts({ phase: 'failed', message: (e as Error).message });
+      });
+  }, [commit, migrate]);
+
+  useEffect(loadCharts, [loadCharts]);
 
   /*
    * The accounts are read once, here, and handed down. Every card would otherwise ask
@@ -105,30 +367,45 @@ export function AnalyticsScreen() {
 
   useEffect(loadAccounts, [loadAccounts]);
 
-  const save = (next: ChartSpec[]) => {
-    setCharts(next);
-    writeCharts(next);
-  };
+  const ready = charts.phase === 'ready';
+  const entries = ready ? charts.list.entries : [];
+  const specs = entrySpecs(entries);
+  const unreadable = entries.length - specs.length;
 
   /**
    * Which tab is showing.
    *
    * The URL is asked first and is not trusted: an id it carries may be a chart this
-   * browser does not have (a link from somebody else, or a chart since deleted), and
+   * workspace does not have (a link from somebody else, or a chart since deleted), and
    * showing the first chart under a URL naming another one is better than a blank
    * screen with a dock full of names. Falling back to the first chart rather than to
    * nothing is also what makes the workspace open where it was left in the common case
    * where the URL carries nothing at all.
+   *
+   * Nothing here writes the URL, which is what keeps an arrival at `?chart=c-b` from
+   * being rewritten to nothing while the list is still in flight: `specs` is empty
+   * then, the fallback is only READ, and the id is found the moment the list lands.
    */
-  const known = urlChart === BUDGETS_TAB || charts.some((c) => c.id === urlChart);
-  const activeId = known ? urlChart : (charts[0]?.id ?? null);
-  const active = charts.find((c) => c.id === activeId) ?? null;
+  const known = urlChart === BUDGETS_TAB || specs.some((c) => c.id === urlChart);
+  const activeId = known ? urlChart : (specs[0]?.id ?? null);
+  const active = specs.find((c) => c.id === activeId) ?? null;
 
   const show = (id: string) => setUrl({ chart: id });
 
+  /** Where a chart sits on the list, which is not where it sits among the drawable ones. */
+  const positionOf = (id: string) => entries.findIndex((e) => e.known && e.spec.id === id);
+
   const onSave = (spec: ChartSpec) => {
-    const exists = charts.some((c) => c.id === spec.id);
-    save(exists ? charts.map((c) => (c.id === spec.id ? spec : c)) : [...charts, spec]);
+    const at = positionOf(spec.id);
+    if (at < 0 && entries.length >= CHARTS_MAX) {
+      // refused here rather than by the route, which would refuse the WHOLE list and
+      // say so in a sentence about a limit the reader has no way to see
+      setCapReached(true);
+      setWizard(null);
+      return;
+    }
+    const entry: ChartEntry = { known: true, spec };
+    save(at < 0 ? [...entries, entry] : entries.map((e, i) => (i === at ? entry : e)));
     setWizard(null);
     /*
      * Only a chart that did not exist a moment ago. Every tab carries its own ⋮, so an
@@ -141,33 +418,39 @@ export function AnalyticsScreen() {
      * already at this URL, and `setUrl` treats a write that changes nothing as the
      * non-navigation it is.
      */
-    if (!exists) show(spec.id);
+    if (at < 0) show(spec.id);
   };
 
   /* Everything below is keyed on an id rather than on a spec: the dock is what calls
      them now, and a strip of tabs knows which chart it is pointing at and nothing else
      about it. */
   const edit = (id: string) => {
-    const spec = charts.find((c) => c.id === id);
+    const spec = specs.find((c) => c.id === id);
     if (spec) setWizard({ editing: spec });
   };
 
   const duplicate = (id: string) => {
-    const at = charts.findIndex((c) => c.id === id);
+    const at = positionOf(id);
     if (at < 0) return;
+    if (entries.length >= CHARTS_MAX) {
+      setCapReached(true);
+      return;
+    }
+    const source = entries[at];
+    if (!source.known) return;
     const copy: ChartSpec = {
-      ...charts[at],
+      ...source.spec,
       id: newChartId(),
-      title: `${charts[at].title} (copy)`,
+      title: `${source.spec.title} (copy)`,
     };
-    save([...charts.slice(0, at + 1), copy, ...charts.slice(at + 1)]);
+    save([...entries.slice(0, at + 1), { known: true, spec: copy }, ...entries.slice(at + 1)]);
     show(copy.id);
   };
 
   const remove = (id: string) => {
-    const at = charts.findIndex((c) => c.id === id);
+    const at = positionOf(id);
     if (at < 0) return;
-    const next = charts.filter((c) => c.id !== id);
+    const next = entries.filter((_, i) => i !== at);
     save(next);
     /*
      * Only when what went was what was showing. Every tab carries its own ⋮, so a
@@ -183,12 +466,14 @@ export function AnalyticsScreen() {
      * fallback above would put the reader on the first chart with no way to tell that
      * anything had happened.
      */
-    const neighbour = next[Math.min(at, next.length - 1)];
+    const left = entrySpecs(next);
+    const gone = specs.findIndex((c) => c.id === id);
+    const neighbour = left[Math.min(gone, left.length - 1)];
     setUrl({ chart: neighbour ? neighbour.id : null }, 'replace');
   };
 
   const tabs: DockTab[] = [
-    ...charts.map((c) => ({
+    ...specs.map((c) => ({
       id: c.id,
       label: c.title || suggestedTitle(c),
       glyph: c.kind,
@@ -209,9 +494,49 @@ export function AnalyticsScreen() {
         </p>
       )}
 
+      {/* everything the screen has to say about the LIST rather than about a chart:
+          announced, because none of it is where the reader was looking */}
+      <div aria-live="polite">
+        {saveFailure && (
+          <p className="error">
+            {saveFailure.stale ? saveFailure.message : `Not saved: ${saveFailure.message}`}{' '}
+            {!saveFailure.stale && (
+              <button className="btn-ghost btn-sm" onClick={() => void pump()}>
+                Try again
+              </button>
+            )}
+          </p>
+        )}
+        {capReached && (
+          <p className="error">
+            This workspace holds at most {CHARTS_MAX} charts. Delete one to make room.
+          </p>
+        )}
+        {edits && <p className="hint">{edits}</p>}
+        {unreadable > 0 && (
+          <p className="hint">
+            {unreadable === 1
+              ? '1 chart on this list was made by a newer version of Finto'
+              : `${unreadable} charts on this list were made by a newer version of Finto`}
+            . {unreadable === 1 ? 'It is kept' : 'They are kept'} and saved with the rest, and
+            cannot be shown here.
+          </p>
+        )}
+      </div>
+
       <div className="chart-stage">
         {activeId === BUDGETS_TAB ? (
+          // reachable whatever the chart list is doing: budgets are not one of them
           <BudgetsBlock />
+        ) : charts.phase === 'loading' ? (
+          <p className="empty">Reading your charts…</p>
+        ) : charts.phase === 'failed' ? (
+          <p className="error">
+            Error: {charts.message}{' '}
+            <button className="btn-ghost btn-sm" onClick={loadCharts}>
+              Try again
+            </button>
+          </p>
         ) : active ? (
           <ChartCard
             // the id, so switching tabs remounts rather than reusing the last chart's
@@ -234,6 +559,8 @@ export function AnalyticsScreen() {
         onEdit={edit}
         onDuplicate={duplicate}
         onDelete={remove}
+        // a list nobody has read yet is a list nothing may be added to or taken from
+        actionsDisabled={!ready}
       />
 
       <ChartWizard

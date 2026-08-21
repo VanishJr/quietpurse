@@ -1,5 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { ThemeProvider } from '../theme';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, BUDGETS } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
 import { MonthlySummary, Summary, Transaction } from '../types';
@@ -7,7 +10,8 @@ import { AnalyticsScreen } from './AnalyticsScreen';
 
 /**
  * The workspace: it starts with nothing on it, the wizard is what puts something there,
- * and what it put there survives a remount.
+ * and what it put there survives a remount — on the SERVER, since row 052, which is
+ * why `seed` below puts a list on a fake charts route rather than into localStorage.
  *
  * Nothing below asserts anything about a plot — not a sector, not a bar, not an axis.
  * recharts measures a 0x0 box in jsdom, so every assertion here is on the card's own
@@ -42,17 +46,79 @@ const MONTHS: MonthlySummary = {
   ],
 };
 
+/**
+ * The charts route as a workspace that actually remembers.
+ *
+ * The version moves on every accepted write and any other version is refused with the
+ * current list, exactly as `replaceCharts` does. A fixture that answered 200 to
+ * everything would make every case below about two devices vacuous — and this row's
+ * worst defect is two of the reader's OWN clicks colliding, which needs a route that
+ * can say no.
+ */
+let workspace: { version: number; charts: unknown[] } = { version: 0, charts: [] };
+
+/** Every PUT body the screen composed, in order. The subject of most of the new cases. */
+const puts: { version: number; charts: unknown[] }[] = [];
+
+beforeEach(() => {
+  workspace = { version: 0, charts: [] };
+  puts.length = 0;
+});
+
+const sent = (init?: RequestInit): { version: number; charts: unknown[] } =>
+  JSON.parse(String(init?.body)) as { version: number; charts: unknown[] };
+
+const acceptPut = (init?: RequestInit): Response => {
+  const body = sent(init);
+  puts.push(body);
+  if (body.version !== workspace.version)
+    return fail(409, { error: 'changed elsewhere', ...workspace });
+  workspace = { version: workspace.version + 1, charts: body.charts };
+  return ok({ ...workspace });
+};
+
+const CHART_ROUTES: Routes = {
+  'GET /api/analytics/charts': () => ok({ ...workspace }),
+  'PUT /api/analytics/charts': acceptPut,
+};
+
 /** The screen reads the account list on mount, for every chart on it at once. */
 const ROUTES: Routes = {
   'GET /api/accounts': () => ok(ACCOUNTS),
   'GET /api/summary/months': () => ok(MONTHS),
+  ...CHART_ROUTES,
 };
 
 const mount = () => renderThemed(<AnalyticsScreen />);
 
-/** A stored workspace, as `readCharts` will find it. */
-const seed = (charts: unknown[]) =>
+/**
+ * The shape `main.tsx` really mounts: StrictMode at the ROOT, which is what makes React
+ * double-invoke the effects under it. Nested inside another provider it does not, so a
+ * case that wraps only the screen reports the condition it meant to arrange as absent.
+ */
+const mountStrict = () =>
+  render(
+    <StrictMode>
+      <ThemeProvider>
+        <AnalyticsScreen />
+      </ThemeProvider>
+    </StrictMode>,
+  );
+
+/**
+ * A workspace the server already holds. The version is above zero because a real one
+ * with charts on it has been written to — and because version 0 with an empty list is
+ * the migration's trigger, which is a different fixture and has its own cases.
+ */
+const seed = (charts: unknown[], version = 3) => {
+  workspace = { version, charts };
+};
+
+/** What this browser held back when the charts were this browser's. */
+const seedLegacy = (charts: unknown[]) =>
   localStorage.setItem('finto.analytics.charts', JSON.stringify(charts));
+
+const LEGACY_KEY = 'finto.analytics.charts';
 
 const COLUMN_CHART = {
   id: 'c-one',
@@ -175,7 +241,7 @@ describe('building a chart', () => {
     mockFetch(ROUTES);
     mount();
     await screen.findByRole('heading', { name: 'Spending, monthly' });
-    expect(screen.getByText('Expenses, total')).toBeInTheDocument();
+    expect(await screen.findByText('Expenses, total')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Spending, monthly' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
@@ -222,7 +288,7 @@ describe('a chart that was already there', () => {
     mount();
 
     expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
-    expect(screen.getAllByText('1,200 EUR').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('1,200 EUR')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
 
@@ -360,14 +426,59 @@ describe('a chart that was already there', () => {
     expect(screen.getByRole('heading', { name: 'Rent' })).toBeInTheDocument();
   });
 
-  it('keeps the stored charts it can read and drops only the row it cannot', async () => {
-    // the shape a hand-edited store, or an older version of this app, can leave behind
-    seed([COLUMN_CHART, { id: 'c-two', kind: 'sunburst', range: '12m', title: 'Nope' }]);
+  /*
+   * A row this version cannot draw — the shape a newer Finto, or a hand-edited backup,
+   * leaves on a list this one then opens. Dropping it was right while the list was one
+   * browser's, and is a deletion from every device now that the list is the workspace's.
+   */
+  it('keeps a row it cannot read, says so, and carries it back out untouched', async () => {
+    const NEWER = { id: 'c-two', kind: 'sunburst', range: '12m', title: 'Nope' };
+    seed([COLUMN_CHART, NEWER]);
     mockFetch(ROUTES);
     mount();
 
     expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
+    // it gets no tab, because there is nothing here that could draw it...
     expect(screen.queryByRole('button', { name: 'Nope' })).not.toBeInTheDocument();
+    // ...and it is not silently absent either
+    expect(screen.getByText(/newer version of Finto/)).toBeInTheDocument();
+
+    // the assertion the old policy could not make: the reader's next save takes it with
+    // them, byte for byte and in the position it was in
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Spending, monthly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+
+    expect(puts[0].charts[2]).toEqual(NEWER);
+    expect(puts[0].charts).toHaveLength(3);
+  });
+
+  /*
+   * The mirror of the case above, and the one row where "kept and named" is the wrong
+   * answer. `analytics_charts.id` is notNull text with no CHECK, so a restored backup
+   * puts an empty one in the table; the route then refuses it. Unreadable, it is sent
+   * back exactly as it came and every save is refused with the whole list, for ever,
+   * under a hint that is false on both halves. Readable, it is re-minted like any other
+   * id the door would not take.
+   */
+  it('reads a chart whose id is empty, and re-mints it rather than bricking the list', async () => {
+    seed([{ ...COLUMN_CHART, id: '' }]);
+    mockFetch(ROUTES);
+    mount();
+
+    expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
+    // not "made by a newer version of Finto": this client can draw it, and saying it
+    // cannot is the half of the old behaviour a reader would have seen
+    expect(screen.queryByText(/newer version of Finto/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Spending, monthly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+
+    // what the route would have refused, and what it now gets instead
+    expect(puts[0].charts[0]).toMatchObject({ title: 'Spending, monthly' });
+    expect(String((puts[0].charts[0] as { id: unknown }).id)).toMatch(/^[A-Za-z0-9._~-]{1,64}$/);
+    expect(await screen.findByText(/1 chart was given a new internal id/)).toBeInTheDocument();
   });
 });
 
@@ -378,6 +489,10 @@ describe('a chart that was already there', () => {
  * A donut cannot draw that — a negative sector is not a thing — so the ring drops it,
  * and everything else on the card has to drop it too or the reader is given a total
  * that is a total of nothing on screen.
+ *
+ * Every case here and in the ranking describe below waits on a figure rather than on
+ * the card's heading: the card prints its name while it is still reading, and since row
+ * 052 it is only mounted once the chart list has arrived from the server.
  */
 describe('a period one category has gone negative in', () => {
   const DONUT = {
@@ -390,13 +505,14 @@ describe('a period one category has gone negative in', () => {
   const SHARE_ROUTES: Routes = {
     'GET /api/accounts': () => ok(ACCOUNTS),
     'GET /api/summary': () => ok(REFUNDED),
+    ...CHART_ROUTES,
   };
 
   it('prints the total of what was drawn, and not of what was dropped', async () => {
     seed([DONUT]);
     mockFetch(SHARE_ROUTES);
     const { container } = mount();
-    await screen.findByRole('heading', { name: 'Where it went' });
+    await screen.findByText('Total');
 
     // 500, not 500 + (−450): the figure above the plot and the figure in the middle of
     // the ring are the same number, because they are the same sum over the same slices
@@ -411,7 +527,7 @@ describe('a period one category has gone negative in', () => {
     seed([DONUT]);
     mockFetch(SHARE_ROUTES);
     const { container } = mount();
-    await screen.findByRole('heading', { name: 'Where it went' });
+    await screen.findByText('Total');
 
     // the ring and the total painted over it are one drawing, hidden as one piece: the
     // table below is what stands in for both, and announcing them reads it out twice
@@ -426,7 +542,7 @@ describe('a period one category has gone negative in', () => {
     seed([DONUT]);
     mockFetch(SHARE_ROUTES);
     const { container } = mount();
-    await screen.findByRole('heading', { name: 'Where it went' });
+    await screen.findByText('Total');
 
     // the hidden table is for the reader who gets no plot; a reader looking straight at
     // the ring needs the same names, and on a phone there is no hover to reach the
@@ -467,9 +583,13 @@ describe('the ranking, which draws the bars a donut cannot', () => {
 
   it('says nothing about the share when the total it would divide by is a net', async () => {
     seed([RANKING]);
-    mockFetch({ 'GET /api/accounts': () => ok(ACCOUNTS), 'GET /api/summary': () => ok(REFUNDED) });
+    mockFetch({
+      'GET /api/accounts': () => ok(ACCOUNTS),
+      'GET /api/summary': () => ok(REFUNDED),
+      ...CHART_ROUTES,
+    });
     const { container } = mount();
-    await screen.findByRole('heading', { name: 'Biggest first' });
+    await screen.findByText('Total');
 
     // the refunded bar is drawn here, which is what makes 50 the honest total...
     expect(container.querySelector('table')?.textContent).toContain('Shopping');
@@ -482,9 +602,13 @@ describe('the ranking, which draws the bars a donut cannot', () => {
 
   it('still divides by the total when the total really is the whole', async () => {
     seed([RANKING]);
-    mockFetch({ 'GET /api/accounts': () => ok(ACCOUNTS), 'GET /api/summary': () => ok(WHOLE) });
+    mockFetch({
+      'GET /api/accounts': () => ok(ACCOUNTS),
+      'GET /api/summary': () => ok(WHOLE),
+      ...CHART_ROUTES,
+    });
     mount();
-    await screen.findByRole('heading', { name: 'Biggest first' });
+    await screen.findByText('Total');
 
     // nothing is below zero, so every bar is part of the 800 and the figure means what
     // it says — a ranking is not silently a chart without percentages
@@ -530,6 +654,7 @@ describe('a comparative chart of one account', () => {
     mockFetch({
       'GET /api/accounts': () => ok(ACCOUNTS),
       'GET /api/transactions': () => ok([tx('t1', 'food', -500)]),
+      ...CHART_ROUTES,
     });
     mount();
     // the figures, and not the heading: a card prints its name while it is still
@@ -558,6 +683,7 @@ describe('a comparative chart of one account', () => {
       // food is spent, shopping is a refund with no purchase behind it in this window
       'GET /api/transactions': () =>
         ok([tx('t1', 'food', -500), tx('t2', 'shopping', 450, true)]),
+      ...CHART_ROUTES,
     });
     const { container } = mount();
     await screen.findByText('Total');
@@ -591,6 +717,7 @@ describe('when the account list cannot be read', () => {
       'GET /api/accounts': () =>
         calls++ === 0 ? fail(500, { error: 'the account list is unavailable' }) : ok(ACCOUNTS),
       'GET /api/transactions': () => ok([]),
+      ...CHART_ROUTES,
     });
     mount();
 
@@ -754,10 +881,13 @@ describe('typing a name while the screen behind the dialog is still loading', ()
       },
     });
     mount();
+    // the chart list, not the account list: New chart is dead until the workspace has
+    // been read, so a press before it lands would do nothing and prove nothing
+    await screen.findByText('Nothing plotted yet');
 
-    // opened while the list is still in flight, which is ordinary: nothing about the
-    // wizard waits for it
-    fireEvent.click(await screen.findByRole('button', { name: 'New chart' }));
+    // opened while the ACCOUNT list is still in flight, which is ordinary: nothing
+    // about the wizard waits for it
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
     fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
     const name = within(await screen.findByRole('dialog')).getByLabelText('Chart name');
     name.focus();
@@ -833,5 +963,526 @@ describe('moving along a strip too long for the row', () => {
 
     // most of the visible row, not all of it — see NUDGE_FRACTION
     expect(scrollBy).toHaveBeenCalledWith({ left: 240 });
+  });
+});
+
+/**
+ * The three states a list that lives on a server has and a list in localStorage never
+ * had: it has not arrived, it could not be read, and the last change was not saved.
+ *
+ * The first two are row 14's defect waiting to happen again — `OverviewScreen` gated
+ * its empty state on `length === 0 && !loading` and told the reader their accounts did
+ * not exist whenever the load failed. "Nothing plotted yet" is a claim about the
+ * reader's workspace, and it may only be made about a list somebody actually read.
+ */
+describe('a workspace that has not been read yet', () => {
+  it('claims nothing about it while the list is still in flight', async () => {
+    let land = () => {};
+    const landed = new Promise<void>((resolve) => {
+      land = () => resolve();
+    });
+    mockFetch({
+      ...ROUTES,
+      'GET /api/analytics/charts': async () => {
+        await landed;
+        return ok({ version: 0, charts: [] });
+      },
+    });
+    mount();
+
+    expect(await screen.findByText('Reading your charts…')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing plotted yet')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Build your first chart' })).not.toBeInTheDocument();
+    // and nothing may be added to a list nobody has read: a chart built here would be
+    // saved at version 0 over whatever the workspace turns out to hold
+    expect(screen.getByRole('button', { name: /New chart/ })).toBeDisabled();
+
+    land();
+
+    expect(await screen.findByText('Nothing plotted yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New chart/ })).toBeEnabled();
+  });
+
+  it('says the list could not be read, rather than that there is nothing on it', async () => {
+    let calls = 0;
+    mockFetch({
+      ...ROUTES,
+      'GET /api/analytics/charts': () =>
+        calls++ === 0
+          ? fail(500, { error: 'the charts could not be read' })
+          : ok({ version: 2, charts: [chart('c-a', 'Groceries')] }),
+    });
+    mount();
+
+    expect(await screen.findByText(/the charts could not be read/)).toBeInTheDocument();
+    expect(screen.queryByText('Nothing plotted yet')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New chart/ })).toBeDisabled();
+
+    // and never a fall back to what this browser happens to hold, which is a list the
+    // reader would edit and then save at version 0 over the one they could not read
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('heading', { name: 'Groceries' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /New chart/ })).toBeEnabled();
+  });
+
+  it('leaves Budgets reachable, which has nothing to do with the chart list', async () => {
+    mockFetch({
+      ...ROUTES,
+      'GET /api/budgets': () => ok(BUDGETS),
+      'GET /api/analytics/charts': () => fail(500, { error: 'the charts could not be read' }),
+    });
+    mount();
+    await screen.findByText(/the charts could not be read/);
+
+    // rendering no dock at all would hold to S9 and take a whole feature away with it
+    fireEvent.click(screen.getByRole('button', { name: 'Budgets' }));
+
+    expect(await screen.findByRole('heading', { name: 'Monthly budgets' })).toBeInTheDocument();
+  });
+
+  it('keeps the chart the reader arrived at, through a load that had not finished', async () => {
+    seed([chart('c-a', 'Groceries'), chart('c-b', 'Salary'), chart('c-c', 'Rent')], 2);
+    window.history.replaceState(null, '', '/?chart=c-b');
+    mockFetch(ROUTES);
+    mount();
+
+    // the list is empty while the GET is out, so the fallback to charts[0] is READ and
+    // never written: an arrival at a chart id must not be rewritten to the first chart
+    expect(await screen.findByRole('heading', { name: 'Salary' })).toBeInTheDocument();
+    expect(new URLSearchParams(window.location.search).get('chart')).toBe('c-b');
+  });
+});
+
+/**
+ * The write path, which is the whole of what keeps two devices — or two of the reader's
+ * own clicks — from overwriting each other.
+ */
+describe('what is sent, and when', () => {
+  it('sends nothing at all merely by being read', async () => {
+    seed([chart('c-a', 'Groceries')], 4);
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+    await screen.findByText('Expenses, total');
+
+    // the migration is a PUT fired by loading and it is not a contradiction of this:
+    // it fires only for a workspace at version 0 with nothing on it, which this is not
+    expect(callsTo('PUT /api/analytics/charts')).toBe(0);
+    expect(puts).toEqual([]);
+  });
+
+  it('never has two writes out at once, so two of the reader’s own clicks cannot collide', async () => {
+    seed([chart('c-a', 'Groceries'), chart('c-b', 'Salary')], 3);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    let first = true;
+    mockFetch({
+      ...ROUTES,
+      'PUT /api/analytics/charts': async (init) => {
+        const wait = first;
+        first = false;
+        if (wait) await held;
+        return acceptPut(init);
+      },
+    });
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Salary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(callsTo('PUT /api/analytics/charts')).toBe(1));
+
+    // the second mutation is made WHILE the first write is out, which is the only
+    // condition under which the version in the write path and the version in React
+    // state differ — two mutations either side of a settled write prove nothing
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(callsTo('PUT /api/analytics/charts')).toBe(1);
+
+    release();
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    // ascending and distinct: the second carries the version the FIRST one's answer
+    // gave it, and not the one the screen was holding when the reader clicked
+    expect(puts.map((p) => p.version)).toEqual([3, 4]);
+    expect(screen.queryByText(/changed somewhere else/)).not.toBeInTheDocument();
+    // and the reader's second action survived, rather than being undone by a message
+    // blaming another device
+    expect(screen.queryByRole('button', { name: 'Groceries' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Salary (copy)' })).toBeInTheDocument();
+  });
+
+  it('goes on saving after a write failed in a way nothing planned for', async () => {
+    seed([chart('c-a', 'Groceries'), chart('c-b', 'Salary')], 3);
+    mockFetch({
+      ...ROUTES,
+      // 200, and a body that is not a chart list. The throw lands past every arm
+      // written for a refusal, which is the arm that matters: a screen that leaves its
+      // one-write-at-a-time latch set here shows the reader every later change and
+      // sends none of them, with nothing on screen saying anything failed
+      'PUT /api/analytics/charts': (init) => {
+        puts.push(sent(init));
+        return ok({ nothing: 'like a chart list' });
+      },
+    });
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Salary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+  });
+
+  it('keeps the work on screen when a save did not land, and sends it again', async () => {
+    seed([chart('c-a', 'Groceries')], 3);
+    let down = true;
+    mockFetch({
+      ...ROUTES,
+      'PUT /api/analytics/charts': (init) => {
+        if (!down) return acceptPut(init);
+        puts.push(sent(init));
+        return fail(500, { error: 'the charts could not be saved' });
+      },
+    });
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+    expect(await screen.findByText(/Not saved: the charts could not be saved/)).toBeInTheDocument();
+    // reverting would throw away work the reader can see and did not undo
+    expect(screen.getByRole('button', { name: 'Groceries (copy)' })).toBeInTheDocument();
+
+    down = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1].charts).toHaveLength(2);
+    await waitFor(() => expect(screen.queryByText(/Not saved/)).not.toBeInTheDocument());
+  });
+
+  it('refuses to compose a hundred-and-first chart, rather than letting the route refuse the list', async () => {
+    seed(
+      Array.from({ length: 100 }, (_, i) => ({ ...COLUMN_CHART, id: `c-${i}`, title: `Chart ${i}` })),
+      5,
+    );
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 0' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Chart 0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+    // the route would refuse the WHOLE list, in a sentence about a limit the reader has
+    // no way to see
+    expect(await screen.findByText(/holds at most 100 charts/)).toBeInTheDocument();
+    expect(puts).toEqual([]);
+    expect(screen.queryByRole('button', { name: 'Chart 0 (copy)' })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * A refusal for staleness, which is the one failure where what is on screen is replaced
+ * rather than kept. Re-applying the reader's change at the new version would resurrect
+ * a chart another device deleted — the exact silent wrongness the version exists for.
+ */
+describe('a list changed on another device', () => {
+  it('shows the workspace’s own list and says the change was not saved', async () => {
+    seed([chart('c-a', 'Groceries')], 3);
+    mockFetch({
+      ...ROUTES,
+      'PUT /api/analytics/charts': (init) => {
+        puts.push(sent(init));
+        // the other device got there first, and the route answers with what it holds
+        return fail(409, { error: 'stale', version: 9, charts: [chart('c-z', 'Rent')] });
+      },
+    });
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+    expect(
+      await screen.findByText(/changed somewhere else while you were working/),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Rent' })).toBeInTheDocument();
+    // no merge, no re-apply — and no second attempt at the version the refusal carried
+    expect(screen.queryByRole('button', { name: 'Groceries (copy)' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Groceries' })).not.toBeInTheDocument();
+    await waitFor(() => expect(puts).toHaveLength(1));
+  });
+});
+
+/**
+ * The one-time move of what this browser was holding into the workspace, and the only
+ * remaining read of `finto.analytics.charts` anywhere in the client.
+ */
+describe('the browser copy this workspace has never seen', () => {
+  it('moves it to the server, then forgets it here', async () => {
+    seedLegacy([COLUMN_CHART]);
+    mockFetch(ROUTES);
+    mount();
+
+    expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ version: 0, charts: [COLUMN_CHART] });
+    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
+  });
+
+  it('leaves the browser copy where it is when the write did not land', async () => {
+    seedLegacy([COLUMN_CHART]);
+    mockFetch({
+      ...ROUTES,
+      'PUT /api/analytics/charts': (init) => {
+        puts.push(sent(init));
+        return fail(500, { error: 'the charts could not be saved' });
+      },
+    });
+    const first = mount();
+
+    expect(await screen.findByText(/the charts could not be saved/)).toBeInTheDocument();
+    expect(localStorage.getItem(LEGACY_KEY)).not.toBeNull();
+
+    // ...so the next mount tries again, and this time it lands
+    first.unmount();
+    mockFetch(ROUTES);
+    mount();
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
+  });
+
+  it('does not upload over a workspace somebody deliberately emptied', async () => {
+    seedLegacy([COLUMN_CHART]);
+    // no charts, but a version above zero: every chart was deleted, possibly on another
+    // device, and uploading this browser's stale copy resurrects them
+    seed([], 4);
+    mockFetch(ROUTES);
+    mount();
+
+    expect(await screen.findByText('Nothing plotted yet')).toBeInTheDocument();
+    expect(puts).toEqual([]);
+    expect(localStorage.getItem(LEGACY_KEY)).not.toBeNull();
+  });
+
+  /*
+   * The refusal is the one failure that ends the migration instead of deferring it: the
+   * workspace has a version above zero now, so it cannot be the trigger again. What must
+   * not happen is the browser's copy being thrown away later by a write that never
+   * carried a byte of it — the reader would lose charts that reached no server at all.
+   */
+  it('keeps the browser copy after a refusal, and a later write does not take it', async () => {
+    seedLegacy([{ ...COLUMN_CHART, title: 'x'.repeat(200) }]);
+    let refused = false;
+    mockFetch({
+      ...ROUTES,
+      'PUT /api/analytics/charts': (init) => {
+        puts.push(sent(init));
+        if (refused) return ok({ version: 10, charts: sent(init).charts });
+        refused = true;
+        // another device wrote while the migration was out
+        return fail(409, { error: 'stale', version: 9, charts: [chart('c-z', 'Rent')] });
+      },
+    });
+    mount();
+
+    await screen.findByText(/changed somewhere else while you were working/);
+    expect(localStorage.getItem(LEGACY_KEY)).not.toBeNull();
+    // the shortening it announced was of the list that has just been thrown away
+    expect(screen.queryByText(/shortened to the 120 characters/)).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Rent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1].version).toBe(9);
+    expect(await screen.findByRole('button', { name: 'Rent (copy)' })).toBeInTheDocument();
+    // the write that landed carried the other device's list, not this browser's
+    expect(localStorage.getItem(LEGACY_KEY)).not.toBeNull();
+  });
+});
+
+/**
+ * What the browser copy can hold and the route will not take.
+ *
+ * `parseChart` accepts an unbounded title, a repeated measure, an id containing any
+ * character and a list of any length; the route refuses all four, and it refuses the
+ * WHOLE list. A migration answered 400 leaves the reader looking at a workspace that
+ * will never save, for ever, over a chart they cannot see and did not create.
+ *
+ * Two assertions per bound and not one: a case AT the bound that goes through
+ * untouched, beside the case above it that is cut. One of them alone pins a
+ * relationship rather than a number.
+ */
+describe('a browser copy the route would refuse', () => {
+  const migrated = async (stored: unknown[]): Promise<Record<string, unknown>[]> => {
+    seedLegacy(stored);
+    mockFetch(ROUTES);
+    mount();
+    await waitFor(() => expect(puts).toHaveLength(1));
+    return puts[0].charts as Record<string, unknown>[];
+  };
+
+  it('sends a title at the bound whole and one above it cut to the bound', async () => {
+    const at = 'a'.repeat(120);
+    const charts = await migrated([
+      { ...COLUMN_CHART, id: 'c-at', title: at },
+      { ...COLUMN_CHART, id: 'c-over', title: 'b'.repeat(121) },
+    ]);
+
+    expect(charts[0].title).toBe(at);
+    expect(charts[1].title).toBe('b'.repeat(120));
+    // an edit this client makes to the reader's content is an edit they are told about
+    expect(await screen.findByText(/shortened to the 120 characters/)).toBeInTheDocument();
+  });
+
+  it('sends an id at the bound whole and re-mints one above it', async () => {
+    const at = 'c'.repeat(64);
+    const charts = await migrated([
+      { ...COLUMN_CHART, id: at },
+      { ...COLUMN_CHART, id: 'd'.repeat(65) },
+    ]);
+
+    expect(charts[0].id).toBe(at);
+    expect(charts[1].id).not.toBe('d'.repeat(65));
+    expect(String(charts[1].id)).toMatch(/^[A-Za-z0-9._~-]{1,64}$/);
+    // re-minted, never dropped: the id is opaque and only ?chart= reads it
+    expect(charts[1].title).toBe('Spending, monthly');
+  });
+
+  it('re-mints an id the URL could not carry unescaped', async () => {
+    const charts = await migrated([{ ...COLUMN_CHART, id: 'c one/two?three' }]);
+
+    expect(charts).toHaveLength(1);
+    expect(String(charts[0].id)).toMatch(/^[A-Za-z0-9._~-]+$/);
+  });
+
+  it('re-mints a repeated id, which the route refuses a whole list over', async () => {
+    const charts = await migrated([chart('c-same', 'One'), chart('c-same', 'Two')]);
+
+    expect(charts[0].id).toBe('c-same');
+    expect(charts[1].id).not.toBe('c-same');
+    expect(charts[1].title).toBe('Two');
+  });
+
+  it('drops a repeated measure and keeps the order of the rest', async () => {
+    const charts = await migrated([
+      { ...COLUMN_CHART, metrics: ['expense', 'expense', 'income'] },
+    ]);
+
+    expect(charts[0].metrics).toEqual(['expense', 'income']);
+  });
+
+  it('truncates an over-long accountId rather than nulling it', async () => {
+    const charts = await migrated([{ ...COLUMN_CHART, accountId: 'e'.repeat(70) }]);
+
+    // null is "every account together": one account's chart would become the whole
+    // workspace's, under its old title
+    expect(charts[0].accountId).toBe('e'.repeat(64));
+  });
+
+  it('sends a list at the cap whole', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ({
+      ...COLUMN_CHART,
+      id: `c-${i}`,
+      title: `Chart ${i}`,
+    }));
+    const charts = await migrated(many);
+
+    expect(charts).toHaveLength(100);
+    expect(screen.queryByText(/could not be saved/)).not.toBeInTheDocument();
+  });
+
+  it('sends the first hundred of a longer one and says how many it could not', async () => {
+    const many = Array.from({ length: 101 }, (_, i) => ({
+      ...COLUMN_CHART,
+      id: `c-${i}`,
+      title: `Chart ${i}`,
+    }));
+    const charts = await migrated(many);
+
+    // the cap is the one place a chart is lost, and the reader is told
+    expect(charts).toHaveLength(100);
+    expect(await screen.findByText(/1 chart could not be saved/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Two reads of the same list in flight at once, which is not hypothetical: `main.tsx`
+ * wraps the app in `React.StrictMode`, and StrictMode double-invokes every effect in
+ * development. Measured in a real browser on 052b's own check stack before it was held
+ * here — the migration ran twice and the workspace took two writes for one move.
+ *
+ * The cost of the second one is not the extra request. It is that a later answer to an
+ * EARLIER read carries the older version: committed, it lowers the version the write
+ * path is holding, and the reader's next save is refused for staleness against a list
+ * nobody else touched.
+ */
+describe('a second read of the same list', () => {
+  it('migrates once and writes once, however many times the effect runs', async () => {
+    seedLegacy([COLUMN_CHART]);
+    mockFetch(ROUTES);
+    mountStrict();
+
+    expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem(LEGACY_KEY)).toBeNull());
+    // the condition, asserted rather than assumed: the effect really did run twice
+    await waitFor(() => expect(callsTo('GET /api/analytics/charts')).toBe(2));
+
+    expect(puts).toHaveLength(1);
+    expect(workspace.version).toBe(1);
+  });
+
+  /*
+   * Two reads answering the same version prove nothing about this — the version cannot
+   * be lowered to itself. The condition is a read ISSUED before a write and ANSWERED
+   * after it, which is what the second effect run plus the migration compose all by
+   * themselves, and it is arranged here rather than hoped for.
+   */
+  it('does not lower the version a write has already moved on', async () => {
+    seedLegacy([COLUMN_CHART]);
+    let release = () => {};
+    const late = new Promise<void>((resolve) => {
+      release = () => resolve();
+    });
+    let reads = 0;
+    mockFetch({
+      ...ROUTES,
+      'GET /api/analytics/charts': async () => {
+        // what this read saw at the moment it was made, which is the whole point
+        const answer = { ...workspace };
+        if ((reads += 1) === 2) await late;
+        return ok(answer);
+      },
+    });
+    mountStrict();
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(workspace.version).toBe(1);
+
+    release();
+    await screen.findByRole('heading', { name: 'Spending, monthly' });
+    await waitFor(() => expect(reads).toBe(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Spending, monthly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+
+    await waitFor(() => expect(puts).toHaveLength(2));
+    // 1, not the 0 the late answer was carrying: a refusal here would name another
+    // device for a version this screen lowered itself
+    expect(puts[1].version).toBe(1);
+    expect(screen.queryByText(/changed somewhere else/)).not.toBeInTheDocument();
   });
 });

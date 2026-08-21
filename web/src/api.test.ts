@@ -159,6 +159,27 @@ describe('401 handling', () => {
     await expect(api.settings()).rejects.toBeInstanceOf(UnauthorizedError);
     expect(seen).not.toHaveBeenCalled();
   });
+
+  /*
+   * putCharts is the one call that leaves request(), because a 409 on that route
+   * carries the current list and refuse() would throw it away. Everything else about
+   * it still has to go through refuse - a session that expires with Analytics open
+   * would otherwise leave the reader on "Not saved: 401", with a Try again that can
+   * only re-refuse, instead of on the sign-in screen.
+   */
+  it('reaches the sign-in screen from a chart save too, not only from request()', async () => {
+    // the version is minted from a body the server sent, which is the only way to get
+    // one - the brand is what stops a number reaching the PUT
+    respondWith(JSON.stringify({ version: 4, charts: [] }), 200);
+    const { version } = await api.charts();
+
+    respondWith('', 401, false);
+    const seen = vi.fn();
+    const off = onUnauthorized(seen);
+    await expect(api.putCharts(version, [])).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(seen).toHaveBeenCalledTimes(1);
+    off();
+  });
 });
 
 /**

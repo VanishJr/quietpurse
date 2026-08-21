@@ -36,17 +36,23 @@ the `unit` project installs no stub at all.
 that crosses (`web/src/styles/tokens.css`); the bundles share the font and the palette and no code,
 which `web/vite.config.ts` says of the build. Nothing holds it from this side.
 
-**State that lives only in the browser, named crossing by crossing.** The chart list is written to
-`localStorage` by `analytics.ts`, and nothing in `api.ts` calls the server's charts routes, so the
-list does not follow a person to a second device — the server side is there, `backend/src/app.ts`
-answering `GET` and `PUT /api/analytics/charts` over a table declared in `backend/src/db/schema.ts`,
-so this is a client that does not call an endpoint rather than an endpoint that does not exist. The
-theme choice is written to `localStorage` by `theme.tsx`; the screen, the account, the open panel
-and the selected chart live in the query string and are read back through `url.ts`. `AGENTS.md`'s
-*Platforms* states that no state lives only in the browser, because the REST API and not this app is
-the contract a mobile client has to reach. **Nothing enforces that, and each of those is a crossing
-of it as the code stands today.** Which of them a product wants to keep — a theme is per-device by
-design where a chart list is a person's content — is an open question this document does not answer.
+**State that lives only in the browser, named crossing by crossing.** The theme choice is written to
+`localStorage` by `theme.tsx`; the screen, the account, the open panel and the selected chart live in
+the query string and are read back through `url.ts`. `AGENTS.md`'s *Platforms* states that no state
+lives only in the browser, because the REST API and not this app is the contract a mobile client has
+to reach. **Nothing enforces that, and each of those is a crossing of it as the code stands today.**
+Which of them a product wants to keep — a theme is per-device by design — is an open question this
+document does not answer.
+
+**The chart list was the third of them and is not one any more.** It is read and written through
+`api.ts` against the routes `backend/src/app.ts` serves over the table in `backend/src/db/schema.ts`,
+so a chart follows a person to a second device. What is left of the browser copy is one read: the key
+`analytics.ts` used to write is migrated into the workspace on the first load that finds one which has
+never saved, and removed once that write is answered. Two things came with the move that are the
+client's alone and are held by cases in `web/src/screens/AnalyticsScreen.test.tsx` rather than by any
+type: **one write is in flight at a time**, because two mutations sharing a version make the reader's
+own second click look like another device's; and **a row this version cannot read is kept and sent
+back**, because dropping it deletes it from every device the next time anything is saved.
 
 **`copy.test.ts` is this package's own check that reads source as text**, and it resolves its root
 differently from the checks in the other package on purpose. `backend/test/SPEC.md` states that rule

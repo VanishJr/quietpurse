@@ -116,6 +116,13 @@ export const accountMonths = (
 
 export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
 
+/**
+ * A workspace that has never saved a chart, which is what the charts route answers a
+ * fresh account with. Version 0 AND an empty list is also the migration's trigger, so
+ * a test that seeds `finto.analytics.charts` against this fixture gets a PUT.
+ */
+export const NO_CHARTS = { version: 0, charts: [] };
+
 export const INDEPENDENCE: Independence = {
   baseCurrency: 'EUR',
   settings: {

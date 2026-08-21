@@ -23,6 +23,7 @@ import {
   TransferRule,
 } from './types';
 import { Category } from './categories';
+import { ChartEntry, chartEntry, entryWire } from './analytics';
 
 /**
  * Backend address.
@@ -198,6 +199,69 @@ const json = (method: string, body?: unknown): RequestInit => ({
   headers: { 'Content-Type': 'application/json' },
   body: body === undefined ? undefined : JSON.stringify(body),
 });
+
+/**
+ * The version the workspace's chart list was read at, and the only thing a PUT may
+ * send as its expected value.
+ *
+ * Branded, and minted in one place: `parseChartList`, over a body the server sent.
+ * The route's compare-and-swap is the whole of what keeps two devices from silently
+ * overwriting each other, and it is defeated by arithmetic — `version + 1` after an
+ * optimistic save is right until one PUT is refused, and from then on every save
+ * lands on somebody else's list and is answered 200. `putCharts(3, …)` does not
+ * compile, so there is no arithmetic here because there is no number here.
+ */
+declare const chartsVersion: unique symbol;
+export type ChartsVersion = number & { readonly [chartsVersion]: true };
+
+export interface ChartList {
+  version: ChartsVersion;
+  /** Array position is the dock's order, kept for rows this client cannot read. */
+  entries: ChartEntry[];
+}
+
+/**
+ * A PUT refused because the workspace moved on. It carries the current list because
+ * the route puts it in the refusal body — a client refused for staleness re-syncs
+ * from the refusal and never asks a second time to find out what happened.
+ *
+ * The server's own sentence is not carried: it ends "save again and it will go
+ * through", which is true of a client that re-applies and false of this one. The
+ * screen says what happened on this surface.
+ */
+export class ChartsStaleError extends Error {
+  constructor(readonly current: ChartList) {
+    super('the chart list changed elsewhere');
+    this.name = 'ChartsStaleError';
+  }
+}
+
+/**
+ * `{ version, charts }`, or a throw. One parser for both bodies the route answers
+ * with: the 200 and the 409 carry the same pair, which is what makes re-syncing from
+ * a refusal the same code as reading.
+ *
+ * It throws where a client fallback is normally a sentence, for `scoped()`'s reason:
+ * a body that is not this shape is not a new client against an old server, it is what
+ * this repository produces the day the route changes shape — and a fallback here
+ * composes the next PUT at a version nobody answered.
+ */
+function parseChartList(body: unknown): ChartList {
+  const o = body as { version?: unknown; charts?: unknown } | null;
+  if (
+    typeof o !== 'object' ||
+    o === null ||
+    !Number.isSafeInteger(o.version) ||
+    (o.version as number) < 0 ||
+    !Array.isArray(o.charts)
+  ) {
+    throw new Error('the API answered something other than a chart list for the saved charts');
+  }
+  return {
+    version: o.version as ChartsVersion,
+    entries: (o.charts as unknown[]).map(chartEntry),
+  };
+}
 
 export interface SessionUser {
   id: string;
@@ -752,6 +816,30 @@ export const api = {
       `/api/imports/${encodeURIComponent(id)}/document`,
       json('DELETE'),
     ),
+
+  /** The workspace's saved charts, and the version they were read at. */
+  charts: async (): Promise<ChartList> =>
+    parseChartList(await request<unknown>('/api/analytics/charts')),
+
+  /**
+   * The whole list at the version it was read at, or a refusal.
+   *
+   * Not through `request<T>`, which is the one call here that could not be: `refuse`
+   * reads `{ error }` and throws the rest of the body away, and the rest of a 409 on
+   * this route is the current version and the current list — put there by the route
+   * so that a stale client does not have to ask again. Everything else still goes
+   * through `refuse`, so a 401 here notifies the same listeners every other call does
+   * and a session that expires with Analytics open reaches the sign-in screen.
+   */
+  putCharts: async (version: ChartsVersion, entries: ChartEntry[]): Promise<ChartList> => {
+    const res = await fetch(`${API_BASE}/api/analytics/charts`, {
+      ...json('PUT', { version, charts: entries.map(entryWire) }),
+      credentials: 'include',
+    });
+    if (res.status === 409) throw new ChartsStaleError(parseChartList(await res.json()));
+    if (!res.ok) await refuse(res);
+    return parseChartList(await res.json());
+  },
 
   /**
    * Every transaction, account and setting as readable JSON. Not a disaster-recovery

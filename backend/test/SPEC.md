@@ -29,7 +29,11 @@ two idioms disagree on purpose; do not fix them into agreement.
 The checks that read source as text: `backend/test/refusal-set.test.ts` reads the PDF importer and
 requires every refusal it can throw to be composed where the budget case can measure it;
 `backend/test/error-budget.test.ts` reads the client's own cap, because the packages share no build
-and that file is the only place the two numbers meet; `backend/test/summary.test.ts` reads the data
+and that file is the only place the two numbers meet; `backend/test/charts-door.test.ts` reads the
+client's chart model for the same reason and holds it EQUAL to the charts route's four vocabularies,
+four length bounds and id charset rather than merely within them, because the route refuses a whole
+list and a client narrower than the door substitutes a chart the reader did not ask for while one
+wider than it composes a list nobody can save; `backend/test/summary.test.ts` reads the data
 layer's summary block and refuses a further summary query written with the scoping helper's filters
 rather than through it; `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
 `backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name

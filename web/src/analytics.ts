@@ -572,14 +572,34 @@ export function suggestedTitle(
 // ---------------------------------------------------------------------------
 
 /**
- * The charts live in localStorage and nowhere else.
+ * The charts are the workspace's, kept on the server and read back through
+ * `GET`/`PUT /api/analytics/charts`. They follow the reader to a second device, and
+ * the tab strip is still the saved state — there is no save button, every change to
+ * the list is a write.
  *
- * There is no endpoint for them, and inventing one is a server change — which this
- * tree does not make. So they are this browser's: they do not follow the account to a
- * second device, and nothing here pretends otherwise. Written on every change rather
- * than on a save button, because the tab strip IS the saved state.
+ * They lived in localStorage and nowhere else until row 052. The key is read once
+ * more, by the migration in `AnalyticsScreen`, and written by nothing: after that
+ * read it is removed, and the only copy of a chart is the one the server holds.
+ *
+ * What is here rather than in `api.ts` is what the route's door is made of — the
+ * bounds it refuses past and the shape a stored object has to have — because both
+ * are facts about a chart rather than about a request.
  */
-const STORAGE_KEY = 'finto.analytics.charts';
+const LEGACY_KEY = 'finto.analytics.charts';
+
+/**
+ * The four lengths the charts route refuses past.
+ *
+ * EQUAL to the server's own (`backend/src/db/index.ts`), never merely under them: a
+ * client bound below the server's silently truncates what the server would have
+ * taken, and one above it composes a list the server refuses whole — and the refusal
+ * is of the WHOLE list, so one over-long title is a workspace that never saves again.
+ * `backend/test/charts-door.test.ts` reads this file as source and holds the pair.
+ */
+export const CHARTS_MAX = 100;
+export const CHART_TITLE_MAX = 120;
+export const CHART_ID_MAX = 64;
+export const CHART_ACCOUNT_ID_MAX = 64;
 
 const KINDS = new Set<string>(CHART_KINDS.map((k) => k.key));
 const METRIC_KEYS = new Set<string>(METRICS.map((m) => m.key));
@@ -589,16 +609,26 @@ const RANGE_KEYS = new Set<string>(RANGES.map((r) => r.key));
 /**
  * One stored object, checked field by field, or null.
  *
- * Everything here was written by an older version of this file or by hand in a
- * devtools console, so none of it can be trusted into a `ChartSpec` on the strength of
- * having parsed. A row that fails is dropped and the rest are kept: losing one chart
- * to a shape nobody recognises is a smaller loss than an empty workspace, and a throw
- * here would take the whole screen down on first paint.
+ * Nothing that arrives here can be trusted into a `ChartSpec` on the strength of
+ * having parsed: it was written by an older version of this file, by a hand-edited
+ * backup, or by a version of the app whose vocabulary is wider than this one's. A
+ * throw would take the whole screen down on first paint, so a shape this version does
+ * not recognise answers null — and `chartEntry` below is what decides what happens to
+ * it, which is no longer "it is dropped".
  */
 function parseChart(raw: unknown): ChartSpec | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
-  if (typeof o.id !== 'string' || o.id === '') return null;
+  /*
+   * An empty id is READ rather than refused, unlike every other field here. `id` is
+   * `notNull` text with no CHECK behind it, so `restoreBackup` lets `''` into the table
+   * and the next GET carries it out — and it is the only shape a stored row can take
+   * that this parser could refuse while the route still refuses to take it back. Refused
+   * here it would be unreadable, therefore never re-minted, therefore sent back as it
+   * came and refused with the WHOLE list: a workspace that never saves again. Read, it
+   * fails `ID_SHAPE` in `normaliseForSave` exactly as `a b/c` does and is re-minted.
+   */
+  if (typeof o.id !== 'string') return null;
   if (typeof o.kind !== 'string' || !KINDS.has(o.kind)) return null;
   if (typeof o.range !== 'string' || !RANGE_KEYS.has(o.range)) return null;
   if (typeof o.title !== 'string') return null;
@@ -629,12 +659,134 @@ function parseChart(raw: unknown): ChartSpec | null {
   };
 }
 
-export function readCharts(): ChartSpec[] {
+/**
+ * One position on the saved list: a chart this client can draw, or one it cannot.
+ *
+ * The second arm is not a defensive nicety. `parseChart`'s "drop the row" policy was
+ * right while the list was one browser's — the loss was that browser's. The list is
+ * the workspace's now, so a row this version cannot read, dropped here, is carried
+ * out of the next PUT and **deleted from every device**, by a client that never
+ * showed it to anybody. It is kept where it was, sent back verbatim, and named on
+ * screen instead.
+ */
+export type ChartEntry = { known: true; spec: ChartSpec } | { known: false; raw: unknown };
+
+export const chartEntry = (raw: unknown): ChartEntry => {
+  const spec = parseChart(raw);
+  return spec === null ? { known: false, raw } : { known: true, spec };
+};
+
+/** What goes on the wire for one position — the spec, or the row as it arrived. */
+export const entryWire = (entry: ChartEntry): unknown => (entry.known ? entry.spec : entry.raw);
+
+/** The charts that can be drawn, in list order. The dock is built from these. */
+export const entrySpecs = (entries: ChartEntry[]): ChartSpec[] =>
+  entries.flatMap((e) => (e.known ? [e.spec] : []));
+
+/** The id `chartSchema` accepts: the URL names a chart by it, unescaped. */
+const ID_SHAPE = /^[A-Za-z0-9._~-]+$/;
+
+/** What `normaliseForSave` had to change, so the screen can say so. */
+export interface Normalised {
+  entries: ChartEntry[];
+  /** Past `CHARTS_MAX`, so not sent at all — the one place a chart is lost. */
+  droppedOverCap: number;
+  titlesShortened: number;
+  idsReminted: number;
+  accountIdsTruncated: number;
+}
+
+const rawId = (raw: unknown): string | null => {
+  const id = (raw as { id?: unknown } | null)?.id;
+  return typeof id === 'string' ? id : null;
+};
+
+/**
+ * The list, cut to what the route will take.
+ *
+ * Every save goes through this and not only the migration, because the door is wider
+ * on the way in than on the way out: `restoreBackup` type-checks a column and cannot
+ * see a zod schema, so a 5 000-character title reaches the table, comes back on the
+ * next GET, and — untouched — fails `CHART_TITLE_MAX` on the way back out. That
+ * refuses the reader's WHOLE list, for ever, over a title they never typed. Cutting
+ * it is an edit to their content and is the smaller harm, which is why the caller
+ * says out loud what was cut.
+ *
+ * Nothing is dropped except past the cap. An id that is illegal, over-long or
+ * repeated is re-minted rather than deleted: the id is opaque, only `?chart=` reads
+ * it, and the URL already falls back when it names a chart that is not there. An
+ * over-long `accountId` is truncated rather than nulled — over 64 characters it names
+ * no account either way and the card says so, where nulling it would turn one
+ * account's chart into the whole workspace's under its old title.
+ *
+ * The cut counts unreadable rows too. The server counts them, so a client that
+ * trimmed only what it can read would compose a list of 101 and be refused whole.
+ */
+export function normaliseForSave(entries: ChartEntry[]): Normalised {
+  const kept = entries.slice(0, CHARTS_MAX);
+  // the unreadable rows' ids are claimed up front: they are not re-minted (nothing
+  // here may rewrite a row it cannot read), so a readable row must give way to them
+  const seen = new Set<string>();
+  for (const entry of kept) {
+    if (entry.known) continue;
+    const id = rawId(entry.raw);
+    if (id !== null) seen.add(id);
+  }
+
+  let titlesShortened = 0;
+  let idsReminted = 0;
+  let accountIdsTruncated = 0;
+
+  const out = kept.map((entry): ChartEntry => {
+    if (!entry.known) return entry;
+    const spec = entry.spec;
+
+    let id = spec.id;
+    if (id.length > CHART_ID_MAX || !ID_SHAPE.test(id) || seen.has(id)) {
+      id = newChartId();
+      idsReminted++;
+    }
+    seen.add(id);
+
+    let title = spec.title;
+    if (title.length > CHART_TITLE_MAX) {
+      title = title.slice(0, CHART_TITLE_MAX);
+      titlesShortened++;
+    }
+
+    let accountId = spec.accountId;
+    if (accountId !== null && accountId.length > CHART_ACCOUNT_ID_MAX) {
+      accountId = accountId.slice(0, CHART_ACCOUNT_ID_MAX);
+      accountIdsTruncated++;
+    }
+
+    /* Uncounted, unlike the three above: the vocabulary is closed and the chips are
+       toggles, so a repeated measure is not something a reader composed and draws
+       identically once it is gone. The route refuses it all the same. */
+    const metrics = [...new Set(spec.metrics)];
+
+    return { known: true, spec: { ...spec, id, title, accountId, metrics } };
+  });
+
+  return {
+    entries: out,
+    droppedOverCap: entries.length - kept.length,
+    titlesShortened,
+    idsReminted,
+    accountIdsTruncated,
+  };
+}
+
+/**
+ * What this browser saved back when the charts were this browser's. Read once, by the
+ * migration, and only for a workspace that has never saved — see `AnalyticsScreen`.
+ */
+export function readLegacyCharts(): ChartSpec[] {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(LEGACY_KEY);
   } catch {
-    // a browser with storage denied has no charts, and that is a whole answer
+    // a browser with storage denied has nothing to migrate, and that is a whole answer
     return [];
   }
   if (!raw) return [];
@@ -647,12 +799,12 @@ export function readCharts(): ChartSpec[] {
   }
 }
 
-export function writeCharts(charts: ChartSpec[]): void {
+/** Called only after the migration's PUT came back 200. */
+export function clearLegacyCharts(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(charts));
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
-    // quota, or storage denied. The workspace on screen is still correct for this
-    // session; the alternative is a modal about a browser setting nobody chose.
+    // storage denied: there was nothing to read either, so there is nothing to clear
   }
 }
 
