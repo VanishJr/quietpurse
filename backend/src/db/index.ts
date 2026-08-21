@@ -2528,6 +2528,18 @@ export const CHART_ID_MAX = 64;
 export const CHART_ACCOUNT_ID_MAX = 64;
 
 /**
+ * The characters a chart id may be made of: the URL names a chart by it, unescaped.
+ *
+ * Here rather than inside `chartSchema` so that it sits with the four bounds, which is
+ * where `backend/test/charts-door.test.ts` looks for the things the client has to
+ * compose against. The client keeps its own copy and cannot import this one - the two
+ * packages share no build - so a narrowing here that the client does not follow means
+ * the client keeps sending an id the route now refuses, and the route refuses the
+ * WHOLE list over it.
+ */
+export const CHART_ID_SHAPE = /^[A-Za-z0-9._~-]+$/;
+
+/**
  * One saved chart, as both routes carry it: the dock's order is array position, so `sort`
  * is not on this type. It IS in a downloaded backup, which selects the columns rather than
  * this shape - say "not on the charts API", never "never leaves".

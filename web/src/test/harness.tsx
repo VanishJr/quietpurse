@@ -8,6 +8,7 @@ import {
   INDEPENDENCE,
   RECURRING,
   TRANSACTIONS,
+  NO_CHARTS,
   TRANSFER_RULES,
   USER,
 } from './fixtures';
@@ -151,12 +152,19 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * Overview fires both; the guard then names the missing one, which is this mechanism
  * working rather than a hole in it. And Analytics, which used to ask for the workspace
  * summary and the budgets on first paint, is a workspace of charts the reader builds
- * now: an empty one asks for nothing but the account list. /api/summary is a chart that
- * exists, /api/budgets the Budgets tab once it is the one showing.
+ * now: an empty one asks for the account list and for the charts themselves, which are
+ * the workspace's and live on the server. /api/summary is a chart that exists,
+ * /api/budgets the Budgets tab once it is the one showing.
+ *
+ * The charts row answers version 0 with nothing in it, which is deliberately the one
+ * response that would set the migration going - and it stays quiet here because there
+ * is nothing in localStorage to migrate. A test that seeds that key gets a PUT, which
+ * is the migration and not a first-paint request.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/auth/get-session': () => ok({ user: USER }),
   'GET /api/accounts': () => ok(ACCOUNTS),
+  'GET /api/analytics/charts': () => ok(NO_CHARTS),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
   'GET /api/recurring': () => ok(RECURRING),
   'GET /api/income-sources': () => ok(INCOME_SOURCES),

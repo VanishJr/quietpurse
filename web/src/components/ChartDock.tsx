@@ -92,6 +92,21 @@ interface Props {
   onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
+  /**
+   * The list is not the reader's to change yet — it has not arrived, or it could not
+   * be read. Choosing a tab still works, because the pinned one is not a chart and
+   * has nothing to do with the list: rendering no dock at all would take Budgets away
+   * every time the charts are slow. `New chart` is disabled rather than absent, and
+   * the ⋮ goes, because a control that is there and does nothing is what a disabled
+   * one exists to avoid.
+   *
+   * The ⋮ half is the contract rather than the delivered behaviour: the one caller
+   * passes an empty `tabs` whenever this is true, so no unpinned tab is on screen to
+   * carry one. It is here because a prop called `actionsDisabled` that left an action
+   * enabled would be a lie in its own name — do not write a test for a state this app
+   * cannot reach, and do not delete it as dead.
+   */
+  actionsDisabled?: boolean;
 }
 
 /** The gap between the ⋮ and the popover above it. */
@@ -142,7 +157,16 @@ interface Reach {
 
 const NO_REACH: Reach = { overflows: false, before: false, after: false };
 
-export function ChartDock({ tabs, activeId, onSelect, onNew, onEdit, onDuplicate, onDelete }: Props) {
+export function ChartDock({
+  tabs,
+  activeId,
+  onSelect,
+  onNew,
+  onEdit,
+  onDuplicate,
+  onDelete,
+  actionsDisabled = false,
+}: Props) {
   const [popover, setPopover] = useState<Popover | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   /** The ⋮ the popover came from, so closing it puts the keyboard back where it was. */
@@ -369,7 +393,7 @@ export function ChartDock({ tabs, activeId, onSelect, onNew, onEdit, onDuplicate
                 <span className="dock-name">{t.label}</span>
               </button>
 
-              {!t.pinned && (
+              {!t.pinned && !actionsDisabled && (
                 <button
                   className="dock-more"
                   aria-expanded={popover?.id === t.id}
@@ -395,7 +419,7 @@ export function ChartDock({ tabs, activeId, onSelect, onNew, onEdit, onDuplicate
         </button>
       )}
 
-      <button className="dock-new" ref={newRef} onClick={onNew}>
+      <button className="dock-new" ref={newRef} onClick={onNew} disabled={actionsDisabled}>
         <span aria-hidden="true">＋</span> New chart
       </button>
 

@@ -45,11 +45,11 @@ export interface AppUrl {
    * Which chart the Analytics workspace is showing — a chart id this module knows
    * nothing about, like the three above.
    *
-   * The charts themselves are this browser's (localStorage; see `analytics.ts`), so a
-   * link carrying one of these ids opens the right tab for the person who made it and
-   * falls back to the first chart for anybody else. That is the same promise `account`
-   * already makes: the URL says where the reader was, and the reader's own data says
-   * whether that place still exists.
+   * The charts themselves belong to the workspace and are read from the server (see
+   * `analytics.ts`), so a link carrying one of these ids opens the right tab on every
+   * device the person who made it signs in on, and falls back to the first chart for
+   * anybody else. That is the same promise `account` already makes: the URL says where
+   * the reader was, and the reader's own data says whether that place still exists.
    */
   chart: string | null;
 }

@@ -19,6 +19,7 @@ import {
   CHART_ACCOUNT_ID_MAX,
   CHART_BREAKDOWNS,
   CHART_ID_MAX,
+  CHART_ID_SHAPE,
   CHART_KINDS,
   CHART_METRICS,
   CHART_RANGES,
@@ -737,9 +738,9 @@ const chartSchema = z.strictObject({
     .string({ error: 'chart id must be text' })
     .min(1, { error: 'chart id must not be empty' })
     .max(CHART_ID_MAX, { error: `chart id must be at most ${CHART_ID_MAX} characters` })
-    // the id is the client's and the URL names a chart by it, so it may carry
-    // nothing that would have to be escaped to get there
-    .regex(/^[A-Za-z0-9._~-]+$/, {
+    // the shape is beside the four bounds in db/, where the client's copy of it is
+    // held against this one
+    .regex(CHART_ID_SHAPE, {
       error: 'chart id may contain only letters, digits, and . _ ~ -',
     }),
   kind: z.enum(CHART_KINDS, { error: `chart kind must be one of: ${CHART_KINDS.join(', ')}` }),

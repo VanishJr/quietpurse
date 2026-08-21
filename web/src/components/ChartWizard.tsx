@@ -33,6 +33,7 @@ import {
   Breakdown,
   ChartKind,
   CHART_KINDS,
+  CHART_TITLE_MAX,
   ChartSpec,
   blankChart,
   chartKind,
@@ -357,6 +358,11 @@ function DetailStep({
             <input
               className="input"
               value={draft.title}
+              /* the door's own bound, at the keyboard. `normaliseForSave` would cut
+                 the 121st character on the way out instead, which is a word going
+                 missing from a tab later where this is a keystroke not appearing
+                 under the caret */
+              maxLength={CHART_TITLE_MAX}
               onChange={(e) => onName(e.target.value)}
               placeholder={suggestedTitle(draft, accountName)}
               aria-label="Chart name"
