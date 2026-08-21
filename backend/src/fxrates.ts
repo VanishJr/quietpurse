@@ -162,10 +162,26 @@ export async function resolveRate(day: string, from: string, to: string): Promis
 }
 
 /**
+ * drizzle wraps every driver error in a DrizzleQueryError whose message is the SQL
+ * and the bound parameters; the reason is one `cause` deeper. ROADMAP row 70 lost a
+ * week to that sentence being logged as if it were the diagnosis.
+ * Not causeChain() from logger.ts: the whole chain leads with the statement and every
+ * bound parameter, which is the noise this exists to drop.
+ */
+function sqlReason(e: unknown): string {
+  const c = (e as { cause?: { message?: string; code?: string } })?.cause;
+  const msg = c?.message ?? (e as Error).message;
+  return c?.code ? `[${c.code}] ${msg}` : msg;
+}
+
+/**
  * Fills in base_amount for every transaction that doesn't have one yet.
  * Idempotent and cheap once everything is converted (a single SELECT).
- * Network errors don't fail the call: the rows stay NULL and are picked up on the
- * next recompute (after every sync and at startup).
+ * Neither a network error nor a failed write fails the call: those rows stay NULL
+ * and are picked up on the next recompute (after every sync and at startup).
+ * The fetch and the write are caught apart so that the wording of one can never
+ * describe the other - a whole account went unconverted for months behind a line
+ * that said the rate had not been fetched.
  * @returns how many rows got a base_amount
  */
 export async function backfillBaseAmounts(
@@ -177,26 +193,38 @@ export async function backfillBaseAmounts(
   const keys = await listUnconvertedDays();
   if (keys.length === 0) return done;
 
-  log(`converting to ${base}: days needing a rate: ${keys.length}...`);
-  let failures = 0;
+  // counted in rates rather than days: a key is a (day, currency) pair, so one date
+  // carrying two currencies needs two, and all three summary lines use that unit
+  log(`converting to ${base}: rates needed: ${keys.length}...`);
+  let ratesApplied = 0;
+  let attempted = 0;
   for (const { day, currency } of keys) {
+    attempted++;
+    let k: number | null;
     try {
-      const k = await resolveRate(day, currency, base);
-      if (k === null || k === 0) {
-        failures++;
-        log(`rate ${currency} -> ${base} on ${day}: no provider returned one`);
-        continue;
-      }
-      done += await applyBaseRate(day, currency, k);
+      k = await resolveRate(day, currency, base);
     } catch (e) {
-      failures++;
-      log(`rate ${currency} on ${day} not fetched: ${(e as Error).message}`);
+      log(`rate ${currency} on ${day} not fetched: ${sqlReason(e)}`);
       // a network error is almost certainly global - don't bother the providers with the rest
+      log(`stopping: ${keys.length - attempted} of ${keys.length} rates were not tried this run`);
       break;
     }
+    if (k === null || k === 0) {
+      log(`rate ${currency} -> ${base} on ${day}: no provider returned one`);
+      continue;
+    }
+    try {
+      done += await applyBaseRate(day, currency, k);
+      ratesApplied++;
+    } catch (e) {
+      // local to one day's rows (an amount whose product overruns an integer, say),
+      // so the remaining days still get converted
+      log(`base_amount for ${currency} on ${day} not written: ${sqlReason(e)}`);
+    }
   }
-  if (failures > 0) {
-    log(`rows still without a rate: ${failures} (will be picked up on the next recompute)`);
+  const left = keys.length - ratesApplied;
+  if (left > 0) {
+    log(`rates left unapplied: ${left} of ${keys.length} (picked up on the next recompute)`);
   }
   log(`transactions converted: ${done}`);
   return done;
