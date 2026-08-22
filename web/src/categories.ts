@@ -1,4 +1,4 @@
-import { CategoryRuleCounts } from './types';
+import { CategoryRuleCounts, CategorySummary } from './types';
 
 /**
  * Category dictionary: the API returns stable slugs, the human-readable names
@@ -46,6 +46,28 @@ export type Category = (typeof CATEGORIES)[number];
 
 /** Category label; an unknown slug (or a free-form item label) is returned as-is. */
 export const categoryLabel = (slug: string): string => CATEGORY_LABELS[slug] ?? slug;
+
+/** A category as the Overview's ring draws it: the summary, plus the name a person reads. */
+export interface SpendSector extends CategorySummary {
+  label: string;
+}
+
+/**
+ * The sectors of the Overview's ring.
+ *
+ * Only the positive categories: a refund can push one below zero — the purchase it
+ * reverses was in an earlier month — and there is no such thing as a negative sector.
+ * That is also why the figure in the hole is the month's expense total and not the sum
+ * of these; `SpendingByCategory.tsx`'s header is where that is settled.
+ *
+ * The labelling is here rather than in the component because recharts looks `nameKey`
+ * up on the datum and never checks it: a ring whose sectors carry only the slug prints
+ * `food` at the reader when they point at one, and nothing but a case can say so.
+ */
+export const spendSectors = (spend: CategorySummary[]): SpendSector[] =>
+  spend
+    .filter((c) => c.total > 0)
+    .map((c) => ({ ...c, label: categoryLabel(c.category) }));
 
 const PATTERN_DISPLAY_MAX = 80;
 

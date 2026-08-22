@@ -532,6 +532,15 @@ const metricLabel = (m: Metric): string => METRICS.find((d) => d.key === m)?.lab
 const breakdownLabel = (b: Breakdown): string =>
   BREAKDOWNS.find((d) => d.key === b)?.label ?? b;
 
+/**
+ * What a ranking's bars are called when a reader points at one. A ranking has no
+ * single `metric` — it is one breakdown's rows — so the word comes from the breakdown,
+ * out of the same `METRICS` vocabulary every other series in this file is named from.
+ * Without a name recharts prints the series' `dataKey` instead: `value : 1,082 EUR`.
+ */
+export const rankingSeriesName = (b: Breakdown): string =>
+  metricLabel(b === 'expense-categories' ? 'expense' : 'income');
+
 /** A list a person reads: "Income", "Income and Expenses", "Income, Expenses and Net". */
 export function joinWords(words: string[]): string {
   if (words.length <= 1) return words[0] ?? '';

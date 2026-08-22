@@ -42,9 +42,10 @@
  * needs. `categoryColorOnPanel` is that rule, and it is the same rule
  * `--c-on-ground-*` already follows.
  */
-import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { toCents } from '../accounts';
-import { categoryLabel } from '../categories';
+import { categoryLabel, spendSectors } from '../categories';
+import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
 import { CategorySummary } from '../types';
@@ -81,7 +82,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
      residue — which is how a tail that is exactly nothing came to be 2e-13 */
   const restTotal =
     (toCents(total) - top.reduce((sum, c) => sum + toCents(c.total), 0)) / 100;
-  const sectors = spend.filter((c) => c.total > 0);
+  const sectors = spendSectors(spend);
 
   /** A share of nothing is not 0%, it is not a share — so nothing is printed. */
   const share = (value: number): string | null =>
@@ -110,7 +111,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                 <Pie
                   data={sectors}
                   dataKey="total"
-                  nameKey="category"
+                  nameKey="label"
                   innerRadius="66%"
                   outerRadius="100%"
                   stroke={ink.panel}
@@ -121,6 +122,11 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                     <Cell key={c.category} fill={categoryColorOnPanel(c.category)} />
                   ))}
                 </Pie>
+                {/* the `panel` ground, and it is not decoration: this card's fill IS
+                    `brand` in dark mode, which is what the other two charts paint their
+                    tooltip in. It answers for the readers who have a pointer — the
+                    legend below still names the top three for the ones who have not. */}
+                <Tooltip {...tooltipProps(ink, 'panel', tooltipMoney(currency))} />
               </PieChart>
             </ResponsiveContainer>
             <div className="donut-center">

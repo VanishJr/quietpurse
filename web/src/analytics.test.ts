@@ -4,6 +4,7 @@ import {
   compareShares,
   positiveShares,
   priorBoundsOf,
+  rankingSeriesName,
   rangeDef,
   seriesFromMonths,
   seriesFromTransactions,
@@ -247,5 +248,16 @@ describe('what a chart is called', () => {
     );
     // ...and "All accounts" is the ordinary case, which says nothing
     expect(suggestedTitle(spec, 'Sparkasse Giro')).toBe('Income and Expenses · 6 months');
+  });
+
+  /*
+   * The ranking's bars have no measure of their own to be named by, and what a reader
+   * sees when they point at one is this word. It is the same Income/Expenses the rest
+   * of the file is named from and never a third one.
+   */
+  it('names a ranking’s bars for the side of the ledger its rows are', () => {
+    expect(rankingSeriesName('expense-categories')).toBe('Expenses');
+    expect(rankingSeriesName('income-categories')).toBe('Income');
+    expect(rankingSeriesName('income-sources')).toBe('Income');
   });
 });
