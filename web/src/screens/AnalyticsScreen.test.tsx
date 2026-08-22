@@ -3,9 +3,18 @@ import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { ThemeProvider } from '../theme';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACCOUNTS, BUDGETS } from '../test/fixtures';
-import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
-import { MonthlySummary, Summary, Transaction } from '../types';
+import { ACCOUNTS, accountMonths, accountSummary, BUDGETS, SUMMARY } from '../test/fixtures';
+import {
+  askedFor,
+  fail,
+  mockFetch,
+  ok,
+  renderThemed,
+  requests,
+  requestUrls,
+  Routes,
+} from '../test/harness';
+import { MonthlySummary, Summary } from '../types';
 import { AnalyticsScreen } from './AnalyticsScreen';
 
 /**
@@ -82,10 +91,35 @@ const CHART_ROUTES: Routes = {
   'PUT /api/analytics/charts': acceptPut,
 };
 
+/**
+ * The account arm of the same two endpoints, built around the id the request named.
+ *
+ * One route serves a workspace chart and a per-account one, because `keyOf` drops the
+ * query string, and `askedFor` is what tells the two apart. A body about any OTHER
+ * account is refused by api.ts, which is that check working rather than a hole here.
+ *
+ * The figures are not the workspace's, and `months` is not empty. Both matter: a card
+ * drawing 4,000 and 1,200 would pass whichever arm answered it, and the fixture's
+ * default of no months at all draws a full axis of zero ticks — which is exactly the
+ * shape this row exists to remove.
+ */
+const accountMonthsBody = (url?: string) =>
+  accountMonths(askedFor(url), {
+    months: [{ month: thisMonth(), income: 2500, expense: 700, net: 1800 }],
+  });
+
+const accountSummaryBody = (url?: string) =>
+  accountSummary(askedFor(url), {
+    totals: { income: 2500, expense: 700 },
+    byCategory: [{ category: 'food', total: 700 }],
+    incomeByCategory: [{ category: 'salary', total: 2500 }],
+  });
+
 /** The screen reads the account list on mount, for every chart on it at once. */
 const ROUTES: Routes = {
   'GET /api/accounts': () => ok(ACCOUNTS),
-  'GET /api/summary/months': () => ok(MONTHS),
+  'GET /api/summary/months': (_init, url) => ok(askedFor(url) ? accountMonthsBody(url) : MONTHS),
+  'GET /api/summary': (_init, url) => ok(askedFor(url) ? accountSummaryBody(url) : SUMMARY),
   ...CHART_ROUTES,
 };
 
@@ -618,12 +652,13 @@ describe('the ranking, which draws the bars a donut cannot', () => {
 });
 
 /**
- * The radar, which is the one kind that asks about two windows — and, on one account,
- * the one that has to ask twice.
+ * The radar, which is the one kind that asks about two windows — and so the one that
+ * has to ask twice, for one account exactly as for the workspace.
  *
- * A single fetch across both is twice the window under one row cap: whichever half the
- * server's limit cut, the two periods still came back looking complete, and a prior
- * window emptied by truncation draws as "everything doubled".
+ * `/api/summary` answers a split of the range it is given. Asked for both periods at
+ * once it would add them together, and nothing on this side could take the earlier half
+ * out again: every category's `before` would be its own `now`, and the polygon the
+ * reader came for would be a period laid over itself.
  */
 describe('a comparative chart of one account', () => {
   const RADAR = {
@@ -634,26 +669,15 @@ describe('a comparative chart of one account', () => {
     title: 'This quarter against the last',
   };
 
-  /** Spent in the window the chart is about — dated today, so it lands in it. */
-  const tx = (id: string, category: string, amount: number, refund = false): Transaction => ({
-    id,
-    accountId: 'acc-1',
-    provider: 'upload',
-    amount,
-    currency: 'EUR',
-    date: new Date().toISOString().slice(0, 10),
-    description: id,
-    category,
-    transfer: false,
-    transferManual: null,
-    refund,
-  });
+  /** What the server answers for the window the chart is about, on either side of it. */
+  const spent = (url: string | undefined, byCategory: { category: string; total: number }[]) =>
+    accountSummary(askedFor(url), { byCategory });
 
-  it('asks for a window at a time, so one cap cannot empty the other', async () => {
+  it('asks for a window at a time, so neither period is half of one answer', async () => {
     seed([RADAR]);
     mockFetch({
       'GET /api/accounts': () => ok(ACCOUNTS),
-      'GET /api/transactions': () => ok([tx('t1', 'food', -500)]),
+      'GET /api/summary': (_init, url) => ok(spent(url, [{ category: 'food', total: 500 }])),
       ...CHART_ROUTES,
     });
     mount();
@@ -662,7 +686,7 @@ describe('a comparative chart of one account', () => {
     await screen.findByText('Total');
 
     const windows = requestUrls()
-      .filter((u) => u.includes('/api/transactions'))
+      .filter((u) => u.includes('/api/summary?'))
       .map((u) => {
         const q = new URL(u.slice('GET '.length), 'http://x').searchParams;
         return { from: q.get('from') ?? '', to: q.get('to') ?? '' };
@@ -671,7 +695,7 @@ describe('a comparative chart of one account', () => {
 
     expect(windows).toHaveLength(2);
     // and they do not overlap: the older one ends before the newer one starts, which is
-    // what makes two caps two answers rather than one answer cut in an unknown place
+    // what makes them two answers rather than one answer about both periods at once
     expect(windows[0].to < windows[1].from).toBe(true);
     expect(windows.every((w) => w.from !== '' && w.to !== '')).toBe(true);
   });
@@ -680,9 +704,15 @@ describe('a comparative chart of one account', () => {
     seed([RADAR]);
     mockFetch({
       'GET /api/accounts': () => ok(ACCOUNTS),
-      // food is spent, shopping is a refund with no purchase behind it in this window
-      'GET /api/transactions': () =>
-        ok([tx('t1', 'food', -500), tx('t2', 'shopping', 450, true)]),
+      // food is spent; shopping is a refund with no purchase behind it in this window,
+      // which the server answers as a category below zero
+      'GET /api/summary': (_init, url) =>
+        ok(
+          spent(url, [
+            { category: 'food', total: 500 },
+            { category: 'shopping', total: -450 },
+          ]),
+        ),
       ...CHART_ROUTES,
     });
     const { container } = mount();
@@ -694,6 +724,119 @@ describe('a comparative chart of one account', () => {
     const table = container.querySelector('table');
     expect(table?.textContent).toContain('Food');
     expect(table?.textContent).not.toContain('Shopping');
+  });
+});
+
+/**
+ * A card about one account, which since this row reads the same two endpoints the
+ * workspace arm does, with an `accountId` on them.
+ *
+ * What that changes is the UNIT and the SCOPE, and neither is something a reader can
+ * check by looking: an account's own figures under the wrong currency code, and another
+ * account's figures under this account's name, are both right-looking and wrong.
+ */
+describe('a chart about one account', () => {
+  const PER_ACCOUNT = {
+    ...COLUMN_CHART,
+    id: 'c-one-account',
+    accountId: 'acc-1',
+    title: 'Sparkasse, monthly',
+  };
+
+  const DONUT = { ...PER_ACCOUNT, id: 'c-one-donut', kind: 'donut', title: 'Where it went' };
+
+  it('prints the currency the body named, and not the one the accounts list holds', async () => {
+    seed([PER_ACCOUNT]);
+    mockFetch({
+      ...ROUTES,
+      // the account's code was corrected while this tab held the list it was read with:
+      // the figures are the server's, and so is the unit they are in
+      'GET /api/summary/months': (_init, url) =>
+        ok(
+          accountMonths(askedFor(url), {
+            currency: 'USD',
+            months: [{ month: thisMonth(), income: 2500, expense: 700, net: 1800 }],
+          }),
+        ),
+    });
+    mount();
+
+    expect(await screen.findByText('Expenses, total')).toBeInTheDocument();
+    expect(screen.getAllByText('700 USD').length).toBeGreaterThan(0);
+    expect(screen.queryByText('700 EUR')).not.toBeInTheDocument();
+  });
+
+  it('prints the body’s currency on a share card too, and not the accounts list’s', async () => {
+    seed([DONUT]);
+    mockFetch({
+      ...ROUTES,
+      'GET /api/summary': (_init, url) =>
+        ok(
+          accountSummary(askedFor(url), {
+            currency: 'USD',
+            byCategory: [{ category: 'food', total: 700 }],
+          }),
+        ),
+    });
+    mount();
+
+    await screen.findByText('Total');
+    expect(screen.getAllByText('700 USD').length).toBeGreaterThan(0);
+    expect(screen.queryByText('700 EUR')).not.toBeInTheDocument();
+  });
+
+  /*
+   * A body of the right shape about the wrong account. `scoped` in api.ts throws on it,
+   * which is the one thing between a query-builder edit that drops the `accountId` and
+   * one account's card printing another account's money — and until this case nothing
+   * anywhere looked at that throw (DEBT.md, 2026-08-11).
+   *
+   * A donut and not the radar: one kind, one request, one message, so the assertion
+   * cannot become order-dependent through `Promise.all`.
+   */
+  it('refuses a summary that came back about a different account', async () => {
+    seed([DONUT]);
+    mockFetch({
+      ...ROUTES,
+      'GET /api/summary': () =>
+        ok(accountSummary('acc-2', { byCategory: [{ category: 'food', total: 700 }] })),
+    });
+    mount();
+
+    expect(
+      await screen.findByText(
+        /the API answered a summary for account acc-2 where acc-1 was asked for/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Total')).not.toBeInTheDocument();
+    expect(screen.queryByText('700 EUR')).not.toBeInTheDocument();
+  });
+
+  /*
+   * "By source" on one account used to fall through to income by category — one thing
+   * drawn under a title naming another. The endpoint has answered it per account since
+   * row 48, filtered through `scopeSql` to that account's own rows. The wizard still
+   * does not offer the choice (a product decision — see BREAKDOWNS), so a spec saved
+   * before an account was picked is how the path is reached.
+   */
+  it('draws one account’s income by source, and not its income by category', async () => {
+    seed([{ ...DONUT, id: 'c-by-source', breakdown: 'income-sources' }]);
+    mockFetch({
+      ...ROUTES,
+      'GET /api/summary': (_init, url) =>
+        ok(
+          accountSummary(askedFor(url), {
+            incomeByCategory: [{ category: 'salary', total: 2500 }],
+            incomeBySource: [{ source: 'src-1', label: 'Acme GmbH', kind: 'own', total: 2500 }],
+          }),
+        ),
+    });
+    const { container } = mount();
+    await screen.findByText('Total');
+
+    const table = container.querySelector('table');
+    expect(table?.textContent).toContain('Acme GmbH');
+    expect(table?.textContent).not.toContain('Salary');
   });
 });
 
@@ -716,7 +859,7 @@ describe('when the account list cannot be read', () => {
     mockFetch({
       'GET /api/accounts': () =>
         calls++ === 0 ? fail(500, { error: 'the account list is unavailable' }) : ok(ACCOUNTS),
-      'GET /api/transactions': () => ok([]),
+      'GET /api/summary/months': (_init, url) => ok(accountMonthsBody(url)),
       ...CHART_ROUTES,
     });
     mount();
@@ -828,9 +971,35 @@ describe('a chart pointed at an account that has since been hidden', () => {
     title: 'Old DKB, monthly',
   };
 
+  /*
+   * Hidden is a workspace-level word. `VISIBLE_ACCOUNT()` keeps a hidden account out of
+   * the workspace's totals and not out of its own, and `summaryScope` in `app.ts`
+   * resolves one by id like any other — which is where that decision is written, and
+   * where it is held: `backend/test/summary.test.ts`'s "a hidden account answers its
+   * real numbers and contributes none of them to the workspace".
+   *
+   * In jsdom the server is a route table, so what this case can say is the client half
+   * of it, and that is the half this row changed: the card asks about the account it was
+   * pointed at, by id, and draws the answer instead of special-casing it into zeroes.
+   */
+  it('asks about it by id and draws what came back, hidden or not', async () => {
+    seed([HIDDEN_ACCOUNT_CHART]);
+    mockFetch(ROUTES);
+    mount();
+
+    expect(await screen.findByText('Expenses, total')).toBeInTheDocument();
+    expect(screen.getAllByText('700 EUR').length).toBeGreaterThan(0);
+    // the id rides in the query string, which is the one place a sent parameter shows:
+    // `keyOf` drops it, so the route table cannot see it and `requestUrls` can
+    expect(requestUrls().some((u) => u.includes('/api/summary/months?accountId=acc-2'))).toBe(
+      true,
+    );
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+
   it('lights the chip for it anyway, and says why it is not one of the others', async () => {
     seed([HIDDEN_ACCOUNT_CHART]);
-    mockFetch({ ...ROUTES, 'GET /api/transactions': () => ok([]) });
+    mockFetch(ROUTES);
     mount();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Old DKB, monthly' }));

@@ -8,13 +8,9 @@
  * name, the numbers and the plot.
  *
  * Everything that is true of every chart lives here and `ChartPlot` is left drawing.
- * That includes the two things a chart is not allowed to do quietly:
- *
- *  - **A refusal is printed, and no numbers are.** `useChartData` nulls the data
- *    before every load, so there is never a figure on screen from the range the card
- *    is no longer about.
- *  - **A per-account fetch that came back at its cap is said out loud.** The shape
- *    would be a plausible chart of part of the window, which is worse than no chart.
+ * That includes the one thing a chart is not allowed to do quietly: **a refusal is
+ * printed, and no numbers are.** `useChartData` nulls the data before every load, so
+ * there is never a figure on screen from the range the card is no longer about.
  *
  * ---------------------------------------------------------------------------
  * Nothing else is written on it
@@ -34,7 +30,7 @@
  * chart happened to be showing. Where that sentence belongs now is an open question
  * rather than an oversight.
  *
- * What stays is what a reader cannot see: the two refusals above, and the table below.
+ * What stays is what a reader cannot see: the refusal above, and the table below.
  * The table is the same idiom `AccountFlows` uses and is there for the same reason: the
  * SVG is not readable, and in jsdom it is not even measurable — recharts sizes itself
  * against a 0x0 box. It is what a screen reader gets, and what a test asserts on.
@@ -72,13 +68,6 @@ export function ChartCard({ spec, accounts, accountsError }: Props) {
 
       {error && <p className="error">Error: {error}</p>}
       {loading && <p className="hint chart-loading">Reading the numbers…</p>}
-
-      {data?.truncated && (
-        <p className="error">
-          More transactions here than one request returns — this is part of the window, not
-          all of it.
-        </p>
-      )}
 
       {data && (
         <>
