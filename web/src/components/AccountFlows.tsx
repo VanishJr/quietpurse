@@ -54,6 +54,7 @@ import {
   YAxis,
 } from 'recharts';
 import { MonthWindow, MONTH_WINDOWS } from '../accounts';
+import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey, fmtMonthTick, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
 import { Account, AccountMonthTotals } from '../types';
@@ -200,22 +201,7 @@ export function AccountFlows({
                   width={Y_AXIS_WIDTH}
                   tickFormatter={fmtShort}
                 />
-                {/* the tooltip is a real DOM node, so its radius and its quiet white
-                    are the tokens rather than a 12 and a 0.7 that happen to equal
-                    them — `var()` resolves in an inline style like any other value */}
-                <Tooltip
-                  cursor={{ stroke: ink.grid, strokeWidth: 1 }}
-                  contentStyle={{
-                    background: ink.brand,
-                    border: 'none',
-                    borderRadius: 'var(--r-md)',
-                    padding: '8px 12px',
-                    fontSize: 12,
-                  }}
-                  labelStyle={{ color: 'var(--c-on-ground-2)', marginBottom: 2 }}
-                  itemStyle={{ color: ink.onBrand, padding: 0 }}
-                  formatter={(value) => fmtMoney(Number(value), account.currency)}
-                />
+                <Tooltip {...tooltipProps(ink, 'surface', tooltipMoney(account.currency))} />
                 {/* animation off for the reason AnalyticsScreen gives: every screen
                     stays mounted, so this first renders inside a hidden container and
                     an animation started there freezes at an arbitrary frame */}

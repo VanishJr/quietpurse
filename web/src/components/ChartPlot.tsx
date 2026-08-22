@@ -54,9 +54,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ChartSpec, drawnShares, METRICS, SharePoint } from '../analytics';
+import { ChartSpec, drawnShares, METRICS, rankingSeriesName, SharePoint } from '../analytics';
 import { ChartData } from '../chartData';
 import { CATEGORY_LABELS } from '../categories';
+import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
 
@@ -101,19 +102,10 @@ export function ChartPlot({ spec, data, height }: Props) {
   const { ink, categoryColor } = useTheme();
 
   const axisTick = { fill: ink.muted, fontSize: 11 };
-  const tooltip = {
-    cursor: { stroke: ink.grid, strokeWidth: 1 },
-    contentStyle: {
-      background: ink.brand,
-      border: 'none',
-      borderRadius: 'var(--r-md)',
-      padding: '8px 12px',
-      fontSize: 12,
-    },
-    labelStyle: { color: 'var(--c-on-ground-2)', marginBottom: 2 },
-    itemStyle: { color: ink.onBrand, padding: 0 },
-    formatter: (value: unknown) => fmtMoney(Number(value), data.currency),
-  };
+  /* `'surface'` for both grounds this file is drawn on: a chart card is a surface and
+     the wizard's live preview is the page, and they take the same chip today.
+     `chartTooltip.test.ts` is what says that shortcut is still safe. */
+  const tooltip = tooltipProps(ink, 'surface', tooltipMoney(data.currency));
 
   const sliceColor = (key: string, index: number): string =>
     categoryColor(CATEGORY_LABELS[key] ? key : RAMP[index % RAMP.length]);
@@ -336,7 +328,16 @@ export function ChartPlot({ spec, data, height }: Props) {
             {/* a refund can push a row negative, and a bar chart is the one shape
                 here that can say so — the zero line is what makes it readable */}
             <ReferenceLine x={0} stroke={ink.muted} strokeWidth={1} />
-            <Bar dataKey="value" radius={[0, 3, 3, 0]} maxBarSize={22} isAnimationActive={false}>
+            {/* named for the same reason the Goal screen's bar is: a series with no
+                `name` is announced by its `dataKey`, and `value : 1,082 EUR` is a
+                field of this file's own vocabulary put in front of the reader */}
+            <Bar
+              dataKey="value"
+              name={rankingSeriesName(spec.breakdown)}
+              radius={[0, 3, 3, 0]}
+              maxBarSize={22}
+              isAnimationActive={false}
+            >
               {rows.map((r, i) => (
                 <Cell key={r.key} fill={sliceColor(r.key, i)} />
               ))}

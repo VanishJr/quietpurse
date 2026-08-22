@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CATEGORIES, CATEGORY_LABELS, categoryLabel, categoryRuleCaption } from './categories';
+import {
+  CATEGORIES,
+  CATEGORY_LABELS,
+  categoryLabel,
+  categoryRuleCaption,
+  spendSectors,
+} from './categories';
 import { PROVIDER_LABELS, providerLabel } from './providers';
 
 describe('category dictionary', () => {
@@ -11,6 +17,27 @@ describe('category dictionary', () => {
 
   it('returns an unknown slug as-is', () => {
     expect(categoryLabel('groceries-2')).toBe('groceries-2');
+  });
+});
+
+describe('the sectors of the Overview ring', () => {
+  it('carries the name a person reads, and never the slug', () => {
+    expect(spendSectors([{ category: 'food', total: 120 }])).toEqual([
+      { category: 'food', total: 120, label: 'Food' },
+    ]);
+  });
+
+  it('labels a slug no dictionary knows with itself', () => {
+    expect(spendSectors([{ category: 'groceries-2', total: 8 }])[0].label).toBe('groceries-2');
+  });
+
+  it('draws no sector for a category a refund pushed below zero', () => {
+    const sectors = spendSectors([
+      { category: 'food', total: 120 },
+      { category: 'shopping', total: -40 },
+      { category: 'cash', total: 0 },
+    ]);
+    expect(sectors.map((s) => s.category)).toEqual(['food']);
   });
 });
 

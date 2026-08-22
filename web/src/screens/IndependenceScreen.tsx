@@ -2,16 +2,20 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
   ReferenceLine,
   ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
 import { api } from '../api';
 import { categoryLabel } from '../categories';
+import { NO_FIGURE, tooltipPercent, tooltipProps } from '../chartTooltip';
 import { Chips } from '../components/Chips';
-import { fmtMoney, MONTHS_SHORT } from '../format';
+import { fmtMoney } from '../format';
+import { SelfSufficiencyBar, selfSufficiencyBars } from '../independence';
 import { useTheme } from '../theme';
 import { GoalMode, Independence } from '../types';
 
@@ -181,18 +185,8 @@ export function IndependenceScreen() {
   const workMissing = Math.max(0, Math.round(data.threshold - workMonthly));
   const requiredRate = workHoursPerMonth > 0 ? data.threshold / workHoursPerMonth : 0;
 
-  // sparkline: self-sufficiency by month, %. In minimum mode the base is the same
-  // across all months ("did I cover my own minimum"), otherwise it's the month's spending.
-  const bars = data.months.map((m) => {
-    const monthBase = isBaseline ? data.baselineSum : m.spend;
-    const ratio = monthBase > 0 ? Math.min(1.5, m.ownIncome / monthBase) : 0;
-    const monthIdx = parseInt(m.month.slice(5, 7), 10) - 1;
-    return {
-      value: Math.round(ratio * 100),
-      label: MONTHS_SHORT[monthIdx],
-      reached: ratio >= 1,
-    };
-  });
+  // sparkline: self-sufficiency by month, %
+  const bars = selfSufficiencyBars(data.months, isBaseline, data.baselineSum);
 
   const axisTick = { fill: ink.muted, fontSize: 10 };
 
@@ -262,6 +256,7 @@ export function IndependenceScreen() {
               <div style={{ height: 140 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={bars} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke={ink.grid} strokeDasharray="3 4" vertical={false} />
                     <XAxis
                       dataKey="label"
                       tick={axisTick}
@@ -269,7 +264,7 @@ export function IndependenceScreen() {
                       tickLine={false}
                     />
                     <YAxis
-                      domain={[0, Math.max(110, ...bars.map((b) => b.value))]}
+                      domain={[0, Math.max(110, ...bars.map((b) => b.drawn))]}
                       tickCount={3}
                       tick={axisTick}
                       axisLine={false}
@@ -278,9 +273,21 @@ export function IndependenceScreen() {
                     />
                     {/* the 100% line: at or above it the month paid for itself */}
                     <ReferenceLine y={100} stroke={ink.good} strokeDasharray="4 4" />
+                    {/* `actual` and never the value the bar was drawn at: the height is
+                        capped at 150 so one big month does not flatten the rest, and a
+                        tooltip reading 150% off a month that was 340% is a figure the
+                        reader takes away and is wrong */}
+                    <Tooltip
+                      {...tooltipProps<SelfSufficiencyBar>(ink, 'page', (_value, m) =>
+                        m ? tooltipPercent(m.actual) : NO_FIGURE,
+                      )}
+                    />
                     {/* animation off — see the note in AnalyticsScreen */}
                     <Bar
-                      dataKey="value"
+                      // recharts names a series in the tooltip by its `dataKey` unless
+                      // it is given a `name`, and `drawn` is a field of this file's own
+                      name="Self-sufficiency"
+                      dataKey="drawn"
                       radius={[3, 3, 0, 0]}
                       isAnimationActive={false}
                       maxBarSize={28}
