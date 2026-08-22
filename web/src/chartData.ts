@@ -3,19 +3,19 @@
  *
  * The one place in the workspace that fetches. `analytics.ts` holds the model and the
  * arithmetic and is pure; the components draw; this is the seam, and it is a seam
- * because a chart's data comes from two different halves of the API depending on a
- * field the reader sets in a dialog:
+ * because a field the reader sets in a dialog decides which SHAPE of body the same two
+ * endpoints come back with:
  *
- *  - **Every account together** is what `/api/summary` and `/api/summary/months`
- *    answer, in the workspace's base currency, with the server doing the arithmetic.
- *  - **One account** has no endpoint at all: both of those take a date range and
- *    nothing else. So the rows come from `/api/transactions` and are summed on the
- *    client by `analytics.ts`, in the ACCOUNT's own currency — the same gap, and the
- *    same answer to it, that `accounts.ts` already carries for the Overview.
+ *  - **Every account together** is `/api/summary` and `/api/summary/months` with no
+ *    account named: the whole workspace, converted into its base currency.
+ *  - **One account** is the same two with an `accountId` on them: that account's own
+ *    rows, in that account's own currency, with nothing converted.
  *
- * Which means the two paths do not merely differ in speed: they report different
- * currencies, and a card must print the one it was actually given. `currency` rides
- * with the data for that reason and is never assumed.
+ * Both arms are summed by the server and by the same SQL — a transfer between your own
+ * accounts is neither income nor an expense, a refund subtracts from the expenses of
+ * the period it landed in. What differs is the UNIT, and a card must print the one it
+ * was actually given: `currency` rides with the data for that reason, taken off the
+ * body that answered and never off the accounts list.
  */
 import { useEffect, useState } from 'react';
 import { api } from './api';
@@ -26,26 +26,22 @@ import {
   ChartSpec,
   ComparedPoint,
   compareShares,
-  CHART_TX_LIMIT,
   positiveShares,
   priorBoundsOf,
   rangeDef,
   seriesFromMonths,
-  seriesFromTransactions,
   SeriesPoint,
   shareFromSummary,
-  shareFromTransactions,
   SharePoint,
   ticksOf,
 } from './analytics';
-import { Account, Transaction } from './types';
+import { Account } from './types';
 
 export type ChartData =
   | {
       shape: 'series';
       currency: string;
       points: SeriesPoint[];
-      truncated: boolean;
     }
   | {
       shape: 'share';
@@ -53,7 +49,6 @@ export type ChartData =
       slices: SharePoint[];
       /** The period beside the one before it. null unless the kind is comparative. */
       compared: ComparedPoint[] | null;
-      truncated: boolean;
     };
 
 export interface ChartLoad {
@@ -89,42 +84,43 @@ const fetchKey = (spec: ChartSpec): string => {
   ].join('|');
 };
 
-async function loadSeries(spec: ChartSpec, account: Account | null, today: Date): Promise<ChartData> {
+async function loadSeries(
+  spec: ChartSpec,
+  accountId: string | null,
+  today: Date,
+): Promise<ChartData> {
   const range = rangeDef(spec.range);
   const { from, to } = boundsOf(range, today);
   const ticks = ticksOf(range, today);
 
-  if (!account) {
+  if (!accountId) {
     const answer = await api.months(from, to);
     return {
       shape: 'series',
       currency: answer.baseCurrency,
       points: seriesFromMonths(answer.months, ticks, range.grain),
-      truncated: false,
     };
   }
 
-  const rows = await api.transactions({
-    accountId: account.id,
-    from,
-    to,
-    limit: CHART_TX_LIMIT,
-  });
+  const answer = await api.accountMonths(accountId, from, to);
   return {
     shape: 'series',
-    currency: account.currency,
-    points: seriesFromTransactions(rows, ticks, range.grain),
-    truncated: rows.length === CHART_TX_LIMIT,
+    currency: answer.currency,
+    points: seriesFromMonths(answer.months, ticks, range.grain),
   };
 }
 
-async function loadShare(spec: ChartSpec, account: Account | null, today: Date): Promise<ChartData> {
+async function loadShare(
+  spec: ChartSpec,
+  accountId: string | null,
+  today: Date,
+): Promise<ChartData> {
   const range = rangeDef(spec.range);
   const { from, to } = boundsOf(range, today);
   const comparative = chartKind(spec.kind).comparative === true;
   const prior = comparative ? priorBoundsOf(range, today) : null;
 
-  if (!account) {
+  if (!accountId) {
     /*
      * Two requests rather than one wider one: `/api/summary` answers a split of the
      * range it is given and there is no arithmetic on this side that could take the
@@ -153,44 +149,31 @@ async function loadShare(spec: ChartSpec, account: Account | null, today: Date):
             positiveShares(shareFromSummary(before, spec.breakdown)),
           )
         : null,
-      truncated: false,
     };
   }
 
   /*
-   * One account, and one request per window rather than one across both.
-   *
-   * The rows carry their own dates, so a single fetch of `prior.from … to` could be
-   * split here with a filter — and was. But that is twice the window under the same
-   * 5,000-row cap, and whichever half the server's limit cut, `compareShares` still
-   * reported both periods complete: lose the older rows and every category's `before` is
-   * 0, which draws as "everything doubled" under a banner that only says some rows are
-   * missing. A window apiece is a cap apiece, and either one hitting it is said out loud.
+   * One account, and one request per window for the reason the workspace arm above
+   * gives: this endpoint answers a split of the range it is given, so both periods in
+   * one window come back added together and nothing on this side could take the earlier
+   * half out again — every category's `before` would be its own `now`.
    */
-  const [rows, priorRows] = await Promise.all([
-    api.transactions({ accountId: account.id, from, to, limit: CHART_TX_LIMIT }),
-    prior
-      ? api.transactions({
-          accountId: account.id,
-          from: prior.from,
-          to: prior.to,
-          limit: CHART_TX_LIMIT,
-        })
-      : Promise.resolve([] as Transaction[]),
+  const [summary, before] = await Promise.all([
+    api.accountSummary(accountId, from, to),
+    prior ? api.accountSummary(accountId, prior.from, prior.to) : Promise.resolve(null),
   ]);
-  const slices = shareFromTransactions(rows, spec.breakdown);
+  const slices = shareFromSummary(summary, spec.breakdown);
   return {
     shape: 'share',
-    currency: account.currency,
+    currency: summary.currency,
     slices,
     // positives only, for the reason the workspace path above gives
-    compared: prior
+    compared: before
       ? compareShares(
           positiveShares(slices),
-          positiveShares(shareFromTransactions(priorRows, spec.breakdown)),
+          positiveShares(shareFromSummary(before, spec.breakdown)),
         )
       : null,
-    truncated: rows.length === CHART_TX_LIMIT || priorRows.length === CHART_TX_LIMIT,
   };
 }
 
@@ -222,13 +205,20 @@ export function useChartData(
 
   const key = fetchKey(spec);
   /*
-   * The account object, resolved out here so the effect depends on the id and the
-   * currency — the only two fields the loaders read — rather than on an array identity
-   * that changes every time the screen reloads the list.
+   * The account object, resolved out here for the refusal below — the loaders read no
+   * field of it and are handed the id alone. So what the effect depends on is WHETHER it
+   * resolved, and not on an array identity that changes every time the screen reloads
+   * the list.
+   *
+   * The currency that used to be in that list went with the read. Nothing is lost by it,
+   * and the sentence saying so is on the other side of the tree: `app.ts` refuses to
+   * correct an account's currency once the account has a row in it, so an account whose
+   * code can still move has nothing on a chart to be mislabelled while a tab holds the
+   * old one.
    */
   const account =
     spec.accountId && accounts ? (accounts.find((a) => a.id === spec.accountId) ?? null) : null;
-  const currency = account?.currency ?? '';
+  const known = account !== null;
   /*
    * Only a per-account chart waits for the list. A workspace-wide one needs nothing
    * from it, and gating on `accounts === null` there would fetch once on mount and
@@ -263,7 +253,7 @@ export function useChartData(
      * titled after one account is the kind of quiet substitution nothing in this app
      * is allowed to make.
      */
-    if (spec.accountId && !account) {
+    if (spec.accountId && !known) {
       setState({
         data: null,
         error: 'That account is no longer here. Edit the chart to point it somewhere else.',
@@ -275,7 +265,9 @@ export function useChartData(
     const today = new Date();
     const shape: ChartShape = chartKind(spec.kind).shape;
     const work =
-      shape === 'series' ? loadSeries(spec, account, today) : loadShare(spec, account, today);
+      shape === 'series'
+        ? loadSeries(spec, spec.accountId, today)
+        : loadShare(spec, spec.accountId, today);
 
     work
       .then((data) => {
@@ -290,7 +282,7 @@ export function useChartData(
     };
     // `spec` itself is deliberately not a dependency — see `fetchKey` above; every
     // field the loaders read is either inside `key` or listed here in its own right.
-  }, [key, spec.accountId, currency, waiting, accountsError]);
+  }, [key, spec.accountId, known, waiting, accountsError]);
 
   return state;
 }

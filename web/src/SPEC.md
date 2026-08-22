@@ -16,8 +16,9 @@ Nothing below repeats any of that.
 - **Every request the product makes**, composed in one module, `api.ts`, the authentication routes
   included: they go through the same raw fetch as the finance routes rather than through an SDK.
 - **The month arithmetic the server deliberately does not do.** The summary endpoints answer only
-  the months an account has rows in; anchoring, filling and comparing are `accounts.ts`'s, and its
-  own header states the whole rule.
+  the months an account has rows in, and two modules fill the rest in opposite directions —
+  `accounts.ts` anchoring on the newest month with data and `analytics.ts` on the window the reader
+  chose — each stating its whole rule in its own header, `windowMonths`' and `ticksOf`'.
 - **The sentences.** The API answers slugs and this package holds the dictionaries that turn them
   into something a person reads, an unknown slug included.
 - **The entry points.** The app is `web/index.html` and the public page is `web/landing.html`; the

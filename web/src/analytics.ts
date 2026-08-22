@@ -33,7 +33,7 @@
 import { monthOf, toCents } from './accounts';
 import { categoryLabel } from './categories';
 import { isoDay, MONTHS_SHORT } from './format';
-import { MonthTotals, Summary, Transaction } from './types';
+import { CategorySummary, IncomeSourceTotal } from './types';
 
 // ---------------------------------------------------------------------------
 // the vocabulary
@@ -133,10 +133,12 @@ export interface BreakdownDef {
   key: Breakdown;
   label: string;
   /**
-   * Whether one account can answer it. Income sources are named by the server's own
-   * catalogue and arrive only on `/api/summary`, which has no per-account form — so a
-   * chart about one account cannot ask this, and the wizard does not offer it there
-   * rather than offering it and drawing nothing.
+   * Whether the wizard offers it for one account. Not a limit of the API: `/api/summary`
+   * has taken an `accountId` since row 48 and answers that account's own income by
+   * source, off the same `scopeSql` every other figure is filtered through. This is a
+   * product decision left open — whether a split by the workspace's income sources is a
+   * question worth asking of one account — and until it is answered the wizard drops
+   * the choice when an account is picked rather than offering what nobody has ruled on.
    */
   workspaceOnly?: true;
 }
@@ -192,14 +194,6 @@ export interface ChartSpec {
   breakdown: Breakdown;
   range: RangeKey;
 }
-
-/**
- * The row cap on a per-account fetch, and the same number `WINDOW_TX_LIMIT` uses on
- * the Overview. A chart built from a fetch that came back AT it is drawn from part of
- * the window, and `chartData.ts` says so on the card rather than letting the shape
- * pass for the whole period.
- */
-export const CHART_TX_LIMIT = 5_000;
 
 // ---------------------------------------------------------------------------
 // ticks and bounds
@@ -340,11 +334,28 @@ const point = (
 });
 
 /**
- * `/api/summary/months` folded onto the ticks. A month the endpoint did not answer is
- * a tick at zero, which is the true statement here — see `ticksOf`.
+ * What a series is built from: one month's income and its expenses, and nothing else.
+ *
+ * Deliberately not `MonthTotals`, and deliberately without `net`. Both summary
+ * endpoints answer a month shape and only one of the two carries a `net` — the account
+ * arm's, which is every row of the month summed, transfers included, so that the months
+ * add up to the balance beside them. It is not this chart's net, and this type is what
+ * stops it being read: the field is not in scope inside the function.
+ */
+export interface MonthFlows {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  expense: number;
+}
+
+/**
+ * `/api/summary/months` folded onto the ticks, whichever arm answered it. A month the
+ * endpoint did not answer is a tick at zero, which is the true statement here — see
+ * `ticksOf`.
  */
 export function seriesFromMonths(
-  months: MonthTotals[],
+  months: MonthFlows[],
   ticks: string[],
   grain: Grain,
 ): SeriesPoint[] {
@@ -357,65 +368,6 @@ export function seriesFromMonths(
   }
   const withYear = spansYears(ticks);
   return ticks.map((t) => point(t, grain, withYear, income.get(t) ?? 0, expense.get(t) ?? 0));
-}
-
-/**
- * What one bucket of rows earned and spent, in cents.
- *
- * These rules used to live in `accounts.ts` as `totals()`, back when the Overview summed
- * one account's transactions in the client because `/api/summary` took a date range and
- * nothing else. Both endpoints take an `accountId` now, that mirror is gone with the
- * module's arithmetic, and this is its last caller — so the rules travel here rather than
- * keeping a function alive elsewhere for one import. They are unchanged, and they are the
- * SQL's: a transfer between your own accounts is neither income nor an expense, and a
- * refund subtracts from expenses in the period it landed in rather than adding to income.
- *
- * Cents in and cents out, never back through the doubles. The call it replaces divided by
- * a hundred and `toCents` multiplied straight back — a round trip past the residue the
- * header is about, for no reader's benefit.
- */
-const bucketCents = (txs: Transaction[]): { income: number; expense: number } => {
-  let income = 0;
-  let expense = 0;
-  for (const t of txs) {
-    if (t.transfer) continue;
-    const c = toCents(t.amount);
-    if (c < 0 || t.refund) expense += -c;
-    else if (c > 0) income += c;
-  }
-  return { income, expense };
-};
-
-/**
- * The same series for one account, summed on the client off `/api/transactions`.
- *
- * It sums rows because when this was written the summary endpoints took a date range and
- * nothing else. They take an `accountId` now, so this arm COULD read `/api/summary/months`
- * the way the workspace arm does — and it is not a one-line swap: that endpoint answers
- * `AccountMonthTotals`, which is deliberately not assignable to the `MonthTotals` above,
- * and only the months that have rows. Left as it is, and named here so that it reads as a
- * row of its own rather than as a gap nobody noticed.
- *
- * The account's own currency, not the base one, and there is nothing to convert: one
- * account is one currency, so nothing here can be lost to a missing rate.
- */
-export function seriesFromTransactions(
-  txs: Transaction[],
-  ticks: string[],
-  grain: Grain,
-): SeriesPoint[] {
-  const buckets = new Map<string, Transaction[]>();
-  for (const t of txs) {
-    const tick = tickOf(t.date, grain);
-    const bucket = buckets.get(tick);
-    if (bucket) bucket.push(t);
-    else buckets.set(tick, [t]);
-  }
-  const withYear = spansYears(ticks);
-  return ticks.map((t) => {
-    const sums = bucketCents(buckets.get(t) ?? []);
-    return point(t, grain, withYear, sums.income, sums.expense);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +407,20 @@ const fromCategories = (rows: { category: string; total: number }[]): SharePoint
     .map((c) => ({ key: c.category, label: categoryLabel(c.category), value: c.total }))
     .sort((a, b) => b.value - a.value);
 
-export function shareFromSummary(summary: Summary, breakdown: Breakdown): SharePoint[] {
+/**
+ * The three splits both summary bodies answer, and the only ones a share chart reads.
+ *
+ * A minimum both arms meet rather than either body's own type: `/api/summary` answers
+ * the whole workspace in the base currency and one account in its own, and a share is
+ * the same arithmetic over either.
+ */
+export interface SummarySplits {
+  byCategory: CategorySummary[];
+  incomeByCategory: CategorySummary[];
+  incomeBySource: IncomeSourceTotal[];
+}
+
+export function shareFromSummary(summary: SummarySplits, breakdown: Breakdown): SharePoint[] {
   if (breakdown === 'income-sources') {
     return summary.incomeBySource
       .map((s) => ({ key: s.source, label: s.label, value: s.total }))
@@ -463,33 +428,6 @@ export function shareFromSummary(summary: Summary, breakdown: Breakdown): ShareP
   }
   return fromCategories(
     breakdown === 'income-categories' ? summary.incomeByCategory : summary.byCategory,
-  );
-}
-
-/**
- * The same split for one account. `income-sources` cannot be answered here and never
- * arrives: `BREAKDOWNS` marks it workspace-only and the wizard drops it from the
- * choices the moment an account is picked. It falls through to income by category
- * rather than throwing, because a spec saved before an account was chosen is a real
- * state and an empty card would say less than the near-miss does.
- */
-export function shareFromTransactions(txs: Transaction[], breakdown: Breakdown): SharePoint[] {
-  const cents = new Map<string, number>();
-  const wantsExpenses = breakdown === 'expense-categories';
-  for (const t of txs) {
-    if (t.transfer) continue;
-    const c = toCents(t.amount);
-    // the rules `bucketCents` states, read from both sides: a refund is a negative
-    // expense and never income, whichever way it is signed
-    const isExpense = c < 0 || t.refund;
-    if (isExpense !== wantsExpenses) continue;
-    const delta = wantsExpenses ? -c : c;
-    cents.set(t.category, (cents.get(t.category) ?? 0) + delta);
-  }
-  return fromCategories(
-    [...cents]
-      .filter(([, total]) => total !== 0)
-      .map(([category, total]) => ({ category, total: total / 100 })),
   );
 }
 

@@ -7,14 +7,14 @@ import {
   rankingSeriesName,
   rangeDef,
   seriesFromMonths,
-  seriesFromTransactions,
-  shareFromTransactions,
+  shareFromSummary,
   suggestedTitle,
   ticksOf,
   ChartSpec,
   RangeKey,
+  SummarySplits,
 } from './analytics';
-import { MonthTotals, Transaction } from './types';
+import { AccountMonthTotals, MonthTotals } from './types';
 
 /**
  * The workspace's arithmetic, which is the half of it a screen test cannot reach:
@@ -38,19 +38,24 @@ const month = (m: string, income: number, expense: number): MonthTotals => ({
   incomeExternal: 0,
 });
 
-const tx = (over: Partial<Transaction>): Transaction => ({
-  id: 't1',
-  accountId: 'acc-1',
-  provider: 'upload',
-  amount: -10,
-  currency: 'EUR',
-  date: '2026-08-04',
-  description: 'a row',
-  category: 'food',
-  transfer: false,
-  transferManual: null,
-  refund: false,
-  ...over,
+/**
+ * The other arm's month, built as the type the endpoint answers rather than as a
+ * literal shaped for the assertion: `net` is a field of that payload, and the case
+ * below is about the function not being able to read it.
+ */
+const accountMonth = (
+  m: string,
+  income: number,
+  expense: number,
+  net: number,
+): AccountMonthTotals => ({ month: m, income, expense, net });
+
+/** The three splits a share is drawn from, whichever arm of the endpoint answered. */
+const splits = (patch: Partial<SummarySplits> = {}): SummarySplits => ({
+  byCategory: [],
+  incomeByCategory: [],
+  incomeBySource: [],
+  ...patch,
 });
 
 describe('the window a range asks for', () => {
@@ -103,30 +108,29 @@ describe('a series across ticks', () => {
   });
 
   it('reads net as income minus expenses, and never as the balance movement', () => {
-    const [point] = seriesFromMonths([month('2026-08', 1000, 1750)], ['2026-08'], 'month');
-    expect(point.net).toBe(-750);
-  });
+    const [workspace] = seriesFromMonths([month('2026-08', 1000, 1750)], ['2026-08'], 'month');
+    expect(workspace.net).toBe(-750);
 
-  it('applies the server rules to one account: transfers are neither, a refund subtracts', () => {
-    const rows = [
-      tx({ id: 'a', amount: -100 }),
-      tx({ id: 'b', amount: 900, category: 'salary' }),
-      // moved between the reader's own accounts: not income, not an expense
-      tx({ id: 'c', amount: -500, transfer: true }),
-      // comes in positive and comes off expenses rather than adding to income
-      tx({ id: 'd', amount: 30, refund: true }),
-    ];
-
-    const [point] = seriesFromTransactions(rows, ['2026-08'], 'month');
-
-    expect(point.income).toBe(900);
-    expect(point.expense).toBe(70);
-    expect(point.net).toBe(830);
+    /*
+     * The account arm answers a month that carries a balance movement of its own: its
+     * `net` is every row summed, transfers included, so that the months add up to the
+     * balance printed beside them. 1,000 in, 400 spent and a 400 transfer out is 200 of
+     * balance and 600 of bottom line, and a chart draws the second.
+     */
+    const [account] = seriesFromMonths(
+      [accountMonth('2026-08', 1000, 400, 200)],
+      ['2026-08'],
+      'month',
+    );
+    expect(account.net).toBe(600);
   });
 
   it('adds in cents, so a column of hundredths does not accumulate a residue', () => {
-    const rows = Array.from({ length: 3 }, (_, i) => tx({ id: `r${i}`, amount: -192.45 }));
-    const [point] = seriesFromTransactions(rows, ['2026-08'], 'month');
+    // the residue moved with the arithmetic — months onto a year tick, where it used to
+    // be rows onto a month. Added as the doubles they arrive as, three of these are
+    // 577.3499999999999
+    const months = ['2026-01', '2026-02', '2026-03'].map((m) => month(m, 0, 192.45));
+    const [point] = seriesFromMonths(months, ['2026'], 'year');
     expect(point.expense).toBe(577.35);
   });
 });
@@ -171,31 +175,43 @@ describe('the name a tick goes on the axis under', () => {
 });
 
 describe('the parts of one period', () => {
-  it('splits an account by category, on the side that was asked for', () => {
-    const rows = [
-      tx({ id: 'a', amount: -100, category: 'food' }),
-      tx({ id: 'b', amount: -40, category: 'transport' }),
-      tx({ id: 'c', amount: 900, category: 'salary' }),
-      tx({ id: 'd', amount: -500, category: 'food', transfer: true }),
-    ];
+  it('splits a period on the side that was asked for, sources included', () => {
+    const summary = splits({
+      byCategory: [
+        { category: 'food', total: 100 },
+        { category: 'transport', total: 40 },
+      ],
+      incomeByCategory: [{ category: 'salary', total: 900 }],
+      incomeBySource: [{ source: 'src-1', label: 'Acme GmbH', kind: 'own', total: 900 }],
+    });
 
-    expect(shareFromTransactions(rows, 'expense-categories')).toEqual([
+    expect(shareFromSummary(summary, 'expense-categories')).toEqual([
       { key: 'food', label: 'Food', value: 100 },
       { key: 'transport', label: 'Transport', value: 40 },
     ]);
-    expect(shareFromTransactions(rows, 'income-categories')).toEqual([
+    expect(shareFromSummary(summary, 'income-categories')).toEqual([
       { key: 'salary', label: 'Salary', value: 900 },
+    ]);
+    // named out of the server's own catalogue rather than a category dictionary — and
+    // answered for one account as readily as for the workspace since row 48
+    expect(shareFromSummary(summary, 'income-sources')).toEqual([
+      { key: 'src-1', label: 'Acme GmbH', value: 900 },
     ]);
   });
 
   it('keeps a category a refund pushed negative, and keeps it out of the sectors', () => {
-    const rows = [
-      tx({ id: 'a', amount: -20, category: 'food' }),
-      // the purchase was in an earlier period; this period's Shopping is below zero
-      tx({ id: 'b', amount: 60, category: 'shopping', refund: true }),
-    ];
+    // the purchase was in an earlier period and only the refund landed in this one, so
+    // the figure the server answers for Shopping is below zero
+    const shares = shareFromSummary(
+      splits({
+        byCategory: [
+          { category: 'food', total: 20 },
+          { category: 'shopping', total: -60 },
+        ],
+      }),
+      'expense-categories',
+    );
 
-    const shares = shareFromTransactions(rows, 'expense-categories');
     expect(shares.map((s) => s.value)).toEqual([20, -60]);
     // a donut cannot draw a negative sector; a bar chart has a baseline and can
     expect(positiveShares(shares).map((s) => s.key)).toEqual(['food']);

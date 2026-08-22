@@ -274,8 +274,9 @@ function DetailStep({
 
   const pickAccount = (id: string | null) => {
     const stillOffered = BREAKDOWNS.find((b) => b.key === draft.breakdown);
-    // an account cannot answer "by source" — see BREAKDOWNS. Moving the reader off it
-    // here rather than letting the card come back empty and unexplained.
+    // "by source" is not offered for one account — a product decision left open, not a
+    // limit of the API; see BREAKDOWNS. Moving the reader off it here rather than
+    // leaving the question lit on a choice the chips no longer carry.
     const breakdown: Breakdown =
       id !== null && stillOffered?.workspaceOnly ? 'expense-categories' : draft.breakdown;
     patch({ accountId: id, breakdown });
