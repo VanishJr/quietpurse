@@ -1,18 +1,12 @@
 /**
- * pdfjs takes its `DOMMatrix` and `Path2D` from `@napi-rs/canvas`, and the production
- * image does not carry that package: 61 MiB of renderer for a parser that reads a
- * text layer and never draws (ROADMAP row 28). Without those two globals pdf.mjs does
- * not merely warn - `const SCALE_MATRIX = new DOMMatrix()` runs at module scope, so
- * the module fails to evaluate, and through the static chain app.ts -> statement.ts ->
- * pdf.ts that used to be a container that could not boot.
- *
- * Installing them before pdfjs loads is an ordering invariant, and this file is the
- * mechanism rather than the rule: an assignment written above a static import is held
- * by source order alone, which `tsc` cannot see and an import sorter reverses without
- * a single check going red. Here the order is a sequence of statements and the only
- * way to reach pdfjs is through the function that runs them, so the invariant cannot
- * be broken by moving a line - only by deleting one. test/canvasabsent.ts is what
- * watches that, in a process where the package is unresolvable.
+ * Installing `DOMMatrix` and `Path2D` before pdfjs loads is an ordering invariant, and
+ * this file is the mechanism rather than the rule: an assignment written above a static
+ * import is held by source order alone, which `tsc` cannot see and an import sorter
+ * reverses without a single check going red. Here the order is a sequence of statements
+ * and the only way to reach pdfjs is through the function that runs them, so the
+ * invariant cannot be broken by moving a line - only by deleting one.
+ * test/canvasabsent.ts is what watches that, in a process where @napi-rs/canvas is
+ * unresolvable.
  *
  * The stubs throw rather than answer. Nothing on the text path constructs a `Path2D`
  * or calls a `DOMMatrix` method - `SCALE_MATRIX` is read in one place, inside the

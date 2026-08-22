@@ -1,21 +1,3 @@
-/**
- * A statement PDF in, a Sheet out - the same seam the CSV and XLSX frontends hand their
- * rows to, so the same statement imported as a PDF and as a CSV produces the same
- * transactions.
- *
- * A PDF has glyphs at coordinates, handed back in the order the generator drew them,
- * which is not the order they are read in: two columns of a statement interleave in
- * getTextContent's array, and a row assembled from array position gives a transaction
- * whose amount belongs to its neighbour - parsed, accepted, plausible and wrong. So
- * everything below groups by coordinate and never by position.
- *
- * Which coordinate means which column is a TEMPLATE, per layout rather than per bank,
- * and there is no way to derive one: it is measured off a document somebody has had in
- * front of them, and nothing in this repository checks a template against a second
- * document. A layout no template matches is refused by name rather than read against
- * the nearest fit - a template that matches too eagerly reports plausible numbers,
- * which is the one outcome worse than a refusal.
- */
 import { toCents } from '../money';
 import { CsvMapping, parseAmount } from './csv';
 import { ISSUERS, issuerName } from './issuer';
@@ -194,16 +176,6 @@ type RowExtent =
   | { kind: 'labelled-continuations'; keep: readonly string[] };
 
 /**
- * Where this layout prints a per-transaction fee, and what that fee is against the
- * amount on the dated line above it.
- *
- * `included` is the whole vocabulary measured - the dated line's amount IS the movement
- * and the fee sits inside it - so a layout whose fee is taken ON TOP is not writable at
- * all rather than spelled by omission. That is deliberate: the sheet path already has
- * that convention, the two corrupt money in opposite directions, and an author who meets
- * an on-top PDF has to add an arm HERE and is dragged by tsc into adding its case at the
- * mapper in the same edit.
- *
  * The fee's number is in the LABEL'S OWN CELL and not in an amount column: on the layout
  * measured the amount column of a fee line carries the merchant's share of the charge, so
  * a reader taking that column stores a fee that is almost the whole movement, and no
@@ -212,15 +184,6 @@ type RowExtent =
 type FeeLine = { kind: 'none' } | { kind: 'included'; label: string };
 
 /**
- * Where this layout prints the merchant category code the card network assigned, if it
- * prints one at all.
- *
- * FeeLine's mechanism and BalanceBox's argument: `none` is a named arm and the field is
- * required, so a template author who could not find the column has to write the "no" on
- * purpose. An optional `mcc?: Span` spells "this layout prints none" and "the author did
- * not look" the same way, and the second is the one that ships a categorisation silently
- * worse than it could be.
- *
  * What it costs when the span is wrong is silent by design and not by oversight: nothing
  * about an MCC refuses, counts or reaches a gate, so no CHECK and no screen can see a
  * span pointing at a neighbour - what holds it is the spans guard over TEMPLATES in
@@ -249,18 +212,6 @@ type BalanceScope =
     };
 
 /**
- * Where the layout states the statement's own opening and closing balance, and what each
- * side came to, for the whole document rather than for one of its products.
- *
- * The two balances have no variant meaning "this layout states none": that is what would
- * let a template author who could not find the box write it away, and the weakest parser
- * in the product would then ship with its only check switched off by a data literal - on
- * exactly the layouts whose author was least sure of what they were reading. A document
- * that does not state its balances is refused by simply not being a template.
- *
- * `gross` is the one place that argument does not reach, so it has a named arm saying
- * this layout prints no per-side totals.
- *
  * `scope` and `gross` are nested here rather than sitting beside `balances` on
  * PdfTemplate because both are resolved at the `label` span this node declares, and a
  * span declared on one node and read from another is a cross-field inconsistency tsc
@@ -560,10 +511,11 @@ export interface PdfLimits {
 /**
  * The document's text, one array of lines in reading order.
  *
- * Grouped by baseline and not by array position (see the file header), then sorted by
- * descending y because a PDF's origin is the bottom left, and within a line by ascending
- * x. pdfjs emits a zero-height whitespace item between placed runs; those are dropped
- * before grouping, or they decide a line's baseline.
+ * Grouped by baseline and never by array position, which is the order the generator
+ * drew in and not the order a reader reads in, then sorted by descending y because a
+ * PDF's origin is the bottom left, and within a line by ascending x. pdfjs emits a
+ * zero-height whitespace item between placed runs; those are dropped before grouping,
+ * or they decide a line's baseline.
  */
 async function readLines(
   bytes: Buffer,

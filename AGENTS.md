@@ -26,8 +26,8 @@ files you are missing. Nothing here depends on them.
 ```
 backend/    Express 5 + TypeScript, Drizzle ORM over PostgreSQL, better-auth, Zod, pino
   src/db/       schema.ts, index.ts (queries), dedup.ts, workspace.ts
-  src/providers/ statement.ts (the one ingestion surface), csv.ts, xlsx.ts, sheet.ts
-  drizzle/      migrations, currently a single squashed 0000_initial.sql
+  src/providers/ the one ingestion surface and the per-format parsers behind it
+  drizzle/      generated migrations
   test/         vitest + pglite + supertest; helpers.ts and pglite.ts are the harness
 web/        React 19 + Vite + Recharts
   src/screens/  Overview, Transactions, Analytics, Independence, Auth
@@ -135,6 +135,21 @@ everywhere.
 
 ## Conventions
 
+- **A module's code carries almost no comments; the reasoning behind it lives in that module's
+  `SPEC.md`.** This is a change of destination and not a licence to delete — what the keep list
+  below protects is exactly what a spec is for. **The test is where the edit that would break the
+  reason is made.** A reason an edit to its own line would break stays beside it: a sentinel's
+  meaning, a sign or rounding convention, why a clause is absent from this expression, a rejected
+  alternative a reader will re-attempt here, an ordering the shape of this function enforces —
+  however far the coupling that ordering serves reaches. A reason broken by an edit made in
+  another file, by somebody who will never open this one, goes to the spec: a coupling read from
+  another file, an ownership boundary, a rejected design at module scale, what a future producer
+  owes. A comment cannot reach them and a spec can.
+  - **A derivation whose content is its arithmetic stays in code, whole, beside the constant it
+    bounds.** A spec is bound by the delete-on-sight list, so it cannot carry the figures; and a
+    chain split across two documents is how three files came to hold a third of one each, with
+    both premises of one third false and its number still right. The spec says such a chain
+    exists, where it is written whole, and what it crosses.
 - **A comment may not state a fact that something else could check.** Nothing tests prose, so a
   comment carrying a number, a count, a measurement, a reachability claim or an inventory of what
   exists is believed long after it stopped being true — comments in this tree have been found
@@ -147,17 +162,19 @@ everywhere.
     inventory; a row number, task id, review round or decision reference; what a test does, what
     a fixture holds, what a past run produced; anything the line below already says; a section
     banner or divider.
-  - **Keep** only what cannot be recovered by reading the code *and* would break behaviour if got
-    wrong: **why something is ABSENT** — a missing clause, filter or check that looks like an
-    oversight and is deliberate, which is the most valuable kind here because absence has no
-    syntax; which of two compiling readings is the intended one; a rejected alternative a reader
-    will otherwise re-attempt, stating the reason and not the story; an ordering or coupling
-    constraint between distant parts of the code; a unit, sign or rounding convention the type
-    does not carry.
-  - There should be **far fewer keeps than feels right.** If the keep list for one file runs past
-    a dozen entries, the rule was applied too generously. A loud failure does not justify a
-    comment — the bar is *silent* breakage. Where a comment mixes a kept reason with a checkable
-    claim, rewrite it to the reason alone; do not keep the number "for context".
+  - **Keep** beside the code only what cannot be recovered by reading the code, *and* would break
+    behaviour if got wrong, *and* is broken by an edit to the line it sits on: **why something is
+    ABSENT** — a missing clause, filter or check that looks like an oversight and is deliberate,
+    which is the most valuable kind here because absence has no syntax; which of two compiling
+    readings is the intended one; a rejected alternative a reader will otherwise re-attempt,
+    stating the reason and not the story; an ordering or coupling constraint between distant parts
+    of the code; a unit, sign or rounding convention the type does not carry.
+  - There should be **far fewer keeps than feels right**, and the bar is the test, not a count: a
+    loud failure does not justify a comment — the breakage has to be *silent* — and the edit that
+    would cause it has to be an edit to that line. A file whose keeps are a data literal measured
+    off a document no reader can open is where a long keep list is the honest answer. Where a
+    comment mixes a kept reason with a checkable claim, rewrite it to the reason alone; do not
+    keep the number "for context".
   - `src/db/workspace.ts`'s header is the shape to copy.
 - Match the style, naming and idiom of the file being edited — **but never its comment volume.**
   Matching a dense neighbour is how the density spread.

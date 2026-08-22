@@ -1,44 +1,18 @@
-/**
- * The typed cell seam every statement parser hands its rows to (ROADMAP 5.2).
- *
- * A CSV row is string[]; a workbook row is not - a date cell arrives as a Date and
- * an amount cell as a float, and running either back through the text parsers
- * would throw away what the file already knew. So the mapper works on Cell and
- * each accessor takes the branch the cell's type dictates.
- *
- * string[][] is assignable to Cell[][], which is why the CSV path still reaches
- * exactly the functions it always did with exactly the same arguments: every CSV
- * cell is a string, so only the string branches below can run for it.
- */
 import { CsvMapping, parseAmount, parseCsvDate } from './csv';
 
 export type Cell = string | number | Date | null;
 
 export interface Sheet {
-  /** the header row first, blank rows already dropped */
   rows: Cell[][];
-  /** what to call row i in a problem message: the sheet row, or the CSV line */
   rowLabel: (i: number) => number;
-  /** why the frontend blanked a cell (an uncached formula, an error value) */
   note?: (row: number, col: number) => string | undefined;
-  /**
-   * What the frontend knows about the file that the mapper cannot see and the user
-   * has to be told anyway - a sheet that was never read. These reach `problems`
-   * ahead of the row-level ones; they are facts about the file, not rejected rows.
-   */
   notices?: string[];
   /** the workbook's date system: serial day 0 is 1904-01-01, not 1899-12-30 */
   date1904?: boolean;
 }
 
-/**
- * One file is one call to insertTransactions, so the whole statement is held in
- * memory as parsed rows. Exceeding this aborts the import rather than truncating
- * it: a half-imported statement reported as a success is worse than a refusal.
- */
 export const MAX_DATA_ROWS = 50_000;
 
-/** Cell as text: what the header, the description and the onlyWhen filter run on. */
 export function cellText(c: Cell | undefined): string {
   if (c === null || c === undefined) return '';
   if (c instanceof Date) return c.toISOString().slice(0, 10);
@@ -70,7 +44,7 @@ const SERIAL_MAX = 80000;
  *
  * UTC throughout: local-time getters shift the calendar day by one for half the
  * world's timezones, and the shifted day goes into the dedup key - so the same
- * statement re-imported from another machine would duplicate every row (ROADMAP 4.2).
+ * statement re-imported from another machine would duplicate every row.
  */
 export function cellDate(
   c: Cell | undefined,

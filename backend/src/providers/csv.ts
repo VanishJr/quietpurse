@@ -7,9 +7,7 @@ export const CSV_PARSER_VERSION = 3;
  * believed, otherwise UTF-8 is tried in fatal mode and a hard failure - which no
  * valid UTF-8 file can produce - falls back to windows-1252, the encoding German
  * bank exports actually use. Guessing by frequency would be worse, and getting it
- * wrong is cosmetic anyway: the description is not part of the dedup key (4.2).
- *
- * The hash is over the raw bytes, never over the result of this.
+ * wrong is cosmetic anyway: the description is not part of the dedup key.
  */
 export function decodeCsv(bytes: Buffer): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
@@ -21,7 +19,6 @@ export function decodeCsv(bytes: Buffer): string {
   }
 }
 
-/** RFC 4180-compatible parsing: quotes, "" inside quotes, CRLF. */
 export function parseCsv(text: string, delimiter: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -110,49 +107,12 @@ export interface CsvMapping {
 /** A list that cannot be empty: an accepted-name list with no names matches nothing. */
 type NonEmpty<T> = readonly [T, ...T[]];
 
-/**
- * What a preset is, now that it is not a CsvMapping: a bank ships one
- * export in every language its app offers, so each column is a list of accepted names
- * and onlyWhen a set of accepted values, and the header decides which of them a given
- * file uses. Candidate order breaks a tie, so a more specific name goes first.
- *
- * description is a list of lists, and the nesting is the point: the outer list is the
- * join order (Sparkasse: payee, then purpose), the inner one the names accepted for
- * that column. As one flat list the two meanings would sit a field apart in a type a
- * Zod schema mirrors by hand, and a second accepted name added to a Sparkasse column
- * would silently start joining three columns instead of two.
- *
- * delimiter, dateFormat and decimal stay scalar: readSheet reads the delimiter before
- * any header exists, so there would be nothing to resolve it against.
- */
 export interface CsvPresetMapping {
   readonly date: NonEmpty<string>;
   readonly amount: NonEmpty<string>;
   readonly description: NonEmpty<NonEmpty<string>>;
   readonly currency?: NonEmpty<string>;
-  /**
-   * The column stating a fee the bank took on top of the amount, which the mapper
-   * subtracts to get the movement the account actually made.
-   *
-   * A preset field with no CsvMapping counterpart, and the asymmetry is deliberate:
-   * a bank that already folds its fee into the amount would have it subtracted a
-   * second time, silently, on every row of every file - and the CSV path has no
-   * reconciliation gate to notice. Whether a column means "on top of" or "included
-   * in" is a fact about a file a human has read, so it is declared here and cannot
-   * be guessed by the generic mapper or supplied by a request.
-   */
   readonly fee?: NonEmpty<string>;
-  /**
-   * The running balance the statement prints after each row, and the column saying
-   * which running balance a row belongs to - one export interleaves several under a
-   * single column (Revolut: Текущий and Сбережения).
-   *
-   * Declared by a preset and nowhere else, for the inverse of `fee`'s reason: a
-   * guessed fee column corrupts silently, where a guessed balance column REFUSES a
-   * file that imports today - on the one path every uncovered user is told to fall
-   * back to. Nested rather than two flat fields so that a series column without a
-   * balance column cannot be spelled: it would have no reader at all.
-   */
   readonly balance?: {
     readonly column: NonEmpty<string>;
     /** absent = the file states one running balance for the whole statement */
@@ -190,11 +150,6 @@ export const CSV_PRESETS: Record<string, { title: string; mapping: CsvPresetMapp
   },
   revolut: {
     title: 'Revolut (Statement CSV)',
-    // Every name below comes from a header someone has actually had in front of
-    // them - the English export and the Russian one. A guessed translation that is
-    // wrong costs nothing, but one that is exactly right for a *different* column is
-    // a silent mis-mapping, and a list that looks complete makes the next failure
-    // harder to read. Coverage grows one line at a time, from real files.
     mapping: {
       date: ['Completed Date', 'Дата выполнения'],
       amount: ['Amount', 'Сумма'],
@@ -280,7 +235,6 @@ export function genericMapping(header: string[]): CsvMapping | null {
   return { date, amount, description, currency: matchColumn(header, GENERIC_CANDIDATES.currency) };
 }
 
-/** "1.234,56", "1,234.56", "-1140,57" -> a number. null = not a number. */
 export function parseAmount(raw: string, decimal: CsvMapping['decimal'] = 'auto'): number | null {
   let s = raw.trim().replace(/\s| /g, '');
   if (!s) return null;
