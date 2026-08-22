@@ -1,15 +1,3 @@
-/**
- * The one ingestion surface: POST /api/imports hands the raw bytes here, this file
- * decides what they are, picks a parser, and stages the rows behind a summary the user
- * has to accept. Confirm is what runs the rest of the pipeline - insertTransactions ->
- * reclassifyAll -> backfillBaseAmounts - and it lives in the data layer
- * (confirmImport, db/index.ts) because it is one database transaction.
- *
- * Deduplication: a statement row carries no bank reference, so this parser supplies no
- * dedupKey and insertTransactions computes one from the row's stable fields. That
- * requires the whole file to be inserted in one call, which it is - a statement covers
- * whole days, so every group of identical rows arrives complete.
- */
 import crypto from 'crypto';
 import { categorize } from '../categorizer';
 import {
@@ -97,7 +85,8 @@ const FORMATS = `${FORMAT_NAMES.slice(0, -1).join(', ')} or ${FORMAT_NAMES[FORMA
  * And a page cap as well, because the byte cap does not bound the page count even
  * loosely: compressed streams are the point of the format, so a plausible statement
  * fits in a few megabytes however many pages it has. Enforced inside readPdf and not
- * here, because numPages needs the document open - see the band comment below.
+ * here, because numPages needs the document open; which refusals leave an imports row
+ * and which leave none is in SPEC.md.
  */
 const MAX_PDF_PAGES = 200;
 
@@ -109,9 +98,7 @@ const MAX_PDF_PAGES = 200;
  * a document may put everything on a single page; what a compressed stream expands to is
  * bounded by neither cap. Opening the document is outside it the same way - charged to the
  * budget, not interruptible by it. So this bounds accidental pathology and not someone who
- * is trying. Closing that needs an execution context that can be terminated, which is a
- * second thread, and the argument that the workspace store is safe rests on there being
- * none. Sustained load across many uploads is a rate limit and not this.
+ * is trying. Sustained load across many uploads is a rate limit and not this.
  */
 const PDF_LIMITS: PdfLimits = { maxPages: MAX_PDF_PAGES, deadlineMs: 20_000 };
 
@@ -162,19 +149,16 @@ const SERIES_QUOTE_MAX = 24;
  *                  the five pdf and csv can reach. The two cannot be traded: a
  *                  132-character note at a six-digit label composes 160, so 131 is
  *                  the only figure safe on every path.
- *                  Spent today: pdf's NOTE_MAX is 132 and composes 159 exactly; csv
- *                  produces no note at all; xlsx produces two, UNCACHED_FORMULA at 89
- *                  composing 117, and errorNote at 33 composing 61 - and what holds
- *                  errorNote inside the budget is the CUT at ERROR_TEXT_MAX in
- *                  xlsx.ts. Not its type: CellErrorValue['error'] is a union of seven
- *                  literals that nothing checks the file against, so before that cut
- *                  the note was 9 plus whatever the bytes said, and a workbook a
- *                  spreadsheet did not write composed past 400 here - evicting
- *                  noRowsParsed's notice about a different part of the file whole.
+ *                  What holds a note inside that budget on the xlsx path is the CUT
+ *                  at ERROR_TEXT_MAX in xlsx.ts and not a type: CellErrorValue's
+ *                  error is a union of literals nothing checks the file against, so
+ *                  an error cell's own text is whatever the bytes say, and without
+ *                  the cut it composes past the budget and evicts noRowsParsed's
+ *                  notice about a different part of the file whole.
  *                  NOT held: that a note producer added later respects its path's
  *                  budget. Nothing checks it, and a blanket bounded() here cannot -
  *                  it would have to cut at 131, which is under what pdf already
- *                  spends. DEBT.md carries it
+ *                  spends.
  *   no movement    the on-top arm quotes two cells at this bound: 159 under a
  *                  six-digit label, and it is spent to the character. included is
  *                  pdf-only, 142; not-stated is every path's, 133 under a six-digit
@@ -184,10 +168,8 @@ const SERIES_QUOTE_MAX = 24;
 const CELL_QUOTE_MAX = 24;
 
 /**
- * What one column name may spend in the summary's readAs. A RENDER bound, and the one
- * number in this band that is NOT part of the ERROR_DETAIL_MAX derivation the three
- * above share: readAs is a field of the summary, never a problem and never an
- * error_detail.
+ * What one column name may spend in the summary's readAs. A RENDER bound: readAs is a
+ * field of the summary, never a problem and never an error_detail.
  *
  * The NUMBER of description names is deliberately not bounded. A truncated list of
  * column names reads exactly like a complete one, and a "+N more" tail is a fifth state
@@ -314,16 +296,6 @@ export type StatementImportResult =
     }
   | { outcome: 'awaiting_confirmation'; summary: ImportSummary };
 
-/**
- * What the bytes are, by content only - never by the extension or the browser's
- * Content-Type, both of which the user's bank chose and neither of which is checked
- * anywhere. Everything this refuses gets a message saying what to do instead.
- *
- * It answers a type and nothing else, deliberately: a classifier with no bytes to
- * hand back cannot give a caller a buffer different from the one it was passed, so
- * the bytes hashed, the bytes stored and the bytes parsed stay one buffer even for a
- * file whose document starts at an offset.
- */
 export function sniff(bytes: Buffer): ImportSourceType {
   const starts = (...signature: number[]): boolean =>
     signature.every((b, i) => bytes[i] === b);
@@ -379,20 +351,6 @@ export function sniff(bytes: Buffer): ImportSourceType {
   return 'csv';
 }
 
-/**
- * Parses the statement and stages what it read. Nothing reaches `transactions`
- * here, and nothing on any screen moves until confirmImport runs.
- *
- * Order of operations: hash and check before parsing, so a
- * re-upload costs nothing; write the import row before touching anything else, so
- * a failure leaves a failed import rather than nothing at all. The import row is
- * deliberately NOT in a transaction with the parse - a rollback would take the
- * failure record with it.
- *
- * The catch is around the staging as well as the parse: a throw after some rows
- * have been staged leaves them attached to a failed import, which is recoverable
- * (delete it and they go too), where leaving them unattributed would not be.
- */
 export async function importStatement(
   req: StatementImportRequest,
 ): Promise<StatementImportResult> {
@@ -428,16 +386,6 @@ export async function importStatement(
   // it would also leave an `imports` row for an upload that was never going to land.
   const account = await uploadDestination(req);
 
-  // What leaves no `imports` row at all is everything decidable without opening the
-  // file: a type the sniffer recognises and refuses, a file past the size cap, a
-  // preset that does not exist. Nothing was parsed and nothing could have been
-  // written, and `failed` means "an import did not complete", not "the user picked
-  // the wrong file". What does leave a failed row is everything the loader has to
-  // open the file to discover - a zip that turns out not to be a workbook, a sheet
-  // with no header, a PDF that is password-protected, past MAX_PDF_PAGES or still
-  // being read at the deadline in PDF_LIMITS - because the bytes alone cannot tell.
-  // It is the opening that decides the band and not how much was parsed: an
-  // encrypted PDF parses nothing either.
   const sourceType = sniff(req.bytes);
   const cap = SIZE_CAP[sourceType];
   if (cap && req.bytes.length > cap.max) throw new Error(cap.tooLarge(cap.max / MB));
@@ -682,12 +630,6 @@ function balanceColumns(
   return { balanceCol, seriesCol: balanceCol < 0 ? -1 : index(preset?.balance?.series) };
 }
 
-/**
- * Which column is which, for one header row. The XLSX header scan and the mapper
- * call this same function: a scan with a laxer predicate would settle on a row
- * above the real header, and the mapper would then read every data row against the
- * wrong columns and report a plausible-looking count as a success.
- */
 function resolveColumns(
   header: string[],
   preset: NamedPreset | null,
@@ -807,16 +749,6 @@ type FeeCell = { ok: true; fee: number | null } | { ok: false; text: string };
 
 /**
  * A fee one row of the file stated, and WHICH OF THE TWO THINGS IT IS.
- *
- * The discriminant travels with the number because the two conventions move the
- * movement in opposite directions: an on-top fee is subtracted to get what the
- * account did, an included one is already inside it. Until this row that fact lived
- * in a doc comment on CsvPresetMapping.fee and was implemented by an unconditional
- * subtraction - correct while a sheet was the only producer, and silently wrong money
- * the moment a second one arrived with the other convention. On the one file measured
- * a PDF fee subtracted a second time takes the net from 192.45 to 192.01 and the
- * reconciliation gate refuses the whole import in a sentence about balances that names
- * nothing about fees.
  *
  * A union rather than a number beside a boolean, for the reason TableLayout,
  * AmountCurrency, RowExtent and StatedBalances are unions: a producer cannot state a
@@ -1435,9 +1367,9 @@ const doesNotAddUp = (
 /**
  * It fires only when the ends match and the halves do not, and the wording leads with
  * that: a single dropped row fails both checks, and the net one runs first because it
- * names the missing amount where this one names a discrepancy in a subtotal (row 035,
- * R1). So the only thing left for this sentence is the compensating pair - money out
- * and money in that the parser never saw, cancelling into a clean net.
+ * names the missing amount where this one names a discrepancy in a subtotal. So the
+ * only thing left for this sentence is the compensating pair - money out and money in
+ * that the parser never saw, cancelling into a clean net.
  *
  * All four figures, signed, rather than the two differences: which side to look at in
  * the document is what the person holding it needs, and a magnitudes-only sentence
@@ -1513,10 +1445,9 @@ type Verdict =
  * from these same rows that is an identity and holds however many rows are missing.
  *
  * It is blind at the ENDS, and the blindness is structural: losing the first or last
- * row of a run does not break it, it moves where it starts or stops. Measured on the
- * real export, 3 of 70 single-row removals pass that way and every one is a boundary
- * row - which is why the confirmation screen may claim the run and may not claim the
- * statement is complete.
+ * row of a run does not break it, it moves where it starts or stops - which is why
+ * the confirmation screen may claim the run and may not claim the statement is
+ * complete.
  *
  * Connectivity is load-bearing rather than decoration: 100->110, 110->130 plus a
  * detached 500->600, 600->500 has balanced degrees at every value and is two runs.
@@ -1605,22 +1536,16 @@ export const balanceBreaks = (
  * The sheet arm's verdict for the whole file, per running balance and then over all
  * of them.
  *
- * A break refuses whatever else is true of the OTHER runs: the file's own arithmetic
- * says money is missing from what was read, and a statement short by a row staged for
- * confirmation is the failure CLAUDE.md ranks above a crash. One blank cell in a
- * pocket the user barely uses may not disarm the refusal for the account it sits
- * beside.
- *
- * "Whatever else is true of the others" is doing the work in that sentence, because a
- * run this importer cannot use is never examined for a break at all - and that is
- * where R10's protection sits. Both ways it happens take their hole out of ONE run
- * and leave its links a subset by construction: a balance cell this parser could not
- * read is a link it never built, and a row the status filter dropped is a step of that
- * series the gate never sees. What is left of either run breaks, and the break is ours
- * rather than the file's. A locale whose balances this `decimal` setting misreads, and
- * a bank that prints a running balance on its pending rows, are the two files that
- * live there - both import today, both must keep importing, and neither may cost a
- * refusal on the one path with nowhere further to fall back to.
+ * A run this importer cannot use is never examined for a break at all, and that is what
+ * keeps a file the parser reads imperfectly from being refused for it. Both ways it
+ * happens take their hole out of ONE run and leave its links a subset by construction:
+ * a balance cell this parser could not read is a link it never built, and a row the
+ * status filter dropped is a step of that series the gate never sees. What is left of
+ * either run breaks, and the break is ours rather than the file's. A locale whose
+ * balances this `decimal` setting misreads, and a bank that prints a running balance on
+ * its pending rows, are the two files that live there - both import today, both must
+ * keep importing, and neither may cost a refusal on the one path with nowhere further
+ * to fall back to.
  *
  * Everything past the loop is only whether a pair can honestly be shown.
  */
@@ -1705,11 +1630,6 @@ type SheetBalances =
  * The net movement of the file per currency, and - for a format that states its own
  * balances - the check that the rows actually run from the opening one to the
  * closing one, and that each half of them comes to what the document printed for it.
- *
- * The two are one pass on purpose. The number a person reads before confirming and
- * the number the gate checks have to come out of the same loop, or they drift with
- * nothing failing until somebody reads a wrong one - the same argument that has
- * `newRows` come from the key generator the confirm uses.
  *
  * Summed in minor units rather than decimals for the reason money.ts gives, and here
  * it is not theoretical: a real statement's amounts summed as decimals miss its

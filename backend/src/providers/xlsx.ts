@@ -1,31 +1,7 @@
-/**
- * XLSX frontend (ROADMAP 5.2): a workbook in, a Sheet of typed cells out. From
- * there the mapping, the row loop and the pipeline are the CSV path's, so a
- * workbook and a CSV of the same statement produce the same transactions.
- *
- * A worksheet cell is not a scalar. Formulas, rich text, hyperlinks and errors all
- * arrive as objects and the seam admits none of them, so they are normalised here
- * - by cell TYPE, never through cell.text, which renders a date with
- * Date.toString(). A formula's cached result is normalised in turn: a computed
- * amount column is common in bank exports and has to stay a number.
- *
- * Where the workbook loses a cell for a reason of its own - a formula the writer
- * cached no result for, an #N/A - the reason travels with the sheet as a note, so
- * the mapper can report that instead of "could not parse the amount". No preset
- * will ever fix a workbook whose amounts were never computed.
- */
 import ExcelJS from 'exceljs';
 import { ERROR_DETAIL_MAX } from '../db';
 import { Cell, MAX_DATA_ROWS, Sheet, cellText, hasContent } from './sheet';
 
-/**
- * Bumped whenever a change here would parse an existing file differently. Per
- * parser, keyed by imports.source_type - see CSV_PARSER_VERSION.
- *
- * "Here" is not only this file: a workbook's columns are resolved by the presets and
- * resolveColumns that the CSV path uses, so a change to either parses a .xlsx export
- * differently for exactly the same reason and moves this number too.
- */
 export const XLSX_PARSER_VERSION = 3;
 
 /** How far down a sheet the header may hide behind a title or an account block. */
@@ -78,8 +54,8 @@ const ERROR_TEXT_MAX = 24;
  * fixed prose, the 3 characters that join the two, and 8 of margin. That reason is
  * 199 - MAX_DATA_ROWS skipped, plus the 159 derived in full above statement.ts's
  * CELL_QUOTE_MAX, which is the one place that number is now written whole. 298 is
- * therefore the exact bound - the margin is there because this number has been
- * derived three times and been wrong twice.
+ * therefore the exact bound; the margin is there because this number has been got
+ * wrong before.
  *
  * Both premises this comment used to state were among those wrongs, and they cancelled:
  * the row label cannot reach Excel's own ceiling (MAX_SHEET_ROWS above stops it at
@@ -131,13 +107,6 @@ interface Oversized {
  */
 const isVisible = (ws: ExcelJS.Worksheet): boolean => ws.state === 'visible';
 
-/**
- * The workbook's rows, from the header down. isHeader is the mapper's own column
- * resolution: the scan must accept exactly the rows the mapper can read, or it
- * settles on a row above the real header and every data row is read against the
- * wrong columns - a partial import that answers 200. Acceptance is ok alone; the
- * reason travels with it only so that a file which matches nothing can say why.
- */
 export async function readXlsx(
   bytes: Buffer,
   isHeader: (header: string[]) => { ok: boolean; error?: string },
@@ -204,26 +173,6 @@ export async function readXlsx(
   throw new Error(notFound(tried, tooLarge, closest));
 }
 
-/**
- * A sheet that was never read is reported on the way out as well as on the way
- * down. A workbook whose January sheet is formatted past the cap imports February,
- * answers 200 and shows a success card; without this nothing the user is shown says
- * that a month is missing. The loop above returns at the first sheet whose header
- * resolves, so the same silence covers every sheet behind that one - a two-month
- * workbook imports January and says nothing whatever about February, which is why
- * the unused list is derived here from the workbook rather than from `tried`.
- * importStatement warns per notice, but a log answers a support question, not the
- * person looking at their own statement, and the `imports` row records nothing about
- * a skipped sheet at all. Hidden and empty sheets are never named: the selector will
- * not read a hidden sheet either, and a blank Tabelle2 rides along in half the
- * workbooks people export - naming either puts a notice on an import with nothing
- * wrong with it. One entry however many sheets and however many causes - it shares
- * the problems array with the row-level messages.
- *
- * Re-uploading the file is deliberately not offered: once this import is confirmed
- * the same bytes answer "already imported" without being parsed, so the only exit
- * that works is saving the other sheets as files of their own.
- */
 function sheetNotice(
   sheets: ExcelJS.Worksheet[],
   used: ExcelJS.Worksheet,
@@ -264,8 +213,7 @@ function sheetNotice(
  * The fixed prose is never shortened - only the sheet lists and the closest-row
  * clause, in that order of preference. A sheet that was never read is a refusal
  * cause with no other channel; the closest row only refines a sentence that is
- * already true, so it yields first. The client renders the whole of this budget
- * (MAX_ERROR_CHARS in web/src/api.ts), so the preference is the only thing standing
+ * already true, so it yields first. The preference is the only thing standing
  * between a clause and the reader: what yields here is gone, not further down.
  */
 function notFound(tried: string[], tooLarge: Oversized[], closest: Candidate | null): string {
@@ -329,8 +277,7 @@ const sheetCount = (n: number): string => `${n} sheet${n === 1 ? '' : 's'}`;
  * everything behind the first `; ` yields first and yields whole, then whole entries
  * off the end, then the lot. A `"` in these sentences is a name delimiter that
  * noColumnMatched does not escape, so the tracking holds only while no name carries
- * one; the unquoted header lists it cannot see at all (DEBT.md, "A header cell
- * containing `, ` is one entry to the reader and two to the cutter").
+ * one, and an unquoted header list it cannot see at all.
  *
  * It cannot split a surrogate pair either, and that is structural rather than
  * promised: it never cuts anywhere but immediately before an ASCII separator.

@@ -1,17 +1,7 @@
 /**
  * Who issued a statement no template matched, read off the IBANs the document itself
- * prints (ROADMAP 5.2, row 30). Diagnostic only: this runs after selectTemplate has
- * already answered, and nothing here can reach back into that decision - the module
- * imports no template, its parameter cannot express one and its return type cannot be
- * one.
- *
- * The rule, and every clause of it was measured rather than reasoned: a name is
- * asserted only when exactly one IBAN-shaped token appears on EVERY page of a document
- * of at least two pages, and that token resolves to a directory entry. Frequency is
- * not evidence - on the two statements this was built against the most frequent IBAN
- * is a counterparty's by two to one, and each of the two would have named the other's
- * bank. What repeats on every page is the account's own IBAN, because it is page
- * furniture, and one page cannot make a claim about repetition at all.
+ * prints. Nothing here can reach back into the template decision: the module imports no
+ * template, its parameter cannot express one and its return type cannot be one.
  */
 
 /** The shortest IBAN any country has registered, and the most ISO 13616 allows. */
@@ -39,22 +29,12 @@ const COUNTRIES: Readonly<Record<string, Bban>> = {
 };
 
 /**
- * (country, bank identifier) -> what to call the institution. Hand-written entry by
- * entry and never bulk-imported: a stale bulk table asserts a bank that has been
- * merged away, in the one sentence whose whole value is that the person holding the
- * file can check it (row 30, D-B).
+ * (country, bank identifier) -> what to call the institution. Every value is the
+ * `Kurzbezeichnung` field of the Deutsche Bundesbank Bankleitzahlendatei, read one row
+ * at a time.
  *
- * Every value is the `Kurzbezeichnung` field of the Deutsche Bundesbank
- * Bankleitzahlendatei, edition valid 08.06.2026 - 06.09.2026, read one row at a time:
- *
- *     50024024  C24 Bank              Frankfurt am Main   DEFFDEFFXXX
- *     10011001  N26 Bank Berlin       Berlin              NTSBDEB1XXX
- *     10010178  Revolut Bank, Berlin  Berlin              REVODEB2XXX
- *
- * Three of them, because a name nobody checked is worse than no name and these are the
- * banks this row was measured against. Adding one can never change WHICH candidate
- * wins - the collapse to a single pair happens before this lookup - only whether the
- * winner has a name.
+ * Adding one can never change WHICH candidate wins - the collapse to a single pair
+ * happens before this lookup - only whether the winner has a name.
  */
 export const ISSUERS: Readonly<Record<string, string>> = {
   'DE 50024024': 'C24 Bank',
@@ -127,18 +107,13 @@ const tokens = (lines: readonly string[]): Set<string> => {
 /**
  * The institution whose statement this is, or nothing.
  *
- * `string | null` and never the IBAN it was read from: this answer is composed into
- * `imports.error_detail`, which is stored per workspace and read by the operator, and
- * a function that cannot return an account number cannot leak one into a diagnostic
- * (row 30, D-C).
- *
  * Page-grouped text, one entry per page of the DOCUMENT including a page that produced
  * no lines: a denominator counted from the pages that happened to yield text is
  * derived from the same data it checks, and a four-page PDF whose last two pages carry
  * no text layer would make a counterparty printed on the first two "on every page".
  *
  * Total by construction - no parse, no BigInt, no unchecked index, no throw - because
- * it decides only HOW a refusal is worded and never whether one happens (trap 8).
+ * it decides only HOW a refusal is worded and never whether one happens.
  */
 export function issuerName(pages: readonly (readonly string[])[]): string | null {
   if (pages.length < 2) return null;
