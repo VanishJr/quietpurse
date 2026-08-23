@@ -522,7 +522,9 @@ export interface Independence {
   baselineThreshold: number;
   /** median spending + buffer — the price of the current lifestyle */
   lifestyleThreshold: number;
-  /** active threshold: depends on settings.goalMode */
+  /** the mode the figures below were computed in; settings.goalMode is the one asked for */
+  effectiveMode: GoalMode;
+  /** active threshold: depends on effectiveMode */
   threshold: number;
   deficit: number;
   /** own income / active mode's base */
