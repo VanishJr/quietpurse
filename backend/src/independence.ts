@@ -34,7 +34,7 @@ import {
   listBaselineItems,
   summaryMonthlyTotals,
 } from './db';
-import { Settings, getSettings } from './settings';
+import { GoalMode, Settings, getSettings } from './settings';
 
 export interface IndependenceMonth {
   /** YYYY-MM */
@@ -68,7 +68,12 @@ export interface Independence {
   baselineThreshold: number;
   /** median spending * (1 + buffer) - the price of your current lifestyle, for comparison */
   lifestyleThreshold: number;
-  /** the active threshold: baselineThreshold or lifestyleThreshold per settings.goalMode */
+  /**
+   * the mode the figures below were actually computed in, against settings.goalMode
+   * which is the mode that was asked for - the two differ when the fallback fires
+   */
+  effectiveMode: GoalMode;
+  /** the active threshold: baselineThreshold or lifestyleThreshold per effectiveMode */
   threshold: number;
   /** threshold minus own income (never negative) */
   deficit: number;
@@ -147,7 +152,9 @@ export async function computeIndependence(now = new Date()): Promise<Independenc
   // The mode's base: both the threshold and self-sufficiency are computed from it.
   // If there are no minimum line items yet (empty table), baseline mode would give a
   // threshold of 0 - fall back to the median so the screen does not show "goal reached".
-  const useBaseline = settings.goalMode === 'baseline' && baselineSum > 0;
+  const effectiveMode: GoalMode =
+    settings.goalMode === 'baseline' && baselineSum > 0 ? 'baseline' : 'lifestyle';
+  const useBaseline = effectiveMode === 'baseline';
   const base = useBaseline ? baselineSum : avgSpend;
   const threshold = useBaseline ? baselineThreshold : lifestyleThreshold;
   const deficit = round2(Math.max(0, threshold - ownIncomeAvg));
@@ -190,6 +197,7 @@ export async function computeIndependence(now = new Date()): Promise<Independenc
     baselineItems,
     baselineThreshold,
     lifestyleThreshold,
+    effectiveMode,
     threshold,
     deficit,
     selfSufficiency,

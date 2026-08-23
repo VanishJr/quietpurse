@@ -121,6 +121,27 @@ describe('bare minimum', () => {
     expect(r.threshold).toBe(r.lifestyleThreshold);
     expect(r.threshold).toBeGreaterThan(0);
   });
+
+  it('the answer names the mode its figures were computed in', async () => {
+    const t = await fresh();
+    await t.upsertBaselineItem('housing', 1000);
+    await t.spendEveryMonth(800, 'spend');
+
+    const r = await t.computeIndependence(NOW);
+    expect(r.settings.goalMode).toBe('baseline');
+    expect(r.effectiveMode).toBe('baseline');
+    expect(r.threshold).toBe(r.baselineThreshold);
+  });
+
+  it('the fallback answers lifestyle while the request stays baseline', async () => {
+    const t = await fresh();
+    await t.spendEveryMonth(800, 'spend');
+
+    const r = await t.computeIndependence(NOW);
+    expect(r.settings.goalMode).toBe('baseline');
+    expect(r.effectiveMode).toBe('lifestyle');
+    expect(r.threshold).toBe(r.lifestyleThreshold);
+  });
 });
 
 describe('goalMode: lifestyle - the older formula is unchanged', () => {

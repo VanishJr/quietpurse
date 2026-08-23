@@ -160,7 +160,19 @@ export function IndependenceScreen() {
 
   const cur = data.baseCurrency;
   const pct = Math.round(data.selfSufficiency * 100);
-  const isBaseline = data.settings.goalMode === 'baseline' && data.baselineSum > 0;
+  const isBaseline = data.effectiveMode === 'baseline';
+  /** the mode that was ASKED for - the chip's own value, and what the minimum block renders on */
+  const wantsBaseline = data.settings.goalMode === 'baseline';
+  const fellBack = wantsBaseline && !isBaseline;
+  const noGround = data.months.length === 0 && data.baselineSum === 0;
+  const lifestyleGap = Math.round(data.lifestyleThreshold - data.baselineThreshold);
+  const thresholdNoun = isBaseline ? 'the minimum' : 'your current lifestyle';
+  const monthsAveraged =
+    data.months.length === 0
+      ? 'no months with data'
+      : data.months.length === 1
+        ? '1 month with data'
+        : `${data.months.length} months with data`;
 
   // active mode's base: minimum or median spending — the threshold is derived from it
   const base = isBaseline ? data.baselineSum : data.avgSpend;
@@ -209,42 +221,68 @@ export function IndependenceScreen() {
               ? 'To cover your minimum, you need to earn'
               : 'To live without help the way you do now, you need to earn'}
           </div>
-          <div className="hero-value">
-            ≈ {fmtMoney(data.threshold, cur)} <span className="hero-permonth">per month</span>
-          </div>
-          <div className="hero-sub">
-            your own income now ≈ {fmtMoney(data.ownIncomeAvg, cur)}
-            {data.deficit > 0
-              ? ` · short by ${fmtMoney(data.deficit, cur)}`
-              : ' · that covers the threshold'}
-          </div>
-          {data.externalAvg > 0 && (
+          {noGround ? (
             <div className="hero-sub">
-              outside help now ≈ {fmtMoney(data.externalAvg, cur)} per month
+              Nothing to work this out from yet — no minimum line items, and no transactions between{' '}
+              {data.from} and {data.to}.
             </div>
+          ) : (
+            <>
+              <div className="hero-value">
+                ≈ {fmtMoney(data.threshold, cur)} <span className="hero-permonth">per month</span>
+              </div>
+              <div className="hero-sub">
+                your own income now ≈ {fmtMoney(data.ownIncomeAvg, cur)}
+                {data.deficit > 0
+                  ? ` · short by ${fmtMoney(data.deficit, cur)}`
+                  : ' · that covers the threshold'}
+              </div>
+              {data.externalAvg > 0 && (
+                <div className="hero-sub">
+                  outside help now ≈ {fmtMoney(data.externalAvg, cur)} per month
+                </div>
+              )}
+            </>
           )}
-          <div className="hero-compare">
-            {isBaseline
-              ? `your current lifestyle costs ${fmtMoney(data.lifestyleThreshold, cur)} — ${fmtMoney(
-                  Math.round(data.lifestyleThreshold - data.baselineThreshold),
+          {isBaseline ? (
+            // the comparison is to a lifestyle figure, and there is none to compare
+            // against until a month has been averaged
+            data.months.length > 0 ? (
+              <div className="hero-compare">
+                {`your current lifestyle costs ${fmtMoney(data.lifestyleThreshold, cur)} — ${fmtMoney(
+                  Math.abs(lifestyleGap),
                   cur,
-                )} more than the minimum`
-              : `the bare minimum is only ${fmtMoney(data.baselineThreshold, cur)} per month`}
-          </div>
+                )} ${lifestyleGap < 0 ? 'less' : 'more'} than the minimum`}
+              </div>
+            ) : null
+          ) : fellBack ? (
+            <div className="hero-compare">
+              You have not entered any minimum line items yet, so these are your current-lifestyle
+              figures. Add the first one below to see your minimum.
+            </div>
+          ) : data.baselineSum > 0 ? (
+            <div className="hero-compare">
+              {`the bare minimum is only ${fmtMoney(data.baselineThreshold, cur)} per month`}
+            </div>
+          ) : null}
 
           {/* self-sufficiency progress */}
-          <div className="track">
-            <div
-              className="track-fill"
-              style={{
-                width: `${Math.min(100, pct)}%`,
-                background: pct >= 100 ? ink.good : ink.accent,
-              }}
-            />
-          </div>
-          <div className="progress-label">
-            self-sufficiency {pct}% {pct >= 100 ? '— goal reached 🎉' : ''}
-          </div>
+          {!noGround && (
+            <>
+              <div className="track">
+                <div
+                  className="track-fill"
+                  style={{
+                    width: `${Math.min(100, pct)}%`,
+                    background: pct >= 100 ? ink.good : ink.accent,
+                  }}
+                />
+              </div>
+              <div className="progress-label">
+                self-sufficiency {pct}% {pct >= 100 ? '— goal reached 🎉' : ''}
+              </div>
+            </>
+          )}
         </div>
 
         <div>
@@ -308,13 +346,13 @@ export function IndependenceScreen() {
         {isBaseline ? (
           <>
             Threshold = sum of minimum line items ({fmtMoney(data.baselineSum, cur)}) + a{' '}
-            {data.settings.bufferPct}% buffer. Income is the average over{' '}
-            {data.settings.windowMonths} mo. ({data.from} — {data.to}).
+            {data.settings.bufferPct}% buffer. Income is the average over {monthsAveraged} ({data.from}{' '}
+            — {data.to}).
           </>
         ) : (
           <>
-            Threshold = median spending over {data.settings.windowMonths} mo. (
-            {fmtMoney(data.avgSpend, cur)}) + a {data.settings.bufferPct}% buffer. One-off
+            Threshold = median spending over {monthsAveraged} ({fmtMoney(data.avgSpend, cur)}) + a{' '}
+            {data.settings.bufferPct}% buffer. One-off
             purchases are spread across the year
             {data.oneOffMonthly > 0 ? ` (+${fmtMoney(data.oneOffMonthly, cur)}/mo)` : ''}. Window:{' '}
             {data.from} — {data.to}.
@@ -322,7 +360,7 @@ export function IndependenceScreen() {
         )}
       </p>
 
-      {isBaseline ? (
+      {wantsBaseline && (
         <>
           <h2 className="block-title">What the minimum is made of (per month)</h2>
           <p className="hint">Click a line item to edit it.</p>
@@ -372,10 +410,18 @@ export function IndependenceScreen() {
                 </button>
               ),
             )}
-            <div className="total-row">
-              <span className="legend-name">Total</span>
-              <span className="legend-value">{fmtMoney(data.baselineSum, cur)}</span>
-            </div>
+            {data.baselineItems.length === 0 ? (
+              <div className="total-row">
+                <span className="legend-name">
+                  Nothing here yet. Add what it takes to live on your own: rent, food, transport.
+                </span>
+              </div>
+            ) : (
+              <div className="total-row">
+                <span className="legend-name">Total</span>
+                <span className="legend-value">{fmtMoney(data.baselineSum, cur)}</span>
+              </div>
+            )}
           </div>
           {adding ? (
             <div className="inline-row" style={{ paddingTop: 10 }}>
@@ -422,7 +468,9 @@ export function IndependenceScreen() {
             </button>
           )}
         </>
-      ) : (
+      )}
+
+      {!isBaseline && (
         <>
           <h2 className="block-title">What the threshold is made of (per month)</h2>
           <div className="legend">
@@ -480,22 +528,22 @@ export function IndependenceScreen() {
         <div>
           <p className="body-text">
             {fmtMoney(data.settings.hourlyRate, cur)}/hr × {data.settings.hoursCapPerWeek} hr/wk ≈{' '}
-            {fmtMoney(workMonthly, cur)}/mo — that's {workPct}% of the minimum.
+            {fmtMoney(workMonthly, cur)}/mo — that's {workPct}% of {thresholdNoun}.
           </p>
           {workMissing > 0 ? (
             <p className="body-text">
-              Short by ≈ {fmtMoney(workMissing, cur)}/mo. To cover the minimum at{' '}
+              Short by ≈ {fmtMoney(workMissing, cur)}/mo. To cover {thresholdNoun} at{' '}
               {data.settings.hoursCapPerWeek} hr/wk, the rate would need to be ≈{' '}
               {fmtMoney(Math.round(requiredRate), cur)}/hr.
             </p>
           ) : (
-            <p className="body-text">That covers the minimum 🎉</p>
+            <p className="body-text">That covers {thresholdNoun} 🎉</p>
           )}
         </div>
       ) : (
         <p className="hint">
           Enter your rate and weekly hours — I'll work out your monthly pay and how much falls
-          short of the minimum.
+          short of {thresholdNoun}.
         </p>
       )}
 

@@ -55,6 +55,18 @@ type: **one write is in flight at a time**, because two mutations sharing a vers
 own second click look like another device's; and **a row this version cannot read is kept and sent
 back**, because dropping it deletes it from every device the next time anything is saved.
 
+**Which of the two goal modes a figure was computed in comes off the body.** `/api/independence`
+answers the mode it actually used beside the mode that was asked for, and
+`web/src/screens/IndependenceScreen.tsx` reads it rather than working it out. The rule it replaced
+was the same expression written once here and once in `backend/src/independence.ts`, agreeing by
+coincidence: either side moving put every heading, hint, legend and what-if label on the screen into
+one mode while the threshold, the shortfall and the self-sufficiency figure were computed in the
+other, with nothing red in either package. Re-deriving it on this side — from the requested mode and
+the line-item total, or by comparing the active threshold against the two the body also carries —
+restores exactly that. Reading the requested mode is a different question and stays: it is what
+decides whether the minimum's line items and their add form are on screen, so the state that cannot
+create its own first item does not exist.
+
 **`copy.test.ts` is this package's own check that reads source as text**, and it resolves its root
 differently from the checks in the other package on purpose. `backend/test/SPEC.md` states that rule
 and the reason for the divergence; it is not restated here.

@@ -142,6 +142,7 @@ export const INDEPENDENCE: Independence = {
   baselineItems: [],
   baselineThreshold: 880,
   lifestyleThreshold: 1100,
+  effectiveMode: 'baseline',
   threshold: 880,
   deficit: 0,
   selfSufficiency: 1,
