@@ -211,8 +211,8 @@ what a frontend's note may spend.
 **That chain is written whole in one place, in code, above `CELL_QUOTE_MAX` in `statement.ts`, and
 it stays there.** A spec is bound by `AGENTS.md`'s delete-on-sight list, so this document cannot
 carry its figures; and the chain was split across three files once, each holding a locally checkable
-third with nobody owning the sum, which is how both premises of one of those thirds came to be false
-while its number stayed right. Splitting it again re-creates exactly that.
+piece with nobody owning the sum, which is how both premises of one of those pieces came to be
+false while its number stayed right. Splitting it again re-creates exactly that.
 
 Two things about it that are the module's rather than that block's:
 

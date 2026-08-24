@@ -1,14 +1,4 @@
 /**
- * The deduplication key format, in one place because two callers depend on it
- * being byte-identical: insertTransactions (./index.ts), which assigns keys to
- * every incoming row, and scripts/migrate-sqlite-to-pg.ts, which reconstructs
- * them for a history imported from the SQLite era. If those two ever disagreed,
- * the first re-import after a migration would duplicate the user's whole history.
- *
- * See ROADMAP 4.2 for why identity and deduplication are separate columns.
- */
-
-/**
  * The key for a provider that has no stable reference of its own (an uploaded
  * statement in any format, and the banks that omit entry_reference): the calendar
  * day, the amount in minor units, the currency, and the ordinal among otherwise
@@ -26,7 +16,7 @@
  *
  * The calendar day rather than the stored instant, for the same reason: a
  * re-export that shifts a booking time by a second is the same instability in
- * another spelling, and a statement date is a calendar day anyway (ROADMAP 4.6).
+ * another spelling, and a statement date is a calendar day anyway.
  */
 export const COMPUTED_PREFIX = 'c:';
 
@@ -48,11 +38,10 @@ export const dedupGroup = (
 /**
  * The ordinals in a group must stay dense 1..n, because insertTransactions
  * numbers an incoming batch from 1 and lets the unique index reject the
- * collisions - with a hole, a batch of k rows inserts more than it should
- * (ROADMAP 4.4). Deleting an import punches holes, so deleteImport renumbers the
- * groups it touched, and the helpers below are how it takes a key apart and puts
- * it back together. They are here rather than in ./index.ts so that the key
- * format stays readable in one file.
+ * collisions - with a hole, a batch of k rows inserts more than it should.
+ * Deleting an import punches holes, so deleteImport renumbers the groups it
+ * touched, and the helpers below are how it takes a key apart and puts it back
+ * together.
  */
 
 const computedKeyGroup = (dedupKey: string): string =>

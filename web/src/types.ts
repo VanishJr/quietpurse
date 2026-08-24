@@ -387,7 +387,7 @@ export interface ImportConfirmed {
   total: number;
 }
 
-/** See the status comment in backend/src/db/schema.ts: each value promises something different. */
+/** See "What each import status promises" in backend/src/db/SPEC.md - the server owns the vocabulary. */
 export type ImportStatus =
   | 'pending'
   | 'awaiting_confirmation'

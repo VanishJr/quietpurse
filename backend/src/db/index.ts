@@ -1,18 +1,3 @@
-/**
- * The data layer: every query the app makes.
- *
- * EVERY query in this module is scoped to the current workspace (see
- * ./workspace.ts): the workspace id comes from AsyncLocalStorage, set by the
- * session middleware for requests and by the scheduler for background jobs.
- * A call outside a workspace context throws instead of leaking data.
- *
- * PG gotchas encoded here so callers never see them:
- *  - SUM()/COUNT() return bigint/numeric and the driver hands them over as
- *    strings - every aggregate is wrapped in Number() at the boundary;
- *  - unquoted SQL aliases fold to lowercase - camelCase aliases are quoted;
- *  - ROUND(double) is round-half-to-even - money rounding casts to ::numeric
- *    first, which rounds half away from zero like toCents() in money.ts.
- */
 import crypto from 'crypto';
 import path from 'path';
 import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
@@ -363,23 +348,6 @@ export async function findAccountByName(name: string): Promise<Account | undefin
 
 declare const resolved: unique symbol;
 
-/**
- * An account id proved to be a row of this workspace. The brand is the point: this
- * type cannot be produced without writing the assertion that says so, and both
- * StagedAccount.id and AccountScope.id require one - so a second way of turning a
- * request into an id is a compile error rather than a review finding. A name was an
- * id once, through a slug function, and two callers deriving it differently put a
- * statement's rows in an account its own summary did not name.
- *
- * Two producers, each branding an id it has just read out of this workspace's own
- * rows and never a string that arrived off the wire unread: resolveUploadAccount
- * below, for an upload that picks its account by id, and app.ts's summaryScope, for
- * a summary that asks about one account.
- *
- * Phantom, and it stops at the data layer: nothing that crosses the wire carries it
- * (ImportRecord.accountId, ImportSummary.accountId and Account.id stay plain
- * strings), because the client mirrors plain objects.
- */
 export type ResolvedAccountId = string & { readonly [resolved]: true };
 
 export type UploadAccount =
@@ -496,37 +464,15 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
 }
 
 /**
- * Inserts a batch of transactions, silently skipping ones already there. Returns
- * the number of genuinely new rows.
+ * Returns the number of genuinely new rows.
  *
- * Identity and deduplication are two different things here: `id` is a fresh UUID
- * that never changes, and duplicates are caught by the
- * UNIQUE (workspace_id, account_id, dedup_key) index instead.
+ * Ordinals for computed keys are numbered over the whole batch, before chunking:
+ * restarting per chunk would collide the second chunk's rows with the first's and
+ * drop them. They start from 1 rather than continuing from what the database already
+ * holds; why that is what makes a re-import insert nothing is in this module's SPEC.md.
  *
- * A source with a stable reference of its own can supply it as dedupKey; none
- * does today, so every key is computed here (the format, and why the
- * description is not part of it, are in ./dedup.ts).
- *
- * Ordinals for computed keys are numbered from 1 within each group, over the
- * whole batch (before chunking - restarting per chunk would collide the second
- * chunk's rows with the first's and drop them). Numbering from 1 rather than
- * continuing from what the database already holds is what makes re-importing
- * idempotent: existing ordinals in a group are dense 1..E, so of k incoming rows
- * the first min(E, k) collide and are skipped, and only a genuinely larger k
- * inserts anything. The database does the comparison, via the unique index.
- *
- * This is exact as long as a batch is complete for every group it touches - all
- * k rows of a day arrive in one call. Statement windows are whole days, so an
- * uploaded file is; a parser that hands over a file in pieces must accumulate
- * them before calling.
- *
- * A duplicate is skipped, never merged: the existing row keeps its description,
- * its category and the user's manual marks. Correcting facts on a re-parse is
- * the imports table's job, not this one's.
- *
- * importId is the provenance of the rows this call actually inserts, and only
- * those - a skipped duplicate keeps whatever import first wrote it (see
- * transactions.import_id in ./schema.ts).
+ * A duplicate is skipped, never merged: the existing row keeps its description, its
+ * category and the user's manual marks.
  */
 export async function insertTransactions(
   txs: NewTransaction[],
@@ -592,7 +538,7 @@ export async function insertTransactionsOn(
   const values: (typeof s.transactions.$inferInsert)[] = claimedKeys(txs).map(
     ({ tx: t, amountCents, dedupKey }) => {
       // transactions already in the base currency need no conversion - fill it now;
-      // for the rest base_amount is filled by backfillBaseAmounts (fxrates.ts) after sync
+      // for the rest base_amount is filled later by backfillBaseAmounts (fxrates.ts)
       const isBase = t.currency === baseCurrency;
       return {
         workspaceId: w,
@@ -725,17 +671,15 @@ export type SummaryScope = WorkspaceScope | AccountScope;
 /**
  * The rows a scope is about and the column its money lives in - together, from one
  * value, because picking the filter of one arm and the column of the other is what
- * puts two currencies in one sum. Every summary query below goes through this and
- * none of them names CONVERTED, VISIBLE_ACCOUNT() or base_amount_cents itself.
+ * puts two currencies in one sum.
  *
- * NOT_TRANSFER is in the WHERE on both arms (transfers between your own accounts
- * are neither income nor spending, per account exactly as workspace-wide). The one
- * exception is accountMonths, which needs the month to survive even when every row
- * in it is a transfer and therefore spells its own WHERE - see the note there.
+ * NOT_TRANSFER is in the WHERE on both arms. The one exception is accountMonths,
+ * which needs the month to survive even when every row in it is a transfer and
+ * therefore spells its own WHERE - see the note there.
  *
  * The workspace clause is table-qualified: summaryIncomeBySource joins
  * income_sources, which has a workspace_id of its own, and an unqualified one is
- * ambiguous there. Qualifying costs the other four nothing.
+ * ambiguous there.
  */
 const scopeSql = (scope: SummaryScope): { where: SQL; money: SQL } =>
   scope.kind === 'account'
@@ -1339,14 +1283,6 @@ export async function countNewKeys(txs: NewTransaction[]): Promise<number> {
   return pairs.length - taken;
 }
 
-/**
- * Why a superseded import is `discarded`. The third producer of that status, and
- * without a sentence here the second one would be indistinguishable from the first:
- * on a `discarded` row NULL means the user declined it, so a superseded row left
- * empty would have item 10's screen telling someone they rejected an import they
- * never saw. It is also the only place a copy the user displaced can be told apart
- * from one they refused, which the retention purge will want.
- */
 const SUPERSEDED_BY_REUPLOAD =
   'superseded: the same file was uploaded again while this import was still awaiting confirmation, so it was dropped in favour of the newer one';
 
@@ -1763,21 +1699,13 @@ async function renumberGroups(
 }
 
 /**
- * Deletes an import and, by the ON DELETE CASCADE on transactions.import_id, its
- * transactions. **This is the only sanctioned path that deletes a user's
- * transactions** - anything else that ever needs to must be as visible as this,
- * not a call buried in a helper.
- *
- * What it removes is exactly the rows this import first wrote: not another
- * import's, not another workspace's (the foreign key is composite), and not a
- * bank sync's (their import_id is NULL). It does not remove the account, whose
- * balance is recomputed afterwards.
+ * What it removes is exactly the rows this import first wrote: not another import's,
+ * not another workspace's (the foreign key is composite), and not a row no import
+ * owns (import_id NULL). It does not remove the account, whose balance is recomputed
+ * afterwards.
  *
  * The ordinals of whatever survives in the affected groups are renumbered in the
  * same transaction - see renumberGroup for what a hole would do.
- *
- * It is also the only path that deletes a stored source document, for the same
- * reason and with the same visibility.
  */
 export async function deleteImport(
   id: string,
@@ -1852,16 +1780,6 @@ export type AccountDelete =
   | { ok: true; deleted: DeletedByAccount }
   | Extract<AccountWrite, { reason: 'not-found' } | { reason: 'staged-import' }>;
 
-/**
- * Every exported table carrying BOTH an account and a workspace - exactly the
- * tables a deleted account leaves rows in. Derived from the schema module rather
- * than remembered, so a new one is a compile error at ACCOUNT_CASCADE instead of a
- * table nobody's delete reaches. There is no foreign key from any of them to
- * `accounts`, so this is the whole of the enumeration.
- *
- * Both conditions are load-bearing: `auth_account` has an accountId and a userId
- * and no workspaceId, and it is better-auth's, not an account of the user's.
- */
 type AccountScoped = {
   [K in keyof typeof s]: (typeof s)[K] extends { accountId: unknown; workspaceId: unknown }
     ? K
@@ -1885,7 +1803,8 @@ const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
  * statement keeps its own type at the call site. What it does NOT prove is that an
  * entry is executed - the body consumes these by name, in an order that is not
  * interchangeable - so a table added here and never called would compile.
- * ACCOUNT_CASCADE_TABLES is the other half of that, and the docstring is the rest.
+ * ACCOUNT_CASCADE_TABLES is the other half of that; why that list is derived from the
+ * schema rather than written down is in this module's SPEC.md.
  */
 const ACCOUNT_CASCADE = {
   transactions: (id: string): SQL =>
@@ -2524,8 +2443,6 @@ export async function setBudget(category: string, monthly: number | null): Promi
   }
 }
 
-// ---------- the Analytics dock: the saved chart list ----------
-
 export { CHART_BREAKDOWNS, CHART_KINDS, CHART_METRICS, CHART_RANGES } from './schema';
 
 export type ChartKind = (typeof s.CHART_KINDS)[number];
@@ -2538,16 +2455,6 @@ export const CHART_TITLE_MAX = 120;
 export const CHART_ID_MAX = 64;
 export const CHART_ACCOUNT_ID_MAX = 64;
 
-/**
- * The characters a chart id may be made of: the URL names a chart by it, unescaped.
- *
- * Here rather than inside `chartSchema` so that it sits with the four bounds, which is
- * where `backend/test/charts-door.test.ts` looks for the things the client has to
- * compose against. The client keeps its own copy and cannot import this one - the two
- * packages share no build - so a narrowing here that the client does not follow means
- * the client keeps sending an id the route now refuses, and the route refuses the
- * WHOLE list over it.
- */
 export const CHART_ID_SHAPE = /^[A-Za-z0-9._~-]+$/;
 
 /**
@@ -2780,13 +2687,6 @@ export async function baselineTotal(): Promise<number> {
   return fromCents(Number(rows[0].total_cents));
 }
 
-/**
- * "My data is mine": one button in the app. The backup is a JSON dump of the
- * CURRENT WORKSPACE's rows in every user table - workspace_id itself is stripped
- * on export and reassigned on restore, so a backup can be moved between
- * workspaces (and servers) freely. Auth tables are deliberately not included:
- * users and sessions belong to the server, not to the workspace's data.
- */
 export interface BackupData {
   format: 'finto-backup';
   version: 1;
@@ -2812,12 +2712,6 @@ const BACKUP_TABLES = {
   analytics_charts: s.analyticsCharts,
 } as const;
 
-/**
- * Tables with an identity id. On restore their ids are dropped and regenerated:
- * the backup may come from another workspace/server whose ids are already taken
- * here (identity sequences are per table, not per workspace). Nothing references
- * these ids across tables, so renumbering is free.
- */
 const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
 
 export async function exportBackup(): Promise<BackupData> {
@@ -2866,39 +2760,11 @@ export function parseBackup(input: unknown): BackupData {
   return { exportedAt: '', ...parsed.data } as BackupData;
 }
 
-/**
- * Columns a restore may never carry over from the file. workspaceId is the scope
- * the restore reassigns. documentKeyVersion is a claim about bytes on THIS
- * server's disk, and the backup carries no documents - a restored row that kept it
- * would promise a file that is not there or, from a crafted backup whose rows name
- * another workspace's import ids, somebody else's.
- *
- * Checked against the row type rather than left as bare strings: the set matches TS
- * property names, so a renamed property would silently stop the strip from firing -
- * no compile error, no runtime error, and a restore quietly carrying a foreign
- * workspace's pointer again.
- *
- * The cost, accepted: because restoreBackup keeps import ids, a workspace restoring
- * its OWN backup reproduces the exact keys its blobs already sit under, and
- * stripping the pointer makes those documents unreadable anyway. They are not
- * unreachable - deleteImport removes a document without consulting this column -
- * so what is lost is a future re-parse skipping those imports. The alternative
- * (keep the pointer where a document exists at the derived key) makes a database
- * restore depend on disk state inside its own transaction, for a feature that does
- * not exist yet.
- */
 const NEVER_RESTORED = new Set<string>([
   'workspaceId' satisfies keyof ImportRow,
   'documentKeyVersion' satisfies keyof ImportRow,
 ]);
 
-/**
- * Statuses a restored import may not keep. `awaiting_confirmation` is a claim about
- * staged rows, and the backup carries none (staged_transactions is not a backup
- * table) - it would arrive as an import whose Confirm inserts nothing and reports
- * success. Typed against ImportStatus, like NEVER_RESTORED: renaming an enum value
- * is then a compile error rather than a set that quietly stops matching.
- */
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
 const RESTORED_UNCONFIRMABLE =
@@ -2917,15 +2783,6 @@ function coerceRestoredImport(row: Record<string, unknown>): Record<string, unkn
   };
 }
 
-/**
- * Keeps only real columns of the target table, and only values whose type the
- * column accepts. Without this a restore file is a direct write path into the
- * database with whatever types the uploader felt like: a string where an integer
- * lives turns into a driver error mid-transaction (a 500 instead of a "bad file"),
- * and a JSON object smuggled into a text column reappears everywhere that value is
- * displayed. Anything unrecognised is dropped rather than rejected, so a backup
- * from a future version still restores what this version understands.
- */
 function sanitizeRow(
   table: (typeof BACKUP_TABLES)[keyof typeof BACKUP_TABLES],
   row: unknown,
@@ -2961,18 +2818,8 @@ function sanitizeRow(
 }
 
 /**
- * Restore from a JSON backup: clear the current workspace's tables and load the
- * dump's rows into it, all in one transaction. Tables the current schema does not
- * know are skipped (a future version's backup restores what it can). After
- * restoring, the caller runs a full reclassification - same as after any bulk import.
- *
- * What it leaves behind, and what is accepted: this deletes the workspace's
- * `imports` rows, and every source document those rows had stays on disk (the
- * backup is JSON and carries no documents). The ones whose import id comes back in
- * the file are still removable, because deleteImport addresses a document without
- * consulting the pointer this strips; the ones whose row is not reinstated are
- * referenced by nothing and no sweeper is in scope. Both are data-subject-deletion
- * lines, not bugs to fix here.
+ * After restoring, the caller runs a full reclassification - same as after any bulk
+ * import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const w = currentWorkspaceId();
