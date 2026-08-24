@@ -542,7 +542,8 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               >
                 <div className="switch-label">Income source</div>
                 <div className="switch-hint">
-                  Outside help isn't counted as your own earnings on the Goal screen
+                  Support isn't counted as your own earnings on the Goal screen, where these
+                  sources are added and renamed
                   {selected.incomeSourceManual ? ' · set manually' : ' · auto-detected'}
                 </div>
                 <div className="chip-wrap">

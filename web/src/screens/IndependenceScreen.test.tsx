@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { INDEPENDENCE } from '../test/fixtures';
 import { mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { Independence, IndependenceMonth, Settings } from '../types';
+import { Independence, IncomeSourceDef, IndependenceMonth, Settings } from '../types';
 import { IndependenceScreen } from './IndependenceScreen';
 
 /**
@@ -49,8 +49,22 @@ const FELL_BACK = body(
   { goalMode: 'baseline' },
 );
 
+/**
+ * A catalog of this file's own: the shared fixture is `[]` and is served to every dom
+ * test through FIRST_PAINT_ROUTES, so changing it changes what App.test.tsx and
+ * TransactionsScreen.test.tsx render for no gain here.
+ */
+const SOURCES: IncomeSourceDef[] = [
+  { id: 'salary', label: 'Salary', kind: 'own', patterns: [], sort: 0, builtin: true },
+  { id: 'family', label: 'Support', kind: 'external', patterns: [], sort: 1, builtin: true },
+  { id: 'other', label: 'Other', kind: 'own', patterns: [], sort: 2, builtin: true },
+];
+
 const goalRoutes = (data: Independence, extra: Routes = {}): Routes => ({
   'GET /api/independence': () => ok(data),
+  // the income sources block mounts with the screen and asks for its own list -
+  // without this every case in this file reds on setup.ts's unmatched-request guard
+  'GET /api/income-sources': () => ok(SOURCES),
   ...extra,
 });
 
@@ -61,10 +75,12 @@ const mount = async (data: Independence, extra: Routes = {}) => {
 };
 
 describe('the Goal screen', () => {
-  it('asks for the goal body and nothing else', async () => {
+  it('asks for the goal body and the income sources and nothing else', async () => {
     await mount(INDEPENDENCE);
     await screen.findByText(/self-sufficiency/);
-    expect(requests()).toEqual(['GET /api/independence']);
+    // an exact list and not a toContain: the claim is `nothing else`, and a
+    // membership check would delete it
+    expect(requests()).toEqual(['GET /api/independence', 'GET /api/income-sources']);
   });
 
   it('reads the mode off the body rather than working it out from the numbers', async () => {
@@ -84,7 +100,7 @@ describe('the Goal screen', () => {
     expect(
       screen.getByRole('heading', { name: 'What if you trim the minimum?' }),
     ).toBeInTheDocument();
-    expect(screen.queryByText('To live without help the way you do now, you need to earn')).toBeNull();
+    expect(screen.queryByText('To live without support the way you do now, you need to earn')).toBeNull();
   });
 
   it('puts the minimum on the mode that was asked for, not the one that answered', async () => {
@@ -94,7 +110,7 @@ describe('the Goal screen', () => {
       await screen.findByRole('heading', { name: 'What the minimum is made of (per month)' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('To live without help the way you do now, you need to earn'),
+      screen.getByText('To live without support the way you do now, you need to earn'),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Nothing here yet\. Add what it takes to live on your own/),
@@ -172,7 +188,7 @@ describe('the Goal screen', () => {
     // the presence anchor is not decoration: an absence assertion on its own is green
     // on a screen that rendered nothing at all
     expect(
-      await screen.findByText('To live without help the way you do now, you need to earn'),
+      await screen.findByText('To live without support the way you do now, you need to earn'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/the bare minimum is only/)).toBeNull();
   });
@@ -459,5 +475,73 @@ describe('the Goal screen', () => {
 
     await waitFor(() => expect(patches).toEqual([{ goalMode: 'lifestyle' }]));
     expect(requests().filter((r) => r === 'GET /api/independence')).toHaveLength(2);
+  });
+
+  /**
+   * The mutation is the block's and the figures are the screen's: which money counts
+   * as the reader's own is the one input every number above is computed from, so a
+   * save that does not re-read them leaves the screen showing pre-mutation figures —
+   * which looks exactly like the save not working.
+   */
+  it('re-reads the figures after a source is added through the block', async () => {
+    const posts: unknown[] = [];
+    await mount(INDEPENDENCE, {
+      'POST /api/income-sources': (init) => {
+        posts.push(JSON.parse(String(init?.body)));
+        return ok({
+          id: 'stipend',
+          label: 'Stipend',
+          kind: 'external',
+          patterns: [],
+          sort: 3,
+          builtin: false,
+        });
+      },
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add income source' }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Stipend' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    // the request, never a spinner: a spinner is painted by a screen that reloads
+    // nothing too
+    await waitFor(() =>
+      expect(requests().filter((r) => r === 'GET /api/independence')).toHaveLength(2),
+    );
+  });
+
+  /**
+   * A threshold of zero covers itself. The state is NOT `noGround`'s: these months are
+   * recorded and every one of them is empty, so `noGround` is false and a fix gated on
+   * it would have left this live.
+   */
+  it('does not congratulate a reader whose threshold is zero', async () => {
+    await mount(
+      body(
+        {
+          avgSpend: 0,
+          ownIncomeAvg: 0,
+          baselineSum: 0,
+          baselineItems: [],
+          baselineThreshold: 0,
+          lifestyleThreshold: 0,
+          effectiveMode: 'lifestyle',
+          threshold: 0,
+          selfSufficiency: 0,
+          months: [month({ spend: 0, ownIncome: 0 })],
+        },
+        { goalMode: 'baseline', hourlyRate: 20 },
+      ),
+    );
+
+    // the presence anchor: absence alone is green on a screen that rendered nothing
+    expect(
+      await screen.findByText(
+        /your current lifestyle works out to zero, so nothing is covered and nothing is short/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/That covers/)).toBeNull();
+    expect(screen.queryByText(/that's 0% of/)).toBeNull();
   });
 });

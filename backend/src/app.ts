@@ -57,6 +57,7 @@ import {
   getIncomeSource,
   getTransaction,
   type ImportDocumentInfo,
+  INCOME_SOURCE_LABEL_MAX,
   listIncomeSources,
   resetBaseAmounts,
   upsertIncomeSource,
@@ -875,50 +876,90 @@ function slugifySourceId(label: string): string {
   return base || 'source';
 }
 
-const isKind = (v: unknown): v is 'own' | 'external' => v === 'own' || v === 'external';
+/**
+ * A source label, at both doors that write one, in accountNameSchema's idiom and for
+ * its reason: zod runs its checks in the order they are added, so a `.max()` written
+ * before `.trim()` at one door bounds the untrimmed string while the next door bounds
+ * the trimmed one, and a rename that cannot restore the label a source already has is
+ * worse than no bound at all.
+ */
+const incomeSourceLabelSchema = z
+  .string({ error: 'income source label must be text' })
+  .trim()
+  .max(INCOME_SOURCE_LABEL_MAX, {
+    error: `income source label must be at most ${INCOME_SOURCE_LABEL_MAX} characters`,
+  })
+  .min(1, { error: 'income source label must not be empty' });
 
-const parsePatterns = (v: unknown): string[] | undefined =>
-  Array.isArray(v) ? v.map(String).map((s) => s.trim()).filter(Boolean) : undefined;
+const incomeSourceKindSchema = z.enum(['own', 'external'], {
+  error:
+    "income source kind must be 'own' (your own earnings) or 'external' (support from outside)",
+});
+
+/**
+ * The trim-and-drop-empties parsePatterns performed, kept as a transform: the user
+ * typing a trailing comma asked for nothing, not for something wrong.
+ */
+const incomeSourcePatternsSchema = z
+  .array(z.string({ error: 'each income source pattern must be text' }), {
+    error: 'income source patterns must be a list',
+  })
+  .transform((list) => list.map((p) => p.trim()).filter(Boolean));
+
+// strict, for the reason newAccountSchema is: a stripped unknown key is a field the
+// user meant to send, silently not applied, answered 200
+const newIncomeSourceSchema = z.strictObject({
+  label: incomeSourceLabelSchema,
+  kind: incomeSourceKindSchema,
+  patterns: incomeSourcePatternsSchema.optional(),
+});
+
+const incomeSourcePatchSchema = z.strictObject({
+  label: incomeSourceLabelSchema.optional(),
+  kind: incomeSourceKindSchema.optional(),
+  patterns: incomeSourcePatternsSchema.optional(),
+});
 
 /**
  * A new source (freelance, stipend, a grant...). The id is derived from the label;
  * after creation the database is re-tagged - the patterns may explain older income.
  */
 app.post('/api/income-sources', async (req, res) => {
-  const body = req.body as { label?: unknown; kind?: unknown; patterns?: unknown };
-  const label = typeof body.label === 'string' ? body.label.trim() : '';
-  if (!label) {
-    res.status(400).json({ error: 'label: non-empty string' });
+  const parsed = newIncomeSourceSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: badRequest(parsed.error) });
     return;
   }
-  if (!isKind(body.kind)) {
-    res.status(400).json({ error: "kind: 'own' (your own earnings) | 'external' (help from outside)" });
-    return;
-  }
+  const { label, kind, patterns } = parsed.data;
   let id = slugifySourceId(label);
   for (let n = 2; await getIncomeSource(id); n++) id = `${slugifySourceId(label)}-${n}`;
-  const source = await upsertIncomeSource({
-    id,
-    label,
-    kind: body.kind,
-    patterns: parsePatterns(body.patterns) ?? [],
-  });
+  const source = await upsertIncomeSource({ id, label, kind, patterns: patterns ?? [] });
   await reclassifyAll();
   res.json(source);
 });
 
+/**
+ * A builtin is editable here and refused by DELETE below: renaming the seeded
+ * external source is how a workspace that predates a change to its label reaches the
+ * word it wants. upsertIncomeSource's conflict clause does not set `builtin`, so a
+ * rename cannot make one deletable.
+ */
 app.put('/api/income-sources/:id', async (req, res) => {
   const existing = await getIncomeSource(req.params.id);
   if (!existing) {
     res.status(404).json({ error: 'source not found' });
     return;
   }
-  const body = req.body as { label?: unknown; kind?: unknown; patterns?: unknown };
+  const parsed = incomeSourcePatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: badRequest(parsed.error) });
+    return;
+  }
   const source = await upsertIncomeSource({
     id: existing.id,
-    label: typeof body.label === 'string' && body.label.trim() ? body.label.trim() : existing.label,
-    kind: isKind(body.kind) ? body.kind : existing.kind,
-    patterns: parsePatterns(body.patterns) ?? existing.patterns,
+    label: parsed.data.label ?? existing.label,
+    kind: parsed.data.kind ?? existing.kind,
+    patterns: parsed.data.patterns ?? existing.patterns,
   });
   await reclassifyAll();
   res.json(source);

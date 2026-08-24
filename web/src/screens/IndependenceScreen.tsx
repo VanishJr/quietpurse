@@ -14,16 +14,19 @@ import { api } from '../api';
 import { categoryLabel } from '../categories';
 import { NO_FIGURE, tooltipPercent, tooltipProps } from '../chartTooltip';
 import { Chips } from '../components/Chips';
+import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { fmtMoney } from '../format';
 import { SelfSufficiencyBar, selfSufficiencyBars } from '../independence';
 import { useTheme } from '../theme';
 import { GoalMode, Independence } from '../types';
 
 /**
- * Goal screen — answers "how much do I need to earn so my family no longer has
- * to help?". All numbers are computed by the backend (/api/independence); this
- * screen only handles display, settings, and "what if" scenarios (the same
- * formula recomputed on the client).
+ * Goal screen — answers "how much do I need to earn so that nobody else has to
+ * help?". Support is whatever somebody else gives you — family, a stipend, a
+ * scholarship — and which money is which is the reader's own answer, given in the
+ * income sources block below. All numbers are computed by the backend
+ * (/api/independence); this screen only handles display, settings, and "what if"
+ * scenarios (the same formula recomputed on the client).
  *
  * Two modes (goalMode):
  *   "Bare minimum"      — threshold built from line items: housing, food,
@@ -196,6 +199,14 @@ export function IndependenceScreen() {
   const workPct = data.threshold > 0 ? Math.round((workMonthly / data.threshold) * 100) : 0;
   const workMissing = Math.max(0, Math.round(data.threshold - workMonthly));
   const requiredRate = workHoursPerMonth > 0 ? data.threshold / workHoursPerMonth : 0;
+  /**
+   * A threshold of zero covers itself, so this block used to congratulate a workspace
+   * with nothing in it — and the line above the congratulation read "that's 0% of the
+   * minimum" beside a real monthly figure. Both come off the same condition, and it is
+   * NOT `noGround`: a workspace whose months are all recorded and all empty has
+   * `avgSpend` 0, threshold 0 and `noGround` false.
+   */
+  const noThreshold = data.threshold <= 0;
 
   // sparkline: self-sufficiency by month, %
   const bars = selfSufficiencyBars(data.months, isBaseline, data.baselineSum);
@@ -219,7 +230,7 @@ export function IndependenceScreen() {
           <div className="hero-label">
             {isBaseline
               ? 'To cover your minimum, you need to earn'
-              : 'To live without help the way you do now, you need to earn'}
+              : 'To live without support the way you do now, you need to earn'}
           </div>
           {noGround ? (
             <div className="hero-sub">
@@ -239,7 +250,7 @@ export function IndependenceScreen() {
               </div>
               {data.externalAvg > 0 && (
                 <div className="hero-sub">
-                  outside help now ≈ {fmtMoney(data.externalAvg, cur)} per month
+                  support now ≈ {fmtMoney(data.externalAvg, cur)} per month
                 </div>
               )}
             </>
@@ -525,21 +536,29 @@ export function IndependenceScreen() {
         </button>
       </div>
       {data.settings.hourlyRate ? (
-        <div>
+        noThreshold ? (
           <p className="body-text">
             {fmtMoney(data.settings.hourlyRate, cur)}/hr × {data.settings.hoursCapPerWeek} hr/wk ≈{' '}
-            {fmtMoney(workMonthly, cur)}/mo — that's {workPct}% of {thresholdNoun}.
+            {fmtMoney(workMonthly, cur)}/mo. There is nothing to measure that against yet —{' '}
+            {thresholdNoun} works out to zero, so nothing is covered and nothing is short.
           </p>
-          {workMissing > 0 ? (
+        ) : (
+          <div>
             <p className="body-text">
-              Short by ≈ {fmtMoney(workMissing, cur)}/mo. To cover {thresholdNoun} at{' '}
-              {data.settings.hoursCapPerWeek} hr/wk, the rate would need to be ≈{' '}
-              {fmtMoney(Math.round(requiredRate), cur)}/hr.
+              {fmtMoney(data.settings.hourlyRate, cur)}/hr × {data.settings.hoursCapPerWeek} hr/wk ≈{' '}
+              {fmtMoney(workMonthly, cur)}/mo — that's {workPct}% of {thresholdNoun}.
             </p>
-          ) : (
-            <p className="body-text">That covers {thresholdNoun} 🎉</p>
-          )}
-        </div>
+            {workMissing > 0 ? (
+              <p className="body-text">
+                Short by ≈ {fmtMoney(workMissing, cur)}/mo. To cover {thresholdNoun} at{' '}
+                {data.settings.hoursCapPerWeek} hr/wk, the rate would need to be ≈{' '}
+                {fmtMoney(Math.round(requiredRate), cur)}/hr.
+              </p>
+            ) : (
+              <p className="body-text">That covers {thresholdNoun} 🎉</p>
+            )}
+          </div>
+        )
       ) : (
         <p className="hint">
           Enter your rate and weekly hours — I'll work out your monthly pay and how much falls
@@ -568,6 +587,10 @@ export function IndependenceScreen() {
           {rentPerMonth > 0 ? `. For comparison: rent is ${fmtMoney(rentPerMonth)} per month.` : '.'}
         </p>
       )}
+
+      {/* the data every figure above is computed from, which is why it is not inside
+          Settings below - that block holds the formula's knobs */}
+      <IncomeSourcesBlock onChanged={load} />
 
       {/* formula settings */}
       <h2 className="block-title">Settings</h2>

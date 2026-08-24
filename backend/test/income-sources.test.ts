@@ -32,6 +32,9 @@ describe('income_sources', () => {
     expect(ids).toContain('family');
     expect(ids).toContain('other');
     const family = sources.find((s) => s.id === 'family')!;
+    // a literal, never the seed's own symbol: the id is data and does not move, and
+    // the label is the one thing about this row that a stranger reads
+    expect(family.label).toBe('Support');
     expect(family.kind).toBe('external');
     expect(family.builtin).toBe(true);
     // from test/setup.ts: FAMILY_NAMES = 'ANNA BECKER, Becker Anna'
