@@ -14,7 +14,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "migrate:sqlite": "tsx scripts/migrate-sqlite-to-pg.ts",
-    "check:stack": "tsx scripts/check-stack.ts"
+    "check:stack": "tsx scripts/check-stack.ts",
+    "check:comments": "tsx scripts/comment-check.ts"
   },
   "dependencies": {
     "better-auth": "^1.6.23",
