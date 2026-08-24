@@ -1,15 +1,3 @@
-/**
- * The whole schema in its final shape (the state after the old SQLite migrations
- * 001+002). SQL migrations are generated from this file by `drizzle-kit generate`
- * into backend/drizzle/ and applied at startup (see ./index.ts).
- *
- * Conventions carried over from the SQLite era, deliberately kept:
- *  - money is INTEGER minor units (cents) - SUM() stays exact (see money.ts);
- *  - dates/timestamps are TEXT ISO-8601 - lexicographic comparison works, and
- *    SUBSTR-based month grouping needs no date-type gymnastics;
- *  - fx_rate is a ratio, not money - double precision.
- * What did change: INTEGER 0/1 flags became real booleans.
- */
 import { sql } from 'drizzle-orm';
 import {
   boolean,
@@ -24,13 +12,6 @@ import {
   timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-
-// ---------- better-auth tables (users, sessions, workspaces) ----------
-//
-// The shape better-auth's drizzle adapter expects (core + the organization
-// plugin). Unlike the finance tables these use real timestamps: the adapter
-// reads and writes Date objects. An "organization" IS a workspace - the app
-// calls it workspace everywhere, the table keeps the plugin's name.
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -129,17 +110,6 @@ export const invitation = pgTable('invitation', {
     .references(() => user.id, { onDelete: 'cascade' }),
 });
 
-// ---------- finance tables (all workspace-scoped) ----------
-
-/**
- * Every data table starts with this column. Deleting a workspace cascades into
- * its data. Account ids are provider-derived and only unique per workspace - two
- * users connecting the same bank produce the same id - so those tables use a
- * composite (workspace_id, id) primary key. Transactions keep the composite key
- * too, even though their id is a UUID: nothing else in the schema is keyed by id
- * alone, and a query that forgets the workspace filter must not compile a path
- * to somebody else's row.
- */
 const workspaceId = () =>
   text('workspace_id')
     .notNull()
@@ -161,24 +131,14 @@ export const accounts = pgTable(
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.id] }),
     /**
-     * A name identifies an account to the user, so no two of them may share one:
-     * two accounts a person cannot tell apart are two the account picker on the
-     * import screen cannot tell them apart either. The resolution that used to rest
-     * on it - an upload naming "Revolut" - went with row 26b; POST and PATCH
-     * /api/accounts are the doors that collide here now. Folded in SQL, and every
-     * comparison against it must fold the same way - JS toLowerCase() and lower()
-     * disagree (Turkish dotted I among others), and a lookup that misses where the
-     * index matches is an insert that collides.
+     * Folded in SQL, and every comparison against it must fold the same way - JS
+     * toLowerCase() and lower() disagree (Turkish dotted I among others), and a
+     * lookup that misses where the index matches is an insert that collides.
      */
     uniqueIndex('accounts_name_unique').on(t.workspaceId, sql`lower(${t.name})`),
   ],
 );
 
-/**
- * One uploaded file, and the provenance of everything it produced (ROADMAP 4.4).
- * Deleting a row here takes its transactions with it - that is the whole point,
- * and deleteImport (./index.ts) is the only sanctioned path to it.
- */
 export const imports = pgTable(
   'imports',
   {
@@ -189,15 +149,8 @@ export const imports = pgTable(
     fileHash: text('file_hash').notNull(),
     sourceType: text('source_type', { enum: ['csv', 'xlsx', 'pdf'] }).notNull(),
     originalFilename: text('original_filename'),
-    // Where the upload went: the account's name and currency as they read at
-    // upload time, and the account the rows are going to. Recorded because Confirm
-    // is a later request that does not carry the form fields. The id is resolved
-    // once, at staging (resolveUploadAccount), and read back verbatim at confirm,
-    // which derives nothing - that is what holds the two together now that a name
-    // is not an id. account_name is what the account was called at upload and stays
-    // that fact forever; a rename moves accounts.name and never this, which is what
-    // the import history prints per row. All three are NULL on every import that
-    // never reached the parse, and on every one from before the confirmation step.
+    // All three are NULL on every import that never reached the parse, and on
+    // every one from before the confirmation step.
     accountName: text('account_name'),
     accountCurrency: text('account_currency'),
     accountId: text('account_id'),
@@ -207,28 +160,6 @@ export const imports = pgTable(
     uploadedAt: text('uploaded_at').notNull(),
     // per parser, keyed by source_type: what makes re-parsing targetable later
     parserVersion: integer('parser_version').notNull(),
-    /**
-     * pending = written, outcome unknown: the process died mid-import;
-     * awaiting_confirmation = parsed, its rows staged in staged_transactions,
-     * waiting for the user to accept the summary; committed = its rows are in the
-     * database; discarded = the user looked at the numbers and said no; failed =
-     * the import did not complete. Usually that means
-     * the parse threw before anything was written, but the failure is caught around
-     * the inserts too - so whatever rows a failed import did write stay attached
-     * to it, and go with it when it is deleted.
-     *
-     * awaiting_confirmation is its own value rather than an overload of `pending`
-     * because `pending` is a corpse: presenting one as "confirm these numbers"
-     * would offer a half-written import for acceptance.
-     *
-     * `discarded` keeps its row instead of deleting it, and that is the point: the
-     * row is what references the stored source document (4.5), which is exactly the
-     * artefact a user who rejected the numbers will be asked for. It owns no
-     * transactions, so nothing is deleted to reach it, and only `committed` claims
-     * a file hash, so the file stays re-uploadable. On a `discarded` row
-     * error_detail separates the two ways it can be reached: NULL means the user
-     * declined it, a sentence means the server did (see restoreBackup).
-     */
     status: text('status', {
       enum: ['pending', 'awaiting_confirmation', 'committed', 'failed', 'discarded'],
     }).notNull(),
@@ -238,26 +169,11 @@ export const imports = pgTable(
     rowsRejected: integer('rows_rejected').notNull().default(0),
     // the failure message, truncated; never a stack trace - it lands in the backup
     errorDetail: text('error_detail'),
-    /**
-     * The pointer to the stored source document (ROADMAP 4.5). It records two
-     * things and deliberately not a third: that a document can be read for this
-     * row, and which key layout it was written under. NOT the key itself - the key
-     * is derived at read time from (current workspace, import id), because a key
-     * read out of this row is a string a restored backup gets to choose.
-     *
-     * NULL means no document can be READ - the layout its bytes were written under
-     * is not recorded. It does NOT mean there are no bytes on disk: an import from
-     * before 4.5, a row restored from a backup (restoreBackup strips this column),
-     * or one that died between the blob landing and this column being set all have
-     * NULL here and may well have a document. Nothing that deletes may treat it as
-     * though it meant "no document" - see deleteImport.
-     */
     documentKeyVersion: integer('document_key_version'),
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.id] }),
     /**
-     * Layer 1 of the duplicate defence (ROADMAP 4.3): the same file twice.
      * Only `committed` blocks - a failed parse must be retryable with the same
      * bytes, and a `pending` corpse must not answer "already imported" for rows
      * that were never written.
@@ -319,15 +235,6 @@ export const transactions = pgTable(
     recurring: boolean('recurring').notNull().default(false),
     // one-off large purchase: spread over 12 months in the goal calculation
     oneOff: boolean('one_off').notNull().default(false),
-    /**
-     * The import that FIRST wrote this row. First writer, not every attestation:
-     * a later import whose file contains the same row inserts nothing and is
-     * recorded nowhere, so deleting this import removes the row even though that
-     * later import still asserts it (ROADMAP 4.4).
-     *
-     * Nullable for the rows the deleted bank integrations wrote, and only those:
-     * every insert path left carries an import id.
-     */
     importId: text('import_id'),
   },
   (t) => [
@@ -355,18 +262,6 @@ export const transactions = pgTable(
   ],
 );
 
-/**
- * The rows of an import that is awaiting confirmation (ROADMAP 5.3). A separate
- * table rather than a status column on `transactions`: an unconfirmed row is never
- * read as data because it is not in the table every read path names, and that needs
- * no filter - so there is none to forget.
- *
- * It carries NO dedup_key, deliberately. The key is computed and arbitrated by the
- * database at confirm time, exactly as it is at import time today, so a staged row
- * claims no slot in transactions_dedup_unique: an import uploaded while this one is
- * outstanding still inserts every row it should, and discarding this one cannot
- * take away a row that other import was told already existed.
- */
 export const stagedTransactions = pgTable(
   'staged_transactions',
   {
@@ -461,7 +356,6 @@ export const budgets = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.category] })],
 );
 
-// baseline minimum line items for the Goal screen
 export const baselineItems = pgTable(
   'baseline_items',
   {
@@ -489,19 +383,6 @@ export const incomeSources = pgTable(
   (t) => [primaryKey({ columns: [t.workspaceId, t.id] })],
 );
 
-/**
- * The three closed vocabularies a saved chart is built from, and the only place
- * they are written. The route's z.enum and the CHECK constraints below are both
- * built from these arrays - but the constraint the database applies is the one in
- * the migration, so a member added here without db:generate widens the door and
- * leaves the column where it was.
- *
- * They are in the database and not only at the door because the client
- * SUBSTITUTES rather than refuses: chartKind() (web/src/analytics.ts) falls back
- * to the first kind, so a restored "pie" would draw as a line chart under the
- * reader's own title. Length bounds get no constraint - an over-long title
- * substitutes nothing.
- */
 export const CHART_KINDS = ['line', 'column', 'area', 'donut', 'ranking', 'radar'] as const;
 export const CHART_RANGES = ['3m', '6m', '12m', '24m', '3y', '5y'] as const;
 export const CHART_BREAKDOWNS = [
@@ -515,11 +396,7 @@ export const CHART_METRICS = ['income', 'expense', 'net'] as const;
 // bound $1 is not a thing. The values are this file's own literals.
 const inList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
 
-/**
- * The Analytics dock: one row per saved chart, ordered by `sort` (the position in
- * the array the client PUT, never on the wire). The list is replaced whole, so
- * `sort` is assigned 0..n-1 on every write.
- */
+/** The list is replaced whole, so `sort` is assigned 0..n-1 on every write. */
 export const analyticsCharts = pgTable(
   'analytics_charts',
   {

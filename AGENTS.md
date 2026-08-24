@@ -25,7 +25,7 @@ files you are missing. Nothing here depends on them.
 
 ```
 backend/    Express 5 + TypeScript, Drizzle ORM over PostgreSQL, better-auth, Zod, pino
-  src/db/       schema.ts, index.ts (queries), dedup.ts, workspace.ts
+  src/db/       the schema, every query, and the workspace context they are scoped to
   src/providers/ the one ingestion surface and the per-format parsers behind it
   drizzle/      generated migrations
   test/         vitest + pglite + supertest; helpers.ts and pglite.ts are the harness
@@ -147,9 +147,10 @@ everywhere.
   owes. A comment cannot reach them and a spec can.
   - **A derivation whose content is its arithmetic stays in code, whole, beside the constant it
     bounds.** A spec is bound by the delete-on-sight list, so it cannot carry the figures; and a
-    chain split across two documents is how three files came to hold a third of one each, with
-    both premises of one third false and its number still right. The spec says such a chain
-    exists, where it is written whole, and what it crosses.
+    chain split across two documents is how three files each came to hold a locally checkable part
+    of one with nobody owning the sum, and both premises of one part were false while its number
+    stayed right. The spec says such a chain exists, where it is written whole, and what it
+    crosses.
 - **A comment may not state a fact that something else could check.** Nothing tests prose, so a
   comment carrying a number, a count, a measurement, a reachability claim or an inventory of what
   exists is believed long after it stopped being true — comments in this tree have been found
@@ -175,7 +176,7 @@ everywhere.
     off a document no reader can open is where a long keep list is the honest answer. Where a
     comment mixes a kept reason with a checkable claim, rewrite it to the reason alone; do not
     keep the number "for context".
-  - `src/db/workspace.ts`'s header is the shape to copy.
+  - `COMPUTED_PREFIX`'s docblock in `src/db/dedup.ts` is the shape to copy.
 - Match the style, naming and idiom of the file being edited — **but never its comment volume.**
   Matching a dense neighbour is how the density spread.
 - **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
