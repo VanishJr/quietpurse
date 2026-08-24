@@ -39,7 +39,11 @@ rather than through it; `backend/test/specs.test.ts` reads every `SPEC.md` this 
 `backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
 `node:path` and no other module and to run nothing at its top level, because a test that imported the
 entry point beside it would spawn servers and drop databases to reach one predicate;
-and `web/src/copy.test.ts` does the same thing from the other package. **Nothing holds that list** —
+`backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
+the core to name `typescript` alone and run nothing at its top level and the entry to be the
+opposite of both, because a purity check that has only ever been shown a pure file cannot
+demonstrate it can tell the two apart; and `web/src/copy.test.ts` does the same thing from the other
+package. **Nothing holds that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 
