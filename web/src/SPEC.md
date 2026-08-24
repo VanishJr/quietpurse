@@ -73,6 +73,17 @@ and the reason for the divergence; it is not restated here.
 
 ## The invariants no type and no test holds
 
+**The word for money somebody else gives you is the public page's, and nothing holds the app to
+it.** `web/src/landing/` sells the product on *support* — the dial the reader drags, the legend
+segment and the opinion that earnings and support are two different numbers — and the app says the
+same word in the Goal screen's hero, in the income sources block beside it and in the Transactions
+detail sheet's hint. Those are independent strings in two bundles that share no code, and
+`copy.test.ts` walks both looking for something else entirely, so either half can drift and every
+test in this package stays green. A third copy of the word is one package over, in the label
+`seedDefaults` gives the seeded external source in `backend/src/db/index.ts`; a user who has renamed
+theirs reads their own word instead, which is what the delete confirmation looks up rather than
+writes out.
+
 **A check in the other package reads `api.ts` as source and finds its error-budget cap by name.**
 `backend/test/error-budget.test.ts` matches `MAX_ERROR_CHARS` in this file textually, because the
 two packages share no build and that is the only place the client's cap and the server's budget

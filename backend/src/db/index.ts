@@ -93,7 +93,10 @@ export async function seedDefaults(): Promise<void> {
       {
         workspaceId: w,
         id: 'family',
-        label: 'Family support',
+        // the id is data and stays; the label is what a stranger reads, and a
+        // scholarship is not family. Existing workspaces keep theirs - the insert
+        // ends onConflictDoNothing - and rename it through the Goal screen.
+        label: 'Support',
         kind: 'external',
         patterns: JSON.stringify(familyNames),
         sort: 1,
@@ -2128,6 +2131,14 @@ function rowToIncomeSource(r: IncomeSourceRow): IncomeSourceDef {
     builtin: r.builtin,
   };
 }
+
+/**
+ * ACCOUNT_NAME_MAX's number and not CHART_TITLE_MAX's: this label is rendered in line
+ * by screens that never wrote it, never as a card heading. Here rather than inside the
+ * schema so it sits with the value it bounds, which is where a reader of
+ * income_sources.label looks.
+ */
+export const INCOME_SOURCE_LABEL_MAX = 60;
 
 export async function listIncomeSources(): Promise<IncomeSourceDef[]> {
   const rows = await getDb()

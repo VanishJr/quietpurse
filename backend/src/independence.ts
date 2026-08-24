@@ -1,6 +1,8 @@
 /**
- * The independence metric - an answer to "how much do I need to earn so my family
- * no longer has to help".
+ * The independence metric - an answer to "how much do I need to earn so that
+ * nobody else has to help". Support is whatever somebody else gives you; which
+ * money is which is the workspace's own answer, carried by each income source's
+ * kind.
  *
  * TWO thresholds are computed, and both are returned - so there is something to
  * compare against:
@@ -14,7 +16,7 @@
  *     purchases amortized). Keeps your current way of life whole, so it is bigger.
  *
  *   Own income        = sources with kind = own (salary, other, freelance...)
- *   External help     = sources with kind = external (family, stipend...)
+ *   Support           = sources with kind = external (a stipend, a scholarship, family...)
  *   Threshold         = base * (1 + buffer)
  *   Shortfall         = Threshold - Own income
  *   Self-sufficiency  = Own income / base
