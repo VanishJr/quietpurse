@@ -37,9 +37,10 @@ partial import they do not notice.
 
 A bank's own export can be a signed container — the statement inside a CMS envelope, with `%PDF-`
 at byte 71 rather than byte 0. A CSV whose first cell is a date starts with an ASCII digit that is
-also a valid ASN.1 tag. The comments at `providers/statement.ts:380` carry the full reasoning,
-including which byte parts the two cases and why the rule is narrow on purpose. Read them before
-touching that function; every clause in it was paid for by a document that broke the previous one.
+also a valid ASN.1 tag. The comments inside `sniff` in `providers/statement.ts` carry the full
+reasoning, including which byte parts the two cases and why the rule is narrow on purpose. Read
+them before touching that function; every clause in it was paid for by a document that broke the
+previous one.
 
 ## Modules
 
@@ -47,7 +48,7 @@ touching that function; every clause in it was paid for by a document that broke
 
 | Module | What it owns |
 |---|---|
-| `app.ts` | The Express app: 41 routes, CORS, the session middleware, the workspace scope per request. Separate from `index.ts` so the middleware chain is testable over real HTTP |
+| `app.ts` | The Express app: every route, CORS, the session middleware, the workspace scope per request. Separate from `index.ts` so the middleware chain is testable over real HTTP |
 | `index.ts` | Process start: config assertions, migrations, listen |
 | `auth.ts` | better-auth wiring — email/password, cookie sessions, the organization plugin that workspaces are built on, rate limits |
 | `config.ts` | `.env` reading plus `assertProductionConfig()`, which refuses to boot production on a dev default |
