@@ -1,9 +1,3 @@
-/**
- * Process entry point: connect the database, wire up auth, bring every workspace
- * up to date, then start listening. The application itself (middleware + routes)
- * lives in app.ts, which stays importable without any of this happening - that is
- * what lets the HTTP tests drive the real middleware chain.
- */
 import os from 'os';
 import { app } from './app';
 import { initAuth } from './auth';
@@ -35,8 +29,8 @@ async function main(): Promise<void> {
 
   const workspaces = await listWorkspaceIds();
 
-  // upgrade path: a new builtin setting/income source added in this version must
-  // appear in workspaces seeded by older versions (seedDefaults is idempotent)
+  // upgrade path: a builtin setting or income source added in this version must
+  // reach workspaces that were seeded by an older one
   for (const w of workspaces) {
     await runWithWorkspace(w, seedDefaults);
   }
@@ -57,10 +51,9 @@ async function main(): Promise<void> {
 
   app.listen(config.port, '0.0.0.0', () => {
     logger.info(`Finto backend: http://localhost:${config.port}`);
-    // The LAN addresses (for opening the app on a phone) are debug-level: on a
-    // dev machine most of them belong to virtual adapters - WSL, Docker,
-    // VirtualBox - and finding the one real address among five is not worth five
-    // lines on every start. LOG_LEVEL=debug brings them back.
+    // debug-level and not info: on a dev machine most of these belong to virtual
+    // adapters - WSL, Docker, VirtualBox - and the one real address is not worth
+    // hunting for on every start
     const nets = os.networkInterfaces();
     for (const list of Object.values(nets)) {
       for (const net of list || []) {
