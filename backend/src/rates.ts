@@ -1,7 +1,4 @@
-/**
- * Monobank public exchange rates: GET /bank/currency (no token needed).
- * Cached - the endpoint is public, but there is no need to hit it on every request.
- */
+/** A public endpoint, so there is no credential here to handle and nothing to rotate. */
 import { currencyName } from './currency';
 
 const API = 'https://api.monobank.ua';

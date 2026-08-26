@@ -1,20 +1,8 @@
 /**
- * Historical exchange rates and filling in base_amount - a transaction's amount in
- * the base currency (config.baseCurrency) at the rate on its date.
- *
- * Providers (the RateProvider interface, resolver below):
- *  - ECB via frankfurter.dev - the default: ~30 currencies, no key, history since 1999;
- *  - NBU - for pairs involving the hryvnia (the ECB doesn't publish it): the official
- *    rate for any day since 1996, cross-rate through UAH.
- * A pair no provider can handle produces a clear error in the log rather than silent
- * NULLs. The order can be overridden: FX_PROVIDER=ecb|nbu (auto by default).
- *
- * The cache is the fx_rates table, and it never expires (a historical rate doesn't change):
- *  - NBU rows: (day, 'EUR') -> hryvnia per unit - the format has been alive since the
- *    first version, so an old cache keeps working;
- *  - ECB rows: (day, 'USD:EUR') -> units of `to` per unit of `from`.
- * Providers publish no rate on weekends - the nearest previous day is used
- * (frankfurter does this itself; for the NBU there's a lookback of up to 7 days).
+ * Two shapes share the rate cache's key space and have to stay distinguishable: a bare
+ * currency means hryvnia per unit of it, and `FROM:TO` means units of `to` per unit of
+ * `from`. The bare shape has been written since the first version, so an old cache
+ * keeps working only while it keeps that meaning.
  */
 import { config } from './config';
 import {
@@ -37,11 +25,10 @@ export interface RateProvider {
 
 const FETCH_TIMEOUT_MS = 10_000;
 
-// ---------- ECB (frankfurter.dev) ----------
-
 /**
- * ECB currencies (frankfurter.dev/v1/currencies). The list has been stable for years,
- * so it is hardcoded: the resolver needs to answer "can I do this" synchronously and offline.
+ * Hardcoded because the resolver has to answer "can I do this" synchronously and offline.
+ * The hryvnia is not in it, which is why the NBU provider exists - though `supports` below
+ * refuses every pair carrying a code outside this set, not the hryvnia's alone.
  */
 const ECB_CURRENCIES = new Set([
   'AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD',
@@ -70,8 +57,6 @@ export const ecbProvider: RateProvider = {
   },
 };
 
-// ---------- NBU ----------
-
 const NBU = 'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange';
 /** how many days back to look for a rate if the NBU didn't publish one for the requested date */
 const MAX_LOOKBACK_DAYS = 7;
@@ -97,10 +82,7 @@ async function fetchNbuRate(currency: string, day: string): Promise<number | nul
   return typeof rate === 'number' && rate > 0 ? rate : null;
 }
 
-/**
- * Hryvnia per unit of currency on a day (cache -> NBU -> previous days).
- * Throws on a network error - the caller decides what to do.
- */
+/** Throws on a network error - the caller decides what to do. */
 export async function rateToUah(currency: string, day: string): Promise<number | null> {
   if (currency === 'UAH') return 1;
   const cached = await getFxRate(day, currency);
@@ -133,8 +115,6 @@ export const nbuProvider: RateProvider = {
   },
 };
 
-// ---------- resolver ----------
-
 function activeProviders(): RateProvider[] {
   switch (config.fxProvider) {
     case 'ecb':
@@ -147,9 +127,8 @@ function activeProviders(): RateProvider[] {
 }
 
 /**
- * Units of `to` per unit of `from` on a day: the first provider that handles the pair.
- * null = no provider can do it, or there is no rate - the caller logs it.
- * Network errors propagate.
+ * The first provider that handles the pair. null = no provider can do it, or there is
+ * no rate - the caller logs it. Network errors propagate.
  */
 export async function resolveRate(day: string, from: string, to: string): Promise<number | null> {
   if (from === to) return 1;
@@ -162,11 +141,10 @@ export async function resolveRate(day: string, from: string, to: string): Promis
 }
 
 /**
- * drizzle wraps every driver error in a DrizzleQueryError whose message is the SQL
- * and the bound parameters; the reason is one `cause` deeper. ROADMAP row 70 lost a
- * week to that sentence being logged as if it were the diagnosis.
- * Not causeChain() from logger.ts: the whole chain leads with the statement and every
- * bound parameter, which is the noise this exists to drop.
+ * drizzle wraps every driver error in one whose message is the SQL and the bound
+ * parameters, with the reason one `cause` deeper - so the outer message reads like a
+ * diagnosis and is not one. Not causeChain() from logger.ts: the whole chain leads with
+ * that statement and every bound value, which is the noise this exists to drop.
  */
 function sqlReason(e: unknown): string {
   const c = (e as { cause?: { message?: string; code?: string } })?.cause;
@@ -175,13 +153,10 @@ function sqlReason(e: unknown): string {
 }
 
 /**
- * Fills in base_amount for every transaction that doesn't have one yet.
- * Idempotent and cheap once everything is converted (a single SELECT).
- * Neither a network error nor a failed write fails the call: those rows stay NULL
- * and are picked up on the next recompute (after every sync and at startup).
- * The fetch and the write are caught apart so that the wording of one can never
- * describe the other - a whole account went unconverted for months behind a line
- * that said the rate had not been fetched.
+ * Neither a network error nor a failed write fails the call: those rows stay NULL and
+ * are picked up on the next recompute. The fetch and the write are caught apart so that
+ * the wording of one can never describe the other - a whole account went unconverted for
+ * months behind a line that said the rate had not been fetched.
  * @returns how many rows got a base_amount
  */
 export async function backfillBaseAmounts(

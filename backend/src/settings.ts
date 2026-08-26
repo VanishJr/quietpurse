@@ -1,10 +1,6 @@
-/**
- * Settings of the toolkit (the Goal screen). Stored in meta as a single JSON
- * string: there are few values, a separate table would not pay for itself.
- */
 import { getMeta, setMeta } from './db';
 
-/** What the threshold is built from - the two modes are spelled out in independence.ts. */
+/** The two modes are derived in full in independence.ts's header. */
 export type GoalMode = 'baseline' | 'lifestyle';
 
 export interface Settings {

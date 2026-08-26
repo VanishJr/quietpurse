@@ -1,23 +1,3 @@
-/**
- * Source documents: the uploaded statement itself, kept encrypted at rest
- * so that a better parser can re-run it later and so that "my
- * import came out wrong" is diagnosable at all. One document per `imports` row,
- * keyed by the import id and dying with it - never keyed by the file hash, which
- * would let a failed import and a committed one of the same bytes share a blob.
- *
- * The states this ordering produces, and which of them are accepted:
- *  - a document whose import row never existed CANNOT happen: the put is strictly
- *    after createImport;
- *  - bytes on disk with `document_key_version` not yet set is the one crash
- *    window, and it is on the garbage side rather than the lie side - nothing
- *    claims a document that is not there, and deleteImport removes the blob
- *    whatever the pointer says, so it stays collectable;
- *  - a `pending` or a `failed` import holding a document is not a defect. The
- *    failed case is the point: the input is what support needs;
- *  - a blob whose row no longer exists at all - a restore deletes the workspace's
- *    `imports` rows - is reachable by nothing. No sweeper is in scope; it is a
- *    data-deletion line rather than something fixed here.
- */
 import crypto from 'crypto';
 import { config } from './config';
 import { currentWorkspaceId } from './db/workspace';
@@ -25,26 +5,13 @@ import { causeChain, logImport } from './logger';
 import { deleteObject, getObject, putObject } from './storage';
 
 /**
- * What a key may be built from. Deliberately narrow: deleteImport has to address a
- * document for a row whose pointer is NULL, so a layout may depend only on what it
- * can supply from the row it is deleting. A layout wanting more - say
- * `<workspace>/<yyyy>/<importId>` - has to widen this type AND widen the select in
- * deleteImport in the same change, and tsc will not let one happen without the other.
+ * Deliberately narrow: a layout may depend only on what deleteImport can supply from
+ * the row it is deleting, so widening this type and widening that select are one
+ * change tsc will not let happen by halves.
  */
 type DocumentKeyContext = { workspaceId: string; importId: string };
 
-/**
- * Every key layout this server has ever written, by version. Adding one is adding
- * an entry here: putDocument writes under the newest, the row records which one,
- * and deleteDocument tries all of them - so there is no version list anywhere that
- * can be forgotten.
- *
- * The workspace segment is the raw id rather than a hash of it: hashing would
- * guarantee the segment always satisfies the storage charset, which turns "a
- * workspace id this system did not expect" from a loud refusal into a silently
- * accepted value, and an operator answering "delete everything for workspace X"
- * could no longer do it with ls and rm.
- */
+/** Entries are never removed: a row may still record an old layout, and deleteDocument tries them all. */
 const DOCUMENT_KEY_LAYOUTS: Record<number, (ctx: DocumentKeyContext) => string> = {
   1: ({ workspaceId, importId }) => `${workspaceId}/${importId}`,
 };
@@ -70,29 +37,15 @@ export interface DocumentKey {
 }
 
 /**
- * Key and id from one secret, in one frozen object: there is no way to hold a key
- * without its id, and no way to seal with key A while stamping id B. HKDF rather
- * than "the env var must be exactly 32 base64 bytes" - whatever
- * `openssl rand -base64 32` or a password manager produced works, the same
- * paste-anything ergonomics as BETTER_AUTH_SECRET.
+ * Key and id come out of one secret together, in a frozen object: there is no way to
+ * hold a key without its id, and no way to seal with key A while stamping id B. HKDF
+ * rather than a fixed-length secret, so whatever a password manager produced works.
  *
- * The id is derived rather than a constant so that a changed DOCUMENT_ENCRYPTION_KEY
- * - the single most likely operational mistake, and the one assertProductionConfig
- * actively pushes an operator to make on their first deploy - is diagnosed as
- * "sealed with key id N, this server holds M" instead of as a corrupted file. It
- * moves by itself if the salt, the info strings or the derivation ever change; a
- * literal would have to be remembered.
- *
- * The honest limit: a one-byte id means a mismatch proves the key is wrong and a
- * match proves nothing. The GCM tag stays the authority, and on a colliding id the
- * reader falls through to the integrity message - which is what it would have said
- * anyway.
- *
- * Rotation's exit, recorded before it is needed: the day a second key is held the
- * reader picks by id, and two keys whose derived ids collide are indistinguishable.
- * The envelope byte cannot be widened for documents already written, so the exit is
- * that boot refuses two configured keys with the same derived id and the operator
- * regenerates one.
+ * The id is derived rather than written down so that a changed DOCUMENT_ENCRYPTION_KEY
+ * is diagnosed as the wrong key instead of as a corrupted file, and so that it moves
+ * by itself when the salt, the info strings or the derivation do. Its honest limit: one
+ * byte means a mismatch proves the key is wrong and a match proves nothing - the GCM
+ * tag stays the authority.
  */
 export function deriveDocumentKey(secret: string): DocumentKey {
   const hkdf = (info: string, length: number): Buffer =>
@@ -115,11 +68,9 @@ function documentKeys(): DocumentKey {
 }
 
 /**
- * The two header bytes followed by the storage key. Binding the key into the AEAD
- * is a third net under a crafted restore: a document copied from one workspace's
- * directory into another's fails its tag before anything is decrypted. It also
- * pins the version and key id bytes - editing either to reach a different reader
- * breaks the tag.
+ * The storage key is in the AEAD so a document copied from one workspace's directory
+ * into another's fails its tag before anything is decrypted, and so editing the version
+ * or key id byte to reach a different reader breaks it too.
  */
 const aad = (header: Buffer, storageKey: string): Buffer =>
   Buffer.concat([header.subarray(0, 2), Buffer.from(storageKey, 'utf8')]);
@@ -135,10 +86,9 @@ const aad = (header: Buffer, storageKey: string): Buffer =>
  *   14  16  GCM tag
  *   30   N  ciphertext
  *
- * The tag sits in the header rather than being appended (the usual convention, and
- * equally safe) for one reason: the ciphertext is then buf.subarray(30), with no
- * arithmetic measured from the end, so no truncation can produce a slice that is
- * accidentally well-formed.
+ * The tag is in the header rather than appended - equally safe, and it puts the
+ * ciphertext at a fixed offset with no arithmetic measured from the end, so no
+ * truncation can produce a slice that is accidentally well-formed.
  */
 export function sealDocument(plain: Buffer, storageKey: string, keys = documentKeys()): Buffer {
   const header = Buffer.alloc(HEADER_BYTES);
@@ -155,9 +105,8 @@ export function sealDocument(plain: Buffer, storageKey: string, keys = documentK
 }
 
 /**
- * Everything throws; nothing degrades. The version and key id are checked BEFORE
- * any decrypt is attempted, so the message names the actual problem instead of
- * reporting a tag failure.
+ * Everything throws; nothing degrades. Version and key id are checked BEFORE any
+ * decrypt, so the message names the real problem instead of a tag failure.
  */
 export function openDocument(sealed: Buffer, storageKey: string, keys = documentKeys()): Buffer {
   if (sealed.length < HEADER_BYTES) {
@@ -190,12 +139,7 @@ export function openDocument(sealed: Buffer, storageKey: string, keys = document
   }
 }
 
-/**
- * What a reader needs to open a document. The file hash travels with it so that
- * getDocument can check what it decrypted against what the import recorded, and
- * the only honest way to obtain one is getImportDocumentRef (db/index.ts) - there
- * is no overload that skips the check.
- */
+/** The file hash travels with the ref so getDocument can check what it decrypted against what the import recorded. */
 export interface DocumentRef {
   importId: string;
   keyVersion: number;
@@ -203,31 +147,21 @@ export interface DocumentRef {
 }
 
 /**
- * What a user is told when the document cannot be stored. A constant, so the sentence
- * is asserted by equality: a regex over paths and errnos passes on a message that has
- * been "improved" to splice in a cause chain which happens not to contain a drive
- * letter, and that is how a filesystem path reaches a screen one refactor from now.
- *
- * It is actionable in the only way this failure is actionable - the bytes are still the
- * user's to re-upload, which is the fact a refusal exists to preserve: committing
- * without the document would claim the file hash forever.
+ * A constant, so the sentence is asserted by equality: a regex over paths and errnos
+ * passes a message somebody has "improved" to splice in a cause chain that happens to
+ * carry no drive letter, and that is how a filesystem path reaches a screen. It is
+ * actionable in the only way this failure is - the bytes are still the user's to
+ * re-upload - because committing without the document would claim the file hash forever.
  */
 export const DOCUMENT_STORE_REFUSED =
   "could not store the uploaded file, so the import was refused - nothing was written, and the same file can be uploaded again once the server's storage is working";
 
-/**
- * The 404 on the download route. It says READ, never "kept": NULL in
- * `document_key_version` records readability, and a row restored from a backup has
- * its pointer stripped while its bytes are still on disk - so asserting that no
- * document is held would be a claim this server cannot make.
- */
+/** Says READ, never "kept": a restored row's pointer is stripped while its bytes are still on disk. */
 export const DOCUMENT_NOT_READABLE = 'this import has no document this server can read';
 
 /**
- * The two operator-caused refusals, constants for DOCUMENT_STORE_REFUSED's reason.
- * Neither names an action, because there is none for the user to take; what they do
- * say is which way the state went, so nobody is told a statement is gone while it is
- * still held.
+ * Neither names an action, because there is none for the user to take; what they do say
+ * is which way the state went, so nobody is told a statement is gone while it is held.
  */
 export const DOCUMENT_READ_REFUSED =
   "the stored copy of this file could not be read, so nothing was sent - your imported data is unaffected, and the server's log names the reason";
@@ -239,7 +173,7 @@ function keyFor(version: number, workspaceId: string, importId: string): string 
   const layout = DOCUMENT_KEY_LAYOUTS[version];
   if (!layout) {
     // never fall back to version 1: that reads a different file's bytes under a
-    // plausible-looking key. A row written by a newer build then rolled back
+    // plausible-looking key
     throw new Error(
       `import ${importId} records a document written under key layout ${version}, and this server knows ${KEY_VERSIONS.join(', ')}`,
     );
@@ -248,12 +182,9 @@ function keyFor(version: number, workspaceId: string, importId: string): string 
 }
 
 /**
- * Stores the uploaded bytes for an import and answers which layout they went
- * under - the caller hands that straight to recordImportDocument, so the row
- * cannot claim a version the writer did not use.
- *
- * The cause goes to the log, including the whole chain and at
- * `error`; the user gets a sentence with no path, no errno and no filename in it.
+ * Answers the layout the bytes went under, so the row cannot claim a version the
+ * writer did not use. The cause goes to the log whole; the user gets a sentence with
+ * no path, no errno and no filename in it.
  */
 export async function putDocument(importId: string, bytes: Buffer): Promise<number> {
   // outside the try on purpose: "no workspace context" has to surface as itself
@@ -270,14 +201,13 @@ export async function putDocument(importId: string, bytes: Buffer): Promise<numb
 }
 
 /**
- * The decrypted bytes, or a throw - never an empty value. A row that claims a
- * document whose bytes are gone (a silently erased volume, a blob removed by hand)
- * is a lie, and a re-parse job must meet a throw rather than something it can read
- * as "nothing to do".
+ * The decrypted bytes or a throw, never an empty value: a row claiming bytes that are
+ * gone is a lie, and a re-parse job must meet a throw rather than something it can
+ * read as "nothing to do".
  *
- * The key is DERIVED from (current workspace, import id) and never read out of the
- * row: a stored key is a string a crafted backup gets to choose, and one workspace
- * would then read another's statement through a path no WHERE clause is near.
+ * The key is DERIVED from the current workspace and the import id, never read out of
+ * the row - a stored key is a string a crafted backup gets to choose, and one
+ * workspace would then read another's statement through a path no WHERE clause is near.
  */
 export async function getDocument(ref: DocumentRef): Promise<Buffer> {
   const key = keyFor(ref.keyVersion, currentWorkspaceId(), ref.importId);
@@ -298,15 +228,12 @@ export async function getDocument(ref: DocumentRef): Promise<Buffer> {
 }
 
 /**
- * Removes an import's document under EVERY layout this server knows, and takes no
- * key version - there is no argument a caller can get wrong and no pointer to
- * consult. That is deliberate: `document_key_version` says whether a document can
- * be READ, never whether bytes exist, and the rows most likely to still have some
- * are exactly the ones whose pointer is NULL (restored, or crashed between the put
- * and recordImportDocument). A delete filtered on the pointer would leave those
- * bank statements on disk with no path that ever revisits them.
+ * Takes no key version and tries every layout: there is no argument a caller can get
+ * wrong and no pointer to consult. A delete filtered on the pointer would skip exactly
+ * the rows most likely to still have bytes, and leave those bank statements on disk
+ * with no path that ever revisits them.
  *
- * Answers whether anything was removed. A missing object is not a failure.
+ * A missing object is not a failure.
  */
 export async function deleteDocument(importId: string): Promise<boolean> {
   const workspaceId = currentWorkspaceId();
