@@ -1,27 +1,15 @@
-/**
- * App settings from the settings table (seeded by the initial migration).
- * Edited via PATCH /api/app-settings; .env is left for secrets and process
- * parameters only (port, database path).
- *
- * Not to be confused with settings.ts - that holds the Goal screen's settings
- * (buffer, window, hourly rate), which live in meta as a single JSON string.
- */
+/** Not settings.ts, which holds the Goal screen's settings and stores them elsewhere. */
 import { currentBaseCurrency, getSetting, setSetting } from './db';
 
 export interface AppSettings {
   /** base currency of all totals; changing it requires recomputing base_amount */
   baseCurrency: string;
-  /**
-   * Account owner names: a transaction with all the words of one of these names
-   * in its description is a transfer between your own accounts (see classify.ts).
-   */
   ownerNames: string[];
 }
 
 export async function getAppSettings(): Promise<AppSettings> {
-  // No env fallback: OWNER_NAMES is the operator's own household, so falling back
-  // to it would show those names in another user's settings. seedDefaults() writes
-  // the key for every workspace, empty for all but the owner's.
+  // No env fallback: OWNER_NAMES is the operator's own household, so falling back to
+  // it would show those names in another user's settings.
   let ownerNames: string[] = [];
   const raw = await getSetting('owner_names');
   if (raw !== undefined) {
@@ -40,14 +28,7 @@ export async function getAppSettings(): Promise<AppSettings> {
 
 declare const checked: unique symbol;
 
-/**
- * A patch that has been through parseAppSettingsPatch, and the only thing
- * updateAppSettings accepts. The brand is what carries the rule: this function used
- * to take `unknown` fields and drop a bad currency in silence, so the route could
- * answer 200 on a change that never happened. A guard at the route would only move
- * that defect one caller away - the next one, on the mobile client's behalf, would
- * meet it again. With the brand it cannot be called with an unchecked body at all.
- */
+/** The brand is the rule: updateAppSettings cannot be called with an unchecked body at all. */
 export type AppSettingsPatch = {
   baseCurrency?: string;
   ownerNames?: string[];
@@ -57,10 +38,7 @@ export type ParsedAppSettingsPatch =
   | { ok: true; patch: AppSettingsPatch }
   | { ok: false; error: string };
 
-/**
- * An absent key means "leave it alone"; a present one that cannot be stored is
- * refused rather than coerced - EURO is not somebody's guess at EUR.
- */
+/** An absent key means "leave it alone"; a present one that cannot be stored is refused, never coerced. */
 export function parseAppSettingsPatch(body: {
   baseCurrency?: unknown;
   ownerNames?: unknown;

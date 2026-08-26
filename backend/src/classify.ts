@@ -1,39 +1,3 @@
-/**
- * Detecting transfers between your own accounts. Such transactions are neither
- * income nor spending — the money just moved from one of your pockets to another,
- * and counting them in analytics inflates both sides.
- *
- * Four rules:
- *
- * 1. Pair matching. A card-to-card transfer shows up in the database twice: an
- *    expense on one of your accounts and income on another. An example from a
- *    statement, both in the same second:
- *      Mono UAH  -2000.00 UAH  "Переказ на картку"
- *      Mono EUR    +44.10 EUR  "З Чорної картки"
- *    Both rows get flagged as a transfer. Different currencies are fine: the
- *    amounts are checked against the exchange rate.
- *
- * 2. The owner's name in the description ("Від: Yurii Kalvenko") — your own money
- *    moved from an account the app does not hold. The names come from the
- *    owner_names setting, and that is now the only source: the bank-supplied
- *    account-holder name went with the deleted integrations (ROADMAP 5.4), so a
- *    workspace that leaves it empty gets no rule 2 at all.
- *
- * 3. A "description + account" rule from the transfer_rules table — the user tagged
- *    a transaction and asked to apply that to all like it (see db.ts). Needed where
- *    pair matching can't help: an outgoing "Sent from N26" has nothing to pair with,
- *    because the matching Revolut income is already explained by rule 2 and never
- *    becomes a candidate (see below).
- *
- * 4. A manual flag on a single transaction — the strongest signal; it lives in a
- *    separate transfer_manual column that this module never touches.
- *
- * A transaction recognized by rule 2 or 3 is not offered for pairing: it is already
- * fully explained. The false match that guards against is spelled out at the
- * candidate filter in reclassifyAll below.
- *
- * The recompute runs at backend startup and after every confirmed import.
- */
 import { getAppSettings } from './appsettings';
 import { RULES_VERSION, categorize, isRefund, recurringKey } from './categorizer';
 import {
@@ -51,21 +15,20 @@ import { getRatesToUAH } from './rates';
 import { Transaction } from './types';
 
 /**
- * Window for a same-currency pair: the amounts have to match to the cent, so there
- * is no need to hurry — an uploaded statement carries a calendar day, not a time.
- * 36 hours rather than 4 days: on round amounts (20/50/100 EUR) a wide window kept
- * gluing unrelated transactions together (a -20 EUR merchant payment and an
- * unrelated +77 EUR incoming transfer were the confirmed victims).
+ * Window for a same-currency pair: the amounts have to match to the cent, so there is
+ * no need to hurry — and a statement's date often carries a calendar day and no time,
+ * so two legs booked a minute apart can sit 24 hours apart in the data. Hence a floor
+ * above a day. 36 hours rather than 4 days: on round amounts (20/50/100 EUR) a wide
+ * window kept gluing unrelated transactions together (a -20 EUR merchant payment and
+ * an unrelated +77 EUR incoming transfer were the confirmed victims).
  */
 const SAME_CURRENCY_WINDOW_MS = 36 * 3600_000;
 
 /**
- * Only transactions that look like a transfer are offered for pairing: category
- * "transfers" (a p2p MCC or transfer wording in the description) or an
- * unrecognized "other". An expense identified as a merchant purchase or a cash
- * withdrawal cannot be the other leg of a transfer — that is exactly what stops a
- * -20 EUR merchant payment being glued to a +20 EUR incoming card transfer. Income
- * categorized as salary/cashback is excluded symmetrically.
+ * An expense identified as a merchant purchase or a cash withdrawal cannot be the
+ * other leg of a transfer — that is exactly what stops a -20 EUR merchant payment
+ * being glued to a +20 EUR incoming card transfer. Income categorized as
+ * salary/cashback is excluded symmetrically.
  */
 const PAIRABLE_CATEGORIES = new Set(['transfers', 'other']);
 
@@ -87,9 +50,8 @@ function normalizeName(s: string): string {
 }
 
 /**
- * The owner's name in the description. Matched word by word rather than as a
- * substring: statements use any order ("Yurii Kalvenko", "Калвенко Юрій"). Single-word
- * names are ignored — far too easy to hit a random merchant.
+ * Matched word by word rather than as a substring: statements write a name in any
+ * order. Names below two words are dropped — one word hits a random merchant.
  */
 async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
   const names = (await getAppSettings()).ownerNames
@@ -107,10 +69,8 @@ async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
 }
 
 /**
- * "Description + account" rules from the database. The description is matched
- * exactly (as the bank sent it) — a rule is created by tapping a specific
- * transaction, so the string is guaranteed to match what the bank sends for that
- * group.
+ * Matched exactly, as the bank sent it: a rule is created by tapping one specific
+ * transaction, so the string is what that bank sends for that whole group.
  */
 async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
   const rules = new Set(
@@ -120,13 +80,7 @@ async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
   return (t: Transaction) => rules.has(`${t.accountId}\0${t.description}`);
 }
 
-/**
- * Auto-tagging the income source from the patterns in income_sources: income whose
- * description contains all the words of one of a source's patterns ("ANNA BECKER",
- * "Від: Becker Anna" -> family) gets that source's id. Matched the same way as
- * owner names: by words, at least two words of 3+ letters. The first matching
- * source (by sort) wins.
- */
+/** Patterns are matched like owner names, and the first matching source by sort wins. */
 async function makeSourceMatcher(): Promise<(description: string) => string | undefined> {
   const sources = (await listIncomeSources())
     .map((s) => ({
@@ -145,11 +99,7 @@ async function makeSourceMatcher(): Promise<(description: string) => string | un
   };
 }
 
-/**
- * User rules "description contains X -> category Y" (created in the app).
- * Stronger than the dictionary: the dictionary is a default, a rule is the owner's
- * explicit decision.
- */
+/** Stronger than the dictionary: the dictionary is a default, a rule is the owner's decision. */
 async function makeCategoryRuleMatcher(): Promise<(description: string) => string | undefined> {
   const rules = (await listCategoryRules()).map(
     (r) => [r.pattern.toLowerCase(), r.category] as const,
@@ -165,18 +115,14 @@ async function makeCategoryRuleMatcher(): Promise<(description: string) => strin
   };
 }
 
-// ---------- recurring payments ----------
-
-/** Minimum number of distinct calendar months for a group to count as recurring. */
 const RECURRING_MIN_MONTHS = 3;
-/** Allowed deviation from the group's median (rent 1000 -> 1020 still passes). */
+/** A fraction of the group's median, not an absolute amount. */
 const RECURRING_AMOUNT_TOLERANCE = 0.2;
 
 /**
- * Recurring payments: the same description in >= 3 different months with a similar
- * amount (±20% of the median). Catches rent, subscriptions and memberships;
- * groceries ("Rewe", anywhere from 5 to 100 EUR) are filtered out by the spread of
- * amounts.
+ * The same description in enough distinct months at a similar amount. The spread of
+ * amounts is what keeps a supermarket out: it is in the description every month and
+ * never for the same amount.
  */
 function detectRecurring(
   txs: Transaction[],
@@ -226,7 +172,7 @@ function fxPlausible(
   return Math.abs(a - b) / Math.max(a, b) <= FX_TOLERANCE;
 }
 
-/** Exported for tests: the pair-matching rules without touching the database. */
+/** Exported so the pair rules can be exercised without a database. */
 export function canPair(
   expense: Transaction,
   income: Transaction,
@@ -243,8 +189,8 @@ export function canPair(
 }
 
 /**
- * Rates are only needed to check cross-currency pairs. If Monobank is unreachable,
- * classify without them: those pairs are still caught by the narrow time window.
+ * Rates are only needed for cross-currency pairs, and those are still bounded by the
+ * narrow time window — so an unreachable provider classifies without them.
  */
 async function ratesOrEmpty(): Promise<Record<string, number>> {
   try {
@@ -254,11 +200,7 @@ async function ratesOrEmpty(): Promise<Record<string, number>> {
   }
 }
 
-/**
- * Recategorizes and re-tags the whole database. Idempotent: a full recompute from
- * the transaction's source fields, no state accumulates.
- * @returns how many transactions were recognized as transfers
- */
+/** @returns how many transactions were recognized as transfers */
 export async function reclassifyAll(): Promise<number> {
   const rates = await ratesOrEmpty();
   const isOwner = await makeOwnerMatcher();
@@ -281,8 +223,6 @@ export async function reclassifyAll(): Promise<number> {
           refund,
           // transfer already recognized by owner name or by a rule; pairing is below
           transfer: isOwner(t.description) || matchesRule(t),
-          // income source: a source's patterns -> its id,
-          // otherwise the salary category -> salary, otherwise other
           incomeSource: income
             ? (sourceFor(t.description) ?? (category === 'salary' ? 'salary' : 'other'))
             : null,
@@ -292,24 +232,18 @@ export async function reclassifyAll(): Promise<number> {
     }),
   );
 
-  // Pairing candidates. Filtered out:
-  //  - refunds on the income side: a refund is a cancelled purchase, not money
-  //    coming in, so it can't be the other half of a transfer;
-  //  - anything already recognized as a transfer. Such a transaction is fully
-  //    explained, and offering it for pairing is dangerous: an incoming
-  //    "Від: Yurii Kalvenko" +20 EUR (moved from a bank that isn't connected) would
-  //    otherwise be glued to a -20 EUR ATM withdrawal on the same day, and the real
-  //    cash expense would disappear from the analytics;
-  //  - anything categorized as a purchase/cash/salary (see PAIRABLE_CATEGORIES).
+  // A transaction already explained is not a candidate: an incoming "Від: Yurii
+  // Kalvenko" +20 EUR would otherwise be glued to a -20 EUR ATM withdrawal on the same
+  // day, and the real cash expense would disappear from the analytics. A refund is a
+  // cancelled purchase rather than money coming in, so it cannot be a leg either.
   const expenses = txs.filter(
     (t) =>
       t.amount < 0 &&
       !result.get(t.id)!.transfer &&
       PAIRABLE_CATEGORIES.has(result.get(t.id)!.category),
   );
-  // income recognized by a source pattern (family support, a stipend) is explained
-  // income and can't be the other leg of a transfer: otherwise a +20000 UAH family
-  // transfer would be glued to an unrelated expense of the same size
+  // income explained by a source pattern cannot be a leg either: a family transfer
+  // would otherwise be glued to an unrelated expense of the same size
   const incomes = txs.filter(
     (t) =>
       t.amount > 0 &&
@@ -319,12 +253,10 @@ export async function reclassifyAll(): Promise<number> {
       PAIRABLE_CATEGORIES.has(result.get(t.id)!.category),
   );
 
-  // First collect every allowed pair, then hand them out in order of increasing time
-  // gap: the closest pair wins. Expenses used to be processed chronologically, and
-  // an earlier expense could steal someone else's income — a -20 EUR withdrawal on
-  // the 9th took the +20 EUR incoming card transfer from the 12th, even though that
-  // one arrived in the same minute as its real counterpart. The result no longer
-  // depends on iteration order.
+  // Every allowed pair first, then handed out by increasing gap, so the closest pair
+  // wins and the result does not depend on iteration order: processing expenses in
+  // date order let an earlier one take an income that arrived in the same minute as
+  // its real counterpart.
   const candidates: { expense: Transaction; income: Transaction; gapMs: number }[] = [];
   for (const expense of expenses) {
     const expenseAt = Date.parse(expense.date);
@@ -354,19 +286,12 @@ export async function reclassifyAll(): Promise<number> {
   await applyClassification(rows);
   await setMeta('classify_version', await rulesSignature());
 
-  // base_amount for new transactions: rates on their dates (cached in fx_rates)
   await backfillBaseAmounts();
 
   return rows.filter((r) => r.transfer).length;
 }
 
-/**
- * Signature of the tagging rules: code version + OWNER_NAMES + income source
- * patterns + user category rules. Changing any of them, in .env or in the database,
- * requires a recompute — otherwise new rules would only apply at the next sync and
- * the old tags would stay wrong.
- * (A source's kind is not part of the signature: it affects summaries, not tagging.)
- */
+/** A source's kind is deliberately outside it: kind moves summaries, not tags. */
 async function rulesSignature(): Promise<string> {
   const categoryRules = (await listCategoryRules())
     .map((r) => `${r.pattern}>${r.category}`)
@@ -380,7 +305,6 @@ async function rulesSignature(): Promise<string> {
   return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}`;
 }
 
-/** Recompute at startup if the tagging rules changed since the last run. */
 export async function reclassifyIfRulesChanged(): Promise<boolean> {
   if ((await getMeta('classify_version')) === (await rulesSignature())) return false;
   await reclassifyAll();

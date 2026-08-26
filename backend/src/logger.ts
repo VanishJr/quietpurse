@@ -1,10 +1,3 @@
-/**
- * The backend's single logger (pino). Level from the LOG_LEVEL env var (info by
- * default), format JSON; with a live terminal (or LOG_PRETTY=1) - human-readable
- * output through pino-pretty.
- *
- * Each module gets its own child with a mod field: sync, classify, fx, http, db, import.
- */
 import pino from 'pino';
 
 const pretty = process.env.LOG_PRETTY === '1' || (process.stdout.isTTY && process.env.LOG_PRETTY !== '0');
@@ -24,19 +17,17 @@ export const logger = pino({
 });
 
 /**
- * An error and everything it wraps, as one line. pino's serializer does walk
- * `cause` into structured fields, but what an operator reads is pino-pretty's
- * message - and ROADMAP 6.4 records a swallowed `cause` as the reason a permanent
- * failure stayed undiagnosable for months, from the log TEXT.
+ * An error and everything it wraps, as one line, because what an operator actually
+ * reads is the rendered message rather than the structured fields beside it.
  *
- * Log-only: this carries paths and errnos, so it must never be spliced into a
- * message a user sees. The walk is bounded and remembers what it has visited - a
- * wrapper whose cause points back at an ancestor is not exotic, and a log helper
- * that loops is a hang in the failure path.
+ * Log-only: this carries paths and errnos, so it must never be spliced into a message
+ * a user sees. The walk is bounded and remembers what it has visited - a wrapper whose
+ * cause points back at an ancestor is not exotic, and a log helper that loops is a hang
+ * in the failure path.
  *
  * Not for a drizzle error: there the outer message is the whole statement with its
- * bound parameters, so fxrates.ts keeps sqlReason(), which takes the innermost
- * reason and its SQLSTATE alone.
+ * bound parameters, so fxrates.ts keeps sqlReason(), which takes the innermost reason
+ * and its SQLSTATE alone.
  */
 export function causeChain(err: unknown, maxDepth = 8): string {
   const parts: string[] = [];

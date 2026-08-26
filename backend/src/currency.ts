@@ -1,4 +1,4 @@
-// ISO 4217 numeric -> alphabetic code (common currencies; otherwise show the number)
+// keyed by ISO 4217 numeric code
 export const CURRENCY_CODES: Record<number, string> = {
   980: 'UAH', 978: 'EUR', 840: 'USD', 826: 'GBP', 985: 'PLN', 203: 'CZK',
   348: 'HUF', 756: 'CHF', 949: 'TRY', 392: 'JPY', 124: 'CAD', 36: 'AUD',

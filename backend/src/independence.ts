@@ -64,11 +64,10 @@ export interface Independence {
   externalAvg: number;
   /** the sum of the baseline minimum line items (before the buffer) */
   baselineSum: number;
-  /** what it is made of - for the breakdown on screen */
   baselineItems: BaselineItem[];
   /** baseline minimum * (1 + buffer) */
   baselineThreshold: number;
-  /** median spending * (1 + buffer) - the price of your current lifestyle, for comparison */
+  /** median spending * (1 + buffer) */
   lifestyleThreshold: number;
   /**
    * the mode the figures below were actually computed in, against settings.goalMode
@@ -81,7 +80,6 @@ export interface Independence {
   deficit: number;
   /** own income / the active mode's base */
   selfSufficiency: number;
-  /** month-by-month dynamics for the chart */
   months: IndependenceMonth[];
   /** what the threshold is made of: average monthly spending by category */
   byCategory: CategorySummary[];
