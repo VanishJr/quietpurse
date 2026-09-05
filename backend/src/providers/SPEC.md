@@ -68,7 +68,7 @@ parses nothing either.
 **A parse cannot be interrupted, and that is a rejected design rather than an oversight.** The
 deadline in `statement.ts` bounds accidental pathology and not somebody who is trying: closing that
 needs an execution context that can be terminated, which is a second thread, and the argument that
-the workspace store is safe rests on there being none.
+the statements folder is safe rests on there being none.
 
 ## Where the boundary runs
 
@@ -291,7 +291,7 @@ the same argument that has the new-row count come from the key generator the con
 
 **A diagnostic never carries an account number.** The issuer lookup in `issuer.ts` answers a name or
 nothing, and never the IBAN it read the name from, because that answer is composed into
-`imports.error_detail`, which is stored per workspace and read by an operator: a function that
+`imports.error_detail`, which is stored and read back by the person: a function that
 cannot return an account number cannot leak one into a diagnostic. Its table of institutions is
 hand-written entry by entry and deliberately never bulk-imported — a stale bulk table asserts a bank
 that has been merged away, in the one sentence whose whole value is that the person holding the file

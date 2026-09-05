@@ -196,11 +196,10 @@ export type StatementImportRequest = StatementDestination & {
   mapping?: Partial<CsvMapping>;
   bytes: Buffer;
   originalFilename?: string;
-  uploadedBy?: string;
 };
 
 export const ACCOUNT_NOT_FOUND =
-  'no such account in this workspace - pick one of your accounts, or create a new one';
+  'no such account - pick one of your accounts, or create a new one';
 export const ACCOUNT_REMOVED =
   'this account has been removed from the app - restore it, then upload the file again';
 
@@ -396,7 +395,6 @@ export async function importStatement(
     sourceType,
     parserVersion: PARSER_VERSION[sourceType],
     originalFilename: req.originalFilename,
-    uploadedBy: req.uploadedBy,
   });
   try {
     // The file itself, before the parse and inside the same catch.
@@ -410,7 +408,11 @@ export async function importStatement(
     // cannot be recovered later could never be captured for that file at all. The
     // throw lands in the catch below - a `failed` row with no transactions, and
     // bytes that stay re-uploadable because only `committed` blocks.
-    await recordImportDocument(record.id, await putDocument(record.id, req.bytes));
+    await putDocument(
+      { importId: record.id, originalFilename: record.originalFilename, sourceType },
+      req.bytes,
+    );
+    await recordImportDocument(record.id);
     const parsed = await readSheet(req, sourceType, preset);
     // logged here rather than in the route because the route only sees the
     // successful path: `problems` is never sent on a failure and nothing about a

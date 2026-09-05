@@ -7,8 +7,8 @@ export default defineConfig({
     // isolation forked a fresh process per test file, and every process compiled
     // the PGlite WASM bundle again - under memory pressure (Docker Desktop
     // running) workers died with native OOMs. One process = one PGlite.
-    // Isolation between files comes from unique ids in the tests themselves;
-    // independence.test.ts truncates via test/pglite.ts when it needs a clean DB.
+    // Isolation between files is test/setup.ts, which is a setup file and so runs
+    // once per test file, truncating every table before each one.
     isolate: false,
     fileParallelism: false,
     // Load PGlite through the native module loader instead of vitest's transform:

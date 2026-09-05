@@ -1,13 +1,10 @@
 /**
  * The landing page, and nothing else.
  *
- * It is not `styles.css` and it is not `styles/auth.css`. The palette, the radii
- * and the durations it shares with the auth screens are in `styles/tokens.css`,
- * which both of them load — that is what makes the two sides of the "Back to
- * Website" button one product rather than two files that agree today. It borrows
- * none of the auth screens' rules, though — those scale every vertical measurement
- * to the window because a login form must not start scrolling when a refusal
- * appears, and a page you scroll on purpose has the opposite requirement.
+ * It is not `styles.css`. The palette, the radii and the durations it shares with
+ * the app are in `styles/tokens.css`, which both of them load — that is what makes
+ * the two sides of the "Open the app" button one product rather than two files that
+ * agree today.
  *
  * ---------------------------------------------------------------------------
  * Motion
@@ -48,8 +45,8 @@ html {
 }
 
 .landing {
-  /* the auth screens' ground, unchanged - it is the same product either side of
-     that button */
+  /* the app's dark ground, unchanged - it is the same product either side of that
+     button */
   --ink: var(--c-ground);
   --paper: var(--c-paper);
   --muted: var(--c-ink-2);
@@ -59,8 +56,8 @@ html {
      lifted for dark and kept for the paper panels */
   --own: var(--c-good-ground);
   --own-ink: var(--c-good-paper);
-  /* #ECEEA9 already means "look at this one" on the auth screens. Here it means
-     "this part is not yours", which is the same instruction */
+  /* #ECEEA9 is the app's attention colour. Here it means "this part is not yours",
+     which is the same instruction */
   --external: var(--c-attention);
   --bad: var(--c-danger);
 
@@ -80,8 +77,8 @@ html {
   --hair-control: var(--c-hairline-control);
 
   --col: 1120px;
-  /* the auth card's corner, which this page borrowed and now reads from the token
-     rather than from a second copy of the number */
+  /* the panel corner, read from the token rather than from a second copy of the
+     number */
   --radius: var(--r-xl);
 
   box-sizing: border-box;

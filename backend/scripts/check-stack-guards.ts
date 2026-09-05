@@ -6,52 +6,11 @@
  */
 import path from 'node:path';
 
-/** The run id in the name is what keeps such a name from being typed by accident. */
-export const CHECK_DB_PATTERN = /^finto_check_[0-9a-f]{8}$/;
-
-export const MAINTENANCE_DATABASE = 'postgres';
-
-const databaseOf = (url: string): string => new URL(url).pathname.replace(/^\//, '');
-
-/**
- * The guard between this script and the owner's data, called ahead of every
- * create, connect and drop: no verb can reach a database it did not name itself.
- */
-export function assertCheckDatabaseUrl(url: string): string {
-  const name = databaseOf(url);
-  if (!CHECK_DB_PATTERN.test(name)) {
-    throw new Error(
-      `refusing to touch database "${name}": this script creates and drops the database it ` +
-        `connects to, and only names matching ${CHECK_DB_PATTERN.source} are its own. ` +
-        `"finto" is the owner's and "finto_test" is the suite's.`,
-    );
-  }
-  return name;
-}
-
-export function assertMaintenanceUrl(url: string): string {
-  const name = databaseOf(url);
-  if (name !== MAINTENANCE_DATABASE) {
-    throw new Error(
-      `the maintenance connection points at "${name}", not "${MAINTENANCE_DATABASE}" - ` +
-        `CREATE DATABASE and DROP DATABASE cannot run from inside the database they name`,
-    );
-  }
-  return name;
-}
-
-/** The default URL carries `finto` as user, password and path; only the parser knows which. */
-export function withDatabase(url: string, database: string): string {
-  const u = new URL(url);
-  u.pathname = `/${database}`;
-  return u.toString();
-}
-
 /**
  * Ports the owner's stack is on or drifts onto: a Vite without `--strictPort`
- * walks up from a busy 5173, and the client then calls an origin nothing trusts.
+ * walks up from a busy 5173, and a check on one of these clicks the owner's app.
  */
-export const RESERVED_PORTS: readonly number[] = [4000, 5173, 5174, 5175, 5432];
+export const RESERVED_PORTS: readonly number[] = [4000, 5173, 5174, 5175];
 
 /** Here rather than in check-stack.ts so the case keeping them off the reserved set reads them. */
 export const DEFAULT_API_PORT = 4300;
@@ -137,6 +96,31 @@ const markerArgs = (marker: string): string[] => ['--', '--finto-check-run', mar
  */
 export function backendArgv(o: { tsxCli: string; entry: string; marker: string }): string[] {
   return [o.tsxCli, o.entry, ...markerArgs(o.marker)];
+}
+
+/**
+ * The backend child's environment, and every override in it is there because
+ * something in the parent's would otherwise decide where the check writes.
+ *
+ * FINTO_HOME alone is NOT enough, which is what this exists to correct: the
+ * statements folder is `DOCUMENT_STORE_PATH || FINTO_HOME/statements`, so an owner
+ * who set that variable in their shell or in backend/.env had the check upload its
+ * fixtures into their real folder, beside their own bank statements. The child
+ * inherits the parent's whole environment, and backend/.env is read by the child on
+ * top of it, so the only way to be sure is to blank the two that can redirect it.
+ *
+ * Blank rather than deleted, because deleting is not enough: `dotenv` fills in a key
+ * that is ABSENT from process.env and leaves a key that is present alone, so an
+ * empty string is what keeps backend/.env out. config.ts reads both with `||`, and
+ * an empty string is falsy there - the same mechanism DATABASE_URL already used.
+ */
+export function backendEnv(o: { home: string; apiPort: number }): NodeJS.ProcessEnv {
+  return {
+    PORT: String(o.apiPort),
+    FINTO_HOME: o.home,
+    DATABASE_URL: '',
+    DOCUMENT_STORE_PATH: '',
+  };
 }
 
 /**
@@ -239,17 +223,15 @@ const isAtOrInside = (child: string, parent: string): boolean => {
 /**
  * Nothing this script writes may land in the repository. `.gitignore` blankets
  * `*.log`, `*.csv` and `*.pdf` repository-wide, so a log written inside the tree
- * would not show in `git status` either.
+ * would not show in `git status` either. The home folder is checked on its own even
+ * though it sits inside the run directory today: the day one moves, the other check
+ * still stands.
  */
-export function assertRunPaths(o: {
-  repoRoot: string;
-  runDir: string;
-  documentStorePath: string;
-}): void {
+export function assertRunPaths(o: { repoRoot: string; runDir: string; home: string }): void {
   const ownerDocuments = path.join(o.repoRoot, 'backend', 'data');
   const places: [string, string][] = [
     ['run directory', o.runDir],
-    ['document store', o.documentStorePath],
+    ['home folder', o.home],
   ];
   for (const [what, p] of places) {
     if (isAtOrInside(p, ownerDocuments)) {

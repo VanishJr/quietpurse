@@ -119,11 +119,11 @@ export interface MonthTotals {
  * months can be added up and compared with the balance printed beside them. That
  * comparison holds over a window covering the account's whole history: the balance has
  * no date filter, so over a shorter window the months add up to that window's movement
- * instead. income and expense exclude transfers, exactly as the workspace-wide figures do.
+ * instead. income and expense exclude transfers, exactly as the figures over every account do.
  *
  * Not MonthTotals and not assignable to it: expenseOneOff, incomeOwn and incomeExternal
- * are independence figures and independence is a workspace question, so the compiler
- * refuses a base-currency month where an account month is wanted.
+ * are independence figures and independence is a question about every account together,
+ * so the compiler refuses a base-currency month where an account month is wanted.
  */
 export interface AccountMonthTotals {
   /** YYYY-MM */
@@ -146,9 +146,10 @@ export interface IncomeSourceTotal {
 }
 
 /**
- * The whole workspace, every amount in the base currency. `scope` is a literal rather
- * than a field that happens to be there, so reading an account body as a workspace one
- * is a compile error.
+ * Every account together, every amount in the base currency. `scope` is a literal
+ * rather than a field that happens to be there, so reading an account body as this
+ * one is a compile error. The literal's word is the wire's: it names the whole of a
+ * person's data, and it predates there being only one person.
  */
 export interface Summary {
   scope: 'workspace';
@@ -180,7 +181,7 @@ export interface AccountSummary {
   incomeBySource: IncomeSourceTotal[];
 }
 
-/** The "over the year" chart for the whole workspace, in the base currency. */
+/** The "over the year" chart over every account, in the base currency. */
 export interface MonthlySummary {
   scope: 'workspace';
   from: string;

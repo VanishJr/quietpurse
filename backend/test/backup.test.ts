@@ -18,13 +18,11 @@ import {
   parseBackup,
   recordImportDocument,
   restoreBackup,
-  runWithWorkspace,
   setOneOff,
 } from '../src/db';
-import { getDocument, putDocument } from '../src/documents';
+import { DocumentMissing, getDocument, putDocument } from '../src/documents';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
-import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
 import { accountFor, idOf, importAndConfirm, markImportCommitted } from './helpers';
 
 const tx = (description: string, amount: number): NewTransaction => ({
@@ -108,19 +106,20 @@ describe('backup and restore (JSON)', () => {
   });
 
   /**
-   * A restore strips the document pointer, so the workspace's own documents become
-   * unreadable even though the ids - and therefore the keys - come back identical.
-   * They must not also become undeletable: deleteImport addresses a document
-   * without consulting the pointer, and this asserts it on the DISK rather than on
-   * a return value, because that is the only thing that distinguishes the two.
+   * The person's own backup, restored onto the machine that holds their statements:
+   * the documents must still open. The key is derived from originalFilename, id and
+   * sourceType, and a backup carries all three, so the pointer is reconstructible and
+   * stripping it threw away something the restore can rebuild. Asserted on the DISK
+   * and through getDocument both - a pointer that comes back and a file that does not
+   * would pass either one alone.
    */
-  it('a restore leaves the documents on disk, and deleting the import still removes them', async () => {
+  it('a restore keeps the documents readable, and deleting the import still removes them', async () => {
     const csv = 'date,amount,description\n2026-05-05,-21.00,Restore then delete\n';
     const imported = await importAndConfirm({
       accountId: await accountFor('Restore Document Bank'),
       bytes: Buffer.from(csv, 'utf8'),
     });
-    const blob = path.join(storageRoot(), TEST_WORKSPACE_ID, imported.importId);
+    const blob = path.join(storageRoot(), `statement_${imported.importId}.csv`);
     const exists = (): Promise<boolean> =>
       fs
         .access(blob)
@@ -130,69 +129,69 @@ describe('backup and restore (JSON)', () => {
 
     await restoreBackup(parseBackup(JSON.parse(JSON.stringify(await exportBackup()))));
 
-    // the pointer is gone, the bytes are not
-    expect(await getImportDocumentRef(imported.importId)).toBeUndefined();
+    // the pointer came back with the row, and it names the file that is still there
+    const ref = await getImportDocumentRef(imported.importId);
+    expect(ref).toBeDefined();
+    expect(await getDocument(ref!)).toEqual(Buffer.from(csv, 'utf8'));
     expect(await exists()).toBe(true);
+    expect(
+      (await listImports()).imports.find((i) => i.id === imported.importId)!.documentAvailable,
+    ).toBe(true);
 
     expect(await deleteImport(imported.importId)).toBeDefined();
     expect(await exists()).toBe(false);
   });
 
   /**
-   * The crafted backup: a row naming ANOTHER workspace's import id, with that
-   * workspace's file hash and a document pointer, restored into this one. Two
-   * independent guards have to stand between it and the neighbour's bank
-   * statement, so both get their own assertion - with one shared assertion,
-   * removing either guard would leave the test green.
+   * The other arm of the restore, and the crafted backup with it. A claim the disk
+   * cannot honour is not refused at restore time any more - it is answered at read
+   * time, by the hash the row carries: a claim reaches a file only where the derived
+   * key names one, and the bytes under it must hash to what the row recorded. So the
+   * forged row resolves to a ref (the column is restored) and reads as nothing.
    */
-  it('a restored row cannot claim another workspace document', async () => {
-    const victim = 'doc-victim';
-    await createWorkspace(dbInstance(), victim);
-    const statement = Buffer.from('date,amount,description\n2026-06-06,-42.00,Theirs\n', 'utf8');
+  it('a restored claim reaches no file the row did not record', async () => {
+    const statement = Buffer.from('date,amount,description\n2026-06-06,-42.00,Claimed\n', 'utf8');
     const fileHash = crypto.createHash('sha256').update(statement).digest('hex');
-
-    const victimImportId = await runWithWorkspace(victim, async () => {
-      const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
-      await markImportCommitted(record.id, 1, 0);
-      await recordImportDocument(record.id, await putDocument(record.id, statement));
-      return record.id;
-    });
+    const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
+    await markImportCommitted(record.id, 1, 0);
+    await putDocument({ importId: record.id, originalFilename: null, sourceType: 'csv' }, statement);
+    await recordImportDocument(record.id);
+    expect(await getDocument((await getImportDocumentRef(record.id))!)).toEqual(statement);
 
     const data = JSON.parse(JSON.stringify(await exportBackup())) as BackupData;
+    const claimed = crypto.randomUUID();
     data.tables.imports.push({
-      id: victimImportId,
-      fileHash,
+      id: claimed,
+      // its own hash: two committed imports of one file are what the partial index refuses
+      fileHash: crypto.createHash('sha256').update('claimed').digest('hex'),
       sourceType: 'csv',
-      originalFilename: 'theirs.csv',
-      uploadedBy: null,
+      originalFilename: 'claimed.csv',
       uploadedAt: new Date().toISOString(),
       parserVersion: 1,
       status: 'committed',
       rowsAccepted: 1,
       rowsRejected: 0,
       errorDetail: null,
-      documentKeyVersion: 1,
+      documentStored: true,
     });
     await restoreBackup(parseBackup(data));
 
-    // guard B: the pointer never survives a restore
     const stored = (await dbInstance().execute(
-      sql`SELECT document_key_version FROM imports
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${victimImportId}`,
-    )) as unknown as { rows: { document_key_version: number | null }[] };
-    expect(stored.rows).toHaveLength(1);
-    expect(stored.rows[0].document_key_version).toBeNull();
-    expect(await getImportDocumentRef(victimImportId)).toBeUndefined();
+      sql`SELECT id, document_stored FROM imports WHERE id IN (${record.id}, ${claimed}) ORDER BY id`,
+    )) as unknown as { rows: { id: string; document_stored: boolean }[] };
+    expect(stored.rows).toHaveLength(2);
+    expect(stored.rows.map((r) => r.document_stored)).toEqual([true, true]);
 
-    // guard A: even a ref forged past the strip resolves to this workspace's key
+    // the forged row's key names no file, so the read refuses with the class the
+    // route turns into a 404 rather than with a fault
+    const forged = await getImportDocumentRef(claimed);
+    expect(forged).toBeDefined();
+    await expect(getDocument(forged!)).rejects.toBeInstanceOf(DocumentMissing);
+
+    // and the real row reads its own bytes back, restore or no restore
     await expect(
-      getDocument({ importId: victimImportId, keyVersion: 1, fileHash }),
-    ).rejects.toThrow(/no bytes at/);
-
-    // and the victim still has their own document
-    await runWithWorkspace(victim, async () => {
-      expect(await getDocument((await getImportDocumentRef(victimImportId))!)).toEqual(statement);
-    });
+      getDocument({ importId: record.id, originalFilename: null, sourceType: 'csv', fileHash }),
+    ).resolves.toEqual(statement);
   });
 
   /**
@@ -276,7 +275,7 @@ describe('backup and restore (JSON)', () => {
   /**
    * imports.account_id is an ordinary column, so it exports and restores with no code
    * of its own - exportBackup selects whole rows and sanitizeRow keeps every real
-   * column not in NEVER_RESTORED. Asserted rather than assumed, because the failure is
+   * column a restore carries like any other. Asserted rather than assumed, because the failure is
    * silent: an import that restores without the id it was staged against is one whose
    * confirm can no longer find its account.
    */
@@ -294,10 +293,10 @@ describe('backup and restore (JSON)', () => {
   });
 
   /**
-   * accounts_name_unique applies to a restore, which inserts a workspace's accounts
+   * accounts_name_unique applies to a restore, which inserts the file's accounts
    * wholesale: a backup holding two names differing only in case now fails, whole.
    * Accepted, and what makes it acceptable rather than catastrophic is that the DELETE
-   * and every INSERT are one transaction - a refused restore leaves the workspace
+   * and every INSERT are one transaction - a refused restore leaves the database
    * exactly as it was, which is the half asserted here.
    */
   it('a restore refused by the name index leaves the existing rows untouched', async () => {
@@ -327,7 +326,7 @@ describe('backup and restore (JSON)', () => {
 
     expect(await listTransactions({ accountId: 'acc1', limit: 100 })).toHaveLength(before.length);
     // this is the line that depends on the rollback: accounts IS in the backup, so
-    // its DELETE ran and only the rollback put the workspace's own accounts back. The
+    // its DELETE ran and only the rollback put the person's own accounts back. The
     // transactions line above does not - a table the backup omits is skipped whole
     expect((await listAccounts(true)).map((a) => a.id).sort()).toEqual(accountsBefore);
     expect((await listAccounts(true)).map((a) => a.id)).not.toContain('dup-a');

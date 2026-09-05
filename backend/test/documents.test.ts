@@ -1,28 +1,25 @@
 /**
- * The storage seam and the envelope (ROADMAP 4.5).
+ * The storage seam and the stored statements above it.
  *
- * Almost everything here is about refusing rather than returning: a truncated
- * file, a flipped byte, an envelope version this server does not know, the wrong
- * key, a document copied out of another workspace's directory, bytes that do not
- * match the file the import recorded. Any one of those returned quietly is a
- * re-parser importing the wrong statement, which is the failure encrypting the
- * documents at all is meant to make impossible.
+ * Two things are held here that nothing else can. The file a person finds in their
+ * statements folder is the file they uploaded, byte for byte, under a name they can
+ * recognise - that is the whole reason the folder is theirs to open. And a name is
+ * derived from user input for the first time in this application, so the derivation
+ * is exercised against every shape a filename can arrive in rather than trusted.
  */
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { config } from '../src/config';
-import { runWithWorkspace } from '../src/db';
 import {
-  CURRENT_KEY_VERSION,
   DocumentRef,
   deleteDocument,
-  deriveDocumentKey,
+  documentKey,
+  documentStem,
   getDocument,
-  openDocument,
   putDocument,
-  sealDocument,
+  STEM_MAX,
 } from '../src/documents';
 import {
   assertStorageWritable,
@@ -31,15 +28,10 @@ import {
   putObject,
   storageRoot,
 } from '../src/storage';
-import { TEST_WORKSPACE_ID } from './pglite';
 
 const bytes = (s: string): Buffer => Buffer.from(s, 'utf8');
 
 const sha256 = (b: Buffer): string => crypto.createHash('sha256').update(b).digest('hex');
-
-/** Where a document for an import id actually sits - spelled out, not asked for. */
-const onDisk = (importId: string): string =>
-  path.join(storageRoot(), TEST_WORKSPACE_ID, importId);
 
 const rootEntries = async (): Promise<string[]> => {
   try {
@@ -51,16 +43,16 @@ const rootEntries = async (): Promise<string[]> => {
 
 describe('the storage seam', () => {
   it('stores and returns the exact bytes, and reports a missing key rather than throwing', async () => {
-    await putObject('seam-ws/seam-one', bytes('hello'));
-    expect(await getObject('seam-ws/seam-one')).toEqual(bytes('hello'));
+    await putObject('seam/seam-one.csv', bytes('hello'));
+    expect(await getObject('seam/seam-one.csv')).toEqual(bytes('hello'));
 
-    expect(await getObject('seam-ws/never-written')).toBeUndefined();
-    expect(await deleteObject('seam-ws/never-written')).toBe(false);
-    expect(await deleteObject('seam-ws/seam-one')).toBe(true);
-    expect(await getObject('seam-ws/seam-one')).toBeUndefined();
+    expect(await getObject('seam/never-written.csv')).toBeUndefined();
+    expect(await deleteObject('seam/never-written.csv')).toBe(false);
+    expect(await deleteObject('seam/seam-one.csv')).toBe(true);
+    expect(await getObject('seam/seam-one.csv')).toBeUndefined();
   });
 
-  it('refuses every key outside the charset, and writes nothing while doing it', async () => {
+  it('refuses every key outside the shape, and writes nothing while doing it', async () => {
     const before = await rootEntries();
     const refused = [
       '..',
@@ -71,10 +63,17 @@ describe('the storage seam', () => {
       '',
       'a/',
       '/',
-      'x'.repeat(65),
+      'x'.repeat(161),
       '.tmp-sneaky',
-      'space here',
-      'ws/statement.csv',
+      'a\\b',
+      'a<b',
+      'a*b',
+      'a:b',
+      'a\nb',
+      // Windows drops a trailing dot or space, so a name ending in one is a name
+      // that reads back under another
+      'trailing-space ',
+      'trailing-dot.',
     ];
     for (const key of refused) {
       await expect(putObject(key, bytes('nope'))).rejects.toThrow(/not a valid storage key/);
@@ -82,6 +81,14 @@ describe('the storage seam', () => {
       await expect(deleteObject(key)).rejects.toThrow(/not a valid storage key/);
     }
     expect(await rootEntries()).toEqual(before);
+  });
+
+  it('accepts the names a cleaned statement is written under', async () => {
+    for (const key of ['Виписка по рахунку_imp-1.pdf', 'a..b_imp-2.csv', 'Q1 2026 (Revolut)_x.xlsx']) {
+      await putObject(key, bytes('yes'));
+      expect(await getObject(key)).toEqual(bytes('yes'));
+      expect(await deleteObject(key)).toBe(true);
+    }
   });
 
   it('the boot check fails on a root that cannot be written to', async () => {
@@ -106,9 +113,8 @@ describe('the storage seam', () => {
 
   /**
    * The whole reason the check writes a probe instead of trusting mkdir -p: a
-   * directory that exists and cannot be written to - a named volume arriving
-   * owned by root while the image runs as USER node. mkdir -p returns clean on
-   * it, the server boots, and every import is refused at runtime instead.
+   * directory that exists and cannot be written to. mkdir -p returns clean on it,
+   * the app starts, and every import is refused at runtime instead.
    *
    * Skipped rather than passed for the wrong reason where the fixture cannot
    * bite: chmod does not remove write access on Windows, and root ignores 0o500.
@@ -134,118 +140,200 @@ describe('the storage seam', () => {
   );
 });
 
-describe('the envelope', () => {
-  const KEY = 'env-ws/env-import';
-
-  it('round-trips, and what it produces is not the plaintext', () => {
-    const plain = bytes('date,amount\n2026-01-01,-9.99\n');
-    const sealed = sealDocument(plain, KEY);
-
-    expect(sealed[0]).toBe(1);
-    expect(sealed[1]).toBe(deriveDocumentKey(config.documentEncryptionKey).id);
-    expect(sealed.length).toBe(30 + plain.length);
-    expect(sealed.includes(plain)).toBe(false);
-    expect(openDocument(sealed, KEY)).toEqual(plain);
-
-    // the same bytes sealed twice differ: the IV is fresh per document
-    expect(sealDocument(plain, KEY).equals(sealed)).toBe(false);
+/**
+ * The name on disk is derived from three fields of the import row and the user's
+ * filename is one of them. Every row below is a filename somebody could upload, and
+ * the expectation is the stem the folder shows for it.
+ */
+describe('the stem a filename becomes', () => {
+  it.each([
+    ['statement.csv', 'statement'],
+    ['Revolut Statement Q1 2026.xlsx', 'Revolut Statement Q1 2026'],
+    ['Виписка по рахунку.pdf', 'Виписка по рахунку'],
+    ['report.2026-08.csv', 'report.2026-08'],
+    ['Statement (1).pdf', 'Statement (1)'],
+    // `)` closes a storage key segment and opens none, so it cannot lead a stem
+    [')statement.csv', 'statement'],
+    [') (2).csv', '(2)'],
+    // a device name that a dot inside the stem would end the name at: prefixed, and
+    // only that shape - `CON` alone is safe because the id follows it before any dot
+    ['con.txt.csv', '_con.txt'],
+    ['COM1 .backup.csv', '_COM1 .backup'],
+    // a path, whichever way its separators lean: only the last segment is a name
+    ['..\\..\\evil.csv', 'evil'],
+    ['../../etc/passwd', 'passwd'],
+    ['/tmp/../statement.csv', 'statement'],
+    // the characters no filesystem or shell takes kindly, each one replaced
+    ['a<b>c:d"e|f?g*h.csv', 'a_b_c_d_e_f_g_h'],
+    ['state\r\nment.csv', 'state__ment'],
+    ['nul\0byte.csv', 'nul_byte'],
+    // a hidden file, a bare extension, and a name that is nothing but dots
+    ['.hidden.csv', 'hidden'],
+    ['.csv', 'statement'],
+    ['...', 'statement'],
+    ['', 'statement'],
+    // Windows strips trailing dots and spaces on its own; nothing here may rely on it
+    ['trailing.   .csv', 'trailing'],
+    ['  padded  .csv', 'padded'],
+    ['many     spaces.csv', 'many spaces'],
+    // an unpaired surrogate, which a restored backup's JSON can legally carry
+    ['bad\ud800name.csv', 'badname'],
+  ])('%j becomes %j', (original, stem) => {
+    expect(documentStem(original)).toBe(stem);
   });
 
-  it('a truncated file throws instead of decrypting what is left', () => {
-    const sealed = sealDocument(bytes('some statement'), KEY);
-    expect(() => openDocument(sealed.subarray(0, 29), KEY)).toThrow(/truncated/);
-    expect(() => openDocument(Buffer.alloc(0), KEY)).toThrow(/truncated/);
-    // a tail the header alone cannot notice - that one is the tag's job
-    expect(() => openDocument(sealed.subarray(0, sealed.length - 1), KEY)).toThrow(
-      /integrity check/,
-    );
+  it('null becomes the plain word, since an upload without a name is one', () => {
+    expect(documentStem(null)).toBe('statement');
   });
 
-  it('a flipped ciphertext byte throws', () => {
-    const sealed = sealDocument(bytes('some statement'), KEY);
-    sealed[35] ^= 0xff;
-    expect(() => openDocument(sealed, KEY)).toThrow(/integrity check/);
+  it('is bounded by code points, and never ends on a space the cap left behind', () => {
+    const long = `${'a'.repeat(STEM_MAX - 1)} ${'b'.repeat(40)}.csv`;
+    const stem = documentStem(long);
+    expect(Array.from(stem)).toHaveLength(STEM_MAX - 1);
+    expect(stem).toBe('a'.repeat(STEM_MAX - 1));
+    // a letter outside the basic plane is one code point and two UTF-16 units, so a
+    // cap counted in units would land on half of one
+    const astral = `${'\u{1d538}'.repeat(STEM_MAX + 5)}.csv`;
+    expect(Array.from(documentStem(astral))).toHaveLength(STEM_MAX);
+    expect(documentStem(astral).length).toBe(STEM_MAX * 2);
   });
 
-  it('an envelope version this server does not know is named, not attempted', () => {
-    const sealed = sealDocument(bytes('some statement'), KEY);
-    sealed[0] = 2;
-    expect(() => openDocument(sealed, KEY)).toThrow(/envelope version 2/);
+  /**
+   * `CON`, `NUL`, `AUX`, `COM1` and the like are device names on Windows whatever
+   * extension follows them, and every one of them is a name a user can type. What
+   * keeps them out is not a list - it is that the stem never stands alone: the id
+   * follows it before the first dot, so the name Windows would resolve is `CON_<id>`.
+   */
+  it.each(['CON', 'NUL', 'AUX', 'PRN', 'COM1', 'LPT9', 'con.txt'])(
+    'a Windows device name %s is never a whole name',
+    (name) => {
+      const key = documentKey({ importId: 'imp-1', originalFilename: `${name}.csv`, sourceType: 'csv' });
+      expect(key.split('.')[0].toUpperCase()).not.toMatch(/^(CON|PRN|AUX|NUL|COM\d|LPT\d)$/);
+      expect(key).toBe(`${documentStem(`${name}.csv`)}_imp-1.csv`);
+    },
+  );
+
+  /**
+   * The property, not another example. documentStem and the storage seam live in
+   * different files and agree only through SEGMENT_START, so this drives the stem's
+   * whole character set through both doors - one character at a time, and in every
+   * position, because a class that is wrong at the head alone is green in the middle
+   * and at the tail. `)` is the character that was wrong: it is legal inside a key
+   * segment and closes one, and it opens none, so `)statement.csv` built a key
+   * resolveKey threw on and the upload was refused as an unwritable folder, forever.
+   *
+   * getObject is the door, because resolveKey is not exported: a key it refuses
+   * throws, where a key it accepts and cannot find answers undefined.
+   */
+  const STEM_ALPHABET = [
+    'a',
+    'Z',
+    '\u042f',
+    '\u{1d538}',
+    '\u0301',
+    '5',
+    '\u0663',
+    '_',
+    '.',
+    '(',
+    ')',
+    '-',
+    ' ',
+    '<',
+  ];
+
+  it.each(STEM_ALPHABET)('a stem built around %j is a key the storage seam opens', async (c) => {
+    for (const around of [c, `${c}${c}`, `${c}x`, `x${c}`, `${c}x${c}`, `x${c}x`]) {
+      for (const original of [around, `${around}.csv`, `${around}.name.csv`]) {
+        const key = documentKey({
+          importId: 'imp-property',
+          originalFilename: original,
+          sourceType: 'csv',
+        });
+        await expect(
+          getObject(key),
+          `${JSON.stringify(original)} became the key ${JSON.stringify(key)}`,
+        ).resolves.toBeUndefined();
+      }
+    }
   });
 
-  it('the wrong key is diagnosed as the wrong key, before any decrypt', () => {
-    const mine = deriveDocumentKey(config.documentEncryptionKey);
-    const theirs = deriveDocumentKey('a completely different document key');
-    // without this the assertion below could pass through the tag path on a
-    // 1-in-256 id collision - green, and testing what the corruption case covers
-    expect(theirs.id).not.toBe(mine.id);
-
-    const sealed = sealDocument(bytes('some statement'), KEY, theirs);
-    expect(() => openDocument(sealed, KEY, mine)).toThrow(
-      /key id \d+ and this server holds key id \d+ - DOCUMENT_ENCRYPTION_KEY/,
-    );
-  });
-
-  it('a document is bound to the key it was sealed under', () => {
-    const sealed = sealDocument(bytes('workspace A statement'), 'ws-a/imp-1');
-    expect(() => openDocument(sealed, 'ws-b/imp-1')).toThrow(/integrity check/);
-    expect(openDocument(sealed, 'ws-a/imp-1')).toEqual(bytes('workspace A statement'));
+  it('an id a backup carried is hashed into the name rather than written into a path', () => {
+    const key = documentKey({ importId: '../evil', originalFilename: null, sourceType: 'csv' });
+    expect(key).toMatch(/^statement_[0-9a-f]{32}\.csv$/);
+    // and two foreign ids never share a name
+    const other = documentKey({ importId: '../evil2', originalFilename: null, sourceType: 'csv' });
+    expect(other).not.toBe(key);
   });
 });
 
 describe('documents: the domain layer', () => {
-  it('a stored document reads back byte-identical and is removed on request', async () => {
+  const locator = (importId: string, originalFilename: string | null = null) => ({
+    importId,
+    originalFilename,
+    sourceType: 'csv',
+  });
+
+  it('a stored document is the uploaded file, byte for byte, under a name a person can read', async () => {
     const plain = bytes('date,amount,description\n2026-02-02,-1.00,Coffee\n');
     const importId = 'doc-domain-roundtrip';
-    const keyVersion = await putDocument(importId, plain);
-    expect(keyVersion).toBe(CURRENT_KEY_VERSION);
+    const doc = locator(importId, 'Revolut March.csv');
+    await putDocument(doc, plain);
 
-    const ref: DocumentRef = { importId, keyVersion, fileHash: sha256(plain) };
+    const ref: DocumentRef = { ...doc, fileHash: sha256(plain) };
     expect(await getDocument(ref)).toEqual(plain);
-    // what is on disk at the derived key is the ciphertext, not the statement
-    expect(await fs.readFile(onDisk(importId))).not.toEqual(plain);
-
-    expect(await deleteDocument(importId)).toBe(true);
-    expect(await deleteDocument(importId)).toBe(false);
-    await expect(getDocument(ref)).rejects.toThrow(/no bytes at/);
-  });
-
-  it('a document that does not match the file the import recorded is refused', async () => {
-    const importId = 'doc-domain-mismatch';
-    const keyVersion = await putDocument(importId, bytes('the statement that was uploaded'));
-    await expect(
-      getDocument({ importId, keyVersion, fileHash: sha256(bytes('a different file')) }),
-    ).rejects.toThrow(/does not match the file/);
-  });
-
-  it('a key layout this server does not know is refused, never read as layout 1', async () => {
-    const importId = 'doc-domain-future-layout';
-    await putDocument(importId, bytes('written by this build'));
-    await expect(getDocument({ importId, keyVersion: 99, fileHash: 'whatever' })).rejects.toThrow(
-      /key layout 99/,
+    // what is on disk is the statement itself, where the folder says it is
+    expect(await fs.readFile(path.join(storageRoot(), `Revolut March_${importId}.csv`))).toEqual(
+      plain,
     );
+
+    expect(await deleteDocument(doc)).toBe(true);
+    expect(await deleteDocument(doc)).toBe(false);
+    await expect(getDocument(ref)).rejects.toThrow(/no file at/);
   });
 
   /**
-   * The other direction of the charset guard: it is safe because every segment is an
-   * id this server generated, and nothing else asserts that those ids are inside it.
-   * An id that falls outside refuses every upload in that workspace with
-   * DOCUMENT_STORE_REFUSED, whose text sends the user and the operator to the disk.
-   * Every other workspace id in this suite is hand-written, so this is the only place
-   * production-shaped ids reach putDocument at all.
+   * The file is the person's to open, and also the person's to edit by accident. A
+   * file that no longer hashes to what the import recorded is refused rather than
+   * handed back as the statement that was uploaded.
    */
-  it('the ids this server generates are inside the storage charset', async () => {
-    const workspaceId = crypto.randomUUID();
+  it('a file that no longer matches what the import recorded is refused', async () => {
+    const importId = 'doc-domain-mismatch';
+    const doc = locator(importId);
+    await putDocument(doc, bytes('the statement that was uploaded'));
+    await fs.writeFile(path.join(storageRoot(), `statement_${importId}.csv`), 'edited in Excel');
+    await expect(
+      getDocument({ ...doc, fileHash: sha256(bytes('the statement that was uploaded')) }),
+    ).rejects.toThrow(/is not the one import/);
+  });
+
+  /**
+   * The name is derived from the row, never stored, so a row whose filename or type
+   * were changed underneath it addresses a different file - which is what makes a
+   * crafted backup unable to point at somebody's statement by writing a path.
+   */
+  it('the name is a function of the row, so nothing on it may move after the put', async () => {
+    const importId = 'doc-domain-moved';
+    const doc = locator(importId, 'before.csv');
+    await putDocument(doc, bytes('written under one name'));
+    expect(await getDocument({ ...doc, fileHash: sha256(bytes('written under one name')) })).toEqual(
+      bytes('written under one name'),
+    );
+    await expect(
+      getDocument({ ...doc, originalFilename: 'after.csv', fileHash: 'whatever' }),
+    ).rejects.toThrow(/no file at/);
+    expect(await deleteDocument({ ...doc, originalFilename: 'after.csv' })).toBe(false);
+    expect(await deleteDocument(doc)).toBe(true);
+  });
+
+  it('the ids this app mints reach the folder verbatim', async () => {
     const importId = crypto.randomUUID();
     const plain = bytes('date,amount,description\n2026-09-09,-4.00,Generated ids\n');
-
-    await runWithWorkspace(workspaceId, async () => {
-      const keyVersion = await putDocument(importId, plain);
-      expect(await getDocument({ importId, keyVersion, fileHash: sha256(plain) })).toEqual(plain);
-      // both ids reached the disk verbatim - neither hashed nor cleaned up
-      await expect(
-        fs.access(path.join(storageRoot(), workspaceId, importId)),
-      ).resolves.toBeUndefined();
-    });
+    const doc = locator(importId, 'generated.csv');
+    await putDocument(doc, plain);
+    await expect(
+      fs.access(path.join(storageRoot(), `generated_${importId}.csv`)),
+    ).resolves.toBeUndefined();
+    expect(await deleteDocument(doc)).toBe(true);
   });
 });

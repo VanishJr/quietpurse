@@ -12,7 +12,6 @@ import {
   PRESETS,
   summaryResult,
   SUMMARY,
-  USER,
 } from '../test/fixtures';
 import {
   askedFor,
@@ -124,7 +123,6 @@ const onOpenAnalytics = vi.fn();
 
 const theScreen = (
   <OverviewScreen
-    user={USER}
     onOpenTransactions={onOpenTransactions}
     onOpenAnalytics={onOpenAnalytics}
   />
@@ -171,24 +169,20 @@ const account = (patch: Partial<Account>): Account => ({
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
 describe('the hero', () => {
-  it('greets by name over today’s date', async () => {
+  it('greets over today’s date', async () => {
     mount();
-    expect(
-      await screen.findByRole('heading', { name: `Welcome, ${USER.name}!` }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Welcome!' })).toBeInTheDocument();
     // the day this test runs on, formatted the one way fmtWeekday formats it — so the
     // assertion is that the line is drawn from a real clock, not that it says a date
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
   });
 
-  it('carries neither the theme button nor the avatar, which are the bar’s now', async () => {
+  it('carries neither the theme button nor the settings control, which are the bar’s now', async () => {
     mount();
     await panel('Sparkasse Giro');
 
     expect(screen.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: `Account: ${USER.email}` }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
   it('opens the import panel for a URL that names it', async () => {
@@ -236,7 +230,7 @@ describe('the URL', () => {
   });
 
   it('falls back to the first account when the URL names one that is not there', async () => {
-    // deleted, hidden, or somebody else's workspace — all the same case, and none of
+    // deleted, hidden, or from somebody else's Finto — all the same case, and none of
     // them is a reason to paint a rail with no tab marked and nothing underneath it
     mount(OVERVIEW_ROUTES, '/?account=acc-does-not-exist');
 
@@ -713,7 +707,7 @@ describe('what the dashboard asks the server for', () => {
     );
   });
 
-  it('refuses rather than printing the workspace’s money under one account’s name', async () => {
+  it('refuses rather than printing every account’s money under one account’s name', async () => {
     mount({
       // what a query-builder edit that drops the accountId produces: 200, a body of
       // the right shape for the OTHER arm, and every figure in the base currency
@@ -723,7 +717,7 @@ describe('what the dashboard asks the server for', () => {
     await tab('Sparkasse Giro');
 
     const error = await screen.findByText(/^Error:/);
-    expect(error).toHaveTextContent(/the whole workspace/);
+    expect(error).toHaveTextContent(/over every account/);
     // the dashboard's own refusal, under a rail that loaded — not a blank screen
     expect(
       screen.queryByRole('region', { name: 'Income and expenses for Sparkasse Giro' }),
@@ -1396,7 +1390,7 @@ describe('adding an account', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add more +' }));
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Cash' } });
     // the currency is not asked for: it is the workspace's base currency
-    expect(screen.getByText(/base currency of this workspace/)).toHaveTextContent('EUR');
+    expect(screen.getByText(/your base currency/)).toHaveTextContent('EUR');
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await panel('Cash');

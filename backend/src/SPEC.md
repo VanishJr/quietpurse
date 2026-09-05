@@ -31,66 +31,64 @@ The door owns what crosses it and nothing behind it.
   the JSON parser's ceiling bounds a body before anything parses it. The per-format caps that apply
   *after* a decode are `backend/src/providers`' and are stated there; neither document repeats the
   other.
-- **The order of the chain**, which is the next section.
-- **Cross-origin access.** The allowlist is `config.corsOrigins`, and a same-origin deployment — the
-  Vite dev proxy, or a host proxying `/api` — never sends a cross-site `Origin` and skips this layer
-  entirely, which is why a header missing here is invisible in development and absent only in the
-  deployed image.
-- **Which of the auth provider's endpoints are reachable.** better-auth's organization plugin is
-  mounted for its schema and its membership model, and mounting it publishes its whole management
-  surface — create, delete, invite-member — on this server as a side effect. Nothing in the app
-  calls any of it: the session middleware picks a workspace out of the membership table directly. So
-  the door closes that prefix outright, and it stays closed until multi-user workspaces are built.
+- **The built client.** Below every `/api` route the door serves what `web/dist` holds, and a GET
+  for any path that is not an API path answers the app's own page, so a reloaded `?screen=` URL
+  lands where it names. A POST to an unknown path is refused rather than answered with a page, and
+  a missing build is answered with the command that makes one rather than with a blank window.
 
-What the door does not own: how a statement is recognised or parsed, what a query is scoped to, how
-a document is sealed, or what the categoriser decides. Each of those refuses on its own terms and
-the door reports the refusal. Not being the door's does not put a rule outside this document:
-sealing a document and deciding a category happen in this directory and are answered for below,
-while recognising a statement and scoping a query happen in directories that carry their own spec.
+What the door does not own: how a statement is recognised or parsed, how a stored file is named, or
+what the categoriser decides. Each of those refuses on its own terms and the door reports the
+refusal. Not being the door's does not put a rule outside this document: naming a stored file and
+deciding a category happen in this directory and are answered for below, while recognising a
+statement and writing a query happen in directories that carry their own spec.
 
-## The order the chain enforces, and what may not be mounted above it
+## There is no session, and what that puts on the door instead
 
-The chain is not a list of independent layers. What it enforces sits on the edges between its
-mounts rather than inside any of them, and an edge is silent when it breaks: nothing fails loudly
-when a mount moves.
+**Every request is the one person's.** There is no sign-in, no session and no tenant: whoever can
+reach the port is the owner of the data behind it. That is not a hole the door papers over — it is
+the product's shape, and what answers for it is the process entry below, which listens on the
+loopback interface unless told otherwise. **No middleware asks who is calling** and nothing in a
+route records who acted, because there is nobody else to be.
 
-**The auth provider's own handler is mounted above the JSON parser**, because it consumes the raw
-request body itself. A parser above it leaves it nothing to read.
+**One middleware asks where the request came from, which is a different question and the only one
+left.** Binding to loopback keeps other machines off the port and says nothing about a page in the
+owner's own browser, which is on this machine by definition — and with no session to be missing,
+such a page is the owner. So every route under the API prefix passes three checks before the body
+is parsed, and each closes something the other two do not.
 
-**Nothing that parses a body is mounted above the session check.** A parser above it lets anyone who
-can reach the port make the server chew through a body-sized allocation per request, for free,
-without ever presenting a credential. The multipart parser obeys the same rule by being mounted per
-route rather than globally.
+- The `Host` header must be an address and not a DNS name. That is what closes DNS rebinding: a
+  page whose own hostname is made to resolve to the loopback address arrives genuinely
+  same-origin with itself, and the name in this header is the only part of it still under the
+  attacker's control. It also leaves the documented wider bind working, because the phone that
+  setting exists for arrives by address.
+- An `Origin`, when it is present, must name this server. This is what closes the plain
+  cross-origin write, which needs no rebind at all: a multipart body is CORS-safelisted, so any
+  page can post a statement here and the browser sends it — the answer is unreadable to that page
+  and the import still lands.
+- A method that changes state, carrying `Sec-Fetch-Site`, must say `same-origin`. Stated as a
+  defence a browser that omits the header does not provide: the two above are what stand behind
+  it, not the other way round.
 
-**Every parser that reads a body is mounted through `withWorkspace`.** The session middleware holds
-the workspace context for the synchronous run of `next()` and for whatever inherits from it; a
-socket is created when the connection is accepted, outside that run. So a parser that finishes on a
-later socket read calls `next()` with an empty store and the handler's first query throws. A browser
-streams a multipart body, so that is every real upload.
+The health route is inside the check with everything else. There is no proxy and no probe that
+needs it exempt, and an exemption granted by habit is the precedent for the next one.
 
-A parser mounted bare may appear to work anyway, and that is the trap. `body-parser` hands `next()` a
-plain callback in exactly the same way, and survives today only because `raw-body` binds its callback
-through an `AsyncResource` — that package's choice, not a rule this application may rest its central
-invariant on. A parser whose package does not make that choice fails silently, in exactly the
-direction `backend/src/db/workspace.ts`'s throw exists to make loud. The rule is therefore stated as
-a refusal to depend on the binding at all, and `backend/test/workspace-scope.test.ts` holds the
-wrapper's own behaviour.
+**Nothing crosses an origin in normal use, which is why the second check costs nothing.** The Vite
+dev server proxies the API to the backend and the start command serves the built client from the
+backend itself, so every request the client makes is same-origin: there is no allowlist to
+maintain, no preflight and no credential to carry.
 
-**Membership is the only check.** A session's workspace becomes the ambient scope for every query in
-the request, and there are no per-role permissions inside a workspace — companies are out of scope,
-and a role check added anywhere would be the first of a system nothing here describes. A workspace
-the user has left never wins; a user with no workspace at all is given one here rather than refused,
-because the registration hook that normally builds one is not transactional with the user row —
-better-auth owns that insert — and a stranded account beats no account.
+**The multipart parser is mounted per route, not globally.** No other route pays for a multipart
+parse it never asked for, and a caller who sends a form to a JSON route is refused by the JSON
+parser's own ceiling.
 
 ## Where the boundary runs
 
 **The application is separable from the process that starts it.** `backend/src/app.ts` exports an
-app that has connected to nothing; `backend/src/index.ts` is what connects the database, wires the
-auth handle and listens. The separation exists so the middleware chain — the session check and the
-workspace scoping, which exist nowhere else — can be driven over real HTTP against an embedded
-database. Anything that reaches out to the world at import time breaks that and breaks it silently:
-the app still imports, and the tests then run against a process that has already done half a boot.
+app that has connected to nothing; `backend/src/index.ts` is what takes the lock, opens the
+database and listens. The separation exists so the whole route table can be driven over real HTTP
+against an embedded database in the suite. Anything that reaches out to the world at import time
+breaks that and breaks it silently: the app still imports, and the tests then run against a process
+that has already done half a boot.
 
 **A value is normalised at the door that writes it, once.** The account doors upper-case a currency
 because an account stored as `usd` lists every one of its own transactions as foreign to it on
@@ -98,47 +96,47 @@ Overview. Nothing downstream re-normalises: `backend/src/providers` stages an ac
 it read it off the row, deliberately, so that a restored `eur` is not silently rewritten by an import
 that asked for nothing of the kind. A second `.toUpperCase()` to remember is a second one to forget.
 
-**One refusal here is made safe by a clause in the data layer.** A builtin income
-source is editable here and refused by the delete route, so a workspace that predates a change to a
-seeded label can reach the word it wants — and what makes that safe is that `upsertIncomeSource`'s
+**One refusal here is made safe by a clause in the data layer.** A builtin income source is
+editable here and refused by the delete route, so a database that predates a change to a seeded
+label can reach the word it wants — and what makes that safe is that `upsertIncomeSource`'s
 conflict clause does not set `builtin`, so a rename cannot turn a builtin into something deletable.
 That clause lives in `backend/src/db` and an edit to it breaks this route.
 
 **A user-chosen filename never reaches a header through a guard believed to be a sanitiser.**
-`backend/src/storage.ts` records that `original_filename` is the user's string; the download route
-therefore builds its whole `Content-Disposition` value in one place, so that a CRLF cannot split the
-response, a quote cannot end the quoted string early, and a character above U+00FF cannot make the
-header call throw on a download that otherwise worked.
+`backend/src/storage.ts` records that its key shape is not one; the download route therefore builds
+its whole `Content-Disposition` value in one place, so that a CRLF cannot split the response, a
+quote cannot end the quoted string early, and a character above U+00FF cannot make the header call
+throw on a download that otherwise worked. The stored file's own name goes through a second,
+separate reduction, which is `## What is kept of an upload` below.
 
 ## What a route owes a caller
 
-**4xx is the caller's fault and 5xx is the server's, and the split is about the operator's alerting
-as much as the user's screen.** A refusal the server caused stays 5xx even when the user can act on
-it. What a route may change is the *body*: the global handler answers `internal error` and puts the
-real message in the log — it tends to carry table names and SQL fragments — and a route with
-something more useful to say answers it itself rather than falling through. On the one screen whose
-job is telling a person whether their rows landed, `internal error` reads as transient and invites
-the same failing press again, so that route's own sentence names the way out instead.
+**4xx is the caller's fault and 5xx is the server's, and the split is about the log as much as the
+user's screen.** A refusal the server caused stays 5xx even when the user can act on it. What a
+route may change is the *body*: the global handler answers `internal error` and puts the real
+message in the log — it tends to carry table names and SQL fragments — and a route with something
+more useful to say answers it itself rather than falling through. On the one screen whose job is
+telling a person whether their rows landed, `internal error` reads as transient and invites the same
+failing press again, so that route's own sentence names the way out instead.
 
-**One route answers without a session.** The health endpoint is the single exemption in the session
-middleware, and it doubles as the probe the web client reads *before* anyone can sign in — it says
-whether registration on this server needs an invite code, so the sign-up form knows whether to ask
-for one. A field added to that response is a field a signed-out stranger can read.
+**An identifier that names nothing is answered with one sentence.** An id that never existed, a row
+that claims no document, and a row whose claimed file is not on this disk reach the same answer and
+the same words; the download route says the document is not *readable*, never that it is not
+*kept*, because a row's claim outlives the machine it was made on. A restore carries the claim and
+carries no files, so the third of those is the ordinary state of a backup opened somewhere else and
+is not reported as a fault. A file that IS there and does not hash to what the row recorded is the
+fault, and it keeps the other status.
 
-**An identifier that names nothing is answered the same way whatever the reason.** Reads are
-workspace-scoped, so another workspace's id and an id that never existed reach the same code path
-and get the same sentence. A sentence per case would turn the route into an existence oracle. The
-wording is a second choice with a reason of its own: the download route says the document is not
-*readable*, never that it is not *kept*, because the bytes of a restored row outlive the stripping
-of its pointer.
-
-**A summary body states its own scope.** Without an account it is the whole workspace in the base
-currency; with one it is that account alone in the account's own currency, and the body says which.
-Transfers between the user's own accounts are out of the income and expense figures on both arms,
-and refunds are subtracted from spending in their own category. The per-account monthly arm answers
-a `net` as well — every row of the month summed, transfers included, which is what lets the bars add
-up to the balance shown beside them over a window covering the account's whole history, and over a
-shorter one they add up to that window's movement and the balance does not.
+**A summary body states its own scope.** Without an account it is every account together in the
+base currency; with one it is that account alone in the account's own currency, and the body says
+which. The literal that names the first is `workspace`, which is the wire's word and predates there
+being one person — it stays because the REST API is the contract, and a renamed literal is a
+different API. Transfers between the user's own accounts are out of the income and expense figures
+on both arms, and refunds are subtracted from spending in their own category. The per-account
+monthly arm answers a `net` as well — every row of the month summed, transfers included, which is
+what lets the bars add up to the balance shown beside them over a window covering the account's
+whole history, and over a shorter one they add up to that window's movement and the balance does
+not.
 
 **A count in an answer is what this call did.** The delete routes report what they actually
 destroyed, taken from the deletes themselves, and that is a different fact from the preview a client
@@ -159,40 +157,52 @@ everything derived is recomputed afterwards because the backup may predate the c
 
 The boot order is a sequence of refusals before anything listens, then the work that may run late.
 
-**Refuse first, listen last.** A production boot on development secrets and a document store nobody
-can write to are both refused before the port is open, because the alternative is discovering either
-one through the first user whose import fails.
+**One process per folder, and the lock is the process's own.** The embedded database does not
+refuse a second opener: two processes on one data directory write over each other's files with
+nothing failing, which was measured rather than assumed. So the entry writes its pid into a lock
+file beside the data before it opens anything, refuses to start while another live pid holds it,
+and takes a dead pid's lock over — a crash leaves a file, not a locked-out person. The lock is not
+taken when a PostgreSQL server is configured instead; that server has its own.
 
-**Connect and migrate before anything touches the data layer**, including the auth wiring, which
-needs the handle.
+**Refuse first, listen last.** A folder for the statements that nobody can write to is refused
+before the port is open, because the alternative is discovering it through the first upload that
+fails.
 
-**Seeding runs for every workspace on every start, unconditionally.** That is the upgrade path: a
-builtin setting or income source added in a new version has to reach workspaces that were seeded by
-an older one, and there is no migration that can do it because the rows are per-workspace. What
-makes the unconditional call cheap rather than destructive is that `seedDefaults` in
-`backend/src/db` inserts on conflict do nothing — an edit that changes that breaks this loop from a
-file whose author will never open this one.
+**Loopback unless told otherwise.** With no sign-in, a server reachable from the network is a
+database reachable from the network, so the entry binds the loopback interface by default and
+prints where it is. The one reason to bind wider is a phone on the same Wi-Fi, and the setting that
+does it says in `backend/.env.example` what it exposes.
+
+**Seeding runs on every start, unconditionally.** That is the upgrade path: a builtin setting or
+income source added in a new version has to reach a database seeded by an older one, and there is
+no migration that can do it because the rows carry a person's edits. What makes the unconditional
+call cheap rather than destructive is that `seedDefaults` in `backend/src/db` inserts on conflict do
+nothing — an edit that changes that breaks this boot from a file whose author will never open this
+one.
 
 **The recompute is deliberately not awaited.** It fetches exchange rates, so awaiting it would hold
 the port closed on a third party's availability.
 
+**Stopping is a close, not a kill.** The embedded database is closed on the signal a terminal sends,
+and the lock goes with it, so the next start does not meet a live-looking lock from a process that
+was told to stop.
+
 ## The invariants no type and no test holds
 
 **Nothing is committed on upload.** The upload route parses the file, stages the rows and answers
-with a summary to accept; nothing on any screen moves until the confirm route is called. A file this
-workspace has already committed is recognised as a duplicate and is not parsed again. This is the
-promise the whole ingestion surface is built to keep, and the door is where it can be broken in one
-line.
+with a summary to accept; nothing on any screen moves until the confirm route is called. A file
+already committed is recognised as a duplicate and is not parsed again. This is the promise the
+whole ingestion surface is built to keep, and the door is where it can be broken in one line.
 
 **The stored statement outlives the import that failed.** The download is offered whatever the
 import's status, because a failed or a discarded import's document is exactly the artefact worth
 having kept — the status gates nothing on that route, on purpose.
 
 **Erasure is a route, not a cleanup.** Removing a stored statement while keeping the import row, its
-transactions and its provenance is how a data-subject erasure request is discharged, and it is the
-reason that route exists at all rather than being folded into deleting the import. Its ordering —
-bytes first, pointer second — is stated beside the code, because the two crash windows are not
-equivalent and only one of them is recoverable.
+transactions and its provenance is what the delete-document route is for, and it is the reason that
+route exists at all rather than being folded into deleting the import. Its ordering — file first,
+pointer second — is stated beside the code, because the two crash windows are not equivalent and
+only one of them is recoverable.
 
 **Nothing enforces any of this.** No type carries the order of a middleware chain, and no test can
 tell a reason that was moved from one that was dropped. The checks in this repository that read a
@@ -213,11 +223,11 @@ them wherever exact integer arithmetic is wanted, which is the same rounding app
 than a second column boundary. Why that rounding is what it is, and the float that forces it, are
 written whole beside `toCents` in `backend/src/money.ts`.
 
-**A body names its own unit, once.** A workspace body carries a base currency, an account body
-carries the account's own currency and no base currency, and `scope` is a literal rather than a
-field that happens to be there — so reading the wrong one is a compile error instead of a figure in
-one currency labelled another. `## What a route owes a caller` says what each scope covers; this is
-the rule that keeps the two readable apart.
+**A body names its own unit, once.** A body over every account carries a base currency, an account
+body carries the account's own currency and no base currency, and `scope` is a literal rather than
+a field that happens to be there — so reading the wrong one is a compile error instead of a figure
+in one currency labelled another. `## What a route owes a caller` says what each scope covers; this
+is the rule that keeps the two readable apart.
 
 **A sign is a convention the type does not carry.** An amount is negative for spending and positive
 for income, in the account's own currency, and a refund arrives positive while subtracting from
@@ -241,23 +251,25 @@ is the cheaper failure: guessing a three-letter code would file a real rate unde
 not, which pairs two amounts that are not the same money and takes a real expense out of the figures
 as a transfer.
 
-## What a deployment must supply, and what the app decides for itself
+## What the environment supplies, and what the app decides for itself
 
 **The environment seeds; the database owns.** Several values exist in both places, and for each of
 them the settings table — or, for the family patterns, the income source row — is the source of
-truth. What the environment does is seed, and the seeding is the loop `## What the process entry
-owes the app` describes: it runs for every workspace on every start and inserts nothing where the
-row is already there, so editing the environment moves a value only where no row has been written
-yet. After that only the base currency reads the environment again, as the fallback for a missing
-row; the owner names and the family patterns have no fallback at all and answer empty when their row
-is absent. `backend/src/config.ts` is therefore not where a base currency, an owner name or a family
-name is answered from at runtime. That split is read from three directions — the settings door, the
-settings table and the screen — and is stated in none of them.
+truth. What the environment does is seed, and the seeding is the call `## What the process entry
+owes the app` describes: it runs on every start and inserts nothing where the row is already there,
+so editing the environment moves a value only where no row has been written yet. After that only
+the base currency reads the environment again, as the fallback for a missing row; the owner names
+and the family patterns have no fallback at all and answer empty when their row is absent.
+`backend/src/config.ts` is therefore not where a base currency, an owner name or a family name is
+answered from at runtime, and the Settings screen is where a person changes them. That split is
+read from three directions — the settings door, the settings table and the screen — and is stated
+in none of them.
 
-**That the owner names have no fallback is deliberate.** They are one household's, so falling back
-to the operator's own would put their names in a stranger's settings screen; the seed reaches every
-workspace as a row instead, empty for all but the first. An environment fallback here is not a
-convenience, it is a cross-workspace leak with no query to blame for it.
+**Nothing is required to start.** Every value the environment can supply has a default that works
+on a machine with nothing installed: the home folder under the person's own home directory, the
+embedded database inside it, the statements folder beside that, loopback, port 4000. A PostgreSQL
+connection string is the one setting that changes an engine rather than a value, and it is read
+only where the database is opened, in `backend/src/db`.
 
 **A setting that cannot be stored is refused, never coerced.** An absent key in a patch means *leave
 it alone*; a present one that is not a value this system can hold is a refusal, because `EURO` is
@@ -275,63 +287,74 @@ only thing between a hand-written body and a threshold computed from a window no
 
 ## What is kept of an upload, and what a crash may leave behind
 
-**A stored statement belongs to one import and dies with it.** The blob is keyed by the import id
-and never by the content: keying by the file's hash would let a failed import and a committed one of
-the same bytes share a blob, so deleting either would reach into the other. It is kept encrypted at
-rest because the reason for keeping it at all is that a better parser can re-run it later and that
-*my import came out wrong* is answerable.
+**A stored statement is the uploaded file, byte for byte, in a folder the person can open.** It is
+kept because a better parser can re-run it later and *my import came out wrong* is answerable — and
+it is kept plain, under a name a person can recognise, because the whole point of the folder is
+that the files in it are theirs. Sealing them was the hosted product's answer to a disk somebody
+else could reach; on one person's own machine that disk is the person's, and what protects it is
+the machine's own encryption, which `SECURITY.md` states as the trade it is.
+
+**A stored statement belongs to one import and dies with it.** The file is named by the import and
+never by the content: naming by the file's hash would let a failed import and a committed one of
+the same bytes share a file, so deleting either would reach into the other.
+
+**The name on disk is derived from the row and never stored on it.** Three fields name a file — the
+import id, the filename the person uploaded and the format the bytes were recognised as — and none
+of them changes after the row is written, so the name is derived again at every read and delete. A
+stored path is a string a crafted backup gets to choose, and a derived one is not. The consequence
+is stated so nobody widens it by halves: a field that names a file may not be updated, and a delete
+has to carry all three.
+
+**The filename is the first user-chosen string ever to reach a path, and the reduction is total.**
+The last path segment only, its extension dropped, every character outside letters, marks, digits
+and a short list replaced, the whole bounded by code points and never by UTF-16 units. The
+extension comes from the recognised format, never from the name. The stem never stands alone: the
+id follows it before the first dot, which is what keeps `CON`, `NUL` and the other Windows device
+names from ever being a whole name — except where a dot inside the stem would end the name early,
+and that one shape is prefixed.
+
+**The stem's leading edge is cut to what the key shape will OPEN a segment with, read off that
+shape rather than copied.** The two are in different files, and the three classes a key segment
+uses are not the same: a dot, a space and a closing parenthesis are all legal inside a segment and
+none of the three begins one. Copied by eye, the closing parenthesis was missed — so a filename
+starting with one produced a key the guard threw on, and the upload was refused with a sentence
+about an unwritable folder, for that file, forever. The guard behind all of it is
+`backend/src/storage.ts`'s key shape, which refuses anything the reduction did not produce rather
+than cleaning it up; what keeps the two in agreement is not the two comments matching but
+`backend/test/documents.test.ts`'s property case, which drives the stem's whole character set
+through both doors, one character at a time and in every position.
+
+**The hash is checked on read, and a file edited in the folder is refused.** A person who opens a
+statement in a spreadsheet and saves it has a different file under the same name; handing it back
+as the upload would be a re-import of their edits. The refusal is 5xx with the person's words about
+nothing having been sent, and the log names the file.
 
 **The ordering is put, then record, and it is enforced across three modules that each hold a piece
-of it.** `backend/src/providers` puts the bytes only after the import row exists and records the
+of it.** `backend/src/providers` puts the file only after the import row exists and records the
 pointer only after the put; `backend/src/db` never records a pointer before the put, composes the
 reference a reader opens a document with — asking it is the honest way to obtain one, and it offers
-no overload that skips the hash check — and deletes the blob whatever the pointer says. Nothing in
-the type enforces the asking: `DocumentRef` is three plain fields with no brand, so a caller who
-assembles one by hand hands the check its own hash to compare against, unlike the branded settings
-patch above, where the compiler really does refuse an unchecked body. No single line holds that
-chain, which is why the states it produces are ruled on here rather than left to be discovered:
+no overload that skips the hash check — and deletes the file whatever the pointer says. Nothing in
+the type enforces the asking: `DocumentRef` is plain fields with no brand, so a caller who assembles
+one by hand hands the check its own hash to compare against, unlike the branded settings patch
+above, where the compiler really does refuse an unchecked body. No single line holds that chain,
+which is why the states it produces are ruled on here rather than left to be discovered:
 
 - **An import row that never existed cannot hold a document.** The put is strictly after the row is
   created, so there is no orphan on that side to sweep for.
-- **Bytes on disk whose pointer was never set are the crash window this design accepts.** It is on
+- **A file on disk whose pointer was never set is the crash window this design accepts.** It is on
   the garbage side rather than the lie side: nothing claims a document that is not there, and the
-  delete path removes the blob unconditionally, so those bytes stay collectable by the ordinary
-  route.
+  delete path removes the file unconditionally, so it stays collectable by the ordinary route.
 - **A pending or a failed import holding a document is not a defect, and the failed case is the
   point.** The input is what a person diagnosing a bad import needs, and it is the artefact most
   worth having kept.
-- **A blob whose row no longer exists at all is reachable by nothing.** A restore replaces a
-  workspace's import rows without touching the store, so a restored workspace can leave bytes
-  behind. No sweeper is in scope: that is a data-deletion question rather than something a storage
-  module fixes on the side.
+- **A file whose row no longer exists at all is reachable by nothing but the folder.** A restore
+  replaces the import rows without touching the folder, so a restore can leave files behind. No
+  sweeper is in scope: the folder is the person's, and they can see what is in it.
 
-**A key layout is added by adding an entry, and there is no version list anywhere that can be
-forgotten.** The writer uses the newest layout, the row records which one it used, and the delete
-tries every layout this server knows. What a layout may be built from is deliberately narrow — only
-what the delete path can supply from the row it is deleting — so widening a layout and widening that
-select are one change the compiler will not let happen by halves.
-
-**The workspace segment of a key is the raw id and not a hash of it.** Hashing would guarantee the
-segment always satisfies the store's charset, which turns *a workspace id this system did not
-expect* from a loud refusal into a silently accepted value; and an operator answering *delete
-everything for workspace X* could no longer do it with `ls` and `rm`.
-
-**Every id this server generates has to be inside the store's charset, and that is owed by whoever
-mints one.** An id outside it refuses every upload in the workspace concerned, with a message that
-blames the disk — loud, far from its cause, and not obviously about ids at all. The rule reaches
-past this repository's own generators: it is owed by a dependency whose alphabet this application
-does not control and must not assume.
-
-**Key rotation's exit is recorded before it is needed.** The day a second sealing key is held the
-reader picks by the id stamped in the envelope, and two keys whose derived ids collide are
-indistinguishable; the stamp cannot be widened for documents already written. So the exit is that
-boot refuses two configured keys with the same derived id and the operator regenerates one — not a
-wider stamp, and not a guess at read time.
-
-**The store below the sealing is a seam and nothing more.** It knows nothing about workspaces,
-imports or encryption — `backend/src/documents.ts` seals the bytes and hands it an opaque key — which
-is what makes replacing the local filesystem with an object store a change to the seam's own
-functions and to nothing else. The seam earns its indirection only while that stays true.
+**The store below the naming is a seam and nothing more.** It knows nothing about imports or
+filenames — `backend/src/documents.ts` derives a name and hands it an opaque key — which is what
+makes replacing the local filesystem with anything else a change to the seam's own functions and to
+nothing else. The seam earns its indirection only while that stays true.
 
 ## What the classifier decides, and what it is coupled to
 
@@ -347,10 +370,10 @@ offering it is how a real cash expense disappears from the figures.
 
 **The owner names are the only source that signal has.** They come from the settings table and from
 nowhere else — the bank-supplied account-holder name left with the deleted integrations — so a
-workspace that leaves that setting empty gets no owner-name signal at all, silently and correctly.
-That is an absence a reader of the classifier cannot see and a reader of the settings screen would
-never guess at. The family names beside them work the opposite way and the two are easy to
-transpose: an owner name means *not income at all*, a family name means *income, but from outside*.
+person who leaves that setting empty gets no owner-name signal at all, silently and correctly. That
+is an absence a reader of the classifier cannot see and a reader of the settings screen would never
+guess at. The family names beside them work the opposite way and the two are easy to transpose: an
+owner name means *not income at all*, a family name means *income, but from outside*.
 
 **Categorising a row takes it out of transfer pairing, and the coupling runs in the direction nobody
 looks.** Only rows that still look like a transfer are offered as pairing candidates, so every
@@ -368,7 +391,7 @@ person types that pattern says so, and nothing refuses it either.
 
 **The tagging rules have a signature.** The categoriser's own version, the owner names, the income
 sources' patterns and the user's category rules are composed into one string, and a start whose
-signature differs from the one recorded recomputes the whole workspace. That is the upgrade path, and
+signature differs from the one recorded recomputes every transaction. That is the upgrade path, and
 it is also the trap: a rule list edited in `backend/src/categorizer.ts` without its version moving is
 a change the signature cannot see, so every existing row keeps a tag the current rules would not give
 it. A source's *kind* is deliberately outside the signature — it moves summaries and not tags.

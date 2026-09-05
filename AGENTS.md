@@ -1,7 +1,8 @@
 # Finto
 
-A hosted personal finance tracker. A person signs up, uploads bank statements in whatever format
-they happen to have, and gets their financial data organised and readable.
+A personal finance tracker that runs on one person's own machine. They upload bank statements
+in whatever format they happen to have, and get their financial data organised and readable.
+No account, no server: the database and the statements are files in one folder on their disk.
 
 **The import promise: one upload button.** CSV, XLSX, PDF — the user should never have to know or
 care which parser runs.
@@ -24,13 +25,14 @@ files you are missing. Nothing here depends on them.
 ## Layout
 
 ```
-backend/    Express 5 + TypeScript, Drizzle ORM over PostgreSQL, better-auth, Zod, pino
-  src/db/       the schema, every query, and the workspace context they are scoped to
+backend/    Express 5 + TypeScript, Drizzle ORM over Postgres (PGlite in the process, or a server), Zod, pino
+  src/db/       the schema, every query, and the one function that opens the database
   src/providers/ the one ingestion surface and the per-format parsers behind it
   drizzle/      generated migrations
   test/         vitest + pglite + supertest; helpers.ts and pglite.ts are the harness
 web/        React 19 + Vite + Recharts
-  src/screens/  Overview, Transactions, Analytics, Independence, Auth
+  src/screens/  Overview, Transactions, Analytics, Independence, Settings
+package.json  the two commands a person runs: setup, start
 ```
 
 `.agents/README.md` is how a task is run — the pipeline, and which checks are worth trusting.
@@ -39,7 +41,14 @@ the threat model.
 
 ## Commands
 
-Run from `backend/` unless stated otherwise.
+From the repository root, the two a person runs:
+
+```
+npm run setup         installs both packages and builds the client into web/dist
+npm start             serves the app on http://localhost:4000, data under ~/Finto
+```
+
+From `backend/` unless stated otherwise:
 
 ```
 npm run typecheck     tsc --noEmit          both packages; backend runs it twice
@@ -65,30 +74,50 @@ change confined to test files is no longer verified by the suite alone.
 
 **Bare `npx tsc --noEmit` is weaker than `npm run typecheck`**: it reads `tsconfig.json` only and
 never sees `test/`. Nothing can force the second invocation; the script is what holds it, and CI
-runs the script.
+runs the script. **And run it from `backend/`, or through `npm --prefix backend`**: the repository
+root now has a `package.json` with no dependencies, so an `npx tsc` or `npx tsx` typed there finds
+no local binary and pulls whatever the npm cache holds under that name — an unrelated package in
+the case of `tsc`, an unpinned version in the case of `tsx`.
 
 ## Invariants
 
-- **Workspace scoping.** Every row belongs to a workspace (`organization.id`). The workspace is
-  carried implicitly through `AsyncLocalStorage` (`src/db/workspace.ts`), never as a parameter.
-  Outside a workspace context, production code throws rather than querying. **Every new query
-  must be scoped** — `test/workspace-scope.test.ts` and `test/tenant-isolation.test.ts` exist to
-  catch this and are not optional.
+- **One person, one folder, one process.** Everything the app keeps is under `FINTO_HOME`
+  (`~/Finto` by default): the embedded database in `db/`, the uploaded statements in
+  `statements/`, and a lock file holding the running process's pid. PGlite does not refuse a
+  second opener, so the lock is the only thing between two `npm start`s and a corrupted
+  database; `src/index.ts` takes it before opening anything and refuses while a live pid holds
+  it.
+- **No sign-in, so the port is the boundary.** Whoever can reach the port owns the data behind
+  it. The server binds the loopback interface unless `HOST` says otherwise, and nothing in a
+  route asks who is calling. A feature that needs to know who is acting has nowhere to read it
+  from; do not add one that pretends to.
 - **Transaction identity.** `transactions.id` is a surrogate UUID; deduplication runs off a
   separate computed key with a per-group ordinal (`src/db/dedup.ts`). Ordinals stay dense across
   a delete. Do not conflate the two keys.
 - **Import provenance.** Every transaction carries `import_id`. `imports` is uniquely indexed on
-  `(workspace_id, file_hash) WHERE status = 'committed'` — only `committed` means the rows are
-  actually in the database, so only `committed` may block a re-upload.
-- **Migrations are squashable until first deploy.** Nothing is deployed, so migration history has
-  no value yet: three schema changes are one regenerated `0000_initial.sql`. That stops being
-  true the day real user data exists. **A squash invalidates every database already migrated:**
-  the regenerated file carries a later `_journal.json` timestamp, so drizzle re-applies it and the
-  run dies with `42P07 relation already exists`. Every local database — dev and `*_test` — has to
-  be dropped and recreated after one.
+  `file_hash WHERE status = 'committed'` — only `committed` means the rows are actually in the
+  database, so only `committed` may block a re-upload.
+- **A stored statement is the uploaded file, plain, under a name derived from its row.** The
+  name is a function of the import id, the uploaded filename and the recognised format, and it is
+  derived again at every read and delete rather than stored — a stored name is a path a crafted
+  backup gets to choose. So those three fields are written once and updated by nothing, and a
+  delete carries all three. The reduction of the filename, and why `CON.txt` is the shape to
+  worry about, is in `src/SPEC.md`.
+- **Migrations are squashable until the first release.** Nothing is published and no copy of the
+  app is running anywhere but a checkout, so migration history has no value yet: three schema
+  changes are one regenerated `0000_initial.sql`. That stops being true the day somebody has
+  data they mean to keep. **A squash invalidates every database already migrated:** the
+  regenerated file carries a later `_journal.json` timestamp, so drizzle re-applies it and the
+  run dies with `relation "accounts" already exists` (SQLSTATE `42P07`, which is on the error's
+  `cause` and not in the sentence). Every local database — `~/Finto/db` and every `*_test` — has
+  to be deleted after one. CI is not affected: its Postgres is a service container created fresh
+  per run, and the default suite is an in-memory PGlite with no directory to carry a journal.
+  `README.md` carries the instruction for a person; this is why it exists.
 - **Categories are slugs** in the database and over the API; display names live in the client
   dictionary. The slug is a stable contract.
-- **Secrets live in `.env`**, everything else configurable lives in the `settings` table.
+- **Nothing is required to start.** Every setting has a default that works on a machine with
+  nothing installed; `.env` holds process settings and no secrets, because there are none.
+  Everything a person edits lives in the `settings` table.
 - **A diagnostic is not delivered until it survives every cap between composition and screen.**
   `ERROR_DETAIL_MAX` bounds what reaches `imports.error_detail`, and `web/src/api.ts` shows that
   whole budget. So ordering decides which clause is *dropped*, not which is read: compose
@@ -112,9 +141,9 @@ navigation and no download, so whether a file lands on disk is unanswerable here
 rendering — recharts measures a 0×0 box, so a test can mount a donut and assert nothing about it.
 Those checks stay manual, and an agent can run them: a real Chrome is reachable through the
 `claude-in-chrome` tools, and each check is recorded with how it was observed (`.agents/README.md`,
-and rule 9 in `.claude/agents/reviewer.md`). The carve-out is **`⬇ Download backup (.json)`**, which
-stays the maintainer's — it writes every transaction in the workspace to a file, and that is not an
-export an agent runs on anyone's behalf.
+and rule 9 in `.claude/agents/reviewer.md`). The carve-out is **`⬇ Export my data (.json)`**, which
+stays the maintainer's — it writes every transaction to a file, and that is not an export an agent
+runs on anyone's behalf.
 
 Several screens and both shared controls are mounted by a test and asserted about by nothing:
 mounting is not coverage, and `Sheet`'s and `Chips`' own behaviour — the backdrop, Escape, focus,
@@ -122,14 +151,19 @@ mounting is not coverage, and `Sheet`'s and `Chips`' own behaviour — the backd
 unrecorded click leaves it unverified too**, because nothing downstream can tell that run from one
 that never happened. Say which screens a green run covered rather than implying it covered `web/`.
 
-The backend suite runs on embedded PGlite by default and on a real Postgres when
-`TEST_DATABASE_URL` is set (CI does both). PGlite is single-connection, so nothing about
-concurrency — a unique index losing a race, two writers meeting — is exercised by the default
-run. The suite truncates every table in the database it is given and refuses one not named
-`*_test`.
+The backend suite runs on an embedded PGlite in memory by default — the same engine the product
+runs on — and on a real Postgres when `TEST_DATABASE_URL` is set (CI does both). PGlite is
+single-connection, so nothing about concurrency — a unique index losing a race, two writers meeting
+— is exercised by the default run. The suite truncates every table in the database it is given
+and refuses one not named `*_test`. It runs in one process, and `test/setup.ts` is a vitest setup
+file, so it runs once **per test file**: it truncates every table and then seeds the defaults, before
+each one — measured, three files, three runs. What is shared between files is the PGlite instance and
+the module registry, not the rows. A file whose figures are exact repeats that pair in its own
+`beforeAll` anyway, because its exactness then rests on a line in the file rather than on a setup
+file the file does not name.
 
 One backend test never runs on Windows or as root: `test/documents.test.ts` skips there, so a green
-local run on either is one short of the total. It is the boot check that a document root which
+local run on either is one short of the total. It is the boot check that a statements folder which
 exists but cannot be written to is refused, and CI (ubuntu, non-root) is the only place it fires.
 Nothing else skips — `canvasabsent.test.ts` hides the package in a spawned child and runs
 everywhere.

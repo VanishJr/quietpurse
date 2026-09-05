@@ -2,22 +2,17 @@
  * The four /api/income-sources routes over real HTTP - the first test any of them
  * has had.
  *
- * Driven through supertest with a real session, because what is worth asserting here
+ * Driven through supertest, because what is worth asserting here
  * is the wire: the status codes, the sentence each refusal composes, and the id the
  * route mints from a label the client never sees. Until row 041b nothing in web/src
  * called three of these four routes, so every refusal below was unreachable and
  * therefore unwritten; the control on the Goal screen is what makes them a door.
- *
- * The process-wide test fallback is cleared for the duration, as in
- * http-accounts.test.ts: with it armed a request that never entered a workspace
- * context would answer from the test workspace instead of throwing.
  */
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
-import { INCOME_SOURCE_LABEL_MAX, dbInstance, setWorkspaceFallback } from '../src/db';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { INCOME_SOURCE_LABEL_MAX, seedDefaults } from '../src/db';
+import { freshTestDb } from './pglite';
 
 const SOURCES = '/api/income-sources';
 
@@ -46,38 +41,31 @@ const created = async (body: unknown): Promise<SourceBody> => {
   return res.body as SourceBody;
 };
 
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
 beforeAll(async () => {
-  initAuth(dbInstance());
-  setWorkspaceFallback(undefined);
-
+  await freshTestDb();
+  await seedDefaults();
   agent = request.agent(app);
-  const res = await agent.post('/api/auth/sign-up/email').send({
-    email: 'income-sources@example.com',
-    password: 'correct-horse-battery',
-    name: 'income sources',
-  });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-});
-
-afterAll(() => {
-  // the fallback is process-wide - the rest of the run expects it armed
-  setWorkspaceFallback(TEST_WORKSPACE_ID);
 });
 
 describe('GET /api/income-sources', () => {
   /**
-   * The seeded catalog a stranger meets. Both halves are literals: the id is data
-   * that reaches transactions.income_source and does not move, the label is the only
-   * part of this row anybody reads, and FAMILY_NAMES belongs to the first workspace
-   * and to no other - this one signed up second.
+   * The seeded catalog a first start produces. Both halves are literals: the id is
+   * data that reaches transactions.income_source and does not move, the label is the
+   * only part of this row anybody reads, and the patterns are FAMILY_NAMES as
+   * test/setup.ts sets it - the environment seeds, the row owns.
    */
-  it('seeds a workspace that is not the first with a neutral external source and no patterns', async () => {
+  it('seeds a neutral external source with the family names from the environment', async () => {
     const family = (await list()).find((s) => s.id === 'family')!;
 
     expect(family.label).toBe('Support');
     expect(family.kind).toBe('external');
     expect(family.builtin).toBe(true);
-    expect(family.patterns).toEqual([]);
+    expect(family.patterns).toEqual(['ANNA BECKER', 'Becker Anna']);
   });
 });
 

@@ -18,7 +18,6 @@ import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createAccount,
-  currentWorkspaceId,
   dbInstance,
   insertTransactions,
   resetBaseAmounts,
@@ -83,7 +82,7 @@ interface StoredRow {
 async function rowOf(description: string): Promise<StoredRow> {
   const res = (await dbInstance().execute(sql`
     SELECT description, base_amount_cents, fx_rate FROM transactions
-    WHERE workspace_id = ${currentWorkspaceId()} AND description = ${description}`)) as unknown as {
+    WHERE description = ${description}`)) as unknown as {
     rows: StoredRow[];
   };
   if (res.rows.length !== 1) {
@@ -99,9 +98,8 @@ beforeAll(async () => {
 });
 
 async function clearWorkspaceRows(): Promise<void> {
-  const w = currentWorkspaceId();
-  await dbInstance().execute(sql`DELETE FROM transactions WHERE workspace_id = ${w}`);
-  await dbInstance().execute(sql`DELETE FROM fx_rates WHERE workspace_id = ${w}`);
+  await dbInstance().execute(sql`DELETE FROM transactions`);
+  await dbInstance().execute(sql`DELETE FROM fx_rates`);
 }
 
 /**

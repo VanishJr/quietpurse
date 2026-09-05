@@ -9,7 +9,6 @@ import {
   allTransactions,
   confirmImport,
   createAccount,
-  currentWorkspaceId,
   dbInstance,
   findAccountByName,
 } from '../src/db';
@@ -43,7 +42,7 @@ export async function markImportCommitted(
   await dbInstance().execute(sql`
     UPDATE imports SET status = 'committed', rows_accepted = ${rowsAccepted},
       rows_rejected = ${rowsRejected}
-    WHERE workspace_id = ${currentWorkspaceId()} AND id = ${id}`);
+    WHERE id = ${id}`);
 }
 
 /** What an upload used to answer, before it stopped importing anything. */
@@ -60,16 +59,13 @@ export interface ImportedStatement {
 }
 
 /**
- * The account an upload's rows go into, created if this workspace has not got one of
- * that name. It stands exactly where resolveUploadAccountId's branch (a) stood: the
- * cases that reach it are about parsing, deduplication, provenance and documents and
+ * The account an upload's rows go into, created if there is not one of that name
+ * yet. It stands exactly where resolveUploadAccountId's branch (a) stood: the cases
+ * that reach it are about parsing, deduplication, provenance and documents and
  * merely need AN account - and several of them upload twice under one name and
  * expect one account, which a lookup-then-create reproduces and a bare create does
- * not.
- *
- * Data layer, so it does not work in the HTTP tests: upload.test.ts and
- * http-accounts.test.ts clear the process-wide workspace fallback, and createAccount
- * outside a request throws. Those files go through POST /api/accounts.
+ * not. The HTTP tests go through POST /api/accounts instead, because the door is
+ * what they are about.
  */
 export async function accountFor(name: string, currency = 'EUR'): Promise<string> {
   const existing = await findAccountByName(name);

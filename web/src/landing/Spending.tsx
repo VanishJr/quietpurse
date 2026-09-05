@@ -189,7 +189,7 @@ export function Spending() {
 
       <div className="spend-cta">
         <a className="cta cta-primary" href="/">
-          Sign in
+          Open the app
         </a>
       </div>
     </section>

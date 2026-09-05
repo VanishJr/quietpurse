@@ -1,7 +1,7 @@
 /**
  * The independence metric - an answer to "how much do I need to earn so that
  * nobody else has to help". Support is whatever somebody else gives you; which
- * money is which is the workspace's own answer, carried by each income source's
+ * money is which is the person's own answer, carried by each income source's
  * kind.
  *
  * TWO thresholds are computed, and both are returned - so there is something to

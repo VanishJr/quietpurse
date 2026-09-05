@@ -2,27 +2,22 @@
  * The ingestion surface over real HTTP (ROADMAP 5.1): one multipart endpoint that
  * decides what the file is from its bytes.
  *
- * Driven through supertest with a real session, because the parts worth testing
- * only exist in the middleware chain - that the multipart parser sits BEHIND the
- * session check, and that a file the app cannot read is refused with something the
- * user can act on rather than a generic 400.
- *
- * The process-wide test fallback is cleared for the duration, as in
- * http-auth.test.ts: with it armed a request that never entered a workspace
- * context would answer from the test workspace instead of throwing.
+ * Driven through supertest, because the parts worth testing only exist in the
+ * middleware chain - what the multipart parser refuses, and that a file the app
+ * cannot read is refused with something the user can act on rather than a generic
+ * 400.
  */
 import http from 'http';
 import { AddressInfo } from 'net';
 import { sql } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
-import { dbInstance, setWorkspaceFallback } from '../src/db';
+import { dbInstance, seedDefaults } from '../src/db';
+import { freshTestDb } from './pglite';
 import { ACCOUNT_NOT_FOUND, ACCOUNT_REMOVED } from '../src/providers/statement';
 import { buildPdf, buildSignedContainer } from './pdffixture';
-import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
@@ -38,10 +33,8 @@ async function xlsxFile(label: string, skippedSheet = false): Promise<Buffer> {
 }
 
 let agent: request.Agent;
-/** The same session as `agent`, for the requests driven without supertest. */
-let sessionCookie: string;
 
-/** The workspace's imports, newest first. */
+/** Every import, newest first. */
 const imports = async (): Promise<
   {
     sourceType: string;
@@ -53,33 +46,23 @@ const imports = async (): Promise<
   }[]
 > => (await agent.get('/api/imports')).body.imports;
 
-/** An upload only stages - this is what makes its rows the workspace's data. */
+/** An upload only stages - this is what makes its rows the person's data. */
 const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
 
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
 beforeAll(async () => {
-  initAuth(dbInstance());
-  setWorkspaceFallback(undefined);
-
+  await freshTestDb();
+  await seedDefaults();
   agent = request.agent(app);
-  const res = await agent
-    .post('/api/auth/sign-up/email')
-    .send({ email: 'uploader@example.com', password: 'correct-horse-battery', name: 'uploader' });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-  sessionCookie = (res.headers['set-cookie'] as unknown as string[])
-    .map((c) => c.split(';')[0])
-    .join('; ');
-});
-
-afterAll(() => {
-  // the fallback is process-wide - the rest of the run expects it armed
-  setWorkspaceFallback(TEST_WORKSPACE_ID);
 });
 
 /**
  * An empty account over the same door the Accounts screen uses, which is where every
- * account in this file comes from since row 26b. The data-layer helper cannot stand
- * in: this file clears the process-wide workspace fallback, so createAccount called
- * outside a request throws "no workspace context".
+ * account in this file comes from since row 26b: the door is what this file is about.
  */
 const makeAccount = async (name: string, currency = 'EUR'): Promise<string> => {
   const res = await agent.post('/api/accounts').send({ name, currency });
@@ -457,18 +440,6 @@ describe('POST /api/imports', () => {
     expect(res.body.error).not.toMatch(/exactly one file field/);
   });
 
-  /**
-   * Trap 1: mounted globally, or above the session check, the multipart parser
-   * would let anyone who can reach the port make the server buffer megabytes.
-   */
-  it('an unauthenticated upload is refused by the session check', async () => {
-    const res = await request(app)
-      .post('/api/imports')
-      .field('accountId', await makeAccount('Stranger'))
-      .attach('file', csvFile('should never be read'), 'statement.csv');
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/sign in required/);
-  });
 });
 
 /**
@@ -677,8 +648,6 @@ describe('POST /api/imports/:id/confirm and /discard', () => {
    */
   it('a guard inside the confirm answers with the way out, not "internal error"', async () => {
     const { importId } = await stage('Broken Invariant Bank', 'staged then broken');
-    // by import id alone: these rows belong to the signed-up session's own
-    // organization, not to TEST_WORKSPACE_ID
     await dbInstance().execute(
       sql`DELETE FROM staged_transactions WHERE import_id = ${importId}`,
     );
@@ -696,12 +665,6 @@ describe('POST /api/imports/:id/confirm and /discard', () => {
     expect((await agent.post('/api/imports/no-such-import/discard')).status).toBe(404);
   });
 
-  it('confirming without a session is refused', async () => {
-    const { importId } = await stage('Stranger Confirm Bank', 'not yours');
-    const res = await request(app).post(`/api/imports/${importId}/confirm`);
-    expect(res.status).toBe(401);
-    expect((await confirm(importId)).status).toBe(200);
-  });
 });
 
 describe('the routes around it', () => {
@@ -764,7 +727,7 @@ describe('GET /api/imports: the filter and the totals', () => {
     return importId as string;
   };
 
-  it('filters the page and counts the filtered set, not the workspace', async () => {
+  it('filters the page and counts the filtered set, not every import', async () => {
     const mine = await makeAccount('Totals Mine');
     const other = await makeAccount('Totals Other');
     const stripped = await importInto(mine, 'totals-mine-a', 4);
@@ -786,7 +749,7 @@ describe('GET /api/imports: the filter and the totals', () => {
     expect(res.body.imports.filter((r: { documentAvailable: boolean }) => r.documentAvailable))
       .toHaveLength(1);
 
-    // the other account's nine are in the workspace's answer and in neither of mine
+    // the other account's nine are in the unfiltered answer and in neither of mine
     const all = await agent.get('/api/imports');
     expect(all.status).toBe(200);
     expect(all.body.totals.imports).toBeGreaterThan(2);
@@ -821,7 +784,6 @@ describe('GET /api/imports: the filter and the totals', () => {
       'status',
       'transactions',
       'uploadedAt',
-      'uploadedBy',
     ]);
   });
 
@@ -832,7 +794,7 @@ describe('GET /api/imports: the filter and the totals', () => {
     expect(res.body.totals).toEqual({ imports: 0, documents: 0, transactions: 0 });
   });
 
-  it('an empty accountId is refused rather than read as the whole workspace', async () => {
+  it('an empty accountId is refused rather than read as every account', async () => {
     const res = await agent.get('/api/imports?accountId=');
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('accountId must be sent once, as a single value');
@@ -847,9 +809,9 @@ describe('GET /api/imports: the filter and the totals', () => {
   /**
    * Recorded, not endorsed. Express 5's DEFAULT `simple` query parser - which is what
    * a bare express() gets, and app.ts sets no other - puts the brackets in the KEY, so
-   * nothing called `accountId` arrives and this reads as the whole workspace. Switching
-   * to the `extended` parser turns `accountId[]=x` into an array, and this test goes red
-   * instead of the filter silently widening to every import in the workspace.
+   * nothing called `accountId` arrives and this reads as every account. Switching to
+   * the `extended` parser turns `accountId[]=x` into an array, and this test goes red
+   * instead of the filter silently widening to every import there is.
    */
   it('bracket syntax is not an accountId under the simple query parser', async () => {
     const res = await agent.get('/api/imports?accountId[]=x');
@@ -859,7 +821,7 @@ describe('GET /api/imports: the filter and the totals', () => {
   });
 });
 
-// ---------- the workspace context and how the body arrives ----------
+// ---------- how the body arrives ----------
 
 const BOUNDARY = '----fintoChunkedBoundary';
 
@@ -910,7 +872,6 @@ async function sendInPieces(
             'content-type': contentType,
             'content-length': String(body.length),
             connection: 'close',
-            cookie: sessionCookie,
           },
         },
         (res) => {
@@ -943,20 +904,17 @@ async function sendInPieces(
 /**
  * A body that arrives in more than one socket read.
  *
- * The session middleware wraps next() in runWithWorkspace(), and that store is live
- * for the synchronous run plus whatever inherits from it. The socket was created
- * when the connection was accepted - outside the run - so a parser that finishes on
- * a later socket read calls next() from the socket's context, with an empty store,
- * and the handler's first db call throws. A browser streams a multipart body, so
- * this is every real upload; supertest's fixtures fit one read, which is why the
- * suite never saw it.
+ * A browser streams a multipart body, so this is every real upload, and supertest's
+ * fixtures fit one read - which is how a parser mounted so that it lost its request
+ * context on the second read once shipped green. The context is gone with the
+ * tenancy; the delivery is still the one the suite would otherwise never drive.
  *
  * The trigger is the number of reads, not the size of the body: 60 bytes in three
  * writes reproduces it and 58 KB in one write does not. The primary case below
  * therefore drives the delivery itself rather than betting that this machine's
  * receive buffer is smaller than some fixture.
  */
-describe('a body that spans socket reads keeps its workspace', () => {
+describe('a body that spans socket reads still imports', () => {
   it('a multipart upload written in three pieces still imports', async () => {
     const body = multipartBody(
       { accountId: await makeAccount('Chunked Bank'), preset: 'generic' },
@@ -978,7 +936,7 @@ describe('a body that spans socket reads keeps its workspace', () => {
     const summary = res.body.summary as { importId: string; accountId: string; total: number };
     expect(summary).toMatchObject({ total: 1 });
     expect((await confirm(summary.importId)).body.inserted).toBe(1);
-    // the answer alone is not enough - the row has to be in this workspace
+    // the answer alone is not enough - the row has to be there
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
     expect(rows.filter((t) => /chunked groceries/.test(t.description))).toHaveLength(1);
   });
@@ -1027,13 +985,13 @@ describe('a body that spans socket reads keeps its workspace', () => {
     'utf8',
   );
 
-  it('a chunked JSON body keeps its workspace', async () => {
+  it('a chunked JSON body still restores', async () => {
     const res = await sendInPieces('/api/restore', 'application/json', emptyBackup, 4);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ restored: true });
   });
 
-  it('a chunked octet-stream body keeps its workspace', async () => {
+  it('a chunked octet-stream body still restores', async () => {
     const res = await sendInPieces('/api/restore', 'application/octet-stream', emptyBackup, 4);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ restored: true });

@@ -187,7 +187,7 @@ describe('the delete itself', () => {
   });
 
   /**
-   * accounts_name_unique is on (workspace_id, lower(name)), so the server already
+   * accounts_name_unique is on lower(name), so the server already
    * treats two spellings as one name and a client demanding the capitals back would
    * refuse a name it calls identical.
    */

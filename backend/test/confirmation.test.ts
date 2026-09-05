@@ -42,7 +42,6 @@ import {
 import { ImportSummary, importStatement } from '../src/providers/statement';
 import { storageRoot } from '../src/storage';
 import { accountFor } from './helpers';
-import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
 
@@ -51,7 +50,7 @@ const repeated = (n: number, row: string, tag = ''): string =>
   csvFile(...Array.from({ length: n }, (_, i) => `${row}${tag ? ` ${tag}${i}` : ''}`));
 
 /**
- * A statement staged into the account of that name, made first if this workspace has
+ * A statement staged into the account of that name, made first if nothing has
  * not got one. Two uploads under one name go to one account, which is what the cases
  * about superseding and deduplication below are built on.
  */
@@ -72,7 +71,7 @@ async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> 
 async function stagedCount(importId: string): Promise<number> {
   const res = (await dbInstance().execute(
     sql`SELECT COUNT(*) AS n FROM staged_transactions
-        WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${importId}`,
+        WHERE import_id = ${importId}`,
   )) as unknown as { rows: { n: string }[] };
   return Number(res.rows[0].n);
 }
@@ -81,7 +80,7 @@ async function stagedCount(importId: string): Promise<number> {
 async function stagedFeeCents(importId: string): Promise<(number | null)[]> {
   const res = (await dbInstance().execute(
     sql`SELECT fee_cents FROM staged_transactions
-        WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${importId}
+        WHERE import_id = ${importId}
         ORDER BY row_no`,
   )) as unknown as { rows: { fee_cents: number | null }[] };
   return res.rows.map((r) => r.fee_cents);
@@ -90,9 +89,10 @@ async function stagedFeeCents(importId: string): Promise<(number | null)[]> {
 const importRow = async (id: string) =>
   (await listImports({ limit: 500 })).imports.find((i) => i.id === id);
 
+/** Where an upload with no filename lands, spelled out: the name in the folder is the contract. */
 const blobExists = (importId: string): Promise<boolean> =>
   fs
-    .access(path.join(storageRoot(), TEST_WORKSPACE_ID, importId))
+    .access(path.join(storageRoot(), `statement_${importId}.csv`))
     .then(() => true)
     .catch(() => false);
 
@@ -101,7 +101,7 @@ const DEC = '2026-12-31T23:59:59.999Z';
 
 describe('an unconfirmed import is not the user’s data', () => {
   /**
-   * First in the file on purpose: it asserts on totals over the whole workspace, so
+   * First in the file on purpose: it asserts on totals over every account, so
    * it has to run before anything else here has confirmed a row.
    */
   it('is invisible to every read path there is', async () => {
@@ -435,7 +435,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     );
     await dbInstance().execute(
       sql`DELETE FROM staged_transactions
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${summary.importId}
+          WHERE import_id = ${summary.importId}
             AND row_no = 1`,
     );
 
@@ -464,7 +464,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     const summary = await upload('Nameless Bank', csvFile('2026-08-05,-12.00,Nameless'));
     await dbInstance().execute(
       sql`UPDATE imports SET account_name = NULL
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
+          WHERE id = ${summary.importId}`,
     );
 
     await expect(confirmImport(summary.importId)).rejects.toThrow(
@@ -486,7 +486,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     const summary = await upload('Idless Bank', csvFile('2026-08-06,-13.00,Idless'));
     await dbInstance().execute(
       sql`UPDATE imports SET account_id = NULL
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
+          WHERE id = ${summary.importId}`,
     );
 
     await expect(confirmImport(summary.importId)).rejects.toThrow(
@@ -509,7 +509,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     const summary = await upload('Guard Bank', csvFile('2026-08-10,-11.00,Elsewhere'));
     await dbInstance().execute(
       sql`UPDATE staged_transactions SET account_id = 'csv:somewhere-else'
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${summary.importId}`,
+          WHERE import_id = ${summary.importId}`,
     );
 
     // built from the id the import recorded, not from a literal: that id is the
@@ -604,7 +604,7 @@ describe('an account deleted between the upload and the confirm', () => {
     expect(await stagedCount(summary.importId)).toBe(2);
 
     await dbInstance().execute(
-      sql`DELETE FROM accounts WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${id}`,
+      sql`DELETE FROM accounts WHERE id = ${id}`,
     );
     expect(await getAccount(id)).toBeUndefined();
 

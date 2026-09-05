@@ -37,9 +37,8 @@ export function Landing() {
           <a href={GITHUB} rel="noreferrer noopener">
             Source
           </a>
-          {/* the round trip: the auth screens' "Back to Website" points here */}
           <a className="nav-signin" href="/">
-            Sign in
+            Open the app
           </a>
         </nav>
       </header>
@@ -60,7 +59,7 @@ export function Landing() {
           <a href={GITHUB} rel="noreferrer noopener">
             Source
           </a>
-          <a href="/">Sign in</a>
+          <a href="/">Open the app</a>
         </p>
       </footer>
     </div>

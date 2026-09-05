@@ -218,9 +218,9 @@ describe('downloading the stored statement', () => {
   });
 
   it('renders the refusal and writes no file when the document cannot be read', async () => {
-    // the backend's own 404 sentence: absent, another workspace's and unreadable are
-    // one answer, and it says READ rather than "kept"
-    const refusal = 'this import has no document this server can read';
+    // the backend's own 404 sentence, copied from documents.ts: absent, restored from
+    // elsewhere and unreadable are one answer, and it says READ rather than "kept"
+    const refusal = 'this import has no file this app can read';
     mockFetch({
       ...BASE,
       'GET /api/imports/imp-1/document': () => fail(404, { error: refusal }),

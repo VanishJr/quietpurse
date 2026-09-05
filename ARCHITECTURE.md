@@ -1,11 +1,14 @@
 # Architecture
 
-Finto is an Express API over PostgreSQL with a React client. The API is the contract — the web
+Finto is an Express API over Postgres with a React client, and one person runs the whole of it on
+their own machine: the database is PGlite, Postgres compiled to run inside the Node process, and it
+lives in a folder beside the statements the person uploaded. The API is the contract — the web
 client is one consumer of it, and native clients are planned — so nothing that decides an outcome
 lives in `web/`.
 
-Two things shape the rest of this document: **every row belongs to a workspace**, and **one upload
-button hides every parser**. Most of what looks like indirection below is one of those two.
+Two things shape the rest of this document: **the data is one folder on one person's disk**, and
+**one upload button hides every parser**. Most of what looks like indirection below is one of those
+two.
 
 ## The one ingestion surface
 
@@ -48,13 +51,11 @@ previous one.
 
 | Module | What it owns |
 |---|---|
-| `app.ts` | The Express app: every route, CORS, the session middleware, the workspace scope per request. Separate from `index.ts` so the middleware chain is testable over real HTTP |
-| `index.ts` | Process start: config assertions, migrations, listen |
-| `auth.ts` | better-auth wiring — email/password, cookie sessions, the organization plugin that workspaces are built on, rate limits |
-| `config.ts` | `.env` reading plus `assertProductionConfig()`, which refuses to boot production on a dev default |
+| `app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `index.ts` so the whole route table is testable over real HTTP |
+| `index.ts` | Process start: the lock on the folder, the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
+| `config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |
 | `db/schema.ts` | Drizzle table definitions. The source the migrations are generated from |
-| `db/index.ts` | Every query. Raw `sql` templates, not the Drizzle query builder — so renaming a column in `schema.ts` breaks at runtime, not at build. Known, and deliberate for now: the SQL arrived written, from the SQLite era |
-| `db/workspace.ts` | The `AsyncLocalStorage` that carries the current workspace. `currentWorkspaceId()` throws outside a context |
+| `db/index.ts` | Opening the database — PGlite in the folder, or a PostgreSQL server — and every query. Raw `sql` templates, not the Drizzle query builder — so renaming a column in `schema.ts` breaks at runtime, not at build. Known, and deliberate for now: the SQL arrived written, from the SQLite era |
 | `db/dedup.ts` | The computed dedup key and its per-group ordinal — distinct from `transactions.id` |
 | `providers/statement.ts` | The ingestion surface: `sniff`, `importStatement`, `readSheet`, `reconcile` |
 | `providers/csv.ts` | Delimiter detection, encoding, column matching, the bank presets |
@@ -67,27 +68,37 @@ previous one.
 | `independence.ts` | The self-sufficiency computation |
 | `fxrates.ts` / `rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
 | `money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
-| `documents.ts` | Uploaded statements sealed on disk: key derivation, `sealDocument`/`openDocument`, key versioning |
-| `storage.ts` | The object store underneath `documents.ts` |
-| `settings.ts` / `appsettings.ts` | Per-workspace settings in the database |
+| `documents.ts` | Uploaded statements as plain files in the statements folder: the name a file gets, `putDocument`/`getDocument`/`deleteDocument`, and the hash check on read |
+| `storage.ts` | The object store underneath `documents.ts`: an atomic write, and a key shape that refuses rather than cleans |
+| `settings.ts` / `appsettings.ts` | The person's settings in the database |
 
-`web/src/screens/` holds Overview, Transactions, Analytics, Independence and Auth; `web/src/api.ts`
-is the only place that talks to the API, and it also owns how a failed request becomes a sentence.
+`web/src/screens/` holds Overview, Transactions, Analytics, Independence and Settings;
+`web/src/api.ts` is the only place that talks to the API, and it also owns how a failed request
+becomes a sentence.
 
-## Workspace scoping
+## One person, one folder
 
-Every data table has a `workspace_id`, and the composite primary key `(workspace_id, id)` makes it
-legal for the same `id` to exist in two workspaces — which is exactly the case that breaks a query
-filtering on `id` alone. `test/tenant-isolation.test.ts` deliberately gives two workspaces
-colliding identifiers.
+Everything the app keeps is under `FINTO_HOME`, `~/Finto` by default:
 
-The scope is **not a parameter**. The session middleware puts it into `AsyncLocalStorage` per
-request and background work sets it per workspace; `db/index.ts` reads it from there. A query that
-runs with no scope throws rather than returning someone else's rows — that throw is the mechanism,
-and `test/workspace-scope.test.ts` is what keeps it honest.
+```
+~/Finto/
+  db/            the PGlite data directory
+  statements/    <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
+  finto.lock     the running process's pid
+```
 
-The trade-off is stated plainly in `SECURITY.md`: isolation is enforced by application code, not by
-Postgres row-level security.
+There is no sign-in and no tenant. Whoever can reach the port owns the data behind it, so
+`index.ts` binds the loopback interface unless told otherwise, and no query carries an owner: the
+whole table is the person's. What that deleted from the data layer was one column on every table, a
+composite key over it, and the request context that carried it; what it left is a database any
+query reads whole.
+
+PGlite does not refuse a second process on the same directory — two writers corrupt it with nothing
+failing — so the lock file is the guard: taken before the database is opened, refused while a live
+pid holds it, taken over from a dead one, removed on the way out. A PostgreSQL server, when
+`DATABASE_URL` names one, brings its own locking and the file is not written.
+
+`SECURITY.md` states plainly what this shape does and does not protect.
 
 ## Two keys that are not the same key
 
@@ -101,18 +112,18 @@ Conflating them re-introduces the duplicate-import bug in whichever direction yo
 ## Import provenance
 
 Every transaction carries `import_id`. `imports` is uniquely indexed on
-`(workspace_id, file_hash) WHERE status = 'committed'` — the partial predicate is the point: a
-staged or discarded import must not block re-uploading the same file, and only `committed` means
-the rows are really in the database.
+`file_hash WHERE status = 'committed'` — the partial predicate is the point: a staged or discarded
+import must not block re-uploading the same file, and only `committed` means the rows are really in
+the database.
 
 ## Migrations
 
 `db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
-`backend/drizzle/` and applied at startup. Until the first real deployment the history is squashed
-into a single `0000_initial.sql` on every schema change — the history has no databases to upgrade.
-**A squash invalidates every database already migrated**, including `*_test` ones, because the
-regenerated file carries a later journal timestamp and drizzle re-applies it. From the first
-deployment on, migrations are append-only and an applied one is never edited.
+`backend/drizzle/` and applied when the database is opened. Until the first release the history is
+squashed into a single `0000_initial.sql` on every schema change — the history has no databases to
+upgrade. **A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
+one, because the regenerated file carries a later journal timestamp and drizzle re-applies it. From
+the first release on, migrations are append-only and an applied one is never edited.
 
 ## Adding a statement format
 
@@ -122,16 +133,19 @@ deployment on, migrations are append-only and an applied one is never edited.
    on evidence the format is present, never on the absence of other formats.
 3. Give it an entry in `PARSER_VERSION`, `SIZE_CAP` and `FORMAT_NAME` in `statement.ts` — the last
    one feeds the refusal text that lists what the app accepts, so a format the user cannot be told
-   about is a format they cannot be refused clearly for.
+   about is a format they cannot be refused clearly for. The type's name is also the extension a
+   stored statement gets, so it has to be one a file can carry.
 4. Add fixtures. PDF fixtures are built in code (`test/pdffixture.ts`) rather than committed, since
    `.gitignore` refuses `*.pdf` and `*.csv` outright.
 
 ## Testing
 
-`backend/` runs vitest against embedded PGlite by default, and against a real Postgres when
-`TEST_DATABASE_URL` is set; CI does both. PGlite is single-connection, so the default run proves
-nothing about concurrency — a unique index losing a race is not exercised there. The suite
-truncates every table in the database it is given and refuses one not named `*_test`.
+`backend/` runs vitest against an embedded PGlite in memory by default — the engine the product
+itself runs on — and against a real Postgres when `TEST_DATABASE_URL` is set; CI does both. PGlite
+is single-connection, so the default run proves nothing about concurrency — a unique index losing a
+race is not exercised there. `test/setup.ts` runs once per test file, so every table is truncated
+before each one; it refuses a database not named `*_test`, and it points the statements folder at
+a temporary directory so nothing a test uploads reaches `~/Finto`.
 
 `web/` runs two vitest projects split by filename so the environment cannot be got wrong: `unit`
 (`*.test.ts`, node) and `dom` (`*.test.tsx`, jsdom). What jsdom structurally cannot check — layout,

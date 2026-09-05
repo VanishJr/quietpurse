@@ -68,6 +68,6 @@ export const withOrdinal = (dedupKey: string, n: number): string =>
  * A key that cannot collide with anything: renumbering moves rows through this
  * namespace first, since writing the final keys directly would trip the unique
  * index whenever a target slot is still held by a row that has not moved yet.
- * The transaction id makes it unique within the workspace.
+ * The transaction id makes it unique.
  */
 export const parkedDedupKey = (transactionId: string): string => `park:${transactionId}`;

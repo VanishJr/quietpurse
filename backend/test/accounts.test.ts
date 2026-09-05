@@ -2,8 +2,8 @@
  * An account's identity is its id, not its name (ROADMAP 5.1, row 25).
  *
  * Two things are asserted here that nothing else can hold. **No two accounts in one
- * workspace share a name**, and that is the database's job - accounts_name_unique
- * over (workspace_id, lower(name)) - so the first test inserts straight into the
+ * share a name**, and that is the database's job - accounts_name_unique over
+ * lower(name) - so the first test inserts straight into the
  * table rather than through a function that could be checking in JS. And **an upload
  * records the id it was given and the confirm reads it back**, so the two requests
  * cannot come to disagree about where the rows went. Everything else in the file is
@@ -38,7 +38,6 @@ import {
 } from '../src/providers/statement';
 import { NewTransaction } from '../src/types';
 import { accountFor, markImportCommitted } from './helpers';
-import { TEST_WORKSPACE_ID } from './pglite';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
 
@@ -55,7 +54,7 @@ async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> 
 async function recordedAccountId(importId: string): Promise<string | null> {
   const res = (await dbInstance().execute(
     sql`SELECT account_id FROM imports
-        WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${importId}`,
+        WHERE id = ${importId}`,
   )) as unknown as { rows: { account_id: string | null }[] };
   return res.rows[0].account_id;
 }
@@ -66,7 +65,7 @@ async function recordedAccount(
 ): Promise<{ name: string | null; currency: string | null }> {
   const res = (await dbInstance().execute(
     sql`SELECT account_name, account_currency FROM imports
-        WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${importId}`,
+        WHERE id = ${importId}`,
   )) as unknown as { rows: { account_name: string | null; account_currency: string | null }[] };
   return { name: res.rows[0].account_name, currency: res.rows[0].account_currency };
 }
@@ -74,14 +73,14 @@ async function recordedAccount(
 /** A refusal above createImport adds none, which is the half a message cannot show. */
 async function importCount(): Promise<number> {
   const res = (await dbInstance().execute(
-    sql`SELECT COUNT(*) AS n FROM imports WHERE workspace_id = ${TEST_WORKSPACE_ID}`,
+    sql`SELECT COUNT(*) AS n FROM imports`,
   )) as unknown as { rows: { n: string }[] };
   return Number(res.rows[0].n);
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-describe('a name is unique per workspace, case-insensitively', () => {
+describe('a name is unique, case-insensitively', () => {
   /**
    * Straight into the table: createAccount catches the violation and turns it into a
    * refusal, so going through it would pass just as well against a check written in
@@ -89,8 +88,8 @@ describe('a name is unique per workspace, case-insensitively', () => {
    */
   it('the database refuses two names differing only in case', async () => {
     await dbInstance().execute(
-      sql`INSERT INTO accounts (workspace_id, id, provider, name, currency, balance_cents)
-          VALUES (${TEST_WORKSPACE_ID}, 'idx-a', 'upload', 'Revolut', 'EUR', 0)`,
+      sql`INSERT INTO accounts (id, provider, name, currency, balance_cents)
+          VALUES ('idx-a', 'upload', 'Revolut', 'EUR', 0)`,
     );
     // drizzle wraps the driver error, so the constraint is read off the cause - the
     // same chain isUniqueViolation walks. Asserted by NAME: any unique violation
@@ -98,8 +97,8 @@ describe('a name is unique per workspace, case-insensitively', () => {
     // accounts_name_unique is what refused the insert
     const refused = await dbInstance()
       .execute(
-        sql`INSERT INTO accounts (workspace_id, id, provider, name, currency, balance_cents)
-            VALUES (${TEST_WORKSPACE_ID}, 'idx-b', 'upload', 'REVOLUT', 'EUR', 0)`,
+        sql`INSERT INTO accounts (id, provider, name, currency, balance_cents)
+            VALUES ('idx-b', 'upload', 'REVOLUT', 'EUR', 0)`,
       )
       .then(
         () => undefined,
@@ -126,7 +125,7 @@ describe('a name is unique per workspace, case-insensitively', () => {
     });
   });
 
-  it('and the same name in a workspace is refused with the holder, hidden or not', async () => {
+  it('and the same name is refused with the holder, hidden or not', async () => {
     const first = await createAccount({ name: 'N26', currency: 'EUR' });
     expect(first.ok).toBe(true);
 
@@ -216,7 +215,7 @@ describe('an upload that picks its account by id', () => {
     expect((await listTransactions({ accountId: id }))[0].currency).toBe('USD');
   });
 
-  it('refuses an id no account in this workspace answers to, and stages nothing', async () => {
+  it('refuses an id no account answers to, and stages nothing', async () => {
     const before = await importCount();
     // not a UUID on purpose: nothing validates the shape, because an id restored
     // from a backup or written before row 25 is not one either
@@ -278,7 +277,7 @@ describe('an upload that picks its account by id', () => {
 
     await dbInstance().execute(
       sql`UPDATE imports SET account_name = 'Something Else Entirely'
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${summary.importId}`,
+          WHERE id = ${summary.importId}`,
     );
 
     expect(await confirmImport(summary.importId)).toMatchObject({ confirmed: true, accountId: id });
@@ -322,27 +321,27 @@ const countOf = async (q: SQL): Promise<number> => {
 
 const rowsOfAccount = (accountId: string): Promise<number> =>
   countOf(sql`SELECT COUNT(*) AS n FROM transactions
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+              WHERE account_id = ${accountId}`);
 
 const importsOfAccount = (accountId: string): Promise<number> =>
   countOf(sql`SELECT COUNT(*) AS n FROM imports
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+              WHERE account_id = ${accountId}`);
 
 const stagedOfAccount = (accountId: string): Promise<number> =>
   countOf(sql`SELECT COUNT(*) AS n FROM staged_transactions
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+              WHERE account_id = ${accountId}`);
 
 const rulesOfAccount = (accountId: string): Promise<number> =>
   countOf(sql`SELECT COUNT(*) AS n FROM transfer_rules
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND account_id = ${accountId}`);
+              WHERE account_id = ${accountId}`);
 
 const stagedOfImport = (importId: string): Promise<number> =>
   countOf(sql`SELECT COUNT(*) AS n FROM staged_transactions
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND import_id = ${importId}`);
+              WHERE import_id = ${importId}`);
 
 const balanceOf = (accountId: string): Promise<number> =>
   countOf(sql`SELECT balance_cents AS n FROM accounts
-              WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${accountId}`);
+              WHERE id = ${accountId}`);
 
 /** One row, always in the same dedup group: one account, one day, one amount. */
 const stagedRow = (accountId: string): NewTransaction => ({
@@ -363,9 +362,8 @@ const newAccount = async (name: string): Promise<string> => {
 };
 
 /**
- * An import attributed to an account with nothing staged under it - the fixture
- * shape tenant-isolation.test.ts already uses, and the only way to write
- * imports.account_id without going through a real file.
+ * An import attributed to an account with nothing staged under it - the only way to
+ * write imports.account_id without going through a real file.
  */
 async function importFor(accountId: string, fileHash: string): Promise<string> {
   const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
@@ -416,7 +414,7 @@ describe('deleting an account', () => {
   });
 
   /**
-   * The staged rows go by the foreign key on (workspace_id, import_id) and not by a
+   * The staged rows go by the foreign key on import_id and not by a
    * statement of this delete's own - which is the entry ACCOUNT_CASCADE answers with
    * CASCADES_FROM_IMPORTS. Reachable only through rows the account does not own:
    * staged rows carrying its OWN id refuse the delete instead (the case below).
@@ -446,7 +444,7 @@ describe('deleting an account', () => {
     expect(await stagedOfImport(record.id)).toBe(0);
   });
 
-  it('leaves another account in the same workspace exactly as it was', async () => {
+  it('leaves another account exactly as it was', async () => {
     const doomed = await populate('Neighbour Doomed');
     const kept = await populate('Neighbour Kept');
     const balance = await balanceOf(kept);
@@ -473,7 +471,7 @@ describe('deleting an account', () => {
   });
 
   /**
-   * accounts_name_unique is unconditional - (workspace_id, lower(name)), nothing
+   * accounts_name_unique is unconditional - lower(name), nothing
    * partial about it - so a delete that left the row behind would make the name
    * permanently unusable with nothing on any screen holding it.
    */
@@ -486,7 +484,7 @@ describe('deleting an account', () => {
     expect(again.ok ? again.account.id : '').not.toBe(id);
   });
 
-  it('answers not-found for an id this workspace does not have, twice over', async () => {
+  it('answers not-found for an id no account has, twice over', async () => {
     expect(await deleteAccount('no-such-account')).toEqual({ ok: false, reason: 'not-found' });
 
     const id = await populate('Deleted Twice');
