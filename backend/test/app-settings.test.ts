@@ -8,18 +8,20 @@
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
-import { dbInstance } from '../src/db';
+import { seedDefaults } from '../src/db';
+import { freshTestDb } from './pglite';
 
 let agent: request.Agent;
 
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
 beforeAll(async () => {
-  initAuth(dbInstance());
+  await freshTestDb();
+  await seedDefaults();
   agent = request.agent(app);
-  const res = await agent
-    .post('/api/auth/sign-up/email')
-    .send({ email: 'settings@example.com', password: 'correct-horse-battery', name: 'settings' });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
 });
 
 const settings = async () => (await agent.get('/api/app-settings')).body;
@@ -37,10 +39,12 @@ describe('PATCH /api/app-settings refuses what it cannot store', () => {
   });
 
   it('ownerNames that is not an array of strings is refused', async () => {
+    const before = await settings();
+
     const res = await agent.patch('/api/app-settings').send({ ownerNames: 'Yurii' });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/ownerNames/);
-    expect((await settings()).ownerNames).toEqual([]);
+    expect((await settings()).ownerNames).toEqual(before.ownerNames);
   });
 
   it('an absent key still means "leave it alone"', async () => {

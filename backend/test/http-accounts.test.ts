@@ -2,22 +2,17 @@
  * The two account routes over real HTTP (ROADMAP 5.1, row 25): creating an account
  * before any statement names one, and renaming or removing one afterwards.
  *
- * Driven through supertest with a real session, because what is worth asserting here
+ * Driven through supertest, because what is worth asserting here
  * is the wire: the status codes, and the sentence each refusal composes. A 409 that
  * names an account the user cannot see, or a 200 for a patch that changed nothing,
  * are both invisible from the data layer.
- *
- * The process-wide test fallback is cleared for the duration, as in upload.test.ts:
- * with it armed a request that never entered a workspace context would answer from
- * the test workspace instead of throwing.
  */
 import { sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
-import { ACCOUNT_NAME_MAX, dbInstance, setWorkspaceFallback } from '../src/db';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { ACCOUNT_NAME_MAX, dbInstance, seedDefaults } from '../src/db';
+import { freshTestDb } from './pglite';
 
 let agent: request.Agent;
 
@@ -59,22 +54,15 @@ const readAccount = async (id: string) => {
   return all.find((a) => a.id === id);
 };
 
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
 beforeAll(async () => {
-  initAuth(dbInstance());
-  setWorkspaceFallback(undefined);
-
+  await freshTestDb();
+  await seedDefaults();
   agent = request.agent(app);
-  const res = await agent.post('/api/auth/sign-up/email').send({
-    email: 'accounts@example.com',
-    password: 'correct-horse-battery',
-    name: 'accounts',
-  });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-});
-
-afterAll(() => {
-  // the fallback is process-wide - the rest of the run expects it armed
-  setWorkspaceFallback(TEST_WORKSPACE_ID);
 });
 
 describe('POST /api/accounts', () => {
@@ -141,7 +129,7 @@ describe('POST /api/accounts', () => {
    * for a name alone had to guess one on the server's behalf. It is defaulted here
    * now, from the same setting the client was reading.
    */
-  it('defaults the currency to the workspace base currency when none is sent', async () => {
+  it('defaults the currency to the base currency when none is sent', async () => {
     const res = await agent.post('/api/accounts').send({ name: 'Currencyless' });
 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -237,7 +225,7 @@ describe('PATCH /api/accounts/:id', () => {
     expect(res.body.error).toBe('nothing to change: send name, hidden, currency, or any of them');
   });
 
-  it('answers 404 for an id this workspace does not have', async () => {
+  it('answers 404 for an id this Finto does not have', async () => {
     const res = await agent.patch('/api/accounts/no-such-account').send({ hidden: true });
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('account not found');
@@ -462,7 +450,7 @@ describe('DELETE /api/accounts/:id', () => {
     expect(await rowsIn(account.id)).toHaveLength(0);
   });
 
-  it('answers 404 for an id this workspace does not have, and for one just deleted', async () => {
+  it('answers 404 for an id this Finto does not have, and for one just deleted', async () => {
     const unknown = await agent.delete('/api/accounts/no-such-account');
     expect(unknown.status).toBe(404);
     expect(unknown.body.error).toBe('account not found');

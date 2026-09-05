@@ -1,10 +1,10 @@
 # Finto
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-20%2B-5FA04E?logo=nodedotjs&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-22%2B-5FA04E?logo=nodedotjs&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![PGlite](https://img.shields.io/badge/PGlite-embedded_Postgres-4169E1?logo=postgresql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 [![CI](https://github.com/VanishJr/finto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VanishJr/finto/actions/workflows/ci.yml)
@@ -12,6 +12,9 @@
 A personal finance tracker built around one question: **how much do I need to earn to
 support myself?** It pulls transactions from several banks, converts everything to a single
 currency, and works out the self-sufficiency threshold.
+
+It runs on your own machine. There is no account to create, no server to rent and nothing to
+install but Node.js: two commands, and your statements sit in a folder you can open.
 
 ---
 
@@ -38,7 +41,7 @@ Hence two things most trackers don't do:
 ## Features
 
 - **Accounts.** One upload button: a statement in whatever format the bank gives you — CSV,
-  XLSX — and the right parser is picked for you.
+  XLSX, PDF — and the right parser is picked for you.
 - **Transactions.** Auto-categorization by MCC and description; "all transactions like this
   one go to this category" rules; detection of transfers between your own accounts, refunds
   and one-off purchases.
@@ -51,138 +54,117 @@ Hence two things most trackers don't do:
 ## Stack
 
 ```
-backend/   Node.js + TypeScript + Express + PostgreSQL 16 + Drizzle + better-auth + vitest
+backend/   Node.js + TypeScript + Express + Postgres embedded in the process (PGlite) + Drizzle + vitest
 web/       Vite + React + TypeScript + Recharts
 ```
 
-Data lives in your own PostgreSQL and is never sent anywhere. Access is an email+password
-session; each account gets an isolated workspace, so several people can share one server
-without sharing data.
+The data never leaves your machine: the database and the statements you upload are files
+in one folder, and the only thing the app ever fetches from the internet is exchange rates.
 
 ## Getting started
 
-Requires Node.js 20+ and a PostgreSQL 16 the backend can reach. The quickest one is the
-`postgres` service from `docker-compose.yml`; `DATABASE_URL` in `backend/.env` points at it
-by default.
-
-### 1. Backend
+Requires Node.js 22 or newer. Nothing else.
 
 ```bash
-docker compose up -d postgres   # or bring your own Postgres and set DATABASE_URL
-cd backend
-cp .env.example .env            # an empty file works too — see below
-npm install
-npm run dev                     # http://localhost:4000, migrations run at startup
+git clone https://github.com/VanishJr/finto.git && cd finto
+npm run setup     # installs both packages and builds the web client
+npm start         # http://localhost:4000
 ```
 
-### 2. Web client
+Open the address it prints. The app opens on Overview, empty, with a button that takes you
+straight to the import; the base currency and the name your bank writes in statements are on
+the Settings screen. Nothing here asks for API access to a bank — a file you exported is all
+it takes.
+
+The Goal screen starts empty too: add the line items of your own bare minimum (rent, food,
+transport…) right on the screen — nobody else's guesses would fit anyway.
+
+Stop it with Ctrl+C. Start it again the same way; your data is where you left it.
+
+### Coming from an earlier checkout
+
+**If an earlier build of Finto ever started on this machine, delete its database before you
+start this one.**
 
 ```bash
-cd web
-npm install
-npm run dev               # http://localhost:5173
+rm -rf ~/Finto/db
 ```
 
-The dev server proxies `/api` to `http://localhost:4000`, so there is no address to
-configure. If the backend runs on another port or host, set `BACKEND_URL` (the proxy
-target) or `VITE_API_URL` (the address the browser uses) — see `web/.env.example`.
+Finto is pre-release, so a schema change is folded into the one migration by regenerating it
+rather than by adding a second one. A database that an earlier build already migrated does not
+know that: it sees a migration it has run before, carrying a newer timestamp, runs it again,
+and the start dies with `relation "accounts" already exists`.
 
-### Backend in Docker
+**There is no repair and no conversion.** A regenerated migration and an already-migrated
+database cannot be reconciled, by design — that is the cost of squashing, and it is why this
+step is a step and not a footnote. From the first release on, migrations are append-only and
+nothing like this is asked of anybody again.
 
-An alternative to step 1 — requires Docker with the Compose plugin:
+Your uploaded statements in `~/Finto/statements/` are untouched by any of this. Import them
+again once the app starts. If you point `DATABASE_URL` at a PostgreSQL server, drop that
+database instead and let the app create it again; if you have run the test suite against a
+`*_test` database of your own, drop that too.
 
-```bash
-cp backend/.env.example backend/.env
-echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" >> backend/.env
-docker compose up -d --build           # backend on http://localhost:4000
+## Where your data is
+
+```
+~/Finto/
+  db/            the database
+  statements/    every statement you uploaded, under a name you can recognise
+  finto.lock     the running app's process id, so a second copy refuses to open the same folder
 ```
 
-Unlike `npm run dev`, the image runs with `NODE_ENV=production`, and in production the
-backend refuses to start on development defaults — an unset `BETTER_AUTH_SECRET` above
-all, since sessions would be signed with a key that is published in this repository.
-Hence the second line; an empty `.env` is enough only for `npm run dev`.
+Set `FINTO_HOME` to keep it somewhere else. The whole folder is yours to copy, back up or
+delete; the app also has a one-click JSON export of every transaction on the Settings
+screen, and Import history offers each uploaded file back.
 
-This starts Postgres alongside the backend; the data stays in the `pgdata` volume, and
-port 5432 is published on localhost so a non-Docker `npm run dev` reaches the same
-database. The web client still runs separately (step 2).
-
-### 3. First run
-
-The app opens on a register/login screen — the first account you create becomes the
-server's first workspace. After that it opens on Overview, empty, with a button that
-takes you straight to the import; the base currency and the name your bank writes in
-statements sit on the same screen, and stay there. Nothing here asks for API access to
-a bank — a file you exported is all it takes.
-
-The Goal screen starts empty too: add the line items of your own bare minimum (rent,
-food, transport…) right on the screen — nobody else's guesses would fit anyway.
+The files in `statements/` are exactly the files you uploaded, unencrypted. What protects
+them is whatever protects the rest of your disk — see `SECURITY.md` for the trade-off that
+is.
 
 ## Configuration
 
-Secrets and process settings live in `backend/.env` (see `.env.example`):
+Nothing is required. `backend/.env.example` lists what can be set; the ones worth knowing:
 
 | Variable | Purpose |
 |---|---|
-| `BETTER_AUTH_SECRET` | key session cookies are signed with. **Set this on any real deployment** (`openssl rand -base64 32`); the dev fallback is public and the backend warns about it at startup |
-| `BETTER_AUTH_URL` | the backend's address as browsers see it, defaults to `http://localhost:PORT` |
-| `CORS_ORIGINS` | origins allowed to call the API with session cookies, comma-separated. Only needed when the web client is served from a different origin than the backend |
-| `SIGNUP_INVITE_CODE` | when set, registration requires this code. Empty (the default) means anyone who can reach the server can sign up |
-| `DATABASE_URL` | PostgreSQL connection string, defaults to the `postgres` service in `docker-compose.yml` |
-| `DOCUMENT_ENCRYPTION_KEY` | key the uploaded statements are sealed with on disk. **Set this on any real deployment** (`openssl rand -base64 32`); the backend refuses to start under `NODE_ENV=production` on the public dev fallback. Changing or losing it makes every document already stored unreadable |
-| `DOCUMENT_STORE_PATH` | where those documents are kept, defaults to `./data/documents` (relative to `backend/`), which is where `docker-compose.yml` mounts the `documents` volume |
-
-There is no client-side secret: `web/` ships no credentials at all. Access is a cookie
-session obtained from the login screen.
-
-Everything else — base currency, account owner names — is edited in the app itself and
-stored in the database, per workspace. `OWNER_NAMES` and `FAMILY_NAMES` in `.env` seed
-the server's first workspace only; every later workspace starts empty and fills those
-in on the Overview screen.
-
-### Accounts and workspaces
-
-Each account gets its own **workspace** with its own accounts, transactions, settings, rules
-and budgets; users on the same server never see each other's data. Registration is open by
-default — set `SIGNUP_INVITE_CODE` to close it before exposing the server beyond your own
-machine.
+| `PORT` | the port the app is served on, defaults to `4000` |
+| `FINTO_HOME` | the folder everything lives in, defaults to `~/Finto` |
+| `HOST` | listen on every network interface (`0.0.0.0`) instead of this machine only — for a phone on the same Wi-Fi. There is no sign-in, so everyone who can reach the port can read and change your data |
+| `OWNER_NAMES`, `FAMILY_NAMES`, `BASE_CURRENCY` | seed the settings on the first start; after that they are edited in the app |
+| `DATABASE_URL` | use a PostgreSQL server instead of the embedded database |
+| `DOCUMENT_STORE_PATH` | keep the uploaded statements somewhere other than `FINTO_HOME/statements` |
 
 ## Development
 
 ```bash
-cd backend && npm test        # vitest
+cd backend && npm run dev     # tsx watch, on http://localhost:4000
+cd web && npm run dev         # Vite on http://localhost:5173, proxying /api to the backend
+
+cd backend && npm test        # vitest, on an embedded database of its own
 cd backend && npm run typecheck
-cd web && npm run build       # tsc --noEmit + build
+cd web && npm test
+cd web && npm run build       # tsc --noEmit + build, into web/dist
 ```
 
+The dev server proxies `/api` to `http://localhost:4000`, so there is no address to
+configure; set `BACKEND_URL` if the backend runs elsewhere.
+
 The database schema lives in `backend/src/db/schema.ts`. SQL migrations are generated from
-it (`npm run db:generate`) into `backend/drizzle/` and applied at startup.
+it (`npm run db:generate`) into `backend/drizzle/` and applied when the app starts.
 
-> Until the prototype is deployed anywhere real, a schema change may be folded into the
-> existing migration by regenerating it — the migration history has no databases to
-> upgrade yet. **From the first deployment on, migrations are append-only** and an applied
+> Until the first release, a schema change may be folded into the existing migration by
+> regenerating it. **A squash invalidates every database already migrated** — the next start
+> dies with `relation "accounts" already exists` — so after one, delete `~/Finto/db` and any
+> `*_test` database. **From the first release on, migrations are append-only** and an applied
 > one is never edited.
-
-Every data table is scoped by `workspace_id`, and the data layer takes that scope from
-AsyncLocalStorage rather than from a parameter (see `backend/src/db/workspace.ts`): the
-session middleware sets it per request, background jobs set it per workspace. A db call
-with no scope throws rather than running unscoped — `backend/test/workspace-scope.test.ts`
-(the mechanism) and `backend/test/tenant-isolation.test.ts` (two workspaces' data) are what
-keep that honest.
-
-An existing SQLite database from the pre-Postgres era is imported with
-`npm run migrate:sqlite` — it loads into one workspace (the oldest by default,
-`--workspace <id>` to pick another).
-
-An update that adds a migration applies it on the next start. Dump the database first if
-the data matters to you (`docker compose exec postgres pg_dump -U finto finto > dump.sql`)
-— the app also has a one-click JSON backup on the Overview screen.
 
 ## Documentation
 
 | File | What it answers |
 |---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The module map, the path one statement takes from upload to committed rows, and how to add a format |
-| [`SECURITY.md`](SECURITY.md) | The threat model, and the open trade-offs — including the ones to fix before hosting this for anyone |
+| [`SECURITY.md`](SECURITY.md) | What protects your data on your own machine, and the one trade-off taken on purpose |
 | [`AGENTS.md`](AGENTS.md) | What to read before changing anything: the invariants, and what the test suite structurally cannot see |
 | [`.agents/README.md`](.agents/README.md) | How a task is run here, and which checks are worth trusting — ranked by whether a check can be wrong about itself |
 

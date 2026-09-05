@@ -469,7 +469,7 @@ describe('xlsx: the same statement in two formats', () => {
    * Why one name resolves to one id whatever parser ran, and the rows keep one
    * provider: the same bank exported as CSV one month and as XLSX the next has to
    * land in ONE account. Two accounts would mean two dedup namespaces - the unique
-   * index is (workspace, account, dedup_key) - and every overlapping row would
+   * index is (account_id, dedup_key) - and every overlapping row would
    * insert a second time, silently duplicating real history. The ids are compared
    * to each other rather than to a literal: what matters is that they agree, and an
    * id nothing derives has no literal to be written down as.

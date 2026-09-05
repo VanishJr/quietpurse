@@ -41,6 +41,36 @@ export function causeChain(err: unknown, maxDepth = 8): string {
   return parts.join(': ');
 }
 
+/**
+ * The same chain, with the REASON first, for the one line a person reads off a
+ * console when the app refuses to start.
+ *
+ * causeChain reports outermost first, which is right for a log entry somebody is
+ * reading deliberately and wrong here: drizzle-orm wraps every driver error, so its
+ * message is the whole failed statement and every bound value, and the sentence that
+ * says what went wrong - the permission, the errno, the relation that already exists
+ * - sits behind all of it. Measured on a squashed migration: `Failed query: CREATE
+ * TABLE "accounts" (...); params: : relation "accounts" already exists`, where the
+ * last five words are the whole of the news.
+ *
+ * A part already contained in the one that wraps it is dropped rather than printed
+ * twice: a thrower that composed its own cause into its own message - which is the
+ * house style for a boot check, because the message has to stand alone - would
+ * otherwise say the errno at both ends.
+ */
+export function reasonFirst(err: unknown, maxDepth = 8): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current !== undefined && current !== null && parts.length < maxDepth && !seen.has(current)) {
+    seen.add(current);
+    const message = current instanceof Error ? current.message : String(current);
+    if (!parts.some((kept) => kept.includes(message))) parts.push(message);
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.reverse().join(': ');
+}
+
 export const logDb = logger.child({ mod: 'db' });
 export const logSync = logger.child({ mod: 'sync' });
 export const logClassify = logger.child({ mod: 'classify' });

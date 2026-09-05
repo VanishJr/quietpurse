@@ -1,4 +1,3 @@
-import { SessionUser } from '../api';
 import {
   Account,
   AccountMonthlySummary,
@@ -24,8 +23,6 @@ import {
  * types.ts drifts from what the tests assume, tsc fails here rather than a screen
  * quietly rendering a shape the backend no longer sends.
  */
-
-export const USER: SessionUser = { id: 'u1', email: 'owner@example.com', name: 'Owner' };
 
 export const APP_SETTINGS: AppSettings = { baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko'] };
 
@@ -117,9 +114,9 @@ export const accountMonths = (
 export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
 
 /**
- * A workspace that has never saved a chart, which is what the charts route answers a
- * fresh account with. Version 0 AND an empty list is also the migration's trigger, so
- * a test that seeds `finto.analytics.charts` against this fixture gets a PUT.
+ * A database that has never saved a chart, which is what the charts route answers a
+ * first start with. Version 0 AND an empty list is also the migration's trigger, so a
+ * test that seeds `finto.analytics.charts` against this fixture gets a PUT.
  */
 export const NO_CHARTS = { version: 0, charts: [] };
 
@@ -221,7 +218,6 @@ export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord =>
   originalFilename: 'statement.csv',
   accountName: 'Sparkasse Giro',
   accountId: 'acc-1',
-  uploadedBy: USER.id,
   uploadedAt: '2026-06-15T10:00:00.000Z',
   parserVersion: 1,
   status: 'committed',

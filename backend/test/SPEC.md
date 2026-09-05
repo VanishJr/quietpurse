@@ -11,7 +11,9 @@ carry their own reasoning in their headers. Nothing below repeats them.
 
 - **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
   that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
-  before anything reads config, which is why the database modules there are dynamic imports;
+  before anything reads config, which is why the database modules there are dynamic imports.
+  It is a vitest setup file, so it runs once per test file and truncates before each one — what
+  the files share is the engine instance and the module registry, never the rows.
   `backend/test/helpers.ts` is the fixture layer.
 - **The checks that read another file as text** instead of importing it. They exist where an
   invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
@@ -38,7 +40,7 @@ layer's summary block and refuses a further summary query written with the scopi
 rather than through it; `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
 `backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
 `node:path` and no other module and to run nothing at its top level, because a test that imported the
-entry point beside it would spawn servers and drop databases to reach one predicate;
+entry point beside it would spawn servers to reach one predicate;
 `backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
 the core to name `typescript` alone and run nothing at its top level and the entry to be the
 opposite of both, because a purity check that has only ever been shown a pure file cannot
@@ -53,7 +55,9 @@ describe in another module.
 `COUNT` as a number and node-postgres answers it as a string, so an aggregate that reaches a caller
 without `Number()` around it is green on every local run and red only in the CI job that sets
 `TEST_DATABASE_URL`. A change that adds a raw `sql` aggregate is run against a real Postgres before
-it is believed.
+it is believed. The default run is on the engine the product itself uses now, so what it proves
+about the embedded database it proves about the product; the PostgreSQL job is what keeps the
+connection-string path honest.
 
 **`typescript` is declared in `backend/package.json` for the typecheck script, and a test in this
 directory also imports its compiler API as a library.** That import is deliberate rather than a

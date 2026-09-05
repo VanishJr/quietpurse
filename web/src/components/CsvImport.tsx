@@ -519,7 +519,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           <p className="hint">
             The account is created when you press Import, before the file is read.
             {baseCurrency !== null &&
-              ` It will hold amounts in ${baseCurrency}, the base currency of this workspace.`}
+              ` It will hold amounts in ${baseCurrency}, your base currency.`}
           </p>
         </>
       )}

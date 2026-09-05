@@ -25,15 +25,14 @@ import {
   listImports,
   listTransactions,
   recordImportDocument,
-  runWithWorkspace,
   stageImport,
   upsertAccount,
 } from '../src/db';
+import { config } from '../src/config';
 import { DOCUMENT_STORE_REFUSED, getDocument } from '../src/documents';
 import { accountFor, importAndConfirm } from './helpers';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
-import { createWorkspace, TEST_WORKSPACE_ID } from './pglite';
 
 /** A generic-preset file: one line per row, all of them parseable. */
 const csvFile = (...rows: string[]): string =>
@@ -49,10 +48,15 @@ const importFile = async (name: string, csv: string) =>
 const countFor = async (accountId: string): Promise<number> =>
   (await listTransactions({ accountId, limit: 500 })).length;
 
-/** Whether a blob exists, addressed by hand rather than through the key registry. */
-const blobExists = async (workspaceId: string, importId: string): Promise<boolean> =>
+/**
+ * Where an upload with no filename lands, spelled out by hand rather than asked of
+ * the module: the name a person finds in the folder is the contract.
+ */
+const blobOf = (importId: string): string => path.join(storageRoot(), `statement_${importId}.csv`);
+
+const blobExists = async (importId: string): Promise<boolean> =>
   fs
-    .access(path.join(storageRoot(), workspaceId, importId))
+    .access(blobOf(importId))
     .then(() => true)
     .catch(() => false);
 
@@ -139,7 +143,7 @@ describe('imports: the file layer', () => {
     // id on a row that never parsed is a client-visible field on the history screen
     const staged = (await dbInstance().execute(
       sql`SELECT account_id FROM imports
-          WHERE workspace_id = ${TEST_WORKSPACE_ID} AND id = ${failed[0].id}`,
+          WHERE id = ${failed[0].id}`,
     )) as unknown as { rows: { account_id: string | null }[] };
     expect(staged.rows[0].account_id).toBeNull();
 
@@ -213,10 +217,10 @@ describe('imports: the file layer', () => {
 
   it('deleting an import destroys its document too', async () => {
     const result = await importFile('Delete Document Bank', csvFile('2026-06-02,-13.00,Gone'));
-    expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(true);
+    expect(await blobExists(result.importId)).toBe(true);
 
     expect((await deleteImport(result.importId))!.removed).toBe(1);
-    expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(false);
+    expect(await blobExists(result.importId)).toBe(false);
     expect(await getImportDocumentRef(result.importId)).toBeUndefined();
   });
 
@@ -233,7 +237,7 @@ describe('imports: the file layer', () => {
    */
   it('a document that cannot be removed does not fail the delete of its import', async () => {
     const result = await importFile('Stuck Document Bank', csvFile('2026-06-04,-16.00,Stuck'));
-    const blob = path.join(storageRoot(), TEST_WORKSPACE_ID, result.importId);
+    const blob = blobOf(result.importId);
     await fs.rm(blob, { force: true });
     await fs.mkdir(path.join(blob, 'inner'), { recursive: true });
 
@@ -243,7 +247,7 @@ describe('imports: the file layer', () => {
       // the blob path is still there (as the directory), which is only true when
       // the removal really failed: without it the two assertions above are also
       // satisfied by an ordinary delete, and the fixture could rot unnoticed
-      expect(await blobExists(TEST_WORKSPACE_ID, result.importId)).toBe(true);
+      expect(await blobExists(result.importId)).toBe(true);
     } finally {
       await fs.rm(blob, { recursive: true, force: true });
     }
@@ -255,52 +259,48 @@ describe('imports: the file layer', () => {
    * answer "already imported" on every retry and the one artefact that cannot be
    * recovered later could never be captured for that file at all.
    *
-   * The failure is forced by putting a plain file where the workspace's directory
-   * belongs - no chmod, identical on Windows and Linux - and in a workspace of its
-   * own, because in the shared one that path is a directory full of the other
-   * tests' documents and clearing it would mean deleting them.
+   * The failure is forced by pointing the store at a plain FILE for the duration -
+   * no chmod, identical on Windows and Linux - and never by touching the folder the
+   * other cases' documents are in.
    */
   it('an import whose document cannot be stored is refused, and the bytes stay re-uploadable', async () => {
-    const workspace = 'doc-storage-failure';
-    await createWorkspace(dbInstance(), workspace);
     const csv = csvFile('2026-06-03,-14.00,Refused');
-    const blocked = path.join(storageRoot(), workspace);
-    await fs.mkdir(storageRoot(), { recursive: true });
-    await fs.writeFile(blocked, 'a file where the workspace directory belongs');
+    const accountId = await accountFor('Storage Failure Bank');
+    const blocked = path.join(config.home, 'blocked-statements');
+    await fs.mkdir(config.home, { recursive: true });
+    await fs.writeFile(blocked, 'a file where the statements folder belongs');
 
+    const before = config.documentStorePath;
     try {
-      await runWithWorkspace(workspace, async () => {
-        const failure = await importFile('Storage Failure Bank', csv).catch((e: Error) => e);
-        expect(failure).toBeInstanceOf(Error);
-        // asserted by identity: a regex alone stays green on a message "improved"
-        // to splice in a cause chain that happens to carry no drive letter
-        expect((failure as Error).message).toBe(DOCUMENT_STORE_REFUSED);
-        expect((failure as Error).message).not.toMatch(
-          /[A-Za-z]:\\|\/tmp\/|EEXIST|ENOTDIR|EACCES/,
-        );
+      config.documentStorePath = blocked;
+      const failure = await importAndConfirm({ accountId, bytes: Buffer.from(csv, 'utf8') }).catch(
+        (e: Error) => e,
+      );
+      expect(failure).toBeInstanceOf(Error);
+      // asserted by identity: a regex alone stays green on a message "improved"
+      // to splice in a cause chain that happens to carry no drive letter
+      expect((failure as Error).message).toBe(DOCUMENT_STORE_REFUSED);
+      expect((failure as Error).message).not.toMatch(
+        /[A-Za-z]:\\|\/tmp\/|EEXIST|ENOTDIR|EACCES/,
+      );
 
-        const rows = (await listImports()).imports;
-        expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ status: 'failed', errorDetail: DOCUMENT_STORE_REFUSED });
-        expect(rows[0].transactions).toBe(0);
-        expect(await listTransactions({ limit: 10 })).toHaveLength(0);
-      });
-
-      // the disk is fixed: the same bytes go in, because only a `committed` import
-      // ever claimed the hash (ROADMAP 4.3)
-      await fs.rm(blocked, { force: true });
-      await runWithWorkspace(workspace, async () => {
-        const retried = await importFile('Storage Failure Bank', csv);
-        expect(retried.duplicate).toBeUndefined();
-        expect(retried.inserted).toBe(1);
-        expect(await blobExists(workspace, retried.importId)).toBe(true);
-      });
+      const refused = (await listImports()).imports.filter(
+        (r) => r.errorDetail === DOCUMENT_STORE_REFUSED,
+      );
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toMatchObject({ status: 'failed', transactions: 0 });
+      expect(await countFor(accountId)).toBe(0);
     } finally {
-      // only while it is still the blocking FILE - on the way out of the happy path
-      // this same path is the workspace's directory, holding the retry's document
-      const stat = await fs.stat(blocked).catch(() => undefined);
-      if (stat?.isFile()) await fs.rm(blocked, { force: true });
+      config.documentStorePath = before;
+      await fs.rm(blocked, { force: true });
     }
+
+    // the disk is fixed: the same bytes go in, because only a `committed` import
+    // ever claimed the hash (ROADMAP 4.3)
+    const retried = await importAndConfirm({ accountId, bytes: Buffer.from(csv, 'utf8') });
+    expect(retried.duplicate).toBeUndefined();
+    expect(retried.inserted).toBe(1);
+    expect(await blobExists(retried.importId)).toBe(true);
   });
 
   it('transactions from a bank sync survive an import deletion', async () => {
@@ -418,10 +418,11 @@ describe('imports: the file layer', () => {
  * `limit` of it, so a panel can say how many are not listed instead of counting what
  * it was sent.
  *
- * Every case runs in a workspace of its own. vitest runs this suite in one process,
- * files in order and with no truncation between them, so 101 imports left in the test
- * workspace would be in every later file's unfiltered listImports() for the rest of
- * the run.
+ * Every case starts with nothing imported and this describe is the last in the file:
+ * vitest runs this suite in one process, files in order and with no truncation between
+ * them, so 101 imports left behind would be in every later file's unfiltered
+ * listImports() for the rest of the run - which is why the truncate is inside each
+ * case rather than at the end of the describe, where a failing case would skip it.
  */
 describe('listImports: the filter and the totals', () => {
   let seq = 0;
@@ -465,17 +466,22 @@ describe('listImports: the filter and the totals', () => {
     expect(confirmed, `confirming ${record.id}`).toMatchObject({ confirmed: true });
     // the pointer only; no bytes are written, and documentAvailable is about the
     // pointer (010 D5)
-    await recordImportDocument(record.id, 1);
+    await recordImportDocument(record.id);
     return record.id;
   }
 
-  const inFreshWorkspace = async (id: string, body: () => Promise<void>): Promise<void> => {
-    await createWorkspace(dbInstance(), id);
-    await runWithWorkspace(id, body);
+  /**
+   * Every total below is exact over everything imported, so each case starts with
+   * nothing imported: the cascade takes the transactions and the staged rows with
+   * the import rows, and nothing after this describe reads them.
+   */
+  const startingEmpty = async (body: () => Promise<void>): Promise<void> => {
+    await dbInstance().execute(sql`TRUNCATE imports CASCADE`);
+    await body();
   };
 
   it('counts the filtered set and pages the same set, with the other account left out', async () => {
-    await inFreshWorkspace('import-totals-filter', async () => {
+    await startingEmpty(async () => {
       const mine = 'csv:totals-mine';
       const theirs = 'csv:totals-theirs';
       const stripped = await importInto(mine, 'Totals Mine', 4);
@@ -499,7 +505,7 @@ describe('listImports: the filter and the totals', () => {
       expect(imports.filter((r) => r.documentAvailable)).toHaveLength(totals.documents);
       expect(imports).toHaveLength(totals.imports);
 
-      // and the workspace's own answer still has the other account's nine in it
+      // and the answer over every account still has the other account's nine in it
       const all = await listImports();
       expect(all.totals).toEqual({ imports: 3, documents: 2, transactions: 16 });
     });
@@ -511,7 +517,7 @@ describe('listImports: the filter and the totals', () => {
    * COUNT(*) OVER () written outside the filtered set passes that one and fails this.
    */
   it('a filtered page shorter than its filtered set still counts the whole of it', async () => {
-    await inFreshWorkspace('import-totals-overflow', async () => {
+    await startingEmpty(async () => {
       const mine = 'csv:overflow-mine';
       const theirs = 'csv:overflow-theirs';
       for (let i = 0; i < 7; i += 1) {
@@ -531,7 +537,7 @@ describe('listImports: the filter and the totals', () => {
   });
 
   it('the page stops at 100 and the total does not', async () => {
-    await inFreshWorkspace('import-totals-cap', async () => {
+    await startingEmpty(async () => {
       for (let i = 0; i < 101; i += 1) {
         await createImport({ fileHash: `cap-${i}`, sourceType: 'csv', parserVersion: 1 });
       }
@@ -548,18 +554,17 @@ describe('listImports: the filter and the totals', () => {
   /**
    * COUNT(*) OVER () returns no ROW when the filtered set is empty, so the zeroes
    * come from an absent row rather than from a page of length 0 - and an id that
-   * matches nothing is not an error: another workspace's id has to stay
-   * indistinguishable from a nonexistent one.
+   * matches nothing is not an error.
    */
   it('an accountId that matches nothing is an empty page and three zeroes', async () => {
-    await inFreshWorkspace('import-totals-unknown', async () => {
+    await startingEmpty(async () => {
       await importInto('csv:unknown-neighbour', 'Unknown Neighbour', 2);
 
       expect(await listImports({ accountId: 'no-such-account' })).toEqual({
         imports: [],
         totals: { imports: 0, documents: 0, transactions: 0 },
       });
-      // '' filters and matches nothing here too: it never widens to the workspace
+      // '' filters and matches nothing here too: it never widens to every account
       expect((await listImports({ accountId: '' })).totals.imports).toBe(0);
     });
   });
@@ -573,7 +578,7 @@ describe('listImports: the filter and the totals', () => {
    * and a column added later inherits this without anyone extending a list.
    */
   it('no field of a listed import is undefined - every alias reached the mapper', async () => {
-    await inFreshWorkspace('import-totals-aliases', async () => {
+    await startingEmpty(async () => {
       await importInto('csv:aliases-mine', 'Aliases Mine', 2);
 
       const [record] = (await listImports()).imports;

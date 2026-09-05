@@ -32,9 +32,9 @@ describe('the page', () => {
   it('offers a way in from the top, the hero and the foot', () => {
     render(<Landing />);
 
-    const signIn = screen.getAllByRole('link', { name: 'Sign in' });
-    expect(signIn.length).toBeGreaterThanOrEqual(3);
-    for (const link of signIn) expect(link).toHaveAttribute('href', '/');
+    const open = screen.getAllByRole('link', { name: 'Open the app' });
+    expect(open.length).toBeGreaterThanOrEqual(3);
+    for (const link of open) expect(link).toHaveAttribute('href', '/');
   });
 
   it('names its landmarks', () => {

@@ -35,7 +35,7 @@
 import { useSyncExternalStore } from 'react';
 
 export interface AppUrl {
-  /** One of SignedIn's TabKeys, unvalidated — this module does not know them. */
+  /** One of Shell's TabKeys, unvalidated — this module does not know them. */
   screen: string | null;
   /** The account id the Overview is about, or null for "whichever is first". */
   account: string | null;
@@ -110,7 +110,7 @@ const href = (): string =>
  * The URL a patch would move to, without moving to it.
  *
  * Exported because the navigation is anchors now, and an `href` is a promise about
- * where a click lands. Building it a second time in SignedIn.tsx would be two pieces
+ * where a click lands. Building it a second time in Shell.tsx would be two pieces
  * of code that agree until one of them is edited — and the failure is invisible from
  * the app's own side: the click still works, because the click never uses the `href`
  * at all. What would be wrong is the address in the status bar, in the copied link,

@@ -17,20 +17,20 @@ process.env.FAMILY_NAMES = 'ANNA BECKER, Becker Anna';
 // pino in tests: silent, and no pino-pretty worker spun up
 process.env.LOG_LEVEL = 'silent';
 process.env.LOG_PRETTY = '0';
-// Source documents go to a per-RUN directory under the OS temp dir, never to
-// backend/data/: imports.test.ts, csv.test.ts, xlsx.test.ts and upload.test.ts all
-// drive real imports, and gitignoring the default root would hide those statement
-// blobs rather than not write them. Keyed on the pid because vitest.config.ts runs
-// one process with isolate:false - src/config is read once per module registry, so
-// a value that differed per file would simply be ignored.
-const documentRoot = path.join(os.tmpdir(), 'finto-test-documents', String(process.pid));
+// Nothing a test does may reach the person's own ~/Finto: the home, and with it the
+// statements folder, go to a per-RUN directory under the OS temp dir. Keyed on the pid
+// because vitest.config.ts runs one process with isolate:false - src/config is read
+// once per module registry, so a value that differed per file would simply be ignored.
+const home = path.join(os.tmpdir(), 'finto-test-home', String(process.pid));
+process.env.FINTO_HOME = home;
+const documentRoot = path.join(home, 'statements');
 process.env.DOCUMENT_STORE_PATH = documentRoot;
 
 // Network is forbidden in tests: rates (Monobank, NBU) must degrade quietly.
 globalThis.fetch = (() =>
   Promise.reject(new Error('network disabled in tests'))) as typeof fetch;
 
-import { freshTestDb, TEST_WORKSPACE_ID } from './pglite';
+import { freshTestDb } from './pglite';
 
 // The disk counterpart of freshTestDb()'s truncate, three lines from it so the two
 // resets are visibly paired: without it an empty database would sit beside the
@@ -42,9 +42,6 @@ import { freshTestDb, TEST_WORKSPACE_ID } from './pglite';
 await fs.rm(documentRoot, { recursive: true, force: true });
 
 const db = await freshTestDb();
-const { initDb, seedDefaults, setWorkspaceFallback } = await import('../src/db');
+const { initDb, seedDefaults } = await import('../src/db');
 initDb(db);
-// Tests call the data layer directly, with no HTTP session to scope them - the
-// fallback stands in for what the session middleware does in production.
-setWorkspaceFallback(TEST_WORKSPACE_ID);
 await seedDefaults();

@@ -9,7 +9,7 @@
  *
  * Not a `role="tablist"`. The app already has one idiom for "which of these is the
  * current one" and it is `aria-current` on a plain button (`.nav-item` in
- * SignedIn.tsx); a real tablist would also make each tab a composite widget, which
+ * Shell.tsx); a real tablist would also make each tab a composite widget, which
  * buys a roving tabindex nobody asked for on a strip of at most three controls.
  *
  * A tab is a name and nothing else. The balance, and the ⋮ that acts on the account,

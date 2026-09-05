@@ -1,16 +1,21 @@
 import crypto from 'crypto';
 import path from 'path';
 import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import fs from 'fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
+import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { type Category, recurringKey } from '../categorizer';
 import { config } from '../config';
-import { DocumentRef, deleteDocument, knowsKeyVersion } from '../documents';
+import { type DocumentLocator, type DocumentRef, deleteDocument } from '../documents';
 import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
+import { assertWritableDir } from '../storage';
 import {
   Account,
   AccountMonthTotals,
@@ -34,9 +39,6 @@ import {
   withOrdinal,
 } from './dedup';
 import * as s from './schema';
-import { currentWorkspaceId } from './workspace';
-
-export { currentWorkspaceId, runWithWorkspace, setWorkspaceFallback } from './workspace';
 
 export type Db = PgDatabase<PgQueryResultHKT, any, any>;
 
@@ -57,63 +59,82 @@ export function dbInstance(): Db {
 
 export const MIGRATIONS_DIR = path.join(__dirname, '..', '..', 'drizzle');
 
+export interface DatabaseHandle {
+  db: Db;
+  /** For the boot log: where the data is, with any password out of it. */
+  location: string;
+  close(): Promise<void>;
+}
+
+/**
+ * Opens and migrates the database config names: a PostgreSQL server when
+ * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Every caller
+ * that needs a handle of its own goes through here, so the two engines are chosen
+ * in one place.
+ */
+export async function openDatabase(): Promise<DatabaseHandle> {
+  if (config.databaseUrl) {
+    const pool = new Pool({ connectionString: config.databaseUrl });
+    const instance = drizzlePg(pool, { schema: s });
+    await migratePg(instance, { migrationsFolder: MIGRATIONS_DIR });
+    return {
+      db: instance,
+      location: config.databaseUrl.replace(/:[^:@/]+@/, ':***@'),
+      close: () => pool.end(),
+    };
+  }
+  // the same probe the statements folder gets, and for a sharper reason: a database
+  // folder that cannot be written to is discovered by the migration, which reports
+  // the SQL it was running and not the permission that stopped it
+  await assertWritableDir(config.databaseDir, 'the database folder (FINTO_HOME/db)');
+  const client = new PGlite(config.databaseDir);
+  const instance = drizzlePglite(client, { schema: s });
+  await migratePglite(instance, { migrationsFolder: MIGRATIONS_DIR });
+  return { db: instance, location: config.databaseDir, close: () => client.close() };
+}
+
+let handle: DatabaseHandle | undefined;
+
 export async function connectDatabase(): Promise<void> {
-  const pool = new Pool({ connectionString: config.databaseUrl });
-  const instance = drizzle(pool, { schema: s });
-  await migrate(instance, { migrationsFolder: MIGRATIONS_DIR });
-  initDb(instance);
-  logDb.info('database connected, migrations applied');
+  handle = await openDatabase();
+  initDb(handle.db);
+  logDb.info(`database ready at ${handle.location}`);
+}
+
+export async function closeDatabase(): Promise<void> {
+  const open = handle;
+  handle = undefined;
+  db = undefined;
+  if (open) await open.close();
 }
 
 export async function seedDefaults(): Promise<void> {
-  const w = currentWorkspaceId();
   const d = getDb();
-  const isOwner = (await listWorkspaceIds())[0] === w;
-  const ownerNames = isOwner ? config.ownerNames : [];
-  const familyNames = isOwner ? config.familyNames : [];
   await d
     .insert(s.incomeSources)
     .values([
-      { workspaceId: w, id: 'salary', label: 'Salary', kind: 'own', patterns: '[]', sort: 0, builtin: true },
+      { id: 'salary', label: 'Salary', kind: 'own', patterns: '[]', sort: 0, builtin: true },
       {
-        workspaceId: w,
         id: 'family',
         // the id is data and stays; the label is what a stranger reads, and a
-        // scholarship is not family. Existing workspaces keep theirs - the insert
-        // ends onConflictDoNothing - and rename it through the Goal screen.
+        // scholarship is not family. A database seeded earlier keeps its label - the
+        // insert ends onConflictDoNothing - and renames it through the Goal screen.
         label: 'Support',
         kind: 'external',
-        patterns: JSON.stringify(familyNames),
+        patterns: JSON.stringify(config.familyNames),
         sort: 1,
         builtin: true,
       },
-      { workspaceId: w, id: 'other', label: 'Other', kind: 'own', patterns: '[]', sort: 2, builtin: true },
+      { id: 'other', label: 'Other', kind: 'own', patterns: '[]', sort: 2, builtin: true },
     ])
     .onConflictDoNothing();
   await d
     .insert(s.settings)
     .values([
-      { workspaceId: w, key: 'base_currency', value: config.baseCurrency },
-      { workspaceId: w, key: 'owner_names', value: JSON.stringify(ownerNames) },
+      { key: 'base_currency', value: config.baseCurrency },
+      { key: 'owner_names', value: JSON.stringify(config.ownerNames) },
     ])
     .onConflictDoNothing();
-}
-
-export async function listWorkspaceIds(): Promise<string[]> {
-  const rows = await getDb()
-    .select({ id: s.organization.id })
-    .from(s.organization)
-    .orderBy(asc(s.organization.createdAt), asc(s.organization.id));
-  return rows.map((r) => r.id);
-}
-
-export async function listUserWorkspaceIds(userId: string): Promise<string[]> {
-  const rows = await getDb()
-    .select({ id: s.member.organizationId })
-    .from(s.member)
-    .where(eq(s.member.userId, userId))
-    .orderBy(asc(s.member.createdAt), asc(s.member.id));
-  return rows.map((r) => r.id);
 }
 
 async function rowsOf<T>(q: SQL): Promise<T[]> {
@@ -135,9 +156,6 @@ function chunked<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-/** The workspace filter every raw SQL query carries. Built at call time - the id lives in ALS. */
-const WS = (): SQL => sql`workspace_id = ${currentWorkspaceId()}`;
-
 /**
  * The effective transfer flag: a manual mark beats auto-detection.
  * Transfer transactions count as neither income nor spending.
@@ -156,8 +174,7 @@ const CATEGORY = sql`COALESCE(category_manual, category)`;
  * deleted: the classifier needs them as the other leg of a transfer - hiding N26
  * shouldn't lose the transfer flag on the matching Revolut income.
  */
-const VISIBLE_ACCOUNT = (): SQL =>
-  sql`account_id NOT IN (SELECT id FROM accounts WHERE hidden AND workspace_id = ${currentWorkspaceId()})`;
+const VISIBLE_ACCOUNT = (): SQL => sql`account_id NOT IN (SELECT id FROM accounts WHERE hidden)`;
 
 /**
  * A row of this account's own, in either table - the two reasons its currency must
@@ -175,11 +192,11 @@ const VISIBLE_ACCOUNT = (): SQL =>
  */
 const HOLDS_TRANSACTIONS = (accountId: string): SQL =>
   sql`EXISTS (SELECT 1 FROM transactions
-      WHERE transactions.account_id = ${accountId} AND transactions.${WS()})`;
+      WHERE transactions.account_id = ${accountId})`;
 
 const HOLDS_STAGED_ROWS = (accountId: string): SQL =>
   sql`EXISTS (SELECT 1 FROM staged_transactions
-      WHERE staged_transactions.account_id = ${accountId} AND staged_transactions.${WS()})`;
+      WHERE staged_transactions.account_id = ${accountId})`;
 
 /**
  * Clauses of the UPDATE that writes the currency rather than a count before it -
@@ -196,15 +213,15 @@ export async function getSetting(key: string): Promise<string | undefined> {
   const rows = await getDb()
     .select()
     .from(s.settings)
-    .where(and(eq(s.settings.workspaceId, currentWorkspaceId()), eq(s.settings.key, key)));
+    .where(eq(s.settings.key, key));
   return rows[0]?.value;
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
   await getDb()
     .insert(s.settings)
-    .values({ workspaceId: currentWorkspaceId(), key, value })
-    .onConflictDoUpdate({ target: [s.settings.workspaceId, s.settings.key], set: { value } });
+    .values({ key, value })
+    .onConflictDoUpdate({ target: [s.settings.key], set: { value } });
 }
 
 export async function currentBaseCurrency(): Promise<string> {
@@ -215,15 +232,15 @@ export async function getMeta(key: string): Promise<string | undefined> {
   const rows = await getDb()
     .select()
     .from(s.meta)
-    .where(and(eq(s.meta.workspaceId, currentWorkspaceId()), eq(s.meta.key, key)));
+    .where(eq(s.meta.key, key));
   return rows[0]?.value;
 }
 
 export async function setMeta(key: string, value: string): Promise<void> {
   await getDb()
     .insert(s.meta)
-    .values({ workspaceId: currentWorkspaceId(), key, value })
-    .onConflictDoUpdate({ target: [s.meta.workspaceId, s.meta.key], set: { value } });
+    .values({ key, value })
+    .onConflictDoUpdate({ target: [s.meta.key], set: { value } });
 }
 
 export async function upsertAccount(a: Account): Promise<void> {
@@ -234,7 +251,6 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
   await d
     .insert(s.accounts)
     .values({
-      workspaceId: currentWorkspaceId(),
       id: a.id,
       provider: a.provider,
       name: a.name,
@@ -243,7 +259,7 @@ export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
       iban: a.iban ?? null,
     })
     .onConflictDoUpdate({
-      target: [s.accounts.workspaceId, s.accounts.id],
+      target: [s.accounts.id],
       // `hidden` is deliberately not in the set below: nothing here may silently
       // un-hide an account the user removed.
       //
@@ -272,7 +288,7 @@ export async function updateAccountBalance(id: string, balance: number): Promise
   await getDb()
     .update(s.accounts)
     .set({ balanceCents: toCents(balance) })
-    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+    .where(eq(s.accounts.id, id));
 }
 
 export async function recalcAccountBalanceFromTransactions(accountId: string): Promise<void> {
@@ -286,8 +302,8 @@ export async function recalcAccountBalanceFromTransactionsOn(
   await d.execute(sql`
     UPDATE accounts SET balance_cents = (
       SELECT COALESCE(SUM(amount_cents), 0) FROM transactions
-      WHERE account_id = ${accountId} AND ${WS()}
-    ) WHERE id = ${accountId} AND ${WS()}`);
+      WHERE account_id = ${accountId}
+    ) WHERE id = ${accountId}`);
 }
 
 type AccountRow = typeof s.accounts.$inferSelect;
@@ -305,11 +321,10 @@ function rowToAccount(r: AccountRow): Account {
 }
 
 export async function listAccounts(includeHidden = false): Promise<Account[]> {
-  const ws = eq(s.accounts.workspaceId, currentWorkspaceId());
   const rows = await getDb()
     .select()
     .from(s.accounts)
-    .where(includeHidden ? ws : and(ws, eq(s.accounts.hidden, false)));
+    .where(includeHidden ? undefined : eq(s.accounts.hidden, false));
   return rows
     .sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name))
     .map(rowToAccount);
@@ -319,7 +334,7 @@ export async function getAccount(id: string): Promise<Account | undefined> {
   const rows = await getDb()
     .select()
     .from(s.accounts)
-    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+    .where(eq(s.accounts.id, id));
   return rows[0] ? rowToAccount(rows[0]) : undefined;
 }
 
@@ -338,10 +353,7 @@ export async function findAccountByName(name: string): Promise<Account | undefin
     .select()
     .from(s.accounts)
     .where(
-      and(
-        eq(s.accounts.workspaceId, currentWorkspaceId()),
-        sql`lower(${s.accounts.name}) = lower(${name})`,
-      ),
+      sql`lower(${s.accounts.name}) = lower(${name})`,
     );
   return rows[0] ? rowToAccount(rows[0]) : undefined;
 }
@@ -359,7 +371,7 @@ export async function resolveUploadAccount(id: string): Promise<UploadAccount> {
   const rows = await getDb()
     .select()
     .from(s.accounts)
-    .where(and(eq(s.accounts.workspaceId, currentWorkspaceId()), eq(s.accounts.id, id)));
+    .where(eq(s.accounts.id, id));
   const row = rows[0];
   if (!row) return { ok: false, reason: 'not-found' };
   if (row.hidden) return { ok: false, reason: 'hidden' };
@@ -393,7 +405,6 @@ export async function createAccount(input: {
     const rows = await getDb()
       .insert(s.accounts)
       .values({
-        workspaceId: currentWorkspaceId(),
         id: crypto.randomUUID(),
         provider: 'upload',
         name: input.name,
@@ -418,7 +429,7 @@ async function currencyRefusal(
   id: string,
 ): Promise<'has-transactions' | 'staged-import' | undefined> {
   const rows = await rowsOf<{ blocked: boolean }>(
-    sql`SELECT ${HOLDS_TRANSACTIONS(id)} AS blocked FROM accounts WHERE id = ${id} AND ${WS()}`,
+    sql`SELECT ${HOLDS_TRANSACTIONS(id)} AS blocked FROM accounts WHERE id = ${id}`,
   );
   if (!rows[0]) return undefined;
   return rows[0].blocked ? 'has-transactions' : 'staged-import';
@@ -435,7 +446,6 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
       })
       .where(
         and(
-          eq(s.accounts.workspaceId, currentWorkspaceId()),
           eq(s.accounts.id, id),
           // and() drops undefined, so a rename or a hide keeps exactly the WHERE it
           // has always had - which is what leaves a populated account renameable
@@ -534,14 +544,12 @@ export async function insertTransactionsOn(
   importId?: string,
 ): Promise<number> {
   if (txs.length === 0) return 0;
-  const w = currentWorkspaceId();
   const values: (typeof s.transactions.$inferInsert)[] = claimedKeys(txs).map(
     ({ tx: t, amountCents, dedupKey }) => {
       // transactions already in the base currency need no conversion - fill it now;
       // for the rest base_amount is filled later by backfillBaseAmounts (fxrates.ts)
       const isBase = t.currency === baseCurrency;
       return {
-        workspaceId: w,
         id: crypto.randomUUID(),
         accountId: t.accountId,
         dedupKey,
@@ -565,7 +573,7 @@ export async function insertTransactionsOn(
       .insert(s.transactions)
       .values(chunk)
       .onConflictDoNothing({
-        target: [s.transactions.workspaceId, s.transactions.accountId, s.transactions.dedupKey],
+        target: [s.transactions.accountId, s.transactions.dedupKey],
       })
       .returning({ id: s.transactions.id });
     inserted += res.length;
@@ -632,7 +640,7 @@ function rowToTx(r: TxRow): Transaction {
 }
 
 export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
-  const where: SQL[] = [WS(), VISIBLE_ACCOUNT()];
+  const where: SQL[] = [VISIBLE_ACCOUNT()];
   if (f.from) where.push(sql`date >= ${f.from}`);
   // include the whole "to" day when a date without a time is given
   if (f.to) where.push(sql`date <= ${f.to.length === 10 ? `${f.to}T23:59:59.999Z` : f.to}`);
@@ -677,18 +685,15 @@ export type SummaryScope = WorkspaceScope | AccountScope;
  * which needs the month to survive even when every row in it is a transfer and
  * therefore spells its own WHERE - see the note there.
  *
- * The workspace clause is table-qualified: summaryIncomeBySource joins
- * income_sources, which has a workspace_id of its own, and an unqualified one is
- * ambiguous there.
  */
 const scopeSql = (scope: SummaryScope): { where: SQL; money: SQL } =>
   scope.kind === 'account'
     ? {
-        where: sql`transactions.${WS()} AND account_id = ${scope.id} AND ${NOT_TRANSFER}`,
+        where: sql`account_id = ${scope.id} AND ${NOT_TRANSFER}`,
         money: sql`amount_cents`,
       }
     : {
-        where: sql`transactions.${WS()} AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}`,
+        where: sql`${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND ${CONVERTED}`,
         money: sql`base_amount_cents`,
       };
 
@@ -734,7 +739,7 @@ export async function summaryIncomeByCategory(
 const INCOME_SOURCE = sql`COALESCE(income_source_manual, income_source, 'other')`;
 
 const IS_EXTERNAL = (): SQL =>
-  sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external' AND workspace_id = ${currentWorkspaceId()})`;
+  sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external')`;
 
 export async function summaryIncomeBySource(
   scope: SummaryScope,
@@ -748,8 +753,7 @@ export async function summaryIncomeBySource(
            COALESCE(i.kind, 'own') AS kind,
            SUM(${money}) AS total_cents
     FROM transactions
-    LEFT JOIN income_sources i
-      ON i.id = ${INCOME_SOURCE} AND i.workspace_id = transactions.workspace_id
+    LEFT JOIN income_sources i ON i.id = ${INCOME_SOURCE}
     WHERE ${where}
       AND amount_cents > 0 AND NOT refund AND date >= ${from} AND date <= ${to}
     GROUP BY 1, 2, 3
@@ -842,7 +846,7 @@ async function accountMonths(
            SUM(CASE WHEN ${NOT_TRANSFER} AND amount_cents > 0 AND NOT refund THEN amount_cents ELSE 0 END) AS income,
            SUM(amount_cents) AS net
     FROM transactions
-    WHERE transactions.${WS()} AND account_id = ${scope.id} AND date >= ${from} AND date <= ${to}
+    WHERE account_id = ${scope.id} AND date >= ${from} AND date <= ${to}
     GROUP BY 1
     ORDER BY 1 ASC`);
   return rows.map((r) => ({
@@ -892,7 +896,7 @@ export async function avgMonthlyByCategory(
 export async function accountOtherCurrencies(scope: AccountScope): Promise<string[]> {
   const rows = await rowsOf<{ currency: string }>(sql`
     SELECT DISTINCT currency FROM transactions
-    WHERE ${WS()} AND account_id = ${scope.id} AND currency <> ${scope.currency}
+    WHERE account_id = ${scope.id} AND currency <> ${scope.currency}
     ORDER BY 1`);
   return rows.map((r) => r.currency);
 }
@@ -916,7 +920,6 @@ export interface ImportRecord {
    * a rename moves the account, never this row's accountName.
    */
   accountId: string | null;
-  uploadedBy: string | null;
   uploadedAt: string;
   parserVersion: number;
   status: ImportStatus;
@@ -925,11 +928,10 @@ export interface ImportRecord {
   errorDetail: string | null;
   transactions: number;
   /**
-   * Whether a document can be READ for this row, which is not whether bytes exist
-   * (see imports.document_key_version): a restored row has its pointer stripped
-   * while its statement is still on disk. The version itself never leaves the
-   * server - it is a storage-layout detail, and a client that can read it is a
-   * client that can be tempted to build a key.
+   * Whether the ROW claims a document, which is not whether the file is on this
+   * disk: the key is derived from originalFilename, id and sourceType, all three of
+   * which a backup carries, so the claim survives a restore and the file may not.
+   * The document route answers what is actually readable; nothing here touches disk.
    */
   documentAvailable: boolean;
 }
@@ -943,7 +945,6 @@ const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => 
   originalFilename: r.originalFilename,
   accountName: r.accountName,
   accountId: r.accountId,
-  uploadedBy: r.uploadedBy,
   uploadedAt: r.uploadedAt,
   parserVersion: r.parserVersion,
   status: r.status,
@@ -951,7 +952,7 @@ const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => 
   rowsRejected: r.rowsRejected,
   errorDetail: r.errorDetail,
   transactions: r.transactions ?? 0,
-  documentAvailable: r.documentKeyVersion !== null,
+  documentAvailable: r.documentStored,
 });
 
 /**
@@ -968,7 +969,6 @@ export async function findCommittedImportByHash(
     .from(s.imports)
     .where(
       and(
-        eq(s.imports.workspaceId, currentWorkspaceId()),
         eq(s.imports.fileHash, fileHash),
         eq(s.imports.status, 'committed'),
       ),
@@ -982,17 +982,14 @@ export async function createImport(input: {
   sourceType: ImportSourceType;
   parserVersion: number;
   originalFilename?: string;
-  uploadedBy?: string;
 }): Promise<ImportRecord> {
   const rows = await getDb()
     .insert(s.imports)
     .values({
-      workspaceId: currentWorkspaceId(),
       id: crypto.randomUUID(),
       fileHash: input.fileHash,
       sourceType: input.sourceType,
       originalFilename: input.originalFilename ?? null,
-      uploadedBy: input.uploadedBy ?? null,
       uploadedAt: new Date().toISOString(),
       parserVersion: input.parserVersion,
       status: 'pending',
@@ -1002,18 +999,15 @@ export async function createImport(input: {
 }
 
 /**
- * The bytes are on disk: the row may now claim them. A separate write rather than
- * a field on createImport/failImport, because the put happens between the two - and
+ * The file is on disk: the row may now claim it. A separate write rather than a
+ * field on createImport/failImport, because the put happens between the two - and
  * a FAILED import keeps its document, which is what makes a miss diagnosable.
  *
  * Never called before the put: a row claiming a document that is not there is the
  * state every read would have to distrust.
  */
-export async function recordImportDocument(id: string, keyVersion: number): Promise<void> {
-  await getDb()
-    .update(s.imports)
-    .set({ documentKeyVersion: keyVersion })
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+export async function recordImportDocument(id: string): Promise<void> {
+  await getDb().update(s.imports).set({ documentStored: true }).where(eq(s.imports.id, id));
 }
 
 /**
@@ -1023,42 +1017,45 @@ export async function recordImportDocument(id: string, keyVersion: number): Prom
  * user has been told is deleted, and nothing revisits it.
  */
 export async function clearImportDocument(id: string): Promise<void> {
-  await getDb()
-    .update(s.imports)
-    .set({ documentKeyVersion: null })
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+  await getDb().update(s.imports).set({ documentStored: false }).where(eq(s.imports.id, id));
 }
 
-export interface ImportDocumentInfo {
-  keyVersion: number | null;
-  originalFilename: string | null;
+/** What names the file on disk, plus the pointer - never the file's path itself. */
+export interface ImportDocumentInfo extends DocumentLocator {
   sourceType: ImportSourceType;
+  documentStored: boolean;
 }
 
 export async function getImportDocumentInfo(id: string): Promise<ImportDocumentInfo | undefined> {
   const rows = await getDb()
     .select({
-      keyVersion: s.imports.documentKeyVersion,
       originalFilename: s.imports.originalFilename,
       sourceType: s.imports.sourceType,
+      documentStored: s.imports.documentStored,
     })
     .from(s.imports)
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
-  return rows[0];
+    .where(eq(s.imports.id, id));
+  return rows[0] && { importId: id, ...rows[0] };
 }
 
+/** Undefined when the row claims no readable document, whatever is on disk. */
 export async function getImportDocumentRef(id: string): Promise<DocumentRef | undefined> {
   const rows = await getDb()
-    .select({ fileHash: s.imports.fileHash, keyVersion: s.imports.documentKeyVersion })
+    .select({
+      fileHash: s.imports.fileHash,
+      originalFilename: s.imports.originalFilename,
+      sourceType: s.imports.sourceType,
+      documentStored: s.imports.documentStored,
+    })
     .from(s.imports)
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+    .where(eq(s.imports.id, id));
   const row = rows[0];
-  if (!row || row.keyVersion === null) return undefined;
-  return { importId: id, keyVersion: row.keyVersion, fileHash: row.fileHash };
+  if (!row || !row.documentStored) return undefined;
+  const { documentStored: _stored, ...locator } = row;
+  return { importId: id, ...locator };
 }
 
 export async function failImport(id: string, message: string): Promise<void> {
-  const w = currentWorkspaceId();
   await getDb().transaction(async (tx) => {
     await tx
       .update(s.imports)
@@ -1072,10 +1069,10 @@ export async function failImport(id: string, message: string): Promise<void> {
             ? message
             : `${message.slice(0, ERROR_DETAIL_MAX - 1)}…`,
       })
-      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+      .where(eq(s.imports.id, id));
     await tx
       .delete(s.stagedTransactions)
-      .where(and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)));
+      .where(eq(s.stagedTransactions.importId, id));
   });
 }
 
@@ -1119,28 +1116,26 @@ type ImportListRow = ImportRow & {
 export async function listImports(
   opts: { accountId?: string; limit?: number } = {},
 ): Promise<ImportList> {
-  const where: SQL[] = [WS()];
+  const where: SQL[] = [];
   // on presence, never on truthiness: '' is a filter that matches nothing, and must
-  // not widen to the whole workspace at this layer either
+  // not widen to every account at this layer either
   if (opts.accountId !== undefined) where.push(sql`account_id = ${opts.accountId}`);
   const limit = opts.limit && opts.limit > 0 ? opts.limit : 100;
   const rows = await rowsOf<ImportListRow>(sql`
     WITH f AS (
-      SELECT workspace_id AS "workspaceId", id, file_hash AS "fileHash",
+      SELECT id, file_hash AS "fileHash",
              source_type AS "sourceType", original_filename AS "originalFilename",
              account_name AS "accountName", account_currency AS "accountCurrency",
-             account_id AS "accountId", uploaded_by AS "uploadedBy",
+             account_id AS "accountId",
              uploaded_at AS "uploadedAt", parser_version AS "parserVersion", status,
              rows_accepted AS "rowsAccepted", rows_rejected AS "rowsRejected",
              error_detail AS "errorDetail",
-             document_key_version AS "documentKeyVersion",
-             (SELECT COUNT(*) FROM transactions t
-               WHERE t.workspace_id = imports.workspace_id AND t.import_id = imports.id)
-               AS "ownTx"
-      FROM imports WHERE ${sql.join(where, sql` AND `)})
+             document_stored AS "documentStored",
+             (SELECT COUNT(*) FROM transactions t WHERE t.import_id = imports.id) AS "ownTx"
+      FROM imports${sql.raw(where.length > 0 ? ' WHERE ' : '')}${sql.join(where, sql` AND `)})
     SELECT f.*,
            COUNT(*) OVER () AS "totalImports",
-           COUNT(*) FILTER (WHERE "documentKeyVersion" IS NOT NULL) OVER () AS "totalDocuments",
+           COUNT(*) FILTER (WHERE "documentStored") OVER () AS "totalDocuments",
            SUM("ownTx") OVER () AS "totalTransactions"
     FROM f ORDER BY "uploadedAt" DESC, id DESC LIMIT ${limit}`);
   const first = rows[0];
@@ -1168,10 +1163,7 @@ export async function listImportAccountIds(importId: string): Promise<string[]> 
     .selectDistinct({ accountId: s.transactions.accountId })
     .from(s.transactions)
     .where(
-      and(
-        eq(s.transactions.workspaceId, currentWorkspaceId()),
-        eq(s.transactions.importId, importId),
-      ),
+      eq(s.transactions.importId, importId),
     );
   return rows.map((r) => r.accountId).sort();
 }
@@ -1219,9 +1211,7 @@ export async function stageImport(
   rowsRejected: number,
   account: StagedAccount,
 ): Promise<void> {
-  const w = currentWorkspaceId();
   const values = txs.map((t, i) => ({
-    workspaceId: w,
     importId: id,
     rowNo: i,
     accountId: t.accountId,
@@ -1248,7 +1238,7 @@ export async function stageImport(
         accountCurrency: account.currency,
         accountId: account.id,
       })
-      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+      .where(eq(s.imports.id, id));
   });
 }
 
@@ -1276,8 +1266,7 @@ export async function countNewKeys(txs: NewTransaction[]): Promise<number> {
     const rows = await rowsOf<{ n: string }>(sql`
       SELECT COUNT(*) AS n FROM transactions t
       JOIN (VALUES ${keyPairs(chunk)}) AS k(account_id, dedup_key)
-        ON t.account_id = k.account_id AND t.dedup_key = k.dedup_key
-      WHERE t.${WS()}`);
+        ON t.account_id = k.account_id AND t.dedup_key = k.dedup_key`);
     taken += Number(rows[0].n);
   }
   return pairs.length - taken;
@@ -1309,19 +1298,17 @@ export async function supersedeStagedImports(
   fileHash: string,
   exceptId: string,
 ): Promise<string[]> {
-  const w = currentWorkspaceId();
   const rows = await getDb().transaction(async (tx) => {
     const mine = await tx
       .select({ uploadedAt: s.imports.uploadedAt })
       .from(s.imports)
-      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, exceptId)));
-    if (!mine[0]) throw new Error(`import ${exceptId} is not in this workspace`);
+      .where(eq(s.imports.id, exceptId));
+    if (!mine[0]) throw new Error(`import ${exceptId} does not exist`);
     const claimed = await tx
       .update(s.imports)
       .set({ status: 'discarded', errorDetail: SUPERSEDED_BY_REUPLOAD.slice(0, ERROR_DETAIL_MAX) })
       .where(
         and(
-          eq(s.imports.workspaceId, w),
           eq(s.imports.fileHash, fileHash),
           eq(s.imports.status, 'awaiting_confirmation'),
           sql`(uploaded_at, id) < (${mine[0].uploadedAt}::text, ${exceptId}::text)`,
@@ -1330,13 +1317,10 @@ export async function supersedeStagedImports(
       .returning({ id: s.imports.id, uploadedAt: s.imports.uploadedAt });
     for (const chunk of chunked(claimed, 100)) {
       await tx.delete(s.stagedTransactions).where(
-        and(
-          eq(s.stagedTransactions.workspaceId, w),
-          inArray(
+        inArray(
             s.stagedTransactions.importId,
             chunk.map((c) => c.id),
           ),
-        ),
       );
     }
     return claimed;
@@ -1352,7 +1336,7 @@ async function importStateOf(
   const rows = await getDb()
     .select({ status: s.imports.status, fileHash: s.imports.fileHash })
     .from(s.imports)
-    .where(and(eq(s.imports.workspaceId, currentWorkspaceId()), eq(s.imports.id, id)));
+    .where(eq(s.imports.id, id));
   return rows[0];
 }
 
@@ -1402,7 +1386,6 @@ export type ConfirmOutcome =
   | { confirmed: false; reason: 'account-hidden' };
 
 export async function confirmImport(id: string): Promise<ConfirmOutcome | undefined> {
-  const w = currentWorkspaceId();
   const baseCurrency = await currentBaseCurrency();
   let accountId = '';
   let inserted = 0;
@@ -1415,7 +1398,6 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
         .set({ status: 'committed' })
         .where(
           and(
-            eq(s.imports.workspaceId, w),
             eq(s.imports.id, id),
             eq(s.imports.status, 'awaiting_confirmation'),
           ),
@@ -1444,7 +1426,7 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
         .select()
         .from(s.stagedTransactions)
         .where(
-          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+          eq(s.stagedTransactions.importId, id),
         )
         // the ORDER BY is not what makes the counts right - ordinals are numbered
         // within a group, so the count is order-independent. What it decides is
@@ -1495,7 +1477,7 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
         await tx
           .select({ hidden: s.accounts.hidden })
           .from(s.accounts)
-          .where(and(eq(s.accounts.workspaceId, w), eq(s.accounts.id, accountId)))
+          .where(eq(s.accounts.id, accountId))
           .for('update')
       ).at(0);
       if (!holder) throw new AccountMissing();
@@ -1504,7 +1486,7 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       await tx
         .delete(s.stagedTransactions)
         .where(
-          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+          eq(s.stagedTransactions.importId, id),
         );
       // inside the transaction. Nothing else ever recomputes an account's balance, so
       // a crash between the inserts and this would leave Overview showing 0 for an
@@ -1548,14 +1530,12 @@ export type DiscardOutcome =
   | { discarded: false; status: ImportStatus };
 
 export async function discardImport(id: string): Promise<DiscardOutcome | undefined> {
-  const w = currentWorkspaceId();
   const claimed = await getDb().transaction(async (tx) => {
     const rows = await tx
       .update(s.imports)
       .set({ status: 'discarded' })
       .where(
         and(
-          eq(s.imports.workspaceId, w),
           eq(s.imports.id, id),
           eq(s.imports.status, 'awaiting_confirmation'),
         ),
@@ -1565,7 +1545,7 @@ export async function discardImport(id: string): Promise<DiscardOutcome | undefi
       await tx
         .delete(s.stagedTransactions)
         .where(
-          and(eq(s.stagedTransactions.workspaceId, w), eq(s.stagedTransactions.importId, id)),
+          eq(s.stagedTransactions.importId, id),
         );
     }
     return rows.length;
@@ -1610,7 +1590,7 @@ async function computedGroupsOf(
   const rows = await rowsVia<{ account_id: string; dedup_key: string }>(
     d,
     sql`SELECT DISTINCT account_id, dedup_key FROM transactions
-        WHERE ${WS()} AND import_id = ${importId}
+        WHERE import_id = ${importId}
           AND starts_with(dedup_key, ${COMPUTED_PREFIX})`,
   );
   const seen = new Map<string, { accountId: string; prefix: string }>();
@@ -1643,8 +1623,8 @@ const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
  * is often the current key of another. Between them the affected slots are all
  * free, so a concurrent import into one of these groups can take a slot and make
  * the second pass violate the unique index - which rolls the whole delete back
- * rather than corrupting anything. Fail-safe, and acceptable while a workspace is
- * one person uploading files.
+ * rather than corrupting anything. Fail-safe, and acceptable for one person
+ * uploading files, which is the only shape this application has.
  *
  * The statement count is bounded by the chunk size and not by the size of the
  * deleted import: rolling back a large statement is the thing this whole feature
@@ -1661,8 +1641,7 @@ async function renumberGroups(
         d,
         sql`SELECT t.id, t.account_id, t.dedup_key FROM transactions t
             JOIN (VALUES ${groupPairs(chunk)}) AS g(account_id, prefix)
-              ON t.account_id = g.account_id AND starts_with(t.dedup_key, g.prefix)
-            WHERE t.${WS()}`,
+              ON t.account_id = g.account_id AND starts_with(t.dedup_key, g.prefix)`,
       )),
     );
   }
@@ -1693,16 +1672,15 @@ async function renumberGroups(
       await d.execute(sql`
         UPDATE transactions AS t SET dedup_key = v.new_key
         FROM (VALUES ${keyAssignments(chunk)}) AS v(id, new_key)
-        WHERE t.${WS()} AND t.id = v.id`);
+        WHERE t.id = v.id`);
     }
   }
 }
 
 /**
  * What it removes is exactly the rows this import first wrote: not another import's,
- * not another workspace's (the foreign key is composite), and not a row no import
- * owns (import_id NULL). It does not remove the account, whose balance is recomputed
- * afterwards.
+ * and not a row no import owns (import_id NULL). It does not remove the account,
+ * whose balance is recomputed afterwards.
  *
  * The ordinals of whatever survives in the affected groups are renumbered in the
  * same transaction - see renumberGroup for what a hole would do.
@@ -1710,18 +1688,21 @@ async function renumberGroups(
 export async function deleteImport(
   id: string,
 ): Promise<{ removed: number; accountIds: string[] } | undefined> {
-  const w = currentWorkspaceId();
   const existing = await getDb()
-    // the version is read for the diagnostic below only - never to decide whether
-    // to delete the blob, which is unconditional (see deleteDocument)
-    .select({ id: s.imports.id, keyVersion: s.imports.documentKeyVersion })
+    // what names the file, read before the row goes: the delete of the file is
+    // unconditional on the pointer (see deleteDocument), so the pointer is not read
+    .select({
+      id: s.imports.id,
+      originalFilename: s.imports.originalFilename,
+      sourceType: s.imports.sourceType,
+    })
     .from(s.imports)
-    .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+    .where(eq(s.imports.id, id));
   if (!existing[0]) return undefined;
 
   const owned = await rowsOf<{ account_id: string; n: string }>(
     sql`SELECT account_id, COUNT(*) AS n FROM transactions
-        WHERE ${WS()} AND import_id = ${id} GROUP BY account_id`,
+        WHERE import_id = ${id} GROUP BY account_id`,
   );
   const accountIds = owned.map((r) => r.account_id);
   const removed = owned.reduce((sum, r) => sum + Number(r.n), 0);
@@ -1730,7 +1711,7 @@ export async function deleteImport(
     const groups = await computedGroupsOf(tx, id);
     await tx
       .delete(s.imports)
-      .where(and(eq(s.imports.workspaceId, w), eq(s.imports.id, id)));
+      .where(eq(s.imports.id, id));
     await renumberGroups(tx, groups);
   });
 
@@ -1745,17 +1726,11 @@ export async function deleteImport(
   // in a form an operator can act on, because "delete my data" that quietly leaves
   // the bank statement on disk is the failure a data-deletion promise cannot have.
   try {
-    await deleteDocument(id);
+    await deleteDocument({ importId: id, ...existing[0] });
   } catch (e) {
     logDb.error(
       { err: e },
       `import ${id} deleted, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
-    );
-  }
-  const claimed = existing[0].keyVersion;
-  if (claimed !== null && !knowsKeyVersion(claimed)) {
-    logDb.error(
-      `import ${id} deleted, but its document was written under key layout ${claimed}, which this server cannot address - remove it by hand`,
     );
   }
 
@@ -1781,9 +1756,7 @@ export type AccountDelete =
   | Extract<AccountWrite, { reason: 'not-found' } | { reason: 'staged-import' }>;
 
 type AccountScoped = {
-  [K in keyof typeof s]: (typeof s)[K] extends { accountId: unknown; workspaceId: unknown }
-    ? K
-    : never;
+  [K in keyof typeof s]: (typeof s)[K] extends { accountId: unknown } ? K : never;
 }[keyof typeof s];
 
 const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
@@ -1793,7 +1766,7 @@ const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
  * is a state the client draws deliberately - the tab remains and says the account
  * is no longer here - so deleting the chart with the account would take a tab away
  * with nothing said, and blanking its account would silently turn one account's
- * chart into the whole workspace's under its old title.
+ * chart into an all-accounts one under its old title.
  */
 const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
 
@@ -1808,13 +1781,14 @@ const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
  */
 const ACCOUNT_CASCADE = {
   transactions: (id: string): SQL =>
-    sql`DELETE FROM transactions WHERE ${WS()} AND account_id = ${id}`,
+    sql`DELETE FROM transactions WHERE account_id = ${id}`,
   imports: (id: string): SQL =>
-    sql`DELETE FROM imports WHERE ${WS()} AND account_id = ${id}
-        AND NOT ${HOLDS_STAGED_ROWS(id)} RETURNING id, document_key_version`,
+    sql`DELETE FROM imports WHERE account_id = ${id}
+        AND NOT ${HOLDS_STAGED_ROWS(id)}
+        RETURNING id, document_stored, original_filename, source_type`,
   stagedTransactions: CASCADES_FROM_IMPORTS,
   transferRules: (id: string): SQL =>
-    sql`DELETE FROM transfer_rules WHERE ${WS()} AND account_id = ${id}`,
+    sql`DELETE FROM transfer_rules WHERE account_id = ${id}`,
   analyticsCharts: OUTLIVES_THE_ACCOUNT,
 } satisfies Record<
   AccountScoped,
@@ -1830,14 +1804,19 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
     documents: 0,
     transferRules: 0,
   };
-  let gone: { id: string; document_key_version: number | null }[] = [];
+  let gone: {
+    id: string;
+    document_stored: boolean;
+    original_filename: string | null;
+    source_type: string;
+  }[] = [];
   let strayAccountIds: string[] = [];
   let strayImportIds: string[] = [];
   try {
     await getDb().transaction(async (tx) => {
       const [held] = await rowsVia<{ id: string }>(
         tx,
-        sql`SELECT id FROM accounts WHERE ${WS()} AND id = ${id} FOR UPDATE`,
+        sql`SELECT id FROM accounts WHERE id = ${id} FOR UPDATE`,
       );
       if (!held) throw new NoSuchAccount();
 
@@ -1851,9 +1830,9 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
       const strays = await rowsVia<{ import_id: string; account_id: string }>(
         tx,
         sql`SELECT DISTINCT t.import_id, t.account_id FROM transactions t
-            WHERE t.${WS()} AND t.account_id <> ${id}
+            WHERE t.account_id <> ${id}
               AND t.import_id IN (
-                SELECT i.id FROM imports i WHERE i.${WS()} AND i.account_id = ${id})`,
+                SELECT i.id FROM imports i WHERE i.account_id = ${id})`,
       );
       const groups = new Map<string, { accountId: string; prefix: string }>();
       if (strays.length > 0) {
@@ -1868,12 +1847,9 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
         }
       }
 
-      gone = await rowsVia<{ id: string; document_key_version: number | null }>(
-        tx,
-        ACCOUNT_CASCADE.imports(id),
-      );
+      gone = await rowsVia<typeof gone[number]>(tx, ACCOUNT_CASCADE.imports(id));
       deleted.imports = gone.length;
-      deleted.documents = gone.filter((r) => r.document_key_version !== null).length;
+      deleted.documents = gone.filter((r) => r.document_stored).length;
 
       // the checked premise, never insurance: renumberGroups moves rows through a
       // parking namespace and can trip the unique index against a concurrent
@@ -1884,7 +1860,7 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
 
       const [removed] = await rowsVia<{ id: string }>(
         tx,
-        sql`DELETE FROM accounts WHERE ${WS()} AND id = ${id}
+        sql`DELETE FROM accounts WHERE id = ${id}
             AND NOT ${HOLDS_STAGED_ROWS(id)} RETURNING id`,
       );
       // unambiguous, unlike updateAccount's read-back: the row lock is held from the
@@ -1904,16 +1880,15 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
   // again. A failure is logged and not raised: the rows really are deleted.
   for (const row of gone) {
     try {
-      await deleteDocument(row.id);
+      await deleteDocument({
+        importId: row.id,
+        originalFilename: row.original_filename,
+        sourceType: row.source_type,
+      });
     } catch (e) {
       logDb.error(
         { err: e },
         `import ${row.id} was deleted with account ${id}, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
-      );
-    }
-    if (row.document_key_version !== null && !knowsKeyVersion(row.document_key_version)) {
-      logDb.error(
-        `import ${row.id} was deleted with account ${id}, but its document was written under key layout ${row.document_key_version}, which this server cannot address - remove it by hand`,
       );
     }
   }
@@ -1942,7 +1917,7 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
 
 export async function allTransactions(): Promise<Transaction[]> {
   const rows = await rowsOf<TxRow>(
-    sql`SELECT * FROM transactions WHERE ${WS()} ORDER BY date ASC`,
+    sql`SELECT * FROM transactions ORDER BY date ASC`,
   );
   return rows.map(rowToTx);
 }
@@ -1957,30 +1932,59 @@ export interface Classification {
 }
 
 /**
+ * How many rows one UPDATE carries. Six bound parameters per row against Postgres's
+ * ceiling of 65,535 puts the hard limit near 10,900; 500 is well under it and is
+ * chosen for the other end - it is the size at which a batch is still a single
+ * round trip a reader can wait on.
+ */
+export const CLASSIFY_BATCH = 500;
+
+/**
  * Writes the classification result. Manual marks (transfer_manual,
  * income_source_manual, one_off) are left alone - they beat auto-detection.
+ *
+ * One statement per batch, and no transaction around the whole run. This used to be
+ * one UPDATE per row inside a single transaction, which is correct against a
+ * connection POOL and is a freeze against the embedded database: PGlite has ONE
+ * connection, so every other query in the application queues behind the open
+ * transaction and the app answers nothing until the re-tag finishes. Nothing sees it
+ * - the suite runs sequentially, and the node-postgres side never had the property.
+ *
+ * Dropping the transaction is safe because of the order in reclassifyAll: the
+ * classify_version signature is written AFTER this returns, so a run that dies half
+ * way leaves the old signature, and the next start recomputes every row again.
+ * A partial re-tag is a state this converges out of rather than one it can be stuck
+ * in - which is the only reason atomicity was worth anything here.
+ *
+ * The casts are on the first VALUES row's business, not decoration: a bound
+ * parameter in a VALUES list arrives as `unknown` and Postgres will not compare it
+ * to a text column without being told what it is.
  */
 export async function applyClassification(rows: Classification[]): Promise<void> {
-  const w = currentWorkspaceId();
-  await getDb().transaction(async (tx) => {
-    for (const r of rows) {
-      await tx
-        .update(s.transactions)
-        .set({
-          category: r.category,
-          transfer: r.transfer,
-          refund: r.refund,
-          incomeSource: r.incomeSource,
-          recurring: r.recurring,
-        })
-        .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.id, r.id)));
-    }
-  });
+  for (let from = 0; from < rows.length; from += CLASSIFY_BATCH) {
+    const batch = rows.slice(from, from + CLASSIFY_BATCH);
+    const values = sql.join(
+      batch.map(
+        (r) =>
+          sql`(${r.id}::text, ${r.category}::text, ${r.transfer}::boolean, ${r.refund}::boolean, ${r.incomeSource}::text, ${r.recurring}::boolean)`,
+      ),
+      sql`, `,
+    );
+    await getDb().execute(sql`
+      UPDATE transactions AS t
+         SET category = v.category,
+             transfer = v.transfer,
+             refund = v.refund,
+             income_source = v.income_source,
+             recurring = v.recurring
+        FROM (VALUES ${values}) AS v(id, category, transfer, refund, income_source, recurring)
+       WHERE t.id = v.id`);
+  }
 }
 
 export async function getTransaction(id: string): Promise<Transaction | undefined> {
   const rows = await rowsOf<TxRow>(
-    sql`SELECT * FROM transactions WHERE id = ${id} AND ${WS()}`,
+    sql`SELECT * FROM transactions WHERE id = ${id}`,
   );
   return rows[0] ? rowToTx(rows[0]) : undefined;
 }
@@ -1992,7 +1996,7 @@ export async function setTransferOverride(
   await getDb()
     .update(s.transactions)
     .set({ transferManual: value })
-    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+    .where(eq(s.transactions.id, id));
   return getTransaction(id);
 }
 
@@ -2008,7 +2012,7 @@ export async function setCategoryOverride(
   await getDb()
     .update(s.transactions)
     .set({ categoryManual: category })
-    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+    .where(eq(s.transactions.id, id));
   return getTransaction(id);
 }
 
@@ -2019,7 +2023,7 @@ export async function setIncomeSourceOverride(
   await getDb()
     .update(s.transactions)
     .set({ incomeSourceManual: source })
-    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+    .where(eq(s.transactions.id, id));
   return getTransaction(id);
 }
 
@@ -2027,7 +2031,7 @@ export async function setOneOff(id: string, value: boolean): Promise<Transaction
   await getDb()
     .update(s.transactions)
     .set({ oneOff: value })
-    .where(and(eq(s.transactions.workspaceId, currentWorkspaceId()), eq(s.transactions.id, id)));
+    .where(eq(s.transactions.id, id));
   return getTransaction(id);
 }
 
@@ -2063,7 +2067,6 @@ export async function listIncomeSources(): Promise<IncomeSourceDef[]> {
   const rows = await getDb()
     .select()
     .from(s.incomeSources)
-    .where(eq(s.incomeSources.workspaceId, currentWorkspaceId()))
     .orderBy(s.incomeSources.sort, s.incomeSources.id);
   return rows.map(rowToIncomeSource);
 }
@@ -2072,7 +2075,7 @@ export async function getIncomeSource(id: string): Promise<IncomeSourceDef | und
   const rows = await getDb()
     .select()
     .from(s.incomeSources)
-    .where(and(eq(s.incomeSources.workspaceId, currentWorkspaceId()), eq(s.incomeSources.id, id)));
+    .where(eq(s.incomeSources.id, id));
   return rows[0] ? rowToIncomeSource(rows[0]) : undefined;
 }
 
@@ -2087,7 +2090,7 @@ export async function upsertIncomeSource(
     Number(
       (
         await rowsOf<{ m: number }>(
-          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM income_sources WHERE ${WS()}`,
+          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM income_sources`,
         )
       )[0].m,
     ) + 1;
@@ -2095,7 +2098,6 @@ export async function upsertIncomeSource(
   await getDb()
     .insert(s.incomeSources)
     .values({
-      workspaceId: currentWorkspaceId(),
       id: def.id,
       label: def.label,
       kind: def.kind,
@@ -2104,7 +2106,7 @@ export async function upsertIncomeSource(
       builtin: false,
     })
     .onConflictDoUpdate({
-      target: [s.incomeSources.workspaceId, s.incomeSources.id],
+      target: [s.incomeSources.id],
       set: { label: def.label, kind: def.kind, patterns, sort: nextSort },
     });
   return (await getIncomeSource(def.id))!;
@@ -2118,19 +2120,18 @@ export async function upsertIncomeSource(
 export async function deleteIncomeSource(id: string): Promise<boolean> {
   const src = await getIncomeSource(id);
   if (!src || src.builtin) return false;
-  const w = currentWorkspaceId();
   await getDb().transaction(async (tx) => {
     await tx
       .update(s.transactions)
       .set({ incomeSource: 'other' })
-      .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.incomeSource, id)));
+      .where(eq(s.transactions.incomeSource, id));
     await tx
       .update(s.transactions)
       .set({ incomeSourceManual: 'other' })
-      .where(and(eq(s.transactions.workspaceId, w), eq(s.transactions.incomeSourceManual, id)));
+      .where(eq(s.transactions.incomeSourceManual, id));
     await tx
       .delete(s.incomeSources)
-      .where(and(eq(s.incomeSources.workspaceId, w), eq(s.incomeSources.id, id)));
+      .where(eq(s.incomeSources.id, id));
   });
   return true;
 }
@@ -2148,7 +2149,6 @@ export async function listTransferRules(): Promise<TransferRule[]> {
   const rows = await getDb()
     .select()
     .from(s.transferRules)
-    .where(eq(s.transferRules.workspaceId, currentWorkspaceId()))
     .orderBy(sql`${s.transferRules.createdAt} DESC`);
   return rows.map(rowToRule);
 }
@@ -2157,17 +2157,15 @@ export async function addTransferRule(
   description: string,
   accountId: string,
 ): Promise<TransferRule> {
-  const w = currentWorkspaceId();
   await getDb()
     .insert(s.transferRules)
-    .values({ workspaceId: w, description, accountId, createdAt: new Date().toISOString() })
+    .values({ description, accountId, createdAt: new Date().toISOString() })
     .onConflictDoNothing();
   const rows = await getDb()
     .select()
     .from(s.transferRules)
     .where(
       and(
-        eq(s.transferRules.workspaceId, w),
         eq(s.transferRules.description, description),
         eq(s.transferRules.accountId, accountId),
       ),
@@ -2178,7 +2176,7 @@ export async function addTransferRule(
 export async function deleteTransferRule(id: number): Promise<boolean> {
   const rows = await getDb()
     .delete(s.transferRules)
-    .where(and(eq(s.transferRules.workspaceId, currentWorkspaceId()), eq(s.transferRules.id, id)))
+    .where(eq(s.transferRules.id, id))
     .returning({ id: s.transferRules.id });
   return rows.length > 0;
 }
@@ -2186,7 +2184,7 @@ export async function deleteTransferRule(id: number): Promise<boolean> {
 export async function countRuleMatches(description: string, accountId: string): Promise<number> {
   const rows = await rowsOf<{ n: string }>(
     sql`SELECT COUNT(*) AS n FROM transactions
-        WHERE description = ${description} AND account_id = ${accountId} AND ${WS()}`,
+        WHERE description = ${description} AND account_id = ${accountId}`,
   );
   return Number(rows[0].n);
 }
@@ -2199,7 +2197,7 @@ export async function countRuleMatches(description: string, accountId: string): 
 export async function clearManualForRule(description: string, accountId: string): Promise<void> {
   await getDb().execute(sql`
     UPDATE transactions SET transfer_manual = NULL
-    WHERE description = ${description} AND account_id = ${accountId} AND ${WS()}`);
+    WHERE description = ${description} AND account_id = ${accountId}`);
 }
 
 export async function getFxRate(day: string, currency: string): Promise<number | undefined> {
@@ -2208,7 +2206,6 @@ export async function getFxRate(day: string, currency: string): Promise<number |
     .from(s.fxRates)
     .where(
       and(
-        eq(s.fxRates.workspaceId, currentWorkspaceId()),
         eq(s.fxRates.date, day),
         eq(s.fxRates.currency, currency),
       ),
@@ -2219,9 +2216,9 @@ export async function getFxRate(day: string, currency: string): Promise<number |
 export async function saveFxRate(day: string, currency: string, rate: number): Promise<void> {
   await getDb()
     .insert(s.fxRates)
-    .values({ workspaceId: currentWorkspaceId(), date: day, currency, rate })
+    .values({ date: day, currency, rate })
     .onConflictDoUpdate({
-      target: [s.fxRates.workspaceId, s.fxRates.date, s.fxRates.currency],
+      target: [s.fxRates.date, s.fxRates.currency],
       set: { rate },
     });
 }
@@ -2229,7 +2226,7 @@ export async function saveFxRate(day: string, currency: string, rate: number): P
 export async function setBaseForBaseCurrency(baseCurrency: string): Promise<number> {
   return execCount(sql`
     UPDATE transactions SET base_amount_cents = amount_cents, fx_rate = 1
-    WHERE base_amount_cents IS NULL AND currency = ${baseCurrency} AND ${WS()}`);
+    WHERE base_amount_cents IS NULL AND currency = ${baseCurrency}`);
 }
 
 /**
@@ -2238,14 +2235,14 @@ export async function setBaseForBaseCurrency(baseCurrency: string): Promise<numb
  */
 export async function resetBaseAmounts(): Promise<number> {
   return execCount(
-    sql`UPDATE transactions SET base_amount_cents = NULL, fx_rate = NULL WHERE ${WS()}`,
+    sql`UPDATE transactions SET base_amount_cents = NULL, fx_rate = NULL`,
   );
 }
 
 export async function listUnconvertedDays(): Promise<{ day: string; currency: string }[]> {
   return rowsOf<{ day: string; currency: string }>(sql`
     SELECT DISTINCT SUBSTR(date, 1, 10) AS day, currency
-    FROM transactions WHERE base_amount_cents IS NULL AND ${WS()} ORDER BY day`);
+    FROM transactions WHERE base_amount_cents IS NULL ORDER BY day`);
 }
 
 /**
@@ -2261,7 +2258,7 @@ export async function applyBaseRate(day: string, currency: string, k: number): P
   return execCount(sql`
     UPDATE transactions
     SET base_amount_cents = CAST(ROUND(amount_cents * ${k}::numeric) AS integer), fx_rate = ${k}
-    WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day} AND ${WS()}`);
+    WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day}`);
 }
 
 export interface RecurringGroup {
@@ -2277,16 +2274,15 @@ export interface RecurringGroup {
 
 export async function setRecurringIgnored(description: string, ignored: boolean): Promise<void> {
   const key = recurringKey(description);
-  const w = currentWorkspaceId();
   if (ignored) {
     await getDb()
       .insert(s.recurringIgnores)
-      .values({ workspaceId: w, key, description, createdAt: new Date().toISOString() })
+      .values({ key, description, createdAt: new Date().toISOString() })
       .onConflictDoNothing();
   } else {
     await getDb()
       .delete(s.recurringIgnores)
-      .where(and(eq(s.recurringIgnores.workspaceId, w), eq(s.recurringIgnores.key, key)));
+      .where(eq(s.recurringIgnores.key, key));
   }
 }
 
@@ -2304,7 +2300,7 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
   }>(sql`
     SELECT description, ${CATEGORY} AS category, date, base_amount_cents
     FROM transactions
-    WHERE ${WS()} AND recurring AND amount_cents < 0 AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()}
+    WHERE recurring AND amount_cents < 0 AND ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()}
       AND base_amount_cents IS NOT NULL AND date >= ${sinceIso}
     ORDER BY date ASC`);
 
@@ -2321,7 +2317,6 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
       await getDb()
         .select({ key: s.recurringIgnores.key })
         .from(s.recurringIgnores)
-        .where(eq(s.recurringIgnores.workspaceId, currentWorkspaceId()))
     ).map((r) => r.key),
   );
 
@@ -2358,7 +2353,6 @@ export async function listCategoryRules(): Promise<CategoryRule[]> {
   const rows = await getDb()
     .select()
     .from(s.categoryRules)
-    .where(eq(s.categoryRules.workspaceId, currentWorkspaceId()))
     .orderBy(sql`${s.categoryRules.createdAt} DESC`);
   return rows.map((r) => ({
     id: r.id,
@@ -2369,18 +2363,17 @@ export async function listCategoryRules(): Promise<CategoryRule[]> {
 }
 
 export async function addCategoryRule(pattern: string, category: string): Promise<CategoryRule> {
-  const w = currentWorkspaceId();
   await getDb()
     .insert(s.categoryRules)
-    .values({ workspaceId: w, pattern, category, createdAt: new Date().toISOString() })
+    .values({ pattern, category, createdAt: new Date().toISOString() })
     .onConflictDoUpdate({
-      target: [s.categoryRules.workspaceId, s.categoryRules.pattern],
+      target: [s.categoryRules.pattern],
       set: { category },
     });
   const rows = await getDb()
     .select()
     .from(s.categoryRules)
-    .where(and(eq(s.categoryRules.workspaceId, w), eq(s.categoryRules.pattern, pattern)));
+    .where(eq(s.categoryRules.pattern, pattern));
   const row = rows[0];
   return { id: row.id, pattern: row.pattern, category: row.category, createdAt: row.createdAt };
 }
@@ -2388,7 +2381,7 @@ export async function addCategoryRule(pattern: string, category: string): Promis
 export async function deleteCategoryRule(id: number): Promise<boolean> {
   const rows = await getDb()
     .delete(s.categoryRules)
-    .where(and(eq(s.categoryRules.workspaceId, currentWorkspaceId()), eq(s.categoryRules.id, id)))
+    .where(eq(s.categoryRules.id, id))
     .returning({ id: s.categoryRules.id });
   return rows.length > 0;
 }
@@ -2397,7 +2390,7 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
  * How many transactions the pattern covers, and how many of those the rule cannot
  * change because the user set the category by hand. One WHERE computing both, so the
  * two can never be taken through different filters and matches - overridden go wrong
- * for a workspace with a hidden account.
+ * as soon as one account is hidden.
  */
 export async function countCategoryRuleMatches(
   pattern: string,
@@ -2406,7 +2399,7 @@ export async function countCategoryRuleMatches(
     sql`SELECT COUNT(*) AS matches,
                COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
         FROM transactions
-        WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0 AND ${WS()}`,
+        WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0`,
   );
   return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
 }
@@ -2420,24 +2413,22 @@ export async function listBudgets(): Promise<Budget[]> {
   const rows = await getDb()
     .select()
     .from(s.budgets)
-    .where(eq(s.budgets.workspaceId, currentWorkspaceId()))
     .orderBy(sql`${s.budgets.monthlyCents} DESC`);
   return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthlyCents) }));
 }
 
 export async function setBudget(category: string, monthly: number | null): Promise<void> {
-  const w = currentWorkspaceId();
   if (monthly === null) {
     await getDb()
       .delete(s.budgets)
-      .where(and(eq(s.budgets.workspaceId, w), eq(s.budgets.category, category)));
+      .where(eq(s.budgets.category, category));
   } else {
     const monthlyCents = toCents(monthly);
     await getDb()
       .insert(s.budgets)
-      .values({ workspaceId: w, category, monthlyCents })
+      .values({ category, monthlyCents })
       .onConflictDoUpdate({
-        target: [s.budgets.workspaceId, s.budgets.category],
+        target: [s.budgets.category],
         set: { monthlyCents },
       });
   }
@@ -2494,13 +2485,9 @@ const parseChartsVersion = (raw: string | undefined): number => {
   return Number.isSafeInteger(n) && n >= 0 ? n : 0;
 };
 
-const chartsVersionRow = async (d: Db, w: string): Promise<string | undefined> =>
-  (
-    await d
-      .select({ value: s.meta.value })
-      .from(s.meta)
-      .where(and(eq(s.meta.workspaceId, w), eq(s.meta.key, CHARTS_VERSION_KEY)))
-  )[0]?.value;
+const chartsVersionRow = async (d: Db): Promise<string | undefined> =>
+  (await d.select({ value: s.meta.value }).from(s.meta).where(eq(s.meta.key, CHARTS_VERSION_KEY)))[0]
+    ?.value;
 
 type ChartRow = typeof s.analyticsCharts.$inferSelect;
 
@@ -2532,18 +2519,17 @@ function rowToChart(r: ChartRow): Chart {
  * next write then matches and silently overwrites it. This way the caller can only
  * ever hold a version older than its list, which the next write refuses out loud.
  */
-async function chartListOn(d: Db, w: string): Promise<ChartList> {
-  const version = parseChartsVersion(await chartsVersionRow(d, w));
+async function chartListOn(d: Db): Promise<ChartList> {
+  const version = parseChartsVersion(await chartsVersionRow(d));
   const rows = await d
     .select()
     .from(s.analyticsCharts)
-    .where(eq(s.analyticsCharts.workspaceId, w))
     .orderBy(s.analyticsCharts.sort, s.analyticsCharts.id);
   return { version, charts: rows.map(rowToChart) };
 }
 
 export async function listCharts(): Promise<ChartList> {
-  return chartListOn(getDb(), currentWorkspaceId());
+  return chartListOn(getDb());
 }
 
 /**
@@ -2556,17 +2542,16 @@ export async function listCharts(): Promise<ChartList> {
  * the canonical value back.
  */
 export async function replaceCharts(expected: number, charts: Chart[]): Promise<ChartsWrite> {
-  const w = currentWorkspaceId();
   return getDb().transaction(async (tx) => {
     await tx
       .insert(s.meta)
-      .values({ workspaceId: w, key: CHARTS_VERSION_KEY, value: '0' })
+      .values({ key: CHARTS_VERSION_KEY, value: '0' })
       .onConflictDoNothing();
-    const raw = await chartsVersionRow(tx, w);
+    const raw = await chartsVersionRow(tx);
     const stale = async (): Promise<ChartsWrite> => ({
       ok: false,
       reason: 'stale',
-      ...(await chartListOn(tx, w)),
+      ...(await chartListOn(tx)),
     });
     if (parseChartsVersion(raw) !== expected) return stale();
     const bumped = await tx
@@ -2574,7 +2559,6 @@ export async function replaceCharts(expected: number, charts: Chart[]): Promise<
       .set({ value: String(expected + 1) })
       .where(
         and(
-          eq(s.meta.workspaceId, w),
           eq(s.meta.key, CHARTS_VERSION_KEY),
           eq(s.meta.value, raw ?? '0'),
         ),
@@ -2583,11 +2567,10 @@ export async function replaceCharts(expected: number, charts: Chart[]): Promise<
     // another writer moved the counter between the read and this statement: under
     // READ COMMITTED the predicate is re-evaluated against their committed row
     if (bumped.length === 0) return stale();
-    await tx.delete(s.analyticsCharts).where(eq(s.analyticsCharts.workspaceId, w));
+    await tx.delete(s.analyticsCharts);
     if (charts.length > 0) {
       await tx.insert(s.analyticsCharts).values(
         charts.map((c, i) => ({
-          workspaceId: w,
           id: c.id,
           sort: i,
           title: c.title,
@@ -2601,7 +2584,7 @@ export async function replaceCharts(expected: number, charts: Chart[]): Promise<
     }
     // read back inside the writing transaction, never the request echoed: a route
     // that answers with what it was sent reports a write that did not happen as 200
-    return { ok: true, ...(await chartListOn(tx, w)) };
+    return { ok: true, ...(await chartListOn(tx)) };
   });
 }
 
@@ -2625,7 +2608,6 @@ export async function listBaselineItems(): Promise<BaselineItem[]> {
   const rows = await getDb()
     .select()
     .from(s.baselineItems)
-    .where(eq(s.baselineItems.workspaceId, currentWorkspaceId()))
     .orderBy(s.baselineItems.sort, sql`${s.baselineItems.monthlyCents} DESC`);
   return rows.map(rowToBaselineItem);
 }
@@ -2641,12 +2623,11 @@ export async function upsertBaselineItem(
   monthly: number,
   sort?: number,
 ): Promise<BaselineItem> {
-  const w = currentWorkspaceId();
   const existing = (
     await getDb()
       .select()
       .from(s.baselineItems)
-      .where(and(eq(s.baselineItems.workspaceId, w), eq(s.baselineItems.label, label)))
+      .where(eq(s.baselineItems.label, label))
   )[0];
   const nextSort =
     sort ??
@@ -2654,16 +2635,16 @@ export async function upsertBaselineItem(
     Number(
       (
         await rowsOf<{ m: number }>(
-          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items WHERE ${WS()}`,
+          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items`,
         )
       )[0].m,
     ) + 1;
   const monthlyCents = toCents(monthly);
   const rows = await getDb()
     .insert(s.baselineItems)
-    .values({ workspaceId: w, label, monthlyCents, sort: nextSort })
+    .values({ label, monthlyCents, sort: nextSort })
     .onConflictDoUpdate({
-      target: [s.baselineItems.workspaceId, s.baselineItems.label],
+      target: [s.baselineItems.label],
       set: { monthlyCents, sort: nextSort },
     })
     .returning();
@@ -2674,7 +2655,7 @@ export async function deleteBaselineItem(label: string): Promise<boolean> {
   const rows = await getDb()
     .delete(s.baselineItems)
     .where(
-      and(eq(s.baselineItems.workspaceId, currentWorkspaceId()), eq(s.baselineItems.label, label)),
+      eq(s.baselineItems.label, label),
     )
     .returning({ id: s.baselineItems.id });
   return rows.length > 0;
@@ -2682,7 +2663,7 @@ export async function deleteBaselineItem(label: string): Promise<boolean> {
 
 export async function baselineTotal(): Promise<number> {
   const rows = await rowsOf<{ total_cents: string }>(
-    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items WHERE ${WS()}`,
+    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items`,
   );
   return fromCents(Number(rows[0].total_cents));
 }
@@ -2715,14 +2696,9 @@ const BACKUP_TABLES = {
 const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
 
 export async function exportBackup(): Promise<BackupData> {
-  const w = currentWorkspaceId();
   const tables: Record<string, unknown[]> = {};
   for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-    const rows = (await getDb()
-      .select()
-      .from(table)
-      .where(eq((table as typeof s.accounts).workspaceId, w))) as Record<string, unknown>[];
-    tables[name] = rows.map(({ workspaceId: _ws, ...rest }) => rest);
+    tables[name] = (await getDb().select().from(table)) as Record<string, unknown>[];
   }
   return {
     format: 'finto-backup',
@@ -2760,11 +2736,6 @@ export function parseBackup(input: unknown): BackupData {
   return { exportedAt: '', ...parsed.data } as BackupData;
 }
 
-const NEVER_RESTORED = new Set<string>([
-  'workspaceId' satisfies keyof ImportRow,
-  'documentKeyVersion' satisfies keyof ImportRow,
-]);
-
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
 const RESTORED_UNCONFIRMABLE =
@@ -2791,11 +2762,12 @@ function sanitizeRow(
   if (!row || typeof row !== 'object' || Array.isArray(row)) {
     throw new Error(`${tableName}: a row is not an object`);
   }
-  const columns = getTableColumns(table);
+  const columns: Record<string, { notNull: boolean; dataType: string } | undefined> =
+    getTableColumns(table);
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
-    const column = columns[key as keyof typeof columns];
-    if (!column || NEVER_RESTORED.has(key)) continue; // unknown column, or one a restore may not carry
+    const column = columns[key];
+    if (!column) continue; // unknown column
     if (value === null) {
       if (column.notNull) throw new Error(`${tableName}.${key}: null in a required column`);
       out[key] = null;
@@ -2822,19 +2794,18 @@ function sanitizeRow(
  * import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
-  const w = currentWorkspaceId();
   let tables = 0;
   let rows = 0;
   await getDb().transaction(async (tx) => {
     for (const [name, table] of Object.entries(BACKUP_TABLES)) {
       const incoming = data.tables[name];
       if (!incoming) continue; // an older backup without this table keeps it empty
-      await tx.execute(sql`DELETE FROM ${sql.raw(name)} WHERE workspace_id = ${w}`);
+      await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
       const dropId = IDENTITY_TABLES.has(name);
       const values = incoming.map((row) => {
         const clean = sanitizeRow(table, row, name);
         const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
-        return dropId ? { ...rest, workspaceId: w } : { ...rest, id, workspaceId: w };
+        return dropId ? rest : { ...rest, id };
       });
       for (const chunk of chunked(values, 500)) {
         await tx.insert(table).values(chunk as never[]);

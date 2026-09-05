@@ -10,23 +10,21 @@ import {
   TRANSACTIONS,
   NO_CHARTS,
   TRANSFER_RULES,
-  USER,
 } from './fixtures';
 
 /**
  * Deny-by-default fetch for the jsdom project.
  *
- * The rejection this returns for an unknown route is not what holds the line. Six
- * background loads in this client end in `.catch(() => {})` - App.tsx,
- * CsvImport.tsx, OverviewScreen.tsx and three in TransactionsScreen.tsx - and
- * auth.signupMode() swallows its own with a try/catch, so a rejection changes
+ * The rejection this returns for an unknown route is not what holds the line. Several
+ * background loads in this client end in `.catch(() => {})` - CsvImport.tsx,
+ * OverviewScreen.tsx and three in TransactionsScreen.tsx - so a rejection changes
  * nothing observable and the screen renders in its empty state. What holds it is
  * the afterEach in setup.ts, which throws naming every request no route matched.
  *
- * Which is why requests() exists. Where the subject of a test is a request - a 401
- * that signs the user out, a confirm that must never fire - the assertion you want
- * is that a request happened, not that a frame was painted: a frame is also painted
- * by the app that never signed in, and awaiting one races the two loads.
+ * Which is why requests() exists. Where the subject of a test is a request - a
+ * confirm that must never fire - the assertion you want is that a request happened,
+ * not that a frame was painted: a frame is also painted by a screen that never
+ * asked, and awaiting one races the two loads.
  *
  * Known limit: the guard sees only what was requested by the time its afterEach
  * runs. One arriving later is wiped by the next test's resetFetch(), or never read
@@ -139,9 +137,9 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
   render(<ThemeProvider>{ui}</ThemeProvider>);
 
 /**
- * Every request the signed-in app fires on first paint, produced by running the App
- * test against an empty table and reading the guard's list - not by reading the
- * screens. A row that adds a first-paint request is told so by a red test.
+ * Every request the app fires on first paint, produced by running the App test
+ * against an empty table and reading the guard's list - not by reading the screens.
+ * A row that adds a first-paint request is told so by a red test.
  *
  * /api/imports/presets (once CsvImport mounts) is deliberately absent: it is not first
  * paint.
@@ -150,11 +148,11 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * asks for every account that HAS a transaction - but TRANSACTIONS here is empty, so it
  * short-circuits on `recent.length === 0` and fires neither. Give that fixture a row and
  * Overview fires both; the guard then names the missing one, which is this mechanism
- * working rather than a hole in it. And Analytics, which used to ask for the workspace
- * summary and the budgets on first paint, is a workspace of charts the reader builds
- * now: an empty one asks for the account list and for the charts themselves, which are
- * the workspace's and live on the server. /api/summary is a chart that exists,
- * /api/budgets the Budgets tab once it is the one showing.
+ * working rather than a hole in it. And Analytics, which used to ask for the summary
+ * and the budgets on first paint, is a board of charts the reader builds now: an empty
+ * one asks for the account list and for the charts themselves, which live on the
+ * server. /api/summary is a chart that exists, /api/budgets the Budgets tab once it is
+ * the one showing.
  *
  * The charts row answers version 0 with nothing in it, which is deliberately the one
  * response that would set the migration going - and it stays quiet here because there
@@ -162,7 +160,6 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * is the migration and not a first-paint request.
  */
 export const FIRST_PAINT_ROUTES: Routes = {
-  'GET /api/auth/get-session': () => ok({ user: USER }),
   'GET /api/accounts': () => ok(ACCOUNTS),
   'GET /api/analytics/charts': () => ok(NO_CHARTS),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
@@ -171,10 +168,4 @@ export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(TRANSACTIONS),
   'GET /api/independence': () => ok(INDEPENDENCE),
-};
-
-/** The signed-out shell: AuthScreen asks the backend whether registration is open. */
-export const SIGNED_OUT_ROUTES: Routes = {
-  'GET /api/auth/get-session': () => ok(null),
-  'GET /api/health': () => ok({ signup: 'open' }),
 };

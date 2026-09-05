@@ -1,24 +1,18 @@
 /**
- * The values the auth screens and the landing page both hold, in the one place
- * that can hold them.
+ * The values the app and the landing page both hold, in the one place that can hold
+ * them.
  *
- * They already agreed — every colour below was declared twice, once in
- * `styles/auth.css` and once in `landing/landing.css`, under two different names
- * with the same hex after it. `#010710` was `--auth-ink` on one side of the "Back
- * to Website" button and `--ink` on the other, and nothing anywhere said the two
- * had to stay equal. The first time somebody warms the ground by a few points on
- * one page, the seam between them becomes visible and neither file is wrong.
+ * They already agreed — every colour below was once declared twice, under two
+ * different names with the same hex after it, and nothing anywhere said the two had
+ * to stay equal. The first time somebody warms the ground by a few points on one
+ * page, the seam between them becomes visible and neither file is wrong.
  *
  * So: this file is the source, and each stylesheet keeps its own names as aliases
- * pointing at it. The local names are not ceremony — `--auth-wrong` and
- * `--external` are the same colour used to mean two different things ("the box the
- * refusal is about", "this part is not yours"), and a rule that reads
- * `background: var(--auth-wrong)` says which of the two it meant.
+ * pointing at it. The local names are not ceremony — a rule that reads
+ * `background: var(--external)` says which of two meanings of one colour it meant.
  *
- * NOT here: anything only one surface has. The auth card's vertical measurements
- * are the Figma frame's and are scaled by `--s`; the landing's section rhythm was
- * tuned against long prose. Neither is a shared decision and pulling either up
- * would invent an agreement that does not exist.
+ * NOT here: anything only one surface has. The landing's section rhythm was tuned
+ * against long prose and is not a shared decision.
  *
  * Loaded by both entry points (`main.tsx` and `landing/main.tsx`).
  */
@@ -28,7 +22,7 @@
 
   /* the dark ground both surfaces sit on */
   --c-ground: #010710;
-  /* the card the auth form is on, and the landing's primary button */
+  /* the landing's primary button, and the app's white discs on the bar */
   --c-paper: #f4f4f4;
   --c-paper-hi: #ffffff;
 
@@ -83,11 +77,7 @@
      names for one corner and 6 and 8 for another; 2px and 15px were "fully round" on
      a 4px track and a 30px switch, which --r-pill draws as well because a radius
      past half the box is clamped to half the box.
-
-     The auth card is not rewritten to these. Its 15px inputs and 12px code boxes are
-     measurements off the Figma frame, scaled by --s, and that file exists to keep
-     them legible as measurements — only its panel corner is here, because that is
-     the one the landing borrowed. */
+ */
   --r-xs: 4px;
   --r-sm: 8px;
   --r-md: 12px;
@@ -99,8 +89,7 @@
 
   /* ---------- type ---------- */
 
-  /* The landing's, and the landing's alone: the auth screens set one size (the
-     frame's 20px) and scale it. Five steps from the six the page had drifted to —
+  /* The landing's, and the landing's alone. Five steps from the six the page had drifted to —
      13, 14 and 15 were three sizes for one job, and 17 was the same as 16 with a
      media query in front of it. */
   --fs-sm: 14px;

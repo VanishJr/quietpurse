@@ -13,8 +13,8 @@ Nothing below repeats any of that.
 
 ## What this module owns
 
-- **Every request the product makes**, composed in one module, `api.ts`, the authentication routes
-  included: they go through the same raw fetch as the finance routes rather than through an SDK.
+- **Every request the product makes**, composed in one module, `api.ts`, through one raw fetch
+  rather than through an SDK.
 - **The month arithmetic the server deliberately does not do.** The summary endpoints answer only
   the months an account has rows in, and two modules fill the rest in opposite directions —
   `accounts.ts` anchoring on the newest month with data and `analytics.ts` on the window the reader
@@ -48,7 +48,7 @@ document does not answer.
 **The chart list was the third of them and is not one any more.** It is read and written through
 `api.ts` against the routes `backend/src/app.ts` serves over the table in `backend/src/db/schema.ts`,
 so a chart follows a person to a second device. What is left of the browser copy is one read: the key
-`analytics.ts` used to write is migrated into the workspace on the first load that finds one which has
+`analytics.ts` used to write is migrated into the database on the first load that finds one which has
 never saved, and removed once that write is answered. Two things came with the move that are the
 client's alone and are held by cases in `web/src/screens/AnalyticsScreen.test.tsx` rather than by any
 type: **one write is in flight at a time**, because two mutations sharing a version make the reader's

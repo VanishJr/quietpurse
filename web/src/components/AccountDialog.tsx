@@ -185,8 +185,8 @@ export function AccountDialog({
 
   /**
    * Case-insensitively, and trimmed on both sides: `accounts_name_unique` is on
-   * (workspace_id, lower(name)), so a client demanding the capitals back would refuse
-   * a name the server calls identical to the one on the tab.
+   * lower(name), so a client demanding the capitals back would refuse a name the
+   * server calls identical to the one on the tab.
    */
   const confirmed =
     !!account && confirmName.trim().toLowerCase() === account.name.trim().toLowerCase();
@@ -243,7 +243,7 @@ export function AccountDialog({
             onChange={(e) => setName(e.target.value)}
           />
           <p className="hint" style={{ marginTop: 6 }}>
-            It will hold amounts in {baseCurrency}, the base currency of this workspace.
+            It will hold amounts in {baseCurrency}, your base currency.
           </p>
           {error && <p className="error">Error: {error}</p>}
           <div className="btn-row">

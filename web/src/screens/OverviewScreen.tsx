@@ -52,13 +52,14 @@
  * What is no longer here
  *
  * Recurring payments, the app settings, the export and the workspace-wide import
- * history are about the workspace and not about any one account. They are on the
- * Account screen, in order. The theme button and the avatar went to the navigation
- * bar, which is where the design puts them and where they are reachable from all five
- * screens rather than from this one. This screen is one account and nothing else.
+ * history are about every account and not about any one of them. They are on the
+ * Settings screen, in order. The theme button and the settings control went to the
+ * navigation bar, which is where the design puts them and where they are reachable
+ * from all five screens rather than from this one. This screen is one account and
+ * nothing else.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, SessionUser } from '../api';
+import { api } from '../api';
 import {
   latestMonth,
   LONGEST_WINDOW,
@@ -157,14 +158,13 @@ const destroyedSentence = (name: string, d: AccountDeleted): string =>
       `${count(d.documents, 'uploaded file', 'uploaded files')} went with it.`;
 
 interface Props {
-  user: SessionUser;
   /** Opens the Transactions screen with this account's filter already applied. */
   onOpenTransactions: (accountId: string) => void;
-  /** Opens the Analytics screen — the spending card over the whole workspace. */
+  /** Opens the Analytics screen — the spending card over every account. */
   onOpenAnalytics: () => void;
 }
 
-export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Props) {
+export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
   /**
    * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
    * is how a failed request came to render as "you have no accounts".
@@ -242,8 +242,8 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
    * of that one: `?screen=overview` with no account is a true and useful URL — "the
    * dashboard, whichever account is first" — and an app that immediately rewrote it to
    * name today's first account would hand out links that go stale on the next upload.
-   * It also means an `?account=` naming something deleted, hidden, or belonging to
-   * somebody else's workspace lands on the first account rather than on a blank screen.
+   * It also means an `?account=` naming something deleted, hidden, or from somebody
+   * else's Finto lands on the first account rather than on a blank screen.
    */
   const selected = onRail.find((a) => a.id === url.account) ?? onRail[0] ?? null;
 
@@ -379,8 +379,8 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
   }
 
   /*
-    `&& selected`, and it is load-bearing. ImportHistory reads a missing account as the
-    whole workspace, so a reload straight onto `?panel=history` — where the accounts are
+    `&& selected`, and it is load-bearing. ImportHistory reads a missing account as
+    every account, so a reload straight onto `?panel=history` — where the accounts are
     still in flight and nothing is selected yet — would answer with every import the user
     has ever made under a heading about one account. It falls through to the dashboard
     for the tick that takes and arrives once there is an account for it to be about.
@@ -407,7 +407,7 @@ export function OverviewScreen({ user, onOpenTransactions, onOpenAnalytics }: Pr
       <div className="ov-hero ov-band">
         <div className="shell">
           <p className="ov-date">{fmtWeekday(today)}</p>
-          <h1 className="welcome-title">Welcome, {user.name || user.email}!</h1>
+          <h1 className="welcome-title">Welcome!</h1>
 
           {onRail.length > 0 && (
             <AccountTabs

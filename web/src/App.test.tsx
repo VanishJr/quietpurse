@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { PRESETS, USER } from './test/fixtures';
-import { fail, FIRST_PAINT_ROUTES, mockFetch, ok, requests, SIGNED_OUT_ROUTES } from './test/harness';
+import { PRESETS } from './test/fixtures';
+import { FIRST_PAINT_ROUTES, mockFetch, ok } from './test/harness';
 
 /**
- * The shell: the session gate, the five always-mounted screens, and the navigation.
+ * The shell: the five always-mounted screens and the navigation.
  *
  * The navigation is one element in two shapes - the design's top bar on a wide window,
  * the bottom bar of the phone app on a narrow one - and which of the two is painted is
@@ -33,33 +33,14 @@ vi.setConfig({ testTimeout: 15_000 });
 /**
  * The Overview's heading, and the anchor for "the app shell really painted".
  *
- * Its own helper for the timeout. `SignedIn` is behind `lazy()`, so this wait includes
- * vitest transforming that whole module graph the first time any test asks for it —
- * and it is a graph with five screens and recharts in it. On a cold run that landed
- * within a few milliseconds of the 1000ms default, which fails the test on the
- * transform rather than on anything the test is about. Nothing here is waiting on the
- * app.
+ * Its own helper for the timeout. The whole module graph - five screens and recharts -
+ * is transformed the first time anything imports this file, and a cold run has been
+ * measured landing within a few milliseconds of the 1000ms default. Nothing here is
+ * waiting on the app.
  */
-const appMounted = () =>
-  screen.findByRole('heading', { name: /^Welcome,/ }, { timeout: 5_000 });
+const appMounted = () => screen.findByRole('heading', { name: /^Welcome/ }, { timeout: 5_000 });
 
-describe('signed out', () => {
-  it('shows the sign-in form and nothing of the app', async () => {
-    mockFetch(SIGNED_OUT_ROUTES);
-    render(<App />);
-
-    // anchor: the sign-in screen, which renders only once the session came back null
-    expect(await screen.findByRole('heading', { name: 'Welcome Back!' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Password')).toBeInTheDocument();
-
-    expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('heading', { name: /^Welcome,/, hidden: true }),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe('signed in', () => {
+describe('the shell', () => {
   it('shows Overview and keeps the other four mounted but hidden', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
@@ -70,11 +51,23 @@ describe('signed in', () => {
     // `hidden: true` is required: getByRole excludes a [hidden] subtree from itself,
     // so without it these would throw - and queryByRole(...) === null would pass
     // just as well against a screen that was never mounted at all.
-    // 'Your account' is in the list because a screen mounted but named by nothing is
-    // asserted about by nothing, and the suite stays green while saying so
-    for (const title of ['Transactions', 'Analytics', 'Goal', 'Your account']) {
-      expect(screen.getByRole('heading', { name: title, hidden: true })).not.toBeVisible();
+    // 'Settings' is in the list because a screen mounted but named by nothing is
+    // asserted about by nothing, and the suite stays green while saying so. Level 1,
+    // because the Goal screen carries a block headed Settings of its own
+    for (const title of ['Transactions', 'Analytics', 'Goal', 'Settings']) {
+      expect(
+        screen.getByRole('heading', { name: title, level: 1, hidden: true }),
+      ).not.toBeVisible();
     }
+  });
+
+  it('asks for no session and offers no sign-in', async () => {
+    mockFetch(FIRST_PAINT_ROUTES);
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign/i })).not.toBeInTheDocument();
   });
 
   it('moves aria-current and visibility when a tab is clicked', async () => {
@@ -94,7 +87,7 @@ describe('signed in', () => {
     );
     expect(tabs.getByRole('link', { name: 'Overview' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('heading', { name: 'Transactions' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: /^Welcome,/, hidden: true })).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/, hidden: true })).not.toBeVisible();
   });
 
   it('marks Import as the page while the import panel is the window', async () => {
@@ -133,7 +126,7 @@ describe('signed in', () => {
 
     fireEvent.click(tabs.getByRole('link', { name: 'Overview' }));
 
-    expect(screen.getByRole('heading', { name: /^Welcome,/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
@@ -152,7 +145,7 @@ describe('signed in', () => {
     fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }));
     fireEvent.click(tabs.getByRole('link', { name: 'Overview' }));
 
-    expect(screen.getByRole('heading', { name: /^Welcome,/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
   });
 
@@ -195,14 +188,14 @@ describe('signed in', () => {
       await screen.findByRole('heading', { name: 'Goal' }, { timeout: 5_000 }),
     ).toBeVisible();
     expect(
-      screen.getByRole('heading', { name: /^Welcome,/, hidden: true }),
+      screen.getByRole('heading', { name: /^Welcome/, hidden: true }),
     ).not.toBeVisible();
   });
 
   it('opens on Overview for a URL naming a screen this app does not have', async () => {
-    // an old link, or a typed one. A blank window under a bar with nothing marked on
-    // it is the one answer that helps nobody
-    window.history.replaceState(null, '', '/?screen=nonesuch');
+    // an old link, or a typed one - `?screen=account` is one now. A blank window under
+    // a bar with nothing marked on it is the one answer that helps nobody
+    window.history.replaceState(null, '', '/?screen=account');
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
 
@@ -221,7 +214,7 @@ describe('signed in', () => {
     act(() => window.history.back());
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /^Welcome,/ })).toBeVisible(),
+      expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible(),
     );
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
     expect(tabs.getByRole('link', { name: 'Transactions' })).not.toHaveAttribute('aria-current');
@@ -244,25 +237,25 @@ describe('signed in', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole('heading', { name: /^Welcome,/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
   });
 
-  it('reaches the Account screen through the avatar, which is not in the list', async () => {
+  it('reaches Settings through the bar’s own control, which is not in the list', async () => {
     // it is the sixth destination and the only one the section list does not carry:
-    // the design puts identity at the right of the bar, which is what freed the fifth
-    // slot for Import
+    // the design puts it at the right of the bar, which is what freed the fifth slot
+    // for Import
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();
 
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
-    expect(tabs.queryByRole('link', { name: 'Account' })).not.toBeInTheDocument();
+    expect(tabs.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
     expect(tabs.getByRole('link', { name: 'Import' })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('link', { name: `Account: ${USER.email}` }));
+    fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
 
-    expect(screen.getByRole('heading', { name: 'Your account' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: /^Welcome,/, hidden: true })).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/, hidden: true })).not.toBeVisible();
   });
 
   it('carries the URL of each destination on the destination itself', async () => {
@@ -285,9 +278,9 @@ describe('signed in', () => {
       'href',
       '/?screen=overview&panel=import',
     );
-    expect(screen.getByRole('link', { name: `Account: ${USER.email}` })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
-      '/?screen=account',
+      '/?screen=settings',
     );
   });
 
@@ -316,7 +309,7 @@ describe('signed in', () => {
 
     // this window did not move, which is the only thing the app was asked not to do
     expect(window.location.search).toBe('');
-    expect(screen.getByRole('heading', { name: /^Welcome,/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
 
@@ -349,88 +342,5 @@ describe('signed in', () => {
     expect(
       screen.getByRole('button', { name: 'Theme: Light. Click to change' }),
     ).toBeInTheDocument();
-  });
-
-  it('drops back to the sign-in form when a mount request comes back 401', async () => {
-    // the union of both tables, signed-in first paint winning the session: the way
-    // back out lands on AuthScreen, which asks /api/health for the signup mode
-    mockFetch({
-      ...SIGNED_OUT_ROUTES,
-      ...FIRST_PAINT_ROUTES,
-      'GET /api/accounts': () => fail(401),
-    });
-    render(<App />);
-
-    // anchor: the sign-in screen, reached only by way of onUnauthorized
-    expect(await screen.findByRole('heading', { name: 'Welcome Back!' })).toBeInTheDocument();
-    // the anchor alone is satisfied by an app that never signed in, which would make
-    // the assertion below true for the trivial reason: pin the request that 401'd
-    expect(requests()).toContain('GET /api/accounts');
-    expect(screen.queryByRole('navigation', { name: 'Sections' })).not.toBeInTheDocument();
-  });
-});
-
-describe('the server is unreachable', () => {
-  const dead = (): never => {
-    throw new TypeError('Failed to fetch');
-  };
-
-  // SIGNED_OUT_ROUTES is spread into both tables although /api/health is never
-  // requested while AuthScreen does not mount: a regression that renders it then
-  // fails on the password assertion below, not on the unstubbed-request guard.
-
-  it('says so, and offers no password field', async () => {
-    mockFetch({ ...SIGNED_OUT_ROUTES, 'GET /api/auth/get-session': dead });
-    render(<App />);
-
-    expect(
-      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
-    // without this the assertions above also pass against an app that never asked
-    expect(requests()).toContain('GET /api/auth/get-session');
-  });
-
-  it('reaches the app when Retry finds the server back', async () => {
-    let down = true;
-    mockFetch({
-      ...SIGNED_OUT_ROUTES,
-      ...FIRST_PAINT_ROUTES,
-      'GET /api/auth/get-session': () => {
-        if (!down) return ok({ user: USER });
-        down = false;
-        return dead();
-      },
-    });
-    render(<App />);
-
-    expect(
-      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-    expect(await appMounted()).toBeVisible();
-  });
-
-  it('keeps the screen and the Retry when the retry fails again', async () => {
-    mockFetch({ ...SIGNED_OUT_ROUTES, 'GET /api/auth/get-session': dead });
-    render(<App />);
-
-    expect(
-      await screen.findByRole('heading', { name: 'Cannot reach the server' }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    // synchronous on purpose: the answer is still in flight here, and this is the
-    // only moment the screen can blank. Awaiting first passes against the version
-    // that blanks it, because by then the second failure has painted it back.
-    expect(screen.getByRole('heading', { name: 'Cannot reach the server' })).toBeInTheDocument();
-
-    await waitFor(() =>
-      expect(requests().filter((r) => r === 'GET /api/auth/get-session')).toHaveLength(2),
-    );
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
   });
 });

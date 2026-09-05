@@ -7,10 +7,9 @@
     <!-- One value and no media query, although this page has two schemes where
          landing.html has one. What `theme-color` colours is the strip of browser
          chrome directly above the window, so the only question it answers is what
-         is at the TOP of this page — and that is dark whichever scheme is on. Signed
-         out it is `.auth`, whose ground is #010710 in both; signed in it is the
+         is at the TOP of this page — and that is dark whichever scheme is on: the
          `.ov-band` bar, which runs #010710 flat from the left edge in light mode and
-         #10161f in dark. The page BEHIND those is near-white in light mode, and it is
+         #10161f in dark. The page BEHIND it is near-white in light mode, and it is
          not what is under the address bar.
 
          A media query would also be answering the wrong question. The scheme this app
@@ -26,9 +25,9 @@
       name="description"
       content="Finto: a personal finance tracker for money that lives in more than one currency."
     />
-    <!-- This page is the application, and everything in it is behind a session:
-         there is nothing here for a crawler but the sign-in form. The public page
-         is landing.html, which asks to be indexed. -->
+    <!-- This page is the application, served from a person's own machine: there is
+         nothing here for a crawler. The public page is landing.html, which asks to
+         be indexed. -->
     <meta name="robots" content="noindex, follow" />
   </head>
   <body>

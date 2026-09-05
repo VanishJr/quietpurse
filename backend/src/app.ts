@@ -1,11 +1,11 @@
+import fs from 'fs';
+import path from 'path';
 import express from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
-import { ensureWorkspace, getAuth } from './auth';
 import { CATEGORIES, type Category } from './categorizer';
-import { reclassifyAll } from './classify';
 import { config } from './config';
+import { reclassifyAll } from './classify';
 import {
   ACCOUNT_NAME_MAX,
   CHARTS_MAX,
@@ -32,9 +32,6 @@ import {
   countCategoryRuleMatches,
   countRuleMatches,
   currentBaseCurrency,
-  dbInstance,
-  listUserWorkspaceIds,
-  runWithWorkspace,
   deleteAccount,
   deleteCategoryRule,
   deleteImport,
@@ -84,9 +81,9 @@ import {
   DOCUMENT_DELETE_REFUSED,
   DOCUMENT_NOT_READABLE,
   DOCUMENT_READ_REFUSED,
+  DocumentMissing,
   deleteDocument,
   getDocument,
-  knowsKeyVersion,
 } from './documents';
 import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
@@ -99,114 +96,121 @@ import { Account, AccountMonthlySummary, AccountSummary, MonthlySummary, Summary
 
 export const app = express();
 
-// A cookie session needs credentials, and with credentials the wildcard origin is
-// forbidden - the exact origin is echoed back instead. Allow-Methods is not
-// redundant with Express's own Allow: without it the preflight for a PATCH fails.
-app.use((req, res, next) => {
-  const origin = req.get('origin');
-  if (origin && config.corsOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    // x-invite-code: without it a cross-origin sign-up fails the preflight
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-invite-code');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    // Content-Disposition is not CORS-safelisted, so cross-origin JS cannot read the
-    // filename of a download it fetched without this
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-    res.setHeader('Access-Control-Max-Age', '86400');
-  }
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
-
-// Mounted BEFORE express.json: this handler consumes the raw request body.
-app.all('/api/auth/*splat', (req, res) => {
-  // A header rather than a field, and checked here rather than inside better-auth,
-  // so the gate needs no access to a parsed body and stays independent of the
-  // sign-up payload schema
-  if (
-    config.signupInviteCode &&
-    req.path.startsWith('/api/auth/sign-up') &&
-    req.get('x-invite-code') !== config.signupInviteCode
-  ) {
-    res.status(403).json({ error: 'registration on this server is invite-only' });
-    return;
-  }
-  // the organization plugin's own management endpoints, which mounting it for its
-  // schema publishes as a side effect
-  if (req.path.startsWith('/api/auth/organization')) {
-    res.status(404).json({ error: 'not found' });
-    return;
-  }
-  void toNodeHandler(getAuth())(req, res);
-});
-
 app.use((req, res, next) => {
   const startedAt = Date.now();
+  // Nothing may frame this app. There is no sign-in, so a page that gets it into an
+  // iframe can walk the person through their own Delete with their own session -
+  // which is every session, always. On every response and not only on the pages: a
+  // header that is right for some paths is one somebody has to keep right.
+  res.setHeader('X-Frame-Options', 'DENY');
   res.on('finish', () => {
     logHttp.debug(`${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - startedAt}ms`);
   });
   next();
 });
 
-app.use(async (req, res, next) => {
-  // the one exemption below this middleware: everything else under /api/ needs a
-  // session, and /api/auth/* was answered above
-  if (req.path === '/api/health') {
-    next();
+/**
+ * Where the request came from, which is the whole of the boundary: there is no
+ * sign-in, so any page that can talk to this server can read and change everything.
+ * Binding to loopback keeps other machines off the port; it does nothing about a
+ * page in the owner's OWN browser, which is on this machine by definition.
+ *
+ * Three headers, and each closes something the other two do not.
+ *
+ * Host closes DNS rebinding. A page at http://evil.example whose name is made to
+ * resolve to 127.0.0.1 arrives here same-origin with itself, and the only part of it
+ * still under the attacker's control is the NAME in this header - so a name is
+ * refused and an address is not. That also leaves HOST=0.0.0.0 working: a phone on
+ * the same Wi-Fi reaches this server by its address and never by a name.
+ *
+ * Origin closes the plain cross-origin write, which needs no rebind at all.
+ * multipart/form-data is CORS-safelisted, so any page on the web can POST a
+ * statement to /api/imports and the browser will send it - the response is
+ * unreadable to that page, but the import lands. A POST carries Origin whatever its
+ * content type, and an opaque origin arrives as the literal `null`, which is not a
+ * URL and is refused with everything else that is not one.
+ *
+ * Sec-Fetch-Site is third and needs no list at all: same-origin or refused. It is a
+ * defence a browser that omits the header does not provide, so Host and Origin are
+ * what stand behind it rather than the other way round.
+ *
+ * /api/health is inside the check like everything else. There is no proxy and no
+ * probe that would need it exempt, and an exemption is how the next route gets one.
+ */
+const REQUEST_NOT_LOCAL =
+  'this request did not come from Finto on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
+
+const isLoopbackName = (name: string): boolean =>
+  name === 'localhost' || name === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name);
+
+/**
+ * An address literal in either family, checked as one rather than by the presence of a
+ * colon: hostPart has already taken the port off, so the only colon that survives is
+ * inside brackets - but `[evil:example]` survives that way too, and it is a name.
+ */
+const isAddressLiteral = (name: string): boolean =>
+  /^\d{1,3}(?:\.\d{1,3}){3}$/.test(name) || /^[0-9a-f:]*:[0-9a-f:.]*$/.test(name);
+
+/**
+ * Set HOST and the owner opened the port deliberately - README and SECURITY.md both
+ * say what that costs. The phone that use case exists for arrives by address, so the
+ * widening is exactly "an address as well as a loopback name", and a DNS name stays
+ * refused in both configurations. That is the half rebinding needs.
+ *
+ * Read per request rather than captured at module load. Nothing else in this file
+ * caches a setting, and a value captured here would make the widened arm unreachable
+ * from a test - the suite runs on the loopback default, so that arm would be held by
+ * nothing at all while being the arm that governs the open configuration.
+ */
+const namesThisServer = (name: string): boolean =>
+  isLoopbackName(name) || (!isLoopbackName(config.host) && isAddressLiteral(name));
+
+/** The host part of a Host header or of an origin: port off, IPv6 brackets off. */
+const hostPart = (value: string): string => {
+  const v = value.trim().toLowerCase();
+  if (v.startsWith('[')) {
+    const close = v.indexOf(']');
+    return close === -1 ? v.slice(1) : v.slice(1, close);
+  }
+  const colon = v.indexOf(':');
+  return colon === -1 ? v : v.slice(0, colon);
+};
+
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+const originIsLocal = (origin: string): boolean => {
+  try {
+    return namesThisServer(hostPart(new URL(origin).host));
+  } catch {
+    return false;
+  }
+};
+
+app.use('/api', (req, res, next) => {
+  const host = req.headers.host;
+  const origin = req.headers.origin;
+  const site = req.headers['sec-fetch-site'];
+  const refuse = (why: string): void => {
+    logHttp.warn(`refused ${req.method} ${req.originalUrl}: ${why}`);
+    res.status(403).json({ error: REQUEST_NOT_LOCAL });
+  };
+  if (!host || !namesThisServer(hostPart(host))) {
+    refuse(`Host ${JSON.stringify(host ?? '')} does not name this server`);
     return;
   }
-  const session = await getAuth().api.getSession({ headers: fromNodeHeaders(req.headers) });
-  if (!session) {
-    res.status(401).json({ error: 'sign in required' });
+  if (origin !== undefined && !originIsLocal(origin)) {
+    refuse(`Origin ${JSON.stringify(origin)} is not this server`);
     return;
   }
-  const memberships = await listUserWorkspaceIds(session.user.id);
-  const active = session.session.activeOrganizationId;
-  // A workspace the user has left never wins. Users with none get one built here
-  // rather than refused: the registration hook that normally builds one is not
-  // transactional with the user row, and a stranded account beats no account.
-  const workspaceId =
-    active && memberships.includes(active)
-      ? active
-      : (memberships[0] ?? (await ensureWorkspace(dbInstance(), session.user.id)));
-  // who is acting, for the routes that record it (imports.uploaded_by), and where -
-  // the workspace travels as data too, for the body parsers below (see withWorkspace)
-  res.locals.userId = session.user.id;
-  res.locals.workspaceId = workspaceId;
-  runWithWorkspace(workspaceId, () => next());
+  if (STATE_CHANGING.has(req.method) && typeof site === 'string' && site !== 'same-origin') {
+    refuse(`Sec-Fetch-Site ${JSON.stringify(site)} on a ${req.method}`);
+    return;
+  }
+  next();
 });
 
-// Body parsing sits AFTER the session check on purpose: parsing before
-// authenticating lets anyone who can reach the port make the server chew through a
-// body-sized allocation per request for free. The multipart parser on /api/imports
-// obeys the same rule by being mounted per route rather than globally.
-//
-// And every parser that reads the body is mounted through withWorkspace(): the
-// runWithWorkspace() above holds its store for the synchronous run of next() and
-// for whatever inherits from it, so a parser finishing on a later socket read calls
-// next() with an empty store and the handler's first db call throws. A bare mount
-// may appear to work anyway, for a reason belonging to the parser's own package.
-export const withWorkspace =
-  (mw: express.RequestHandler): express.RequestHandler =>
-  (req, res, next) => {
-    mw(req, res, (err?: unknown) => {
-      const ws = res.locals.workspaceId as string | undefined;
-      // /api/health calls next() before the workspace is resolved
-      if (!ws) {
-        next(err);
-        return;
-      }
-      runWithWorkspace(ws, () => next(err));
-    });
-  };
-
 // the ceiling is raised from the default for one caller: a backup restored as JSON
-app.use(withWorkspace(express.json({ limit: '25mb' })));
+app.use(express.json({ limit: '25mb' }));
 
 const q = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -214,7 +218,7 @@ const q = (v: unknown): string | undefined =>
 const isCategory = (v: unknown): v is Category => (CATEGORIES as readonly unknown[]).includes(v);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, signup: config.signupInviteCode ? 'invite' : 'open' });
+  res.json({ ok: true });
 });
 
 /**
@@ -320,7 +324,7 @@ app.post('/api/accounts', async (req, res) => {
   }
   const result = await createAccount({
     name: parsed.data.name,
-    // absent means the workspace's own unit, never a guess made on the client's
+    // absent means the base currency, never a guess made on the client's
     // behalf. This is the one path into accounts.currency that currencyCode does not
     // see: the fallback is validated at the settings door, so the asymmetry is
     // deliberate rather than missed.
@@ -531,7 +535,7 @@ type ScopeResult =
 
 /**
  * Deliberately not q(): it maps both '' and a repeated parameter to undefined, and
- * undefined here means the whole workspace in the base currency - so a caller
+ * undefined here means every account in the base currency - so a caller
  * building `?accountId=${account?.id ?? ''}` would be handed every account's money
  * labelled as one account's. Presence first, then the type, then the trimmed string,
  * and each of the two refusals says its own cause: `?accountId=` was sent exactly
@@ -836,7 +840,7 @@ app.post('/api/income-sources', async (req, res) => {
 
 /**
  * A builtin is editable here and refused by DELETE below: renaming the seeded external
- * source is how a workspace that predates a change to its label reaches the word it
+ * source is how a database that predates a change to its label reaches the word it
  * wants.
  */
 app.put('/api/income-sources/:id', async (req, res) => {
@@ -1104,6 +1108,9 @@ app.get('/api/export.csv', async (req, res) => {
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="finto.csv"');
+  // every transaction the person has, in one response: res.send sets an ETag and no
+  // Cache-Control, which permits heuristic caching of the whole of it
+  res.setHeader('Cache-Control', 'no-store');
   // BOM - so Excel opens UTF-8 with non-latin characters without a fight
   res.send('\uFEFF' + [header, ...lines].join('\n'));
 });
@@ -1121,8 +1128,8 @@ const UPLOAD_LIMITS = {
 
 /**
  * In memory, never on disk: the hash is over the bytes and the XLSX reader takes a
- * Buffer. Mounted per route rather than globally, and therefore below the session
- * check - see the note above withWorkspace.
+ * Buffer. Mounted per route rather than globally, so no other route pays for a
+ * multipart parse it never asked for.
  */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -1160,7 +1167,7 @@ function uploadError(err: unknown): string {
 }
 
 const uploadFile: express.RequestHandler = (req, res, next) => {
-  withWorkspace(upload.single('file'))(req, res, (err: unknown) => {
+  upload.single('file')(req, res, (err: unknown) => {
     if (!err) {
       next();
       return;
@@ -1341,7 +1348,6 @@ app.post('/api/imports', uploadFile, async (req, res) => {
       mapping,
       bytes: req.file.buffer,
       originalFilename: req.file.originalname || undefined,
-      uploadedBy: res.locals.userId as string | undefined,
     });
     if (result.outcome === 'duplicate') {
       const where = result.accountIds.join(', ') || 'no account (its rows were already there)';
@@ -1457,9 +1463,9 @@ app.post('/api/imports/:id/discard', async (req, res) => {
 
 /**
  * Presence then shape, deliberately not q(): q() maps both '' and a repeated parameter
- * to undefined, and undefined here means the whole workspace. A caller writing
- * `?accountId=${account?.id ?? ''}` would then be answered with every import this
- * workspace has and print it as one account's. Same test and same sentence as
+ * to undefined, and undefined here means every account. A caller writing
+ * `?accountId=${account?.id ?? ''}` would then be answered with every import there
+ * is and print it as one account's. Same test and same sentence as
  * summaryScope. An id that matches no account is not an error.
  */
 app.get('/api/imports', async (req, res) => {
@@ -1534,10 +1540,9 @@ export function attachmentDisposition(importId: string, info?: ImportDocumentInf
 app.get('/api/imports/:id/document', async (req, res) => {
   const ref = await getImportDocumentRef(req.params.id);
   if (!ref) {
-    // absent, another workspace's, and "no readable document" are one answer, because
-    // the select is workspace-scoped and they are one code path. A sentence per case
-    // would make this route an existence oracle. It says READ and never "kept": a
-    // restored row has its pointer stripped while its bytes are still on disk
+    // absent and "no readable document" are one answer and one code path. It says
+    // READ and never "kept": the row's claim survives a restore, and the file it
+    // names belongs to the disk it was uploaded to
     res.status(404).json({ error: DOCUMENT_NOT_READABLE });
     return;
   }
@@ -1545,9 +1550,16 @@ app.get('/api/imports/:id/document', async (req, res) => {
   try {
     bytes = await getDocument(ref);
   } catch (e) {
-    // 500 and not 400 - the user's file is not at fault - and the whole chain goes to
-    // the log, or a rotated DOCUMENT_ENCRYPTION_KEY reaches the operator as an
-    // integrity failure. The client gets no path, no errno and no filename
+    // A row that claims a document whose file is not here is the ordinary state of a
+    // restored backup, so it joins the 404 above rather than reporting a fault: the
+    // machine holding the statements is the machine they were uploaded to. Every
+    // other read failure is 500 and not 400 - the user's file is not at fault - and
+    // the whole chain goes to the log. The client gets no path, no errno, no filename
+    if (e instanceof DocumentMissing) {
+      logImport.info(`import ${req.params.id} claims a document that is not on this disk`);
+      res.status(404).json({ error: DOCUMENT_NOT_READABLE });
+      return;
+    }
     logImport.error(
       { err: e },
       `import ${req.params.id} document could not be read: ${causeChain(e)}`,
@@ -1557,24 +1569,22 @@ app.get('/api/imports/:id/document', async (req, res) => {
   }
   const info = await getImportDocumentInfo(req.params.id);
   // attachment + nosniff + octet-stream, all three: these are user-uploaded bytes
-  // served back from the origin that holds the session cookie
+  // served back from the app's own origin
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   // res.send(Buffer) sets an ETag and no Cache-Control, which permits heuristic
   // caching of a decrypted bank statement
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Disposition', attachmentDisposition(req.params.id, info));
-  logImport.info(
-    `import ${req.params.id} document sent to ${res.locals.userId as string} (${bytes.length} bytes)`,
-  );
+  logImport.info(`import ${req.params.id} document sent (${bytes.length} bytes)`);
   res.send(bytes);
 });
 
 app.delete('/api/imports/:id/document', async (req, res) => {
-  // on the ROW, never on the pointer: a row whose pointer is NULL may still have
-  // bytes, and those are exactly the rows a retention policy has to reach. And it
-  // runs before any disk access - checking afterwards would delete the blob at
-  // <this workspace>/<id> for an id with no row here, then answer "not found"
+  // on the ROW, never on the pointer: a row whose pointer is cleared may still have
+  // a file, and those are exactly the rows a retention policy has to reach. And it
+  // runs before any disk access - checking afterwards would delete a file for an id
+  // with no row, then answer "not found"
   const info = await getImportDocumentInfo(req.params.id);
   if (!info) {
     res.status(404).json({ error: 'import not found' });
@@ -1582,7 +1592,7 @@ app.delete('/api/imports/:id/document', async (req, res) => {
   }
   let bytesRemoved: boolean;
   try {
-    bytesRemoved = await deleteDocument(req.params.id);
+    bytesRemoved = await deleteDocument(info);
   } catch (e) {
     // the pointer stays: it still describes what is on disk
     logImport.error(
@@ -1601,17 +1611,7 @@ app.delete('/api/imports/:id/document', async (req, res) => {
   // `false` is not a failure - most rows never had a document - and the pointer is
   // cleared either way, or the row goes on claiming a readable one.
   await clearImportDocument(req.params.id);
-  if (info.keyVersion !== null && !knowsKeyVersion(info.keyVersion)) {
-    // deleteDocument tried every layout this server knows, and this row's is not one
-    // of them, so its bytes are still there - and the pointer that named the layout
-    // has just been cleared. Mirrors deleteImport's line, for the same recovery
-    logImport.error(
-      `import ${req.params.id} document was written under key layout ${info.keyVersion}, which this server cannot address - remove it by hand`,
-    );
-  }
-  logImport.info(
-    `import ${req.params.id} document deleted by ${res.locals.userId as string} (bytes removed: ${bytesRemoved})`,
-  );
+  logImport.info(`import ${req.params.id} document deleted (bytes removed: ${bytesRemoved})`);
   res.json({ deleted: true, importId: req.params.id, bytesRemoved });
 });
 
@@ -1620,6 +1620,9 @@ app.get('/api/backup', async (_req, res) => {
   const data = await exportBackup();
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="finto-backup-${stamp}.json"`);
+  // as on the CSV export and the document download: this is every table in the
+  // database, and nothing may hold a copy of it that the person did not ask for
+  res.setHeader('Cache-Control', 'no-store');
   res.send(JSON.stringify(data));
 });
 
@@ -1627,7 +1630,7 @@ app.post(
   '/api/restore',
   // the same ceiling as the JSON parser above, and it has to stay the same: the body
   // reaches one of the two depending on the content type the client sent
-  withWorkspace(express.raw({ type: 'application/octet-stream', limit: '25mb' })),
+  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
   async (req, res) => {
     // the file arrives either as a raw octet-stream (Buffer) or, when the client
     // sends application/json, already parsed by the global json middleware
@@ -1635,7 +1638,7 @@ app.post(
     if (Buffer.isBuffer(raw) && raw.subarray(0, 16).equals(Buffer.from('SQLite format 3\0'))) {
       res.status(400).json({
         error:
-          'this is a SQLite dump from the pre-Postgres era - import it on the server with: npm run migrate:sqlite -- <file>',
+          'this is a SQLite database from an old version of Finto, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen',
       });
       return;
     }
@@ -1651,6 +1654,72 @@ app.post(
     }
   },
 );
+
+/** The built client, when `npm run setup` has produced one. */
+export const WEB_DIST = path.join(__dirname, '..', '..', 'web', 'dist');
+
+/**
+ * Below every /api route, so nothing here can shadow one, and for GET alone: a POST to
+ * an unknown path is refused, never answered with a page. Only what Vite wrote under
+ * assets/ carries a content hash in its name, so only that may be cached for good; the
+ * two pages and the favicon are revalidated, or a rebuilt landing page never arrives.
+ */
+const CLIENT_NOT_BUILT =
+  'the web client is not built - run `npm run setup` from the repository root, then start again';
+
+/**
+ * RELATIVE to the build, never the absolute path on disk. `filePath.includes('/assets/')`
+ * reads the whole path, so a checkout under any directory called `assets` - and a home
+ * directory is one somebody can have - served index.html with a year of immutable
+ * caching, and the person's browser then never sees a new version of the app at all.
+ * Only Vite puts a content hash in a name, and only under that one folder.
+ */
+export function cacheControlFor(filePath: string): string {
+  const relative = path.relative(WEB_DIST, filePath);
+  return relative.startsWith(`assets${path.sep}`)
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
+}
+
+/**
+ * Whether a path that matched no file gets the app. Two conditions, and the first is
+ * the one that was missing: a request for a FILE that is not there is a 404, never
+ * 200 with a page in it. After a rebuild a stale index.html asks for a bundle whose
+ * name no longer exists, and answering HTML makes the browser report a syntax error
+ * inside a script - which sends the reader to the wrong file entirely.
+ *
+ * "File-shaped" is the last segment carrying an extension. It is the only signal
+ * available: a <script src> is sent with `Accept: * / *`, which matches text/html, so
+ * the Accept header alone cannot tell a bundle from a page. Accept is still checked,
+ * because it is what keeps a JSON client from being handed a page.
+ */
+export const servesTheApp = (pathname: string, acceptsHtml: boolean): boolean =>
+  acceptsHtml && !/\.[A-Za-z0-9]+$/.test(pathname.split('/').pop() ?? '');
+
+app.use(
+  express.static(WEB_DIST, {
+    index: false,
+    setHeaders: (res, filePath) => {
+      res.setHeader('Cache-Control', cacheControlFor(filePath));
+    },
+  }),
+);
+
+app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
+  const index = path.join(WEB_DIST, 'index.html');
+  // before the shape test, and deliberately: with no build there is nothing to
+  // serve for any path, and this sentence is the one that says why
+  if (!fs.existsSync(index)) {
+    res.status(503).type('text/plain').send(CLIENT_NOT_BUILT);
+    return;
+  }
+  if (!servesTheApp(req.path, Boolean(req.accepts('html')))) {
+    res.status(404).type('text/plain').send('not found');
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(index);
+});
 
 // One handler, and no per-route wrapper: Express 5 catches an async route's rejection
 // itself. The message goes to the log and not to the client - it tends to carry table

@@ -1,21 +1,16 @@
 /**
  * Both summary routes over real HTTP: what `?accountId=` does, and what it refuses.
  *
- * Driven through supertest with a real session, because everything worth asserting
- * here is the wire - the status code, the sentence each refusal composes, and which
- * currency field the body carries. A per-account body that answered `baseCurrency`
- * would render a UAH figure labelled EUR, and nothing below the route can see that.
- *
- * The process-wide test fallback is cleared for the duration, as in
- * http-accounts.test.ts: with it armed a request that never entered a workspace
- * context would answer from the test workspace instead of throwing.
+ * Driven through supertest, because everything worth asserting here is the wire -
+ * the status code, the sentence each refusal composes, and which currency field the
+ * body carries. A per-account body that answered `baseCurrency` would render a UAH
+ * figure labelled EUR, and nothing below the route can see that.
  */
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
-import { dbInstance, setWorkspaceFallback } from '../src/db';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { seedDefaults } from '../src/db';
+import { freshTestDb } from './pglite';
 
 const FROM = '2026-01-01';
 const TO = '2026-12-31';
@@ -59,20 +54,8 @@ const mixedStatement = Buffer.from(
 );
 
 let agent: request.Agent;
-let stranger: request.Agent;
-let foreigner: request.Agent;
 let walletId: string;
-let strangerAccountId: string;
 let foreignId: string;
-
-const signUp = async (email: string): Promise<request.Agent> => {
-  const a = request.agent(app);
-  const res = await a
-    .post('/api/auth/sign-up/email')
-    .send({ email, password: 'correct-horse-battery', name: email });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-  return a;
-};
 
 const makeAccount = async (a: request.Agent, name: string, currency = 'EUR'): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency });
@@ -90,31 +73,33 @@ const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Pro
   expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
 };
 
-beforeAll(async () => {
-  initAuth(dbInstance());
-  setWorkspaceFallback(undefined);
+/**
+ * Two accounts in one database, so every figure over every account is the sum of
+ * both: the wallet's rows, and the one row of the hryvnia account that the file
+ * declared in EUR - the hryvnia row itself has no rate and counts nowhere but on
+ * its own account's arm.
+ */
+const ALL_EXPENSE = EXPENSE + FOREIGN_BASE_EXPENSE;
 
-  agent = await signUp('summary@example.com');
-  stranger = await signUp('summary-stranger@example.com');
-  // a third workspace, so that nothing this account holds can move a figure
-  // asserted about the other two
-  foreigner = await signUp('summary-foreign@example.com');
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
+beforeAll(async () => {
+  await freshTestDb();
+  await seedDefaults();
+  agent = request.agent(app);
 
   walletId = await makeAccount(agent, 'Wallet');
-  strangerAccountId = await makeAccount(stranger, 'Their Wallet');
-  foreignId = await makeAccount(foreigner, 'Hryvnia', 'UAH');
+  foreignId = await makeAccount(agent, 'Hryvnia', 'UAH');
 
   await importCsv(agent, walletId, statement);
-  await importCsv(foreigner, foreignId, mixedStatement);
-});
-
-afterAll(() => {
-  // the fallback is process-wide - the rest of the run expects it armed
-  setWorkspaceFallback(TEST_WORKSPACE_ID);
+  await importCsv(agent, foreignId, mixedStatement);
 });
 
 describe('GET /api/summary', () => {
-  it('answers the whole workspace in the base currency when no account is named', async () => {
+  it('answers every account in the base currency when no account is named', async () => {
     const res = await agent.get(`/api/summary?${WINDOW}`);
 
     expect(res.status).toBe(200);
@@ -123,7 +108,7 @@ describe('GET /api/summary', () => {
       from: FROM,
       to: TO,
       baseCurrency: 'EUR',
-      totals: { expense: EXPENSE, income: INCOME },
+      totals: { expense: ALL_EXPENSE, income: INCOME },
     });
     // the unit is named once per body: no account arm field leaks onto this one
     expect(res.body).not.toHaveProperty('currency');
@@ -150,7 +135,7 @@ describe('GET /api/summary', () => {
 });
 
 describe('GET /api/summary/months', () => {
-  it('answers the workspace chart with the independence figures on it', async () => {
+  it('answers the chart over every account with the independence figures on it', async () => {
     const res = await agent.get(`/api/summary/months?${WINDOW}`);
 
     expect(res.status).toBe(200);
@@ -158,7 +143,7 @@ describe('GET /api/summary/months', () => {
     expect(res.body.months).toHaveLength(1);
     expect(res.body.months[0]).toMatchObject({
       month: '2026-03',
-      expense: EXPENSE,
+      expense: ALL_EXPENSE,
       income: INCOME,
       expenseOneOff: 0,
     });
@@ -218,7 +203,7 @@ describe('the last day of the window is inside it', () => {
  */
 describe('an account whose currency is not the base currency', () => {
   it.each(ROUTES)('%s: says its own currency, and names the row not in it', async (route) => {
-    const res = await foreigner.get(`${route}?accountId=${foreignId}&${WINDOW}`);
+    const res = await agent.get(`${route}?accountId=${foreignId}&${WINDOW}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
@@ -233,37 +218,38 @@ describe('an account whose currency is not the base currency', () => {
 
   /**
    * D1 and D2 end to end: the account arm sums its own rows whatever currency they
-   * are in, and the workspace arm sums the converted ones in the base currency. A
-   * row with no rate is a real movement of that account's money and a number the
-   * workspace may not add to euros.
+   * are in, and the arm over every account sums the converted ones in the base
+   * currency. A row with no rate is a real movement of that account's money and a
+   * number the other arm may not add to euros - so it is in one figure and not the
+   * other.
    */
-  it('answers a different total than the workspace arm over the same rows', async () => {
-    const account = await foreigner.get(`/api/summary?accountId=${foreignId}&${WINDOW}`);
+  it('counts its unconverted row on its own arm and on no other', async () => {
+    const account = await agent.get(`/api/summary?accountId=${foreignId}&${WINDOW}`);
     expect(account.status).toBe(200);
     expect(account.body.totals).toEqual({
       expense: FOREIGN_EXPENSE + FOREIGN_BASE_EXPENSE,
       income: 0,
     });
 
-    const workspace = await foreigner.get(`/api/summary?${WINDOW}`);
-    expect(workspace.status).toBe(200);
-    expect(workspace.body).toMatchObject({
+    const all = await agent.get(`/api/summary?${WINDOW}`);
+    expect(all.status).toBe(200);
+    expect(all.body).toMatchObject({
       scope: 'workspace',
       baseCurrency: 'EUR',
-      totals: { expense: FOREIGN_BASE_EXPENSE, income: 0 },
+      totals: { expense: ALL_EXPENSE, income: INCOME },
     });
-    expect(workspace.body).not.toHaveProperty('currency');
+    expect(all.body).not.toHaveProperty('currency');
   });
 });
 
 /**
  * I7. q() maps both '' and a repeated parameter to undefined, and undefined means
- * the whole workspace - so a caller building `?accountId=${account?.id ?? ''}` would
- * be handed every account's money labelled as one account's. Neither route may
- * route this through q(), and the two causes get their own sentences: `?accountId=`
- * was sent exactly once.
+ * every account - so a caller building `?accountId=${account?.id ?? ''}` would be
+ * handed every account's money labelled as one account's. Neither route may route
+ * this through q(), and the two causes get their own sentences: `?accountId=` was
+ * sent exactly once.
  */
-describe('a malformed accountId never means the whole workspace', () => {
+describe('a malformed accountId never means every account', () => {
   it.each(ROUTES)('%s: an empty accountId is refused as empty', async (route) => {
     const res = await agent.get(`${route}?accountId=&${WINDOW}`);
     expect(res.status).toBe(400);
@@ -305,8 +291,7 @@ describe('a malformed accountId never means the whole workspace', () => {
 /**
  * I3 and I10. A body about an account has to state a currency, and there is no
  * currency without an account - so an id that resolves to nothing is a refusal and
- * not a 200 of zeroes. getAccount is workspace-scoped, so another workspace's id
- * and a nonexistent one are the same answer, down to the sentence.
+ * not a 200 of zeroes.
  */
 describe('an accountId that resolves to nothing', () => {
   it.each(ROUTES)('%s: an unknown id is 404', async (route) => {
@@ -314,38 +299,28 @@ describe('an accountId that resolves to nothing', () => {
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: 'account not found' });
   });
-
-  it.each(ROUTES)('%s: another workspace’s id is the same 404, word for word', async (route) => {
-    const mine = await agent.get(`${route}?accountId=no-such-account&${WINDOW}`);
-    const theirs = await agent.get(`${route}?accountId=${strangerAccountId}&${WINDOW}`);
-
-    expect(theirs.status).toBe(404);
-    expect(theirs.body).toEqual(mine.body);
-    // and the account is really there, for its owner
-    const owner = await stranger.get(`${route}?accountId=${strangerAccountId}&${WINDOW}`);
-    expect(owner.status).toBe(200);
-  });
 });
 
 /**
- * D4. Hiding an account keeps it out of the workspace totals - that is what
- * VISIBLE_ACCOUNT() is for. Asked about by id it answers its real numbers: the
+ * D4. Hiding an account keeps it out of the totals over every account - that is
+ * what VISIBLE_ACCOUNT() is for. Asked about by id it answers its real numbers: the
  * caller named it, and a removed account whose figures read as zero is
  * indistinguishable from an empty one.
  *
- * Last in the file, and put back afterwards: it changes what the workspace arm sums.
+ * Last in the file, and put back afterwards: it changes what the other arm sums.
  */
 describe('a hidden account', () => {
   afterAll(async () => {
     await agent.patch(`/api/accounts/${walletId}`).send({ hidden: false });
   });
 
-  it('answers its real numbers by id while contributing nothing to the workspace', async () => {
+  it('answers its real numbers by id while contributing nothing to the figures over every account', async () => {
     expect((await agent.patch(`/api/accounts/${walletId}`).send({ hidden: true })).status).toBe(200);
 
-    const workspace = await agent.get(`/api/summary?${WINDOW}`);
-    expect(workspace.status).toBe(200);
-    expect(workspace.body.totals).toEqual({ expense: 0, income: 0 });
+    // the hryvnia account's converted row is all that is left
+    const all = await agent.get(`/api/summary?${WINDOW}`);
+    expect(all.status).toBe(200);
+    expect(all.body.totals).toEqual({ expense: FOREIGN_BASE_EXPENSE, income: 0 });
 
     const account = await agent.get(`/api/summary?accountId=${walletId}&${WINDOW}`);
     expect(account.status).toBe(200);

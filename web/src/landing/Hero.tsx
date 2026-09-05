@@ -213,7 +213,7 @@ export function Hero() {
 
       <div className="hero-cta">
         <a className="cta cta-primary" href="/">
-          Sign in
+          Open the app
         </a>
       </div>
     </section>

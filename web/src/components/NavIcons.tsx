@@ -6,8 +6,8 @@
  * announced next to the word it draws is the word twice.
  *
  * They are drawn on a phone and not on a wide window: the design's top bar is text
- * pills, and `styles.css` hides them there. There is no Account icon because Account
- * is the avatar in that bar rather than a section in the list.
+ * pills, and `styles.css` hides them there. Settings is not a section in the list but
+ * the control at the right of the bar, and its icon is drawn at every width.
  */
 
 const box = {
@@ -54,6 +54,16 @@ export const ImportIcon = () => (
   <svg {...box}>
     <path d="M10 2.75v8.5M6.75 8l3.25 3.25L13.25 8" />
     <path d="M3.5 13.5v2.25a1.5 1.5 0 001.5 1.5h10a1.5 1.5 0 001.5-1.5V13.5" />
+  </svg>
+);
+
+/** Settings: three sliders. The one icon here that is drawn on a wide window too. */
+export const SettingsIcon = () => (
+  <svg {...box}>
+    <path d="M3.25 6h13.5M3.25 10h13.5M3.25 14h13.5" />
+    <circle cx="7" cy="6" r="1.75" fill="currentColor" stroke="none" />
+    <circle cx="13" cy="10" r="1.75" fill="currentColor" stroke="none" />
+    <circle cx="8.5" cy="14" r="1.75" fill="currentColor" stroke="none" />
   </svg>
 );
 

@@ -8,23 +8,19 @@
  * sweep is held by the enumeration in describe 2 rather than by anything structural -
  * one override, read back from every surface that reports a category.
  *
- * Describe 1 is the data layer with the process-wide workspace fallback armed;
- * describe 2 clears it in its own beforeAll (the http-accounts.test.ts idiom) because
- * a request that never entered a workspace context must throw rather than answer from
- * the test workspace. A file-level clear would unscope describe 1 instead.
+ * Describe 1 is the data layer; describe 2 is the same feature over real HTTP, and it
+ * starts from an empty database of its own because every figure it asserts is exact.
  */
 import { sql } from 'drizzle-orm';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { initAuth } from '../src/auth';
 import { reclassifyAll } from '../src/classify';
 import {
   addCategoryRule,
   avgMonthlyByCategory,
   countCategoryRuleMatches,
   createAccount,
-  currentWorkspaceId,
   dbInstance,
   deleteCategoryRule,
   exportBackup,
@@ -34,15 +30,15 @@ import {
   listTransactions,
   parseBackup,
   restoreBackup,
+  seedDefaults,
   setCategoryOverride,
-  setWorkspaceFallback,
   summaryByCategory,
   summaryIncomeByCategory,
   updateAccount,
 } from '../src/db';
 import { Account, NewTransaction, Transaction } from '../src/types';
 import { idOf } from './helpers';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { freshTestDb } from './pglite';
 
 // ---------- describe 1: the data layer ----------
 
@@ -88,8 +84,7 @@ const make = async (name: string): Promise<Account> => {
  */
 async function columnsOf(id: string): Promise<{ category: string; manual: string | null }> {
   const res = (await dbInstance().execute(
-    sql`SELECT category, category_manual FROM transactions
-        WHERE id = ${id} AND workspace_id = ${currentWorkspaceId()}`,
+    sql`SELECT category, category_manual FROM transactions WHERE id = ${id}`,
   )) as unknown as { rows: { category: string; category_manual: string | null }[] };
   expect(res.rows).toHaveLength(1);
   return { category: res.rows[0].category, manual: res.rows[0].category_manual };
@@ -263,7 +258,7 @@ describe('the data layer: a manual category, and what may not touch it', () => {
    * pattern" - four here, one of them on a hidden account, because
    * countCategoryRuleMatches carries WS() and no VISIBLE_ACCOUNT() and `overridden`
    * must carry exactly the same filters. Take one of the two through the visibility
-   * filter and `matches - overridden` is wrong for any workspace with a hidden
+   * filter and `matches - overridden` is wrong for anyone with a hidden
    * account, quietly.
    */
   it('the rule caption counts the rows it cannot change, through the same filters', async () => {
@@ -364,21 +359,9 @@ const pastStatement = Buffer.from(
 );
 
 let agent: request.Agent;
-let stranger: request.Agent;
-let past: request.Agent;
 let walletId: string;
-let strangerTxId: string;
 let shopId: string;
 let clearId: string;
-
-const signUp = async (email: string): Promise<request.Agent> => {
-  const a = request.agent(app);
-  const res = await a
-    .post('/api/auth/sign-up/email')
-    .send({ email, password: 'correct-horse-battery', name: email });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-  return a;
-};
 
 const makeAccount = async (a: request.Agent, name: string): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency: 'EUR' });
@@ -413,22 +396,19 @@ const patchCategory = (a: request.Agent, id: string, body: unknown) =>
 
 describe('over HTTP: the route, and every surface that reports a category', () => {
   beforeAll(async () => {
-    initAuth(dbInstance());
-    setWorkspaceFallback(undefined);
+    // the data layer's cases above left rows behind, and the figures below are
+    // exact: start from the empty database this describe would have as its own file
+    await freshTestDb();
+    await seedDefaults();
 
-    agent = await signUp('category@example.com');
-    stranger = await signUp('category-stranger@example.com');
-    past = await signUp('category-past@example.com');
+    agent = request.agent(app);
 
     walletId = await makeAccount(agent, 'Wallet');
-    const strangerAccountId = await makeAccount(stranger, 'Their Wallet');
-    const pastAccountId = await makeAccount(past, 'Past');
+    const pastAccountId = await makeAccount(agent, 'Past');
 
     await importCsv(agent, walletId, statement);
-    await importCsv(stranger, strangerAccountId, statement);
-    await importCsv(past, pastAccountId, pastStatement);
+    await importCsv(agent, pastAccountId, pastStatement);
 
-    strangerTxId = (await one(stranger, 'ZZ Mystery Shop')).id;
     shopId = (await one(agent, 'ZZ Mystery Shop')).id;
     clearId = (await one(agent, 'ZZ Mystery Clear')).id;
 
@@ -437,20 +417,15 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     const income = await one(agent, 'ZZ Mystery Income');
     expect((await patchCategory(agent, income.id, { category: 'salary' })).status).toBe(200);
 
-    const rent = (await listed(past))
+    const rent = (await listed(agent))
       .filter((t) => t.description === 'ZZ Monthly Rent')
       .sort((a, b) => a.date.localeCompare(b.date));
     expect(rent).toHaveLength(PAST_MONTHS);
-    expect((await patchCategory(past, rent[PAST_MONTHS - 1].id, { category: 'housing' })).status)
+    expect((await patchCategory(agent, rent[PAST_MONTHS - 1].id, { category: 'housing' })).status)
       .toBe(200);
 
     const budget = await agent.put('/api/budgets').send({ category: 'food', monthly: FOOD_BUDGET });
     expect(budget.status, JSON.stringify(budget.body)).toBe(200);
-  });
-
-  afterAll(() => {
-    // the fallback is process-wide - the rest of the run expects it armed
-    setWorkspaceFallback(TEST_WORKSPACE_ID);
   });
 
   describe('PATCH /api/transactions/:id/category', () => {
@@ -486,16 +461,10 @@ describe('over HTTP: the route, and every surface that reports a category', () =
       expect(res.body.error).toMatch(/^category must be one of: /);
     });
 
-    it('an unknown id is 404, and so is another workspace’s id', async () => {
+    it('an unknown id is 404', async () => {
       const unknown = await patchCategory(agent, 'no-such-transaction', { category: 'food' });
       expect(unknown.status).toBe(404);
       expect(unknown.body).toEqual({ error: 'transaction not found' });
-
-      const theirs = await patchCategory(agent, strangerTxId, { category: 'food' });
-      expect(theirs.status).toBe(404);
-      expect(theirs.body).toEqual(unknown.body);
-      // and the row is really there, for its owner
-      expect((await patchCategory(stranger, strangerTxId, { category: 'food' })).status).toBe(200);
     });
 
     /** null is the only thing that clears the column, and it answers 200. */
@@ -552,7 +521,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
       expect(line[0].split(',')[6]).toBe('food');
     });
 
-    it('GET /api/summary: spending and income by category, on the workspace arm', async () => {
+    it('GET /api/summary: spending and income by category, on the arm over every account', async () => {
       const res = await agent.get('/api/summary');
       expect(res.status).toBe(200);
       expect(res.body.byCategory).toContainEqual({
@@ -608,7 +577,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
 
     /** avgMonthlyByCategory, through the Goal screen's own window. */
     it('GET /api/independence: the average per month by category', async () => {
-      const res = await past.get('/api/independence');
+      const res = await agent.get('/api/independence');
       expect(res.status).toBe(200);
       const byCategory = res.body.byCategory as { category: string; total: number }[];
       expect(byCategory).toContainEqual({
@@ -623,7 +592,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     });
 
     it('GET /api/recurring: the group takes its newest row’s category', async () => {
-      const res = await past.get('/api/recurring');
+      const res = await agent.get('/api/recurring');
       expect(res.status).toBe(200);
       expect(res.body.groups).toHaveLength(1);
       expect(res.body.groups[0]).toMatchObject({

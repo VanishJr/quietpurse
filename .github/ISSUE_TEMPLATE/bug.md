@@ -21,15 +21,17 @@ labels: bug
 
 - [ ] Web client — which screen:
 - [ ] API — which endpoint:
-- [ ] Startup / migrations / Docker
+- [ ] Startup / migrations
 
 ## Setup
 
 - Commit or branch:
 - Node version:
-- Postgres: docker-compose service / your own (version):
+- Operating system:
+- Database: the built-in one under `~/Finto/db`, or your own PostgreSQL (version):
 - Browser, if it is a client problem:
 
 ## Anything in the logs
 
-<!-- `LOG_LEVEL=debug` turns on HTTP logging. Check for a workspace id or an email before pasting. -->
+<!-- `LOG_LEVEL=debug` turns on HTTP logging. It logs the path of every request, so check for an
+     account name or a statement filename before pasting. -->

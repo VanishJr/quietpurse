@@ -117,7 +117,7 @@ export interface Transaction {
  * otherwise carry the same value and change nothing — after the user had narrowed the
  * filter by hand in between, which is exactly when they would click it again.
  *
- * Here rather than in SignedIn.tsx so that the screen reading it does not have to
+ * Here rather than in Shell.tsx so that the screen reading it does not have to
  * import the module that renders it.
  */
 export interface TxFocus {
@@ -413,7 +413,6 @@ export interface ImportRecord {
    * history filters on this and never on the name.
    */
   accountId: string | null;
-  uploadedBy: string | null;
   uploadedAt: string;
   parserVersion: number;
   status: ImportStatus;

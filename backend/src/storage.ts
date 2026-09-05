@@ -6,16 +6,25 @@ import { causeChain } from './logger';
 
 /**
  * NOT a sanitiser: nothing is cleaned up into something acceptable, anything outside
- * the charset throws, so `..`, absolute paths, drive letters, NULs and empty segments
- * are outside it by construction rather than by removal.
+ * the shape throws, so `..`, absolute paths, drive letters, NULs, empty segments and a
+ * segment ending in a dot or a space are outside it by construction rather than by
+ * removal.
  *
- * What makes a key safe is not this pattern but where its segments come from -
- * documents.ts builds every one of them from an id this server generated. `CON`,
- * `NUL`, `AUX` and `COM1` all match here and are device names on Windows, so an
- * original_filename or any other string a user chose must never be passed through in
- * the belief that this guard covers it.
+ * The three classes differ, and the middle one is the widest: `.`, `)` and ` ` are
+ * legal inside a segment and `)` closes one, but none of the three OPENS one. That
+ * asymmetry is why SEGMENT_START is exported - documentStem cuts a user's filename to
+ * it rather than to a second copy of the class, so a name this file refuses cannot be
+ * a name that file produces. The agreement is held by documents.test.ts's property
+ * case over the stem's whole character set, not by the two comments matching.
  */
-const KEY = /^[A-Za-z0-9_-]{1,64}(\/[A-Za-z0-9_-]{1,64})*$/;
+const START = '\\p{L}\\p{M}\\p{N}_(-';
+const MIDDLE = '\\p{L}\\p{M}\\p{N}_.() -';
+const END = '\\p{L}\\p{M}\\p{N}_)-';
+const SEGMENT = `[${START}](?:[${MIDDLE}]{0,158}[${END}])?`;
+const KEY = new RegExp(`^${SEGMENT}(?:/${SEGMENT})*$`, 'u');
+
+/** One code point, and whether a key segment may begin with it. */
+export const SEGMENT_START = new RegExp(`^[${START}]$`, 'u');
 
 /** A relative DOCUMENT_STORE_PATH is resolved from backend/. */
 export function storageRoot(): string {
@@ -31,9 +40,46 @@ function resolveKey(key: string): string {
 }
 
 /**
+ * Nobody but this user. The statements are bank statements and the database beside
+ * them is every transaction in them, and row 72 removed the encryption that used to
+ * stand between them and a second account on the machine - so the only thing left is
+ * the mode, and it is set where the file is created rather than repaired afterwards.
+ *
+ * 0700 on a directory is the load-bearing half: PGlite writes its own files inside
+ * the database folder under its own modes, and a folder nobody else may traverse
+ * covers them whatever they are. An umask can only take permissions away here, never
+ * add them. A directory that already exists keeps the mode it has - Node applies this
+ * to what it creates - which is why a folder from an earlier build stays as it was.
+ */
+export const OWNER_ONLY_DIR = 0o700;
+export const OWNER_ONLY_FILE = 0o600;
+
+/**
+ * The directory exists AND can be written to. mkdir alone is not the check - it
+ * succeeds on an existing directory whatever its permissions, and a folder that
+ * cannot be written to would otherwise be discovered by the first upload that is
+ * refused, or by a migration that reports the SQL it failed on.
+ *
+ * The probe's name starts with a dot, so it is outside KEY by construction and no get
+ * can address it. The resolved path belongs in this message: it is a boot failure on
+ * the console, not the user-facing surface, and a path plus an errno is the whole of
+ * what makes it actionable.
+ */
+export async function assertWritableDir(dir: string, what: string): Promise<void> {
+  const probe = path.join(dir, `.writable-${crypto.randomUUID()}`);
+  try {
+    await fs.mkdir(dir, { recursive: true, mode: OWNER_ONLY_DIR });
+    await fs.writeFile(probe, 'finto', { mode: OWNER_ONLY_FILE });
+    await fs.unlink(probe);
+  } catch (e) {
+    throw new Error(`${what} at ${dir} is not writable: ${causeChain(e)}`, { cause: e });
+  }
+}
+
+/**
  * Writes under a temp name in the DESTINATION directory and renames into place:
  * rename is atomic within a filesystem, a copy across one is not, and a crash
- * mid-write must never leave a truncated blob under a name a row already points
+ * mid-write must never leave a truncated file under a name a row already points
  * at. The temp name is unique per write - two concurrent puts under different keys
  * would otherwise collide on it - and starts with a dot, which puts it outside KEY
  * so no get can resolve it.
@@ -43,17 +89,17 @@ function resolveKey(key: string): string {
  * close a hole that is not open.
  *
  * No fsync. A power loss that leaves a zero-length or partial file is caught loudly
- * by the length check and the AEAD tag on read; the failure mode is a refusal, not
- * plausible bytes. A crash between the write and the rename leaves the temp file
- * behind forever - it is ciphertext, it is unreachable, and no sweeper is in scope.
+ * by the hash check on read; the failure mode is a refusal, not plausible bytes. A
+ * crash between the write and the rename leaves the temp file behind - unreachable
+ * by any key, and no sweeper is in scope.
  */
 export async function putObject(key: string, bytes: Buffer): Promise<void> {
   const target = resolveKey(key);
   const dir = path.dirname(target);
-  await fs.mkdir(dir, { recursive: true });
+  await fs.mkdir(dir, { recursive: true, mode: OWNER_ONLY_DIR });
   const temp = path.join(dir, `.tmp-${crypto.randomUUID()}`);
   try {
-    await fs.writeFile(temp, bytes);
+    await fs.writeFile(temp, bytes, { mode: OWNER_ONLY_FILE });
     await fs.rename(temp, target);
   } catch (e) {
     await fs.rm(temp, { force: true }).catch(() => undefined);
@@ -74,7 +120,7 @@ export async function getObject(key: string): Promise<Buffer | undefined> {
 
 /**
  * "Not there" is not an error and must not be reported as one: most deletes reach
- * imports that never had a document, and an error line per delete trains the operator
+ * imports that never had a document, and an error line per delete trains the reader
  * to ignore the one that matters.
  */
 export async function deleteObject(key: string): Promise<boolean> {
@@ -88,27 +134,7 @@ export async function deleteObject(key: string): Promise<boolean> {
   }
 }
 
-/**
- * The root exists AND can be written to. mkdir alone is not the check - it succeeds on
- * an existing directory whatever its permissions, which is exactly the failure this
- * exists to catch: a named volume that arrives owned by root while the image runs as a
- * non-root user, so the server boots clean and refuses every import at runtime instead.
- *
- * The probe's name starts with a dot, so it is outside KEY by construction and no get
- * can address it. The resolved path belongs in this message: it is a boot failure on
- * the operator's console, not the user-facing surface.
- */
+/** The statements folder, named for the setting that moves it. */
 export async function assertStorageWritable(): Promise<void> {
-  const root = storageRoot();
-  const probe = path.join(root, `.writable-${crypto.randomUUID()}`);
-  try {
-    await fs.mkdir(root, { recursive: true });
-    await fs.writeFile(probe, 'finto');
-    await fs.unlink(probe);
-  } catch (e) {
-    throw new Error(
-      `the source document store at ${root} is not writable (DOCUMENT_STORE_PATH): ${causeChain(e)}`,
-      { cause: e },
-    );
-  }
+  await assertWritableDir(storageRoot(), 'the statements folder (DOCUMENT_STORE_PATH)');
 }

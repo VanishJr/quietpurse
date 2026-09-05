@@ -32,12 +32,11 @@ async function fresh() {
   vi.resetModules();
   const db = await import('../src/db');
 
-  // the reset module graph lost the database AND the workspace scope from
-  // setup.ts - re-init both on the shared PGlite (freshTestDb truncates every
-  // table; the instance survives on globalThis)
-  const { freshTestDb, TEST_WORKSPACE_ID } = await import('./pglite');
+  // the reset module graph lost the database from setup.ts - re-init it on the
+  // shared PGlite (freshTestDb truncates every table; the instance survives on
+  // globalThis)
+  const { freshTestDb } = await import('./pglite');
   db.initDb(await freshTestDb());
-  db.setWorkspaceFallback(TEST_WORKSPACE_ID);
   await db.seedDefaults();
 
   const { computeIndependence } = await import('../src/independence');

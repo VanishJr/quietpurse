@@ -1,11 +1,5 @@
 /**
- * The application: the five screens and the navigation. Mounted only with a session,
- * so every request below is scoped to the user's workspace.
- *
- * It is a module of its own so that it can be a chunk of its own: imported directly by
- * App.tsx it puts the whole app - five screens and recharts with it - into the bundle
- * the sign-in form is served from, downloaded and parsed by somebody who does not have
- * an account yet. App.tsx reaches it through `lazy()` instead.
+ * The application: the five screens and the navigation.
  *
  * The navigation is ONE element in two shapes: a bar across the top when there is room,
  * and `position: fixed` at the foot of the window when there is not - never a second
@@ -13,8 +7,9 @@
  * accessibility tree twice.
  *
  * `Import` is in that list and is hidden on a phone: it does not fit five-across, and
- * the Account screen carries its own control for it. `Account` is NOT in the list - it
- * is the avatar at the right of the bar, which is what frees the fifth slot for Import.
+ * the Settings screen carries its own control for it. `Settings` is NOT in the list -
+ * it is the control at the right of the bar, which is what frees the fifth slot for
+ * Import.
  *
  * The nav comes first in the DOM. The screens are what a keyboard should reach first,
  * which is what the `row-reverse` it replaced was for, and that does not survive a bar
@@ -25,26 +20,25 @@
  * `?account=` and `?panel=`; see `url.ts`, including why a query parameter rather than
  * a path. What it buys is the Back button.
  *
- * Every section, and the avatar, is an `<a href>` carrying the URL it would move to,
- * not a `<button onClick>`: a control that HAPPENS to change the page is one a browser
- * cannot offer Cmd-click, middle click, "Open in a new tab" or "Copy link address" for.
- * A plain left click stays the app's and every other click is handed straight back to
- * the browser; that rule is written once, in `navigate` below.
+ * Every section, and the settings control, is an `<a href>` carrying the URL it would
+ * move to, not a `<button onClick>`: a control that HAPPENS to change the page is one a
+ * browser cannot offer Cmd-click, middle click, "Open in a new tab" or "Copy link
+ * address" for. A plain left click stays the app's and every other click is handed
+ * straight back to the browser; that rule is written once, in `navigate` below.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { auth, SessionUser } from './api';
 import {
   AnalyticsIcon,
   GoalsIcon,
   ImportIcon,
   OverviewIcon,
+  SettingsIcon,
   TransactionsIcon,
 } from './components/NavIcons';
-import { initialOf } from './identity';
-import { AccountScreen } from './screens/AccountScreen';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
 import { IndependenceScreen } from './screens/IndependenceScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
+import { SettingsScreen } from './screens/SettingsScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ThemeMode, useTheme } from './theme';
 import { TxFocus } from './types';
@@ -57,9 +51,9 @@ const TABS = [
   { key: 'goal', title: 'Goals', Icon: GoalsIcon },
 ] as const;
 
-type TabKey = (typeof TABS)[number]['key'] | 'account';
+type TabKey = (typeof TABS)[number]['key'] | 'settings';
 
-const TAB_KEYS: readonly TabKey[] = [...TABS.map((t) => t.key), 'account'];
+const TAB_KEYS: readonly TabKey[] = [...TABS.map((t) => t.key), 'settings'];
 
 /**
  * Which screen a URL is asking for, and Overview for a URL that asks for nothing this
@@ -91,7 +85,7 @@ const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
 const MODE_GLYPH: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };
 const MODE_NAME: Record<ThemeMode, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
 
-export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut: () => void }) {
+export function Shell() {
   const { mode, setMode } = useTheme();
   /**
    * Where the reader is, read from the URL rather than held here — so Back, Reload and
@@ -133,7 +127,12 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
     read();
     el.addEventListener('scroll', read, { passive: true });
     return () => el.removeEventListener('scroll', read);
-  }, [url.panel]);
+    // `tab` as well as the panel, and it is not a formality: leaving this screen
+    // hides it, which resets its scrollTop to 0 with no scroll event to announce it.
+    // Without the re-read, coming back to a dashboard that is now at its top is
+    // rendered with the band dropped and the shadow on, which is what a scrolled page
+    // looks like - the one state it is not in
+  }, [url.panel, tab]);
 
   const onOverview = tab === 'overview';
   const importing = onOverview && url.panel === 'import';
@@ -194,16 +193,6 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
    */
   const openImport = () => setUrl(IMPORT_PATCH);
 
-  const signOut = async () => {
-    try {
-      await auth.logout();
-    } finally {
-      // even if the call failed, drop back to the login screen: whatever went
-      // wrong, staying in a UI whose requests 401 is worse
-      onSignedOut();
-    }
-  };
-
   return (
     <div className="app">
       {/* The bar above the content carries every one of its controls before the first
@@ -223,7 +212,7 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
       */}
       <header className={`topbar ov-band${bandRunsOn ? ' is-merged' : ''}`}>
         {/* the same column the screens are laid out in, so the wordmark lines up with
-            the first card under it and the avatar with the last */}
+            the first card under it and the settings control with the last */}
         <div className="shell topbar-inner">
           <div className="nav-mark">Finto</div>
 
@@ -273,13 +262,13 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
               <span aria-hidden="true">{MODE_GLYPH[mode]}</span>
             </button>
             <a
-              className="avatar"
-              href={urlFor(patchFor('account'))}
-              onClick={(e) => navigate(e, () => go('account'))}
-              aria-current={tab === 'account' ? 'page' : undefined}
-              aria-label={`Account: ${user.email}`}
+              className="settings-link"
+              href={urlFor(patchFor('settings'))}
+              onClick={(e) => navigate(e, () => go('settings'))}
+              aria-current={tab === 'settings' ? 'page' : undefined}
+              aria-label="Settings"
             >
-              <span aria-hidden="true">{initialOf(user)}</span>
+              <SettingsIcon />
             </a>
           </div>
         </div>
@@ -292,7 +281,6 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
       <main className="screens" id="screens">
         <div className="screen" ref={overview} hidden={tab !== 'overview'}>
           <OverviewScreen
-            user={user}
             onOpenTransactions={openTransactions}
             onOpenAnalytics={() => go('analytics')}
           />
@@ -306,8 +294,8 @@ export function SignedIn({ user, onSignedOut }: { user: SessionUser; onSignedOut
         <div className="screen" hidden={tab !== 'goal'}>
           <IndependenceScreen />
         </div>
-        <div className="screen" hidden={tab !== 'account'}>
-          <AccountScreen user={user} onSignOut={signOut} onOpenImport={openImport} />
+        <div className="screen" hidden={tab !== 'settings'}>
+          <SettingsScreen onOpenImport={openImport} />
         </div>
       </main>
     </div>

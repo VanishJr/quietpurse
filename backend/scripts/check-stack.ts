@@ -1,6 +1,6 @@
 /**
- * A throwaway Finto stack for a manual check: its own database, its own ports, its
- * own document store, and a teardown that stops only what it started.
+ * A throwaway Finto stack for a manual check: its own home folder (database and
+ * statements), its own ports, and a teardown that stops only what it started.
  *
  *   npm --prefix C:\Dev\Finto\backend run check:stack -- up
  *   npm --prefix C:\Dev\Finto\backend run check:stack -- up --import <absolute file>
@@ -10,12 +10,11 @@
  * `up` returns once both servers answer, so the caller gets its shell back and the
  * children outlive the invocation. Options: --api-port, --app-port, --import.
  *
- * The owner's `npm run dev`, the `finto` database and the browser profile it is
- * signed into are out of reach by construction, not by care: every database name
- * goes through assertCheckDatabaseUrl, every path through assertRunPaths, and every
- * kill through shouldKill. Those live in check-stack-guards.ts, which a test can
- * import without any of this running. `.agents/concepts/check-stack.md` is the
- * mechanism written out.
+ * The owner's `npm run dev` and the ~/Finto folder it runs on are out of reach by
+ * construction, not by care: every path goes through assertRunPaths and every kill
+ * through shouldKill. Those live in check-stack-guards.ts, which a test can import
+ * without any of this running. `.agents/concepts/check-stack.md` is the mechanism
+ * written out.
  */
 import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -24,18 +23,15 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { Pool } from 'pg';
 import { config } from '../src/config';
 import {
-  assertCheckDatabaseUrl,
   assertCheckPort,
-  assertMaintenanceUrl,
   assertNoOptions,
   assertRunPaths,
+  backendEnv,
   backendArgv,
   killOutcome,
   markerFor,
-  MAINTENANCE_DATABASE,
   NOTHING_TO_TEAR_DOWN,
   parseOptions,
   reuseVerdict,
@@ -44,7 +40,6 @@ import {
   teardownIncomplete,
   teardownSentence,
   webArgv,
-  withDatabase,
   type ChildKind,
   type ChildRecord,
   type KillOutcome,
@@ -65,15 +60,8 @@ const VITE_BIN = path.join(WEB_DIR, 'node_modules', 'vite', 'bin', 'vite.js');
 const STACK_ROOT = path.join(os.tmpdir(), 'finto-check');
 const MANIFEST_PATH = path.join(STACK_ROOT, 'manifest.json');
 
-/**
- * Cookies are scoped by host and ignore the port, so a second port on 127.0.0.1
- * shares the owner's dev cookie jar - a sign-in there signs them out of theirs.
- * `localhost` is a different cookie host and config.ts trusts it already. It stops
- * protecting anything the moment the owner opens the dev app on localhost too.
- */
+/** A host the owner's dev app is not served on, so the two are not one origin in a browser's history. */
 const HOST = 'localhost';
-
-const CREDENTIALS = { email: 'check@finto.local', password: 'finto-check-stack', name: 'Check' };
 
 const READY_TIMEOUT_MS = 90_000;
 
@@ -84,13 +72,11 @@ type Manifest = {
   startedAt: string;
   repoRoot: string;
   runDir: string;
-  databaseName: string;
-  databaseUrl: string;
-  documentStorePath: string;
+  /** The run's FINTO_HOME: its database and its statements, nothing of the owner's. */
+  home: string;
   chromeProfileDir: string;
   appUrl: string;
   apiUrl: string;
-  credentials: { email: string; password: string };
   children: ChildRecord[];
 };
 
@@ -209,49 +195,6 @@ function writeManifest(m: Manifest): void {
   fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(m, null, 2)}\n`);
 }
 
-// ---------- database ----------
-
-const maintenanceUrl = (): string => withDatabase(config.databaseUrl, MAINTENANCE_DATABASE);
-
-async function onMaintenance<T>(fn: (pool: Pool) => Promise<T>): Promise<T> {
-  const url = maintenanceUrl();
-  assertMaintenanceUrl(url);
-  const pool = new Pool({ connectionString: url });
-  try {
-    return await fn(pool);
-  } finally {
-    await pool.end();
-  }
-}
-
-async function createCheckDatabase(url: string): Promise<void> {
-  // safe to interpolate: assertCheckDatabaseUrl returns only [a-z0-9_] matching
-  // CHECK_DB_PATTERN, and CREATE DATABASE takes no parameters
-  const name = assertCheckDatabaseUrl(url);
-  await onMaintenance((pool) => pool.query(`CREATE DATABASE "${name}"`));
-}
-
-async function dropCheckDatabase(url: string): Promise<'dropped' | 'absent'> {
-  const name = assertCheckDatabaseUrl(url);
-  return onMaintenance(async (pool) => {
-    const found = await pool.query('SELECT 1 FROM pg_database WHERE datname = $1', [name]);
-    if (found.rowCount === 0) return 'absent';
-    // FORCE terminates connections to THIS database only - the guard above is what
-    // makes that sentence true, so it runs before the drop and never after
-    await pool.query(`DROP DATABASE "${name}" WITH (FORCE)`);
-    return 'dropped';
-  });
-}
-
-async function listDatabases(): Promise<string[]> {
-  return onMaintenance(async (pool) => {
-    const r = await pool.query<{ datname: string }>(
-      'SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname',
-    );
-    return r.rows.map((x) => x.datname);
-  });
-}
-
 // ---------- teardown ----------
 
 type TeardownReport = {
@@ -259,7 +202,6 @@ type TeardownReport = {
   alreadyDead: number;
   failed: number;
   notOurs: { record: ChildRecord; detail: string }[];
-  database: 'dropped' | 'absent';
   runDir: 'removed' | 'absent' | 'kept as evidence';
   runDirPath: string;
   busyPorts: number[];
@@ -287,7 +229,6 @@ async function teardown(m: Manifest): Promise<TeardownReport> {
     alreadyDead: 0,
     failed: 0,
     notOurs: [],
-    database: 'absent',
     runDir: 'absent',
     runDirPath: m.runDir,
     busyPorts: [],
@@ -304,12 +245,7 @@ async function teardown(m: Manifest): Promise<TeardownReport> {
   for (const child of m.children) {
     if (!(await portFreed(child.port))) report.busyPorts.push(child.port);
   }
-  report.database = await dropCheckDatabase(m.databaseUrl);
-  assertRunPaths({
-    repoRoot: m.repoRoot,
-    runDir: m.runDir,
-    documentStorePath: m.documentStorePath,
-  });
+  assertRunPaths({ repoRoot: m.repoRoot, runDir: m.runDir, home: m.home });
   // a teardown that did not finish - a process left alone as NOT OURS, a kill that
   // failed, a port still held afterwards - is the one outcome that leaves evidence
   // worth reading, and removing the manifest is what would make the next `down` say
@@ -328,7 +264,6 @@ async function teardown(m: Manifest): Promise<TeardownReport> {
 
 function printTeardown(report: TeardownReport): void {
   console.log(teardownSentence({ ...report, notOurs: report.notOurs.length }));
-  console.log(`  database:      ${report.database}`);
   console.log(`  run directory: ${report.runDir}`);
   for (const { record, detail } of report.notOurs) {
     console.error(
@@ -416,36 +351,14 @@ function printLogTail(label: string, file: string, lines = 40): void {
 
 // ---------- the API calls up makes ----------
 
-/**
- * The only origin the check backend trusts is the check app's, which is what
- * CORS_ORIGINS was set to - so that is the one a server-side caller states.
- */
-type Session = { apiUrl: string; origin: string; cookie: string };
+const call = (apiUrl: string, route: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(`${apiUrl}${route}`, init);
 
-const call = (s: Session, route: string, init: RequestInit = {}): Promise<Response> =>
-  fetch(`${s.apiUrl}${route}`, {
-    ...init,
-    headers: { ...init.headers, origin: s.origin, ...(s.cookie ? { cookie: s.cookie } : {}) },
-  });
-
-async function signUp(apiUrl: string, origin: string): Promise<Session> {
-  const anonymous: Session = { apiUrl, origin, cookie: '' };
-  const res = await call(anonymous, '/api/auth/sign-up/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(CREDENTIALS),
-  });
-  if (!res.ok) throw new Error(`sign-up failed (${res.status}): ${await res.text()}`);
-  const cookie = res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
-  if (!cookie) throw new Error('sign-up returned no session cookie');
-  return { apiUrl, origin, cookie };
-}
-
-async function importStatement(session: Session, file: string): Promise<number> {
+async function importStatement(apiUrl: string, file: string): Promise<number> {
   if (!path.isAbsolute(file)) throw new Error(`--import needs an absolute path, got ${file}`);
   const bytes = fs.readFileSync(file);
 
-  const accountRes = await call(session, '/api/accounts', {
+  const accountRes = await call(apiUrl, '/api/accounts', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name: 'Check account' }),
@@ -458,16 +371,16 @@ async function importStatement(session: Session, file: string): Promise<number> 
   const form = new FormData();
   form.append('accountId', account.id);
   form.append('file', new Blob([new Uint8Array(bytes)]), path.basename(file));
-  const stageRes = await call(session, '/api/imports', { method: 'POST', body: form });
+  const stageRes = await call(apiUrl, '/api/imports', { method: 'POST', body: form });
   if (!stageRes.ok) throw new Error(`upload refused (${stageRes.status}): ${await stageRes.text()}`);
   const staged = (await stageRes.json()) as
     | { outcome: 'duplicate'; importId: string }
     | { outcome: 'awaiting_confirmation'; summary: { importId: string } };
   if (staged.outcome === 'duplicate') {
-    throw new Error(`the server answered "duplicate" on a database it created a minute ago`);
+    throw new Error(`the server answered "duplicate" on a home folder it created a minute ago`);
   }
 
-  const confirmRes = await call(session, `/api/imports/${staged.summary.importId}/confirm`, {
+  const confirmRes = await call(apiUrl, `/api/imports/${staged.summary.importId}/confirm`, {
     method: 'POST',
   });
   if (!confirmRes.ok) throw new Error(`confirm refused (${confirmRes.status}): ${await confirmRes.text()}`);
@@ -495,10 +408,9 @@ async function warnAboutOwnerStack(): Promise<void> {
   for (const port of RESERVED_PORTS) {
     if (await listening(port)) answering.push(port);
   }
-  const dev = answering.filter((p) => p !== 5432);
-  if (dev.length === 0) return;
+  if (answering.length === 0) return;
   console.warn(
-    `\nWARNING: the owner's stack is answering on ${dev.join(', ')}. This script never touches it, ` +
+    `\nWARNING: the owner's stack is answering on ${answering.join(', ')}. This script never touches it, ` +
       `but editing a file under backend/src while their \`npm run dev\` watches it restarts their ` +
       `server, and startup re-tags every transaction whose rules signature moved.`,
   );
@@ -555,20 +467,17 @@ async function up(options: Options): Promise<void> {
   const runId = crypto.randomBytes(4).toString('hex');
   const marker = markerFor(runId);
   const runDir = path.join(STACK_ROOT, runId);
-  const documentStorePath = path.join(runDir, 'documents');
+  const home = path.join(runDir, 'home');
   const chromeProfileDir = path.join(runDir, 'chrome');
-  assertRunPaths({ repoRoot: REPO_ROOT, runDir, documentStorePath });
+  assertRunPaths({ repoRoot: REPO_ROOT, runDir, home });
 
-  fs.mkdirSync(documentStorePath, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(chromeProfileDir, { recursive: true });
   const backendLog = path.join(runDir, 'backend.log');
   const webLog = path.join(runDir, 'web.log');
 
   const apiUrl = `http://${HOST}:${options.apiPort}`;
   const appUrl = `http://${HOST}:${options.appPort}`;
-  const databaseUrl = withDatabase(config.databaseUrl, `finto_check_${runId}`);
-  const databaseName = assertCheckDatabaseUrl(databaseUrl);
-  await createCheckDatabase(databaseUrl);
 
   const manifest: Manifest = {
     version: 1,
@@ -577,13 +486,10 @@ async function up(options: Options): Promise<void> {
     startedAt: new Date().toISOString(),
     repoRoot: REPO_ROOT,
     runDir,
-    databaseName,
-    databaseUrl,
-    documentStorePath,
+    home,
     chromeProfileDir,
     appUrl,
     apiUrl,
-    credentials: { email: CREDENTIALS.email, password: CREDENTIALS.password },
     children: [],
   };
 
@@ -630,15 +536,9 @@ async function up(options: Options): Promise<void> {
     'backend',
     BACKEND_DIR,
     backendArgv({ tsxCli: TSX_CLI, entry: path.join(BACKEND_DIR, 'src', 'index.ts'), marker }),
-    {
-      PORT: String(options.apiPort),
-      DATABASE_URL: databaseUrl,
-      BETTER_AUTH_URL: apiUrl,
-      CORS_ORIGINS: appUrl,
-      DOCUMENT_STORE_PATH: documentStorePath,
-      DOCUMENT_ENCRYPTION_KEY: `finto-check-document-key-${runId}`,
-      SIGNUP_INVITE_CODE: '',
-    },
+    // see backendEnv: FINTO_HOME alone is not enough, because DOCUMENT_STORE_PATH
+    // overrides the folder it derives, and the check inherits the owner's environment
+    backendEnv({ home, apiPort: options.apiPort }),
     backendLog,
     options.apiPort,
   );
@@ -647,7 +547,7 @@ async function up(options: Options): Promise<void> {
     WEB_DIR,
     webArgv({ viteBin: VITE_BIN, port: options.appPort, host: HOST, marker }),
     // resolved on the machine running Vite, never in a browser, so the loopback
-    // literal is right here where the cookie host is not
+    // literal is right here
     { BACKEND_URL: `http://127.0.0.1:${options.apiPort}` },
     webLog,
     options.appPort,
@@ -676,8 +576,7 @@ async function up(options: Options): Promise<void> {
 
   let imported: number | undefined;
   try {
-    const session = await signUp(apiUrl, appUrl);
-    if (options.importFile) imported = await importStatement(session, options.importFile);
+    if (options.importFile) imported = await importStatement(apiUrl, options.importFile);
   } catch (e) {
     console.error(`\n${(e as Error).message}`);
     console.error('\ntearing down what this run started:');
@@ -689,9 +588,7 @@ async function up(options: Options): Promise<void> {
 check stack ${runId} is up
   app            ${appUrl}
   api            ${apiUrl}
-  sign in as     ${CREDENTIALS.email} / ${CREDENTIALS.password}
-  database       ${databaseName}
-  document store ${documentStorePath}
+  home           ${home} (its database in db/, its statements in statements/)
   chrome profile ${chromeProfileDir}
   logs           ${backendLog}
                  ${webLog}
@@ -730,10 +627,9 @@ async function status(): Promise<void> {
     const port = (await listening(record.port)) ? 'answering' : 'silent';
     console.log(`  ${record.kind.padEnd(8)} pid ${record.pid} ${identity}; port ${record.port} ${port}`);
   }
-  const databases = await listDatabases();
-  console.log(`  database ${manifest.databaseName} ${databases.includes(manifest.databaseName) ? 'exists' : 'absent'}`);
+  console.log(`  home ${manifest.home} ${fs.existsSync(manifest.home) ? 'exists' : 'absent'}`);
   console.log(`  run directory ${manifest.runDir} ${fs.existsSync(manifest.runDir) ? 'exists' : 'absent'}`);
-  console.log(`  app ${manifest.appUrl}   api ${manifest.apiUrl}   sign in as ${manifest.credentials.email} / ${manifest.credentials.password}`);
+  console.log(`  app ${manifest.appUrl}   api ${manifest.apiUrl}`);
   await warnAboutOwnerStack();
 }
 
@@ -756,11 +652,10 @@ async function main(): Promise<void> {
 }
 
 /**
- * A machine that has not run `docker compose up` fails here first, and node-postgres
- * throws an AggregateError whose `.message` is the empty string - so the line the
- * first operator of this script sees was `check-stack failed: ` and nothing after
- * the colon. Every ECONNREFUSED is in `.errors`, and `String(e)` alone is the bare
- * word "AggregateError".
+ * An AggregateError's `.message` is the empty string - a port probe that fails on
+ * both loopback families throws one - so the line an operator sees would be
+ * `check-stack failed: ` and nothing after the colon. Every inner error is in
+ * `.errors`, and `String(e)` alone is the bare word "AggregateError".
  */
 main().catch((e: unknown) => {
   const message = e instanceof Error ? e.message : '';

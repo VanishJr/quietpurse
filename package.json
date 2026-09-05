@@ -1,0 +1,16 @@
+{
+  "name": "finto",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A personal finance tracker that runs on your own machine: bank statements in, one self-sufficiency number out",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "setup": "npm --prefix backend ci && npm --prefix web ci && npm --prefix web run build",
+    "start": "npm --prefix backend start",
+    "test": "npm --prefix backend test && npm --prefix web test",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix web run typecheck"
+  }
+}

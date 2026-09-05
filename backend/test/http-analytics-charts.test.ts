@@ -2,30 +2,24 @@
  * The saved chart list over real HTTP: what a PUT stores, what it answers, and what
  * it refuses.
  *
- * Driven through supertest with a real session, because everything worth asserting
+ * Driven through supertest, because everything worth asserting
  * here is the wire - the status code, the sentence each refusal composes, and the
  * fact that a 200 body is the list read back out of the table rather than the
  * request echoed. A route that answers with what it was sent reports a write that
  * did not happen as a success, and nothing below the route can see that.
- *
- * The process-wide test fallback is cleared for the duration, as in
- * http-summary.test.ts: with it armed a request that never entered a workspace
- * context would answer from the test workspace instead of throwing.
  */
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { CHARTS_STALE, app } from '../src/app';
-import { initAuth } from '../src/auth';
 import {
   CHARTS_MAX,
   CHART_ACCOUNT_ID_MAX,
   CHART_ID_MAX,
   CHART_METRICS,
   CHART_TITLE_MAX,
-  dbInstance,
-  setWorkspaceFallback,
+  seedDefaults,
 } from '../src/db';
-import { TEST_WORKSPACE_ID } from './pglite';
+import { freshTestDb } from './pglite';
 
 const CHARTS = '/api/analytics/charts';
 
@@ -56,17 +50,7 @@ const chart = (over: Partial<ChartBody> = {}): ChartBody => ({
 });
 
 let agent: request.Agent;
-let fresh: request.Agent;
 let walletId: string;
-
-const signUp = async (email: string): Promise<request.Agent> => {
-  const a = request.agent(app);
-  const res = await a
-    .post('/api/auth/sign-up/email')
-    .send({ email, password: 'correct-horse-battery', name: email });
-  expect(res.status, `sign-up failed: ${JSON.stringify(res.body)}`).toBeLessThan(300);
-  return a;
-};
 
 const makeAccount = async (a: request.Agent, name: string): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency: 'EUR' });
@@ -87,26 +71,22 @@ const save = async (a: request.Agent, charts: ChartBody[]): Promise<request.Resp
   return a.put(CHARTS).send({ version, charts });
 };
 
+/**
+ * Everything asserted below is exact, so the file starts from an empty database: the
+ * suite runs in one process with no truncation between files, and the rows an earlier
+ * file left behind would otherwise be in every unfiltered answer here.
+ */
 beforeAll(async () => {
-  initAuth(dbInstance());
-  setWorkspaceFallback(undefined);
-
-  agent = await signUp('charts@example.com');
-  // a workspace that never saves anything, so the empty answer stays assertable
-  // however the cases below are ordered
-  fresh = await signUp('charts-fresh@example.com');
-
+  await freshTestDb();
+  await seedDefaults();
+  agent = request.agent(app);
   walletId = await makeAccount(agent, 'Wallet');
 });
 
-afterAll(() => {
-  // the fallback is process-wide - the rest of the run expects it armed
-  setWorkspaceFallback(TEST_WORKSPACE_ID);
-});
-
+/** First in the file on purpose: it is the one answer a save anywhere below would change. */
 describe('GET /api/analytics/charts', () => {
-  it('answers a workspace that has never saved with version 0 and no charts', async () => {
-    const res = await fresh.get(CHARTS);
+  it('answers a database that has never saved with version 0 and no charts', async () => {
+    const res = await agent.get(CHARTS);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ version: 0, charts: [] });

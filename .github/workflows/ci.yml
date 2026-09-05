@@ -37,8 +37,8 @@ jobs:
       run:
         working-directory: backend
     services:
-      # 16-alpine, matching docker-compose.yml: that file is the closest thing to
-      # a statement about which server this runs on in production.
+      # 16-alpine: the server version the DATABASE_URL path is held against, since the
+      # embedded engine the product runs on is exercised by the job above.
       postgres:
         image: postgres:16-alpine
         env:

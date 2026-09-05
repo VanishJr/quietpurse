@@ -4,12 +4,11 @@ import os from 'os';
 import path from 'path';
 import ts from 'typescript';
 import {
-  assertCheckDatabaseUrl,
   assertCheckPort,
-  assertMaintenanceUrl,
   assertNoOptions,
   assertRunPaths,
   backendArgv,
+  backendEnv,
   DEFAULT_API_PORT,
   DEFAULT_APP_PORT,
   killOutcome,
@@ -21,7 +20,6 @@ import {
   teardownIncomplete,
   teardownSentence,
   webArgv,
-  withDatabase,
   type ChildRecord,
   type Observed,
 } from '../scripts/check-stack-guards';
@@ -90,55 +88,9 @@ describe('shouldKill', () => {
 });
 
 /** I1. The owner's database and the suite's are one typo apart from the check's. */
-describe('assertCheckDatabaseUrl', () => {
-  const url = (db: string): string => `postgres://finto:finto@localhost:5432/${db}`;
-
-  it.each(['finto', 'finto_test', 'postgres', 'finto_check', 'finto_check_ABCDEF12', 'finto_check_xyz', ''])(
-    'refuses the database named %j',
-    (db) => {
-      expect(() => assertCheckDatabaseUrl(url(db))).toThrow(/refusing to touch database/);
-    },
-  );
-
-  it('accepts a name this script minted itself', () => {
-    expect(assertCheckDatabaseUrl(url('finto_check_ab12cd34'))).toBe('finto_check_ab12cd34');
-  });
-
-  it('names the two databases a reader would otherwise reach for', () => {
-    expect(() => assertCheckDatabaseUrl(url('finto'))).toThrow(/finto_test/);
-  });
-});
-
-describe('assertMaintenanceUrl', () => {
-  it('accepts the maintenance database', () => {
-    expect(assertMaintenanceUrl('postgres://finto:finto@localhost:5432/postgres')).toBe('postgres');
-  });
-
-  it('refuses to issue CREATE and DROP from inside the owner database', () => {
-    expect(() => assertMaintenanceUrl('postgres://finto:finto@localhost:5432/finto')).toThrow(
-      /cannot run from inside the database they name/,
-    );
-  });
-});
-
-/** Trap 2: the default URL carries the string `finto` as user, password and path. */
-describe('withDatabase', () => {
-  it('replaces the database and nothing else in a URL that repeats its name', () => {
-    expect(withDatabase('postgres://finto:finto@localhost:5432/finto', 'finto_check_ab12cd34')).toBe(
-      'postgres://finto:finto@localhost:5432/finto_check_ab12cd34',
-    );
-  });
-
-  it('leaves a non-default user and password intact', () => {
-    expect(withDatabase('postgres://someone:s3cret@db.local:5433/finto', 'postgres')).toBe(
-      'postgres://someone:s3cret@db.local:5433/postgres',
-    );
-  });
-});
-
 /** I2. */
 describe('assertCheckPort', () => {
-  it.each([4000, 5173, 5174, 5175, 5432])('refuses %i, which the owner is on or drifts onto', (port) => {
+  it.each([4000, 5173, 5174, 5175])('refuses %i, which the owner is on or drifts onto', (port) => {
     expect(() => assertCheckPort('app', port)).toThrow(/owner's stack/);
   });
 
@@ -242,10 +194,37 @@ describe('assertNoOptions', () => {
 });
 
 /** I4. */
+/**
+ * Where the check's own statements land. FINTO_HOME decides the database and it does
+ * NOT decide the statements folder on its own: DOCUMENT_STORE_PATH beats it, and the
+ * child inherits the owner's environment and then reads backend/.env on top of that.
+ * So an owner who had set that variable had a check upload its fixture CSVs into the
+ * folder holding their real bank statements.
+ *
+ * Blank and not absent is the whole of the fix: dotenv fills in a key that is missing
+ * from process.env and leaves a key that is present alone.
+ */
+describe('backendEnv', () => {
+  const env = backendEnv({ home: path.join(os.tmpdir(), 'finto-check', 'ab12cd34', 'home'), apiPort: 4300 });
+
+  it('sends the run its own home', () => {
+    expect(env.FINTO_HOME).toBe(path.join(os.tmpdir(), 'finto-check', 'ab12cd34', 'home'));
+    expect(env.PORT).toBe('4300');
+  });
+
+  it.each(['DOCUMENT_STORE_PATH', 'DATABASE_URL'])(
+    'blanks %s rather than leaving it out, so neither the shell nor backend/.env decides it',
+    (key) => {
+      expect(Object.keys(env)).toContain(key);
+      expect(env[key]).toBe('');
+    },
+  );
+});
+
 describe('assertRunPaths', () => {
   const repoRoot = 'C:\\Dev\\Finto';
   const outside = path.join(os.tmpdir(), 'finto-check', 'ab12cd34');
-  const ok = { repoRoot, runDir: outside, documentStorePath: path.join(outside, 'documents') };
+  const ok = { repoRoot, runDir: outside, home: path.join(outside, 'home') };
 
   it('accepts a run directory outside the repository', () => {
     expect(() => assertRunPaths(ok)).not.toThrow();
@@ -260,20 +239,19 @@ describe('assertRunPaths', () => {
   });
 
   /**
-   * The regex names the branch, not the label. `document store` is in both messages
-   * because it is the interpolated `what`, so matching on it passes whichever arm
-   * threw - and the owner-documents arm is unreachable without the repository arm
-   * also matching, so that is the whole assertion.
+   * The regex names the branch, not the label: the owner-documents arm is
+   * unreachable without the repository arm also matching, so that is the whole
+   * assertion.
    */
   it('refuses the owner\u2019s document store itself', () => {
-    expect(() => assertRunPaths({ ...ok, documentStorePath: 'C:\\Dev\\Finto\\backend\\data' })).toThrow(
+    expect(() => assertRunPaths({ ...ok, home: 'C:\\Dev\\Finto\\backend\\data' })).toThrow(
       /at or inside the owner's document store/,
     );
   });
 
   it('refuses anything under the owner\u2019s document store', () => {
     expect(() =>
-      assertRunPaths({ ...ok, documentStorePath: 'C:\\Dev\\Finto\\backend\\data\\documents' }),
+      assertRunPaths({ ...ok, home: 'C:\\Dev\\Finto\\backend\\data\\documents' }),
     ).toThrow(/at or inside the owner's document store/);
   });
 
