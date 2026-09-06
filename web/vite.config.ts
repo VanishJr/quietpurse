@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -26,19 +25,5 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    /**
-     * Two pages, not one. `index.html` is the app; `landing.html` is the public
-     * page, and it shares nothing with the app but the font and the palette — no
-     * /api call, no bundle in common.
-     *
-     * The backend serves both from `web/dist`: the app at `/` and the landing at
-     * `/landing.html`, and every other path falls back to the app.
-     */
-    rollupOptions: {
-      input: {
-        app: resolve(__dirname, 'index.html'),
-        landing: resolve(__dirname, 'landing.html'),
-      },
-    },
   },
 });

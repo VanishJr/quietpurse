@@ -9,11 +9,12 @@
  * ---------------------------------------------------------------------------
  * Query parameters, and the path is never touched
  *
- * `?screen=transactions`, not `/transactions`. The build is a two-page one — the app is
- * `index.html` and the public page is `landing.html` — so a path this module invented
- * would be a path the host has to be told to rewrite back to `index.html`, and told
- * without swallowing the landing page. A query string needs nothing from anybody: the
- * path stays whatever served the app, and the same file answers every URL this writes.
+ * `?screen=transactions`, not `/transactions`. A path this module invented would be a
+ * path the server has to be told to rewrite back to `index.html`, and that rewrite is a
+ * rule two places have to agree on — the SPA fallback in `backend/src/app.ts` decides
+ * which paths get the app, and it cannot see this list. A query string needs nothing
+ * from anybody: the path stays whatever served the app, and the same file answers every
+ * URL this writes.
  *
  * Anything already in the query survives a write. Only the three keys below are set or
  * removed, so a `?ref=` somebody arrived on is still there afterwards.

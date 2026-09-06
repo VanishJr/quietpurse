@@ -1662,7 +1662,7 @@ export const WEB_DIST = path.join(__dirname, '..', '..', 'web', 'dist');
  * Below every /api route, so nothing here can shadow one, and for GET alone: a POST to
  * an unknown path is refused, never answered with a page. Only what Vite wrote under
  * assets/ carries a content hash in its name, so only that may be cached for good; the
- * two pages and the favicon are revalidated, or a rebuilt landing page never arrives.
+ * page and the favicon are revalidated, or a rebuilt client never reaches the browser.
  */
 const CLIENT_NOT_BUILT =
   'the web client is not built - run `npm run setup` from the repository root, then start again';

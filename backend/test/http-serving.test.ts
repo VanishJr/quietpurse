@@ -30,7 +30,6 @@ describe('the cache rule on the built client', () => {
       'public, max-age=31536000, immutable',
     );
     expect(cacheControlFor(path.join(WEB_DIST, 'index.html'))).toBe('no-cache');
-    expect(cacheControlFor(path.join(WEB_DIST, 'landing.html'))).toBe('no-cache');
     expect(cacheControlFor(path.join(WEB_DIST, 'favicon.svg'))).toBe('no-cache');
   });
 

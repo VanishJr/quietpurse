@@ -44,8 +44,11 @@ entry point beside it would spawn servers to reach one predicate;
 `backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
 the core to name `typescript` alone and run nothing at its top level and the entry to be the
 opposite of both, because a purity check that has only ever been shown a pure file cannot
-demonstrate it can tell the two apart; and `web/src/copy.test.ts` does the same thing from the other
-package. **Nothing holds that list** —
+demonstrate it can tell the two apart; and `web/src/copy.test.ts` and
+`web/src/tokens.test.ts` do the same thing from the other package, the second reading
+`web/src/styles/tokens.css` for declarations and the whole package for the `var()` that reaches
+them, because a custom property nothing names costs nothing at run time and so cannot be found any
+other way. **Nothing holds that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 
