@@ -99,6 +99,17 @@ beforeAll(async () => {
 });
 
 describe('GET /api/summary', () => {
+  /**
+   * The wire's word for the all-accounts scope, pinned on its own: the client narrows
+   * on this literal and both packages build from one tree, so the day it changes this
+   * is the one line that says so on the server side.
+   */
+  it('names the all-accounts scope by its exact wire literal', async () => {
+    const res = await agent.get(`/api/summary?${WINDOW}`);
+    expect(res.status).toBe(200);
+    expect(res.body.scope).toBe('workspace');
+  });
+
   it('answers every account in the base currency when no account is named', async () => {
     const res = await agent.get(`/api/summary?${WINDOW}`);
 

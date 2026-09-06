@@ -118,3 +118,106 @@ describe('api.deleteAccount()', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE');
   });
 });
+
+/**
+ * The calls no screen pins by URL. harness.tsx keys its route table on the pathname
+ * alone, so the method, the body and the encoding of an id are observable only here.
+ */
+describe('the calls the offline product depends on', () => {
+  interface Sent {
+    url: string;
+    method: string | undefined;
+    body: unknown;
+    contentType: string | undefined;
+  }
+
+  /** What one call handed fetch: the URL, the method, the parsed JSON body, the type. */
+  async function sent(call: () => Promise<unknown>, answer = '{}'): Promise<Sent> {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(answer, { headers: { 'Content-Type': 'application/json' } }),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await call();
+    const [input, init] = fetchMock.mock.calls[0];
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    return {
+      url: String(input),
+      method: init?.method,
+      body: typeof init?.body === 'string' ? JSON.parse(init.body) : init?.body,
+      contentType: headers['Content-Type'],
+    };
+  }
+
+  it('api.backup() GETs /api/backup and hands back the bytes as a Blob', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response('{"format":"finto-backup"}'),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const blob = await api.backup();
+
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob.text()).toBe('{"format":"finto-backup"}');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/backup');
+  });
+
+  it('api.backup() rejects with the server sentence instead of handing back the refusal as bytes', async () => {
+    respondWith(JSON.stringify({ error: 'the database is busy' }), 500);
+    await expect(api.backup()).rejects.toThrow('the database is busy');
+  });
+
+  it('api.settings() GETs and api.updateSettings() PATCHes the patch as JSON, null included', async () => {
+    expect(await sent(() => api.settings())).toMatchObject({ url: '/api/settings', method: undefined });
+    expect(await sent(() => api.updateSettings({ windowMonths: 12, hourlyRate: null }))).toEqual({
+      url: '/api/settings',
+      method: 'PATCH',
+      body: { windowMonths: 12, hourlyRate: null },
+      contentType: 'application/json',
+    });
+  });
+
+  /** null is the delete, so it has to reach the wire rather than be dropped as empty. */
+  it('api.baseline() GETs and api.setBaselineItem() PUTs the label and the amount, null included', async () => {
+    expect(await sent(() => api.baseline())).toMatchObject({ url: '/api/baseline', method: undefined });
+    expect(await sent(() => api.setBaselineItem('Rent', 800))).toEqual({
+      url: '/api/baseline',
+      method: 'PUT',
+      body: { label: 'Rent', monthly: 800 },
+      contentType: 'application/json',
+    });
+    expect((await sent(() => api.setBaselineItem('Rent', null))).body).toEqual({
+      label: 'Rent',
+      monthly: null,
+    });
+  });
+
+  it('the transfer-rule calls: GET the list, POST the txId, DELETE the rule by id in the path', async () => {
+    expect(await sent(() => api.transferRules(), '[]')).toMatchObject({
+      url: '/api/transfer-rules',
+      method: undefined,
+    });
+    expect(await sent(() => api.addTransferRule('tx-1'))).toEqual({
+      url: '/api/transfer-rules',
+      method: 'POST',
+      body: { txId: 'tx-1' },
+      contentType: 'application/json',
+    });
+    expect(await sent(() => api.deleteTransferRule(7))).toMatchObject({
+      url: '/api/transfer-rules/7',
+      method: 'DELETE',
+      body: undefined,
+    });
+  });
+
+  it('api.setTransfer() PATCHes the transaction with the id encoded and the flag in the body, null included', async () => {
+    expect(await sent(() => api.setTransfer('tx 1', null))).toEqual({
+      url: '/api/transactions/tx%201/transfer',
+      method: 'PATCH',
+      body: { transfer: null },
+      contentType: 'application/json',
+    });
+    expect((await sent(() => api.setTransfer('tx-2', true))).body).toEqual({ transfer: true });
+  });
+});
