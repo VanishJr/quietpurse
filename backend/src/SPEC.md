@@ -270,8 +270,10 @@ in none of them.
 **Nothing is required to start.** Every value the environment can supply has a default that works
 on a machine with nothing installed: the home folder under the person's own home directory, the
 embedded database inside it, the statements folder beside that, loopback, port 4000. A PostgreSQL
-connection string is the one setting that changes an engine rather than a value, and it is read
-only where the database is opened, in `backend/src/db`.
+connection string is the one setting that changes an engine rather than a value, and two places
+read it: `backend/src/db`, where the database is opened, and the process entry, which skips the
+lock file when it is set — `## What the process entry owes the app` above says why that server
+needs none.
 
 **A setting that cannot be stored is refused, never coerced.** An absent key in a patch means *leave
 it alone*; a present one that is not a value this system can hold is a refusal, because `EURO` is

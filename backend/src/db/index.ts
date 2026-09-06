@@ -68,9 +68,10 @@ export interface DatabaseHandle {
 
 /**
  * Opens and migrates the database config names: a PostgreSQL server when
- * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Every caller
- * that needs a handle of its own goes through here, so the two engines are chosen
- * in one place.
+ * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Everything in
+ * src that needs a handle goes through here, so the two engines are chosen in one
+ * place; the suite's harness (test/pglite.ts) opens its own and migrates it from
+ * the same directory.
  */
 export async function openDatabase(): Promise<DatabaseHandle> {
   if (config.databaseUrl) {
