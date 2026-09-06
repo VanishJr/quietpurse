@@ -83,8 +83,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  *
  * Both summary endpoints answer a discriminated union: every account together in the
  * base currency, or one account in its own. `scope` is the only thing that says which
- * - the literal `workspace` is the wire's word for the first and predates there being
- * one person - and an account request answered with the other body would put all the
+ * - `all` for the first, `account` for the second - and an account request answered
+ * with the other body would put all the
  * money on screen under one account's name and currency code: right-looking, wrong,
  * and permanent.
  *
@@ -94,7 +94,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * query-builder edit drops the `accountId`. Both arms are called inside a `try` that
  * renders the screen's own refusal, so the throw is a refusal and never a blank.
  */
-async function scoped<T extends { scope: 'workspace' | 'account' }>(
+async function scoped<T extends { scope: 'all' | 'account' }>(
   path: string,
   want: T['scope'],
   accountId: string | null,
@@ -119,8 +119,8 @@ async function scoped<T extends { scope: 'workspace' | 'account' }>(
   return body;
 }
 
-const allAccountsBody = <T extends { scope: 'workspace' }>(path: string, what: string): Promise<T> =>
-  scoped<T>(path, 'workspace', null, what);
+const allAccountsBody = <T extends { scope: 'all' }>(path: string, what: string): Promise<T> =>
+  scoped<T>(path, 'all', null, what);
 
 const accountBody = <T extends { scope: 'account'; accountId: string }>(
   path: string,

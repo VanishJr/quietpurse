@@ -125,8 +125,8 @@ describe('an unconfirmed import is not the user’s data', () => {
     expect(summary.supersededImportId).toBeUndefined();
 
     expect(await listTransactions({ limit: 500 })).toHaveLength(0);
-    expect(await summaryTotals({ kind: 'workspace' }, JAN, DEC)).toEqual({ expense: 0, income: 0 });
-    expect(await summaryMonthlyTotals({ kind: 'workspace' }, JAN, DEC)).toEqual([]);
+    expect(await summaryTotals({ kind: 'all' }, JAN, DEC)).toEqual({ expense: 0, income: 0 });
+    expect(await summaryMonthlyTotals({ kind: 'all' }, JAN, DEC)).toEqual([]);
     expect(await listRecurringGroups(JAN)).toEqual([]);
     // the account is the one the upload picked, and nothing has reached it: no rows
     // and a balance still at 0, so Overview shows what it showed before the upload

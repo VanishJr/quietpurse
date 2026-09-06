@@ -67,7 +67,7 @@ describe('income_sources', () => {
 
     const march = (
       await summaryMonthlyTotals(
-        { kind: 'workspace' },
+        { kind: 'all' },
         '2026-03-01T00:00:00.000Z',
         '2026-03-31T23:59:59.999Z',
       )

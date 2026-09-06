@@ -148,11 +148,11 @@ export interface IncomeSourceTotal {
 /**
  * Every account together, every amount in the base currency. `scope` is a literal
  * rather than a field that happens to be there, so reading an account body as this
- * one is a compile error. The literal's word is the wire's: it names the whole of a
- * person's data, and it predates there being only one person.
+ * one is a compile error. The literal is `all`, beside `account` on the per-account
+ * bodies: one word each for the two scopes the wire answers.
  */
 export interface Summary {
-  scope: 'workspace';
+  scope: 'all';
   from: string;
   to: string;
   baseCurrency: string;
@@ -183,7 +183,7 @@ export interface AccountSummary {
 
 /** The "over the year" chart over every account, in the base currency. */
 export interface MonthlySummary {
-  scope: 'workspace';
+  scope: 'all';
   from: string;
   to: string;
   baseCurrency: string;

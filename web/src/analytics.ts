@@ -136,17 +136,17 @@ export interface BreakdownDef {
    * Whether the wizard offers it for one account. Not a limit of the API: `/api/summary`
    * has taken an `accountId` since row 48 and answers that account's own income by
    * source, off the same `scopeSql` every other figure is filtered through. This is a
-   * product decision left open — whether a split by the workspace's income sources is a
+   * product decision left open — whether a split by income source is a
    * question worth asking of one account — and until it is answered the wizard drops
    * the choice when an account is picked rather than offering what nobody has ruled on.
    */
-  workspaceOnly?: true;
+  allAccountsOnly?: true;
 }
 
 export const BREAKDOWNS: BreakdownDef[] = [
   { key: 'expense-categories', label: 'Expenses by category' },
   { key: 'income-categories', label: 'Income by category' },
-  { key: 'income-sources', label: 'Income by source', workspaceOnly: true },
+  { key: 'income-sources', label: 'Income by source', allAccountsOnly: true },
 ];
 
 export interface RangeDef {

@@ -107,7 +107,7 @@ describe('GET /api/summary', () => {
   it('names the all-accounts scope by its exact wire literal', async () => {
     const res = await agent.get(`/api/summary?${WINDOW}`);
     expect(res.status).toBe(200);
-    expect(res.body.scope).toBe('workspace');
+    expect(res.body.scope).toBe('all');
   });
 
   it('answers every account in the base currency when no account is named', async () => {
@@ -115,7 +115,7 @@ describe('GET /api/summary', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      scope: 'workspace',
+      scope: 'all',
       from: FROM,
       to: TO,
       baseCurrency: 'EUR',
@@ -150,7 +150,7 @@ describe('GET /api/summary/months', () => {
     const res = await agent.get(`/api/summary/months?${WINDOW}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ scope: 'workspace', baseCurrency: 'EUR' });
+    expect(res.body).toMatchObject({ scope: 'all', baseCurrency: 'EUR' });
     expect(res.body.months).toHaveLength(1);
     expect(res.body.months[0]).toMatchObject({
       month: '2026-03',
@@ -245,7 +245,7 @@ describe('an account whose currency is not the base currency', () => {
     const all = await agent.get(`/api/summary?${WINDOW}`);
     expect(all.status).toBe(200);
     expect(all.body).toMatchObject({
-      scope: 'workspace',
+      scope: 'all',
       baseCurrency: 'EUR',
       totals: { expense: ALL_EXPENSE, income: INCOME },
     });
@@ -289,7 +289,7 @@ describe('a malformed accountId never means every account', () => {
   it.each(ROUTES)('%s: bracket syntax arrives under another key entirely', async (route) => {
     const res = await agent.get(`${route}?accountId[]=x&${WINDOW}`);
     expect(res.status).toBe(200);
-    expect(res.body.scope).toBe('workspace');
+    expect(res.body.scope).toBe('all');
   });
 
   it.each(ROUTES)('%s: a well-formed id with spaces around it resolves', async (route) => {

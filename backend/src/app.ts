@@ -547,7 +547,7 @@ type ScopeResult =
  * resolves like any other - the caller named it by id.
  */
 async function summaryScope(raw: unknown): Promise<ScopeResult> {
-  if (raw === undefined) return { ok: true, scope: { kind: 'workspace' } };
+  if (raw === undefined) return { ok: true, scope: { kind: 'all' } };
   if (typeof raw !== 'string') {
     return { ok: false, status: 400, error: 'accountId must be sent once, as a single value' };
   }
@@ -597,7 +597,7 @@ app.get('/api/summary', async (req, res) => {
     return;
   }
   const summary: Summary = {
-    scope: 'workspace',
+    scope: 'all',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
@@ -636,7 +636,7 @@ app.get('/api/summary/months', async (req, res) => {
     return;
   }
   const months: MonthlySummary = {
-    scope: 'workspace',
+    scope: 'all',
     from,
     to,
     baseCurrency: await currentBaseCurrency(),
@@ -1040,7 +1040,7 @@ app.get('/api/budgets', async (_req, res) => {
   const from = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
   const to = now.toISOString();
   const spent = new Map(
-    (await summaryByCategory({ kind: 'workspace' }, from, to)).map((c) => [c.category, c.total]),
+    (await summaryByCategory({ kind: 'all' }, from, to)).map((c) => [c.category, c.total]),
   );
   const dayOfMonth = now.getUTCDate();
   const daysInMonth = new Date(

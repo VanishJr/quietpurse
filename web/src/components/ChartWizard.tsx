@@ -278,11 +278,11 @@ function DetailStep({
     // limit of the API; see BREAKDOWNS. Moving the reader off it here rather than
     // leaving the question lit on a choice the chips no longer carry.
     const breakdown: Breakdown =
-      id !== null && stillOffered?.workspaceOnly ? 'expense-categories' : draft.breakdown;
+      id !== null && stillOffered?.allAccountsOnly ? 'expense-categories' : draft.breakdown;
     patch({ accountId: id, breakdown });
   };
 
-  const breakdowns = BREAKDOWNS.filter((b) => draft.accountId === null || !b.workspaceOnly);
+  const breakdowns = BREAKDOWNS.filter((b) => draft.accountId === null || !b.allAccountsOnly);
 
   return (
     <>

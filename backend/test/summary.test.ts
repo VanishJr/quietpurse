@@ -1,9 +1,9 @@
 /**
- * The summary queries on both arms: the whole workspace in the base currency, or
+ * The summary queries on both arms: every account together in the base currency, or
  * one named account in that account's own currency.
  *
  * What is worth asserting here is that the two arms cannot borrow each other's
- * clauses. The workspace arm excludes hidden accounts and rows with no exchange
+ * clauses. The all-accounts arm excludes hidden accounts and rows with no exchange
  * rate, and it must keep doing both; the account arm must do neither, because a
  * query about one account that drops that account's own rows answers a number the
  * balance printed beside it contradicts. Both are one word of SQL apart, and the
@@ -50,9 +50,9 @@ const HIDDEN_INCOME = 2000;
 /** The account arm sees its own rows whatever currency they are in. */
 const MAIN_ARM_EXPENSE = MAIN_EXPENSE + UAH_EXPENSE;
 const MAIN_ARM_INCOME = MAIN_INCOME + UAH_INCOME;
-/** The workspace arm: converted rows of visible accounts, transfers excluded. */
-const WORKSPACE_EXPENSE = MAIN_EXPENSE + SECOND_EXPENSE;
-const WORKSPACE_INCOME = MAIN_INCOME;
+/** The all-accounts arm: converted rows of visible accounts, transfers excluded. */
+const ALL_ACCOUNTS_EXPENSE = MAIN_EXPENSE + SECOND_EXPENSE;
+const ALL_ACCOUNTS_INCOME = MAIN_INCOME;
 
 const tx = (over: Partial<NewTransaction>): NewTransaction => ({
   accountId: 'unset',
@@ -68,7 +68,7 @@ const tx = (over: Partial<NewTransaction>): NewTransaction => ({
 
 /**
  * The scope a route builds once getAccount has said yes. The assertion is what
- * ResolvedAccountId is for: an id read off a row of this workspace, never a string
+ * ResolvedAccountId is for: an id read off a row of this database, never a string
  * that arrived unread.
  */
 const scopeOf = (account: Account): AccountScope => ({
@@ -107,7 +107,7 @@ beforeAll(async () => {
       date: '2026-03-06T12:00:00.000Z',
       description: 'salary',
     }),
-    // the two rows the workspace arm may not touch and the account arm must: no
+    // the two rows the all-accounts arm may not touch and the account arm must: no
     // exchange rate has been fetched, so base_amount_cents is NULL on both
     tx({
       accountId: main.id,
@@ -166,12 +166,12 @@ const categories = (rows: { category: string }[]): string[] => rows.map((r) => r
 interface SummaryQuery {
   name: string;
   account: (scope: AccountScope) => Promise<number>;
-  workspace: () => Promise<number>;
+  all: () => Promise<number>;
   /** what the fixture says this query attributes to Main... */
   main: number;
   /** ...to the hidden account... */
   hidden: number;
-  /** ...and to the workspace. */
+  /** ...and to every account together. */
   whole: number;
 }
 
@@ -179,51 +179,51 @@ const QUERIES: SummaryQuery[] = [
   {
     name: 'summaryTotals',
     account: async (s) => bothWays(await summaryTotals(s, FROM, TO)),
-    workspace: async () => bothWays(await summaryTotals({ kind: 'workspace' }, FROM, TO)),
+    all: async () => bothWays(await summaryTotals({ kind: 'all' }, FROM, TO)),
     main: MAIN_ARM_EXPENSE + MAIN_ARM_INCOME,
     hidden: HIDDEN_EXPENSE + HIDDEN_INCOME,
-    whole: WORKSPACE_EXPENSE + WORKSPACE_INCOME,
+    whole: ALL_ACCOUNTS_EXPENSE + ALL_ACCOUNTS_INCOME,
   },
   {
     name: 'summaryByCategory',
     account: async (s) => summed(await summaryByCategory(s, FROM, TO)),
-    workspace: async () => summed(await summaryByCategory({ kind: 'workspace' }, FROM, TO)),
+    all: async () => summed(await summaryByCategory({ kind: 'all' }, FROM, TO)),
     main: MAIN_ARM_EXPENSE,
     hidden: HIDDEN_EXPENSE,
-    whole: WORKSPACE_EXPENSE,
+    whole: ALL_ACCOUNTS_EXPENSE,
   },
   {
     name: 'summaryIncomeByCategory',
     account: async (s) => summed(await summaryIncomeByCategory(s, FROM, TO)),
-    workspace: async () => summed(await summaryIncomeByCategory({ kind: 'workspace' }, FROM, TO)),
+    all: async () => summed(await summaryIncomeByCategory({ kind: 'all' }, FROM, TO)),
     main: MAIN_ARM_INCOME,
     hidden: HIDDEN_INCOME,
-    whole: WORKSPACE_INCOME,
+    whole: ALL_ACCOUNTS_INCOME,
   },
   {
     name: 'summaryIncomeBySource',
     account: async (s) => summed(await summaryIncomeBySource(s, FROM, TO)),
-    workspace: async () => summed(await summaryIncomeBySource({ kind: 'workspace' }, FROM, TO)),
+    all: async () => summed(await summaryIncomeBySource({ kind: 'all' }, FROM, TO)),
     main: MAIN_ARM_INCOME,
     hidden: HIDDEN_INCOME,
-    whole: WORKSPACE_INCOME,
+    whole: ALL_ACCOUNTS_INCOME,
   },
   {
     name: 'summaryMonthlyTotals',
     account: async (s) =>
       (await summaryMonthlyTotals(s, FROM, TO)).reduce((t, m) => t + m.income + m.expense, 0),
-    workspace: async () =>
-      (await summaryMonthlyTotals({ kind: 'workspace' }, FROM, TO)).reduce(
+    all: async () =>
+      (await summaryMonthlyTotals({ kind: 'all' }, FROM, TO)).reduce(
         (t, m) => t + m.income + m.expense,
         0,
       ),
     main: MAIN_ARM_EXPENSE + MAIN_ARM_INCOME,
     hidden: HIDDEN_EXPENSE + HIDDEN_INCOME,
-    whole: WORKSPACE_EXPENSE + WORKSPACE_INCOME,
+    whole: ALL_ACCOUNTS_EXPENSE + ALL_ACCOUNTS_INCOME,
   },
 ];
 
-describe('the account arm and the workspace arm answer different questions', () => {
+describe('the account arm and the all-accounts arm answer different questions', () => {
   it('one account in its own currency, or every visible account in the base one', async () => {
     expect(await summaryTotals(mainScope, FROM, TO)).toEqual({
       expense: MAIN_ARM_EXPENSE,
@@ -233,23 +233,23 @@ describe('the account arm and the workspace arm answer different questions', () 
       expense: SECOND_EXPENSE,
       income: 0,
     });
-    expect(await summaryTotals({ kind: 'workspace' }, FROM, TO)).toEqual({
-      expense: WORKSPACE_EXPENSE,
-      income: WORKSPACE_INCOME,
+    expect(await summaryTotals({ kind: 'all' }, FROM, TO)).toEqual({
+      expense: ALL_ACCOUNTS_EXPENSE,
+      income: ALL_ACCOUNTS_INCOME,
     });
   });
 
   /**
    * I4(a). A row whose rate has not been fetched has no base_amount_cents, so the
-   * workspace arm leaves it out rather than adding hryvnias to euros - and the
+   * all-accounts arm leaves it out rather than adding hryvnias to euros - and the
    * account arm must count it, because it is a real movement of that account's own
    * money and the balance beside these figures already includes it.
    */
   it.each(QUERIES)(
-    '$name: an unconverted row counts on the account arm and not on the workspace arm',
+    '$name: an unconverted row counts on the account arm and not on the all-accounts arm',
     async (q) => {
       expect(await q.account(mainScope)).toBe(q.main);
-      expect(await q.workspace()).toBe(q.whole);
+      expect(await q.all()).toBe(q.whole);
     },
   );
 
@@ -259,7 +259,7 @@ describe('the account arm and the workspace arm answer different questions', () 
       category: 'transport',
       total: UAH_EXPENSE,
     });
-    expect(categories(await summaryByCategory({ kind: 'workspace' }, FROM, TO))).not.toContain(
+    expect(categories(await summaryByCategory({ kind: 'all' }, FROM, TO))).not.toContain(
       'transport',
     );
     expect(await summaryIncomeByCategory(mainScope, FROM, TO)).toContainEqual({
@@ -267,29 +267,29 @@ describe('the account arm and the workspace arm answer different questions', () 
       total: UAH_INCOME,
     });
     expect(
-      categories(await summaryIncomeByCategory({ kind: 'workspace' }, FROM, TO)),
+      categories(await summaryIncomeByCategory({ kind: 'all' }, FROM, TO)),
     ).not.toContain('gift');
   });
 
   /**
-   * I4(b). VISIBLE_ACCOUNT() keeps a hidden account out of the workspace totals.
+   * I4(b). VISIBLE_ACCOUNT() keeps a hidden account out of the all-accounts totals.
    * Applied to a query about one named account it is not a filter but a mute
    * switch: the caller asked about that account by id.
    */
   it.each(QUERIES)(
-    '$name: a hidden account answers its real numbers and contributes none of them to the workspace',
+    '$name: a hidden account answers its real numbers and contributes none of them to the all-accounts figures',
     async (q) => {
       expect(await q.account(hiddenScope)).toBe(q.hidden);
-      expect(await q.workspace()).toBe(q.whole);
+      expect(await q.all()).toBe(q.whole);
     },
   );
 
-  it('and the hidden account’s categories appear in no workspace figure', async () => {
+  it('and the hidden account’s categories appear in no all-accounts figure', async () => {
     expect(categories(await summaryByCategory(hiddenScope, FROM, TO))).toEqual(['home']);
-    expect(categories(await summaryByCategory({ kind: 'workspace' }, FROM, TO))).not.toContain(
+    expect(categories(await summaryByCategory({ kind: 'all' }, FROM, TO))).not.toContain(
       'home',
     );
-    expect(categories(await summaryIncomeByCategory({ kind: 'workspace' }, FROM, TO))).not.toContain(
+    expect(categories(await summaryIncomeByCategory({ kind: 'all' }, FROM, TO))).not.toContain(
       'bonus',
     );
   });
@@ -344,7 +344,7 @@ describe('an account’s months', () => {
    */
   it('but a transfer is not spending in its category on either arm', async () => {
     expect(categories(await summaryByCategory(mainScope, FROM, TO))).not.toContain('savings');
-    expect(categories(await summaryByCategory({ kind: 'workspace' }, FROM, TO))).not.toContain(
+    expect(categories(await summaryByCategory({ kind: 'all' }, FROM, TO))).not.toContain(
       'savings',
     );
   });
@@ -377,7 +377,7 @@ describe('an account with no rows in the window', () => {
 
 /**
  * The clause list is a convention - SQL is a string, and there is no type that can
- * refuse a sixth summary query written with the workspace arm's filters. The cases
+ * refuse a sixth summary query written with the all-accounts arm's filters. The cases
  * above cover the five that exist; this one covers the one nobody has written yet.
  *
  * It reads source, so it asserts nothing at all if its anchors move: the first three
