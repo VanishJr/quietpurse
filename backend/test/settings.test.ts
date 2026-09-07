@@ -123,10 +123,27 @@ describe('updateSettings', () => {
     expect((await updateSettings({ goalMode: unknown })).goalMode).toBe('lifestyle');
   });
 
-  it('a field that is not a number leaves the current value', async () => {
-    expect((await updateSettings({ bufferPct: 33 })).bufferPct).toBe(33);
+  // One case per field, not one case standing for four: each `??` fallback is its own
+  // constant, and a case naming a field whose stored value is already set cannot see
+  // what the fallback does when it is not - which is the hourlyRate case below.
+  it.each([
+    ['bufferPct', 33],
+    ['windowMonths', 12],
+    ['hoursCapPerWeek', 30],
+    ['hourlyRate', 60],
+  ] as const)('%s: a value that is not a number leaves the current one', async (field, set) => {
+    const stored = await updateSettings({ [field]: set } as Partial<Settings>);
+    expect(stored[field]).toBe(set);
     const text = '50' as unknown as number;
-    expect((await updateSettings({ bufferPct: text })).bufferPct).toBe(33);
+    const after = await updateSettings({ [field]: text } as Partial<Settings>);
+    expect(after[field]).toBe(set);
+  });
+
+  it('an hourlyRate that is not a number leaves it unset rather than at the floor', async () => {
+    expect((await getSettings()).hourlyRate).toBeNull();
+    const text = 'abc' as unknown as number;
+    expect((await updateSettings({ hourlyRate: text })).hourlyRate).toBeNull();
+    expect((await getSettings()).hourlyRate).toBeNull();
   });
 
   it('drops keys it does not know, from the answer and from storage', async () => {
