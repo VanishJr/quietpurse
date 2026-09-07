@@ -42,11 +42,15 @@ export async function updateSettings(patch: Partial<Settings>): Promise<Settings
   const next: Settings = {
     bufferPct: clamp(num(patch.bufferPct, cur.bufferPct), 0, 100),
     windowMonths: Math.round(clamp(num(patch.windowMonths, cur.windowMonths), 1, 24)),
+    // Anything that is not a finite number keeps the stored value, null included.
+    // Substituting 0 for an unset rate would put it under the clamp, which lifts it
+    // to the floor - so an unparseable patch would invent a rate of 0.01 an hour and
+    // the Goal screen would compute against it.
     hourlyRate:
       patch.hourlyRate === null
         ? null
-        : patch.hourlyRate !== undefined
-          ? clamp(num(patch.hourlyRate, cur.hourlyRate ?? 0), 0.01, 10_000)
+        : typeof patch.hourlyRate === 'number' && Number.isFinite(patch.hourlyRate)
+          ? clamp(patch.hourlyRate, 0.01, 10_000)
           : cur.hourlyRate,
     hoursCapPerWeek: clamp(num(patch.hoursCapPerWeek, cur.hoursCapPerWeek), 1, 80),
     goalMode:

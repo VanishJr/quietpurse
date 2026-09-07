@@ -21,8 +21,7 @@ Nothing below repeats any of that.
   chose — each stating its whole rule in its own header, `windowMonths`' and `ticksOf`'.
 - **The sentences.** The API answers slugs and this package holds the dictionaries that turn them
   into something a person reads, an unknown slug included.
-- **The entry points.** The app is `web/index.html` and the public page is `web/landing.html`; the
-  sources of the second are `web/src/landing/`.
+- **The entry point.** The app is `web/index.html`, and it is the only page this package builds.
 
 ## Where the boundary runs
 
@@ -32,10 +31,6 @@ and no other transport appears anywhere in it — no `XMLHttpRequest`, no `Event
 harness replaces the global fetch and catches a request to a route no test declared, which is a
 different rule: a second module fetching a route some test already declares is invisible to it, and
 the `unit` project installs no stub at all.
-
-**`web/src/landing/` imports no code from the rest of this package.** The palette is the one import
-that crosses (`web/src/styles/tokens.css`); the bundles share the font and the palette and no code,
-which `web/vite.config.ts` says of the build. Nothing holds it from this side.
 
 **State that lives only in the browser, named crossing by crossing.** The theme choice is written to
 `localStorage` by `theme.tsx`; the screen, the account, the open panel and the selected chart live in
@@ -67,22 +62,26 @@ restores exactly that. Reading the requested mode is a different question and st
 decides whether the minimum's line items and their add form are on screen, so the state that cannot
 create its own first item does not exist.
 
-**`copy.test.ts` is this package's own check that reads source as text**, and it resolves its root
-differently from the checks in the other package on purpose. `backend/test/SPEC.md` states that rule
-and the reason for the divergence; it is not restated here.
+**`copy.test.ts` and `tokens.test.ts` are this package's own checks that read source as text**, and
+both resolve their root differently from the checks in the other package on purpose.
+`backend/test/SPEC.md` states that rule and the reason for the divergence; it is not restated here.
+
+**A design token with no `var()` behind it is refused**, by `tokens.test.ts`, because
+`web/src/styles/tokens.css` is the one place values two stylesheets had to agree on were pulled into
+— and CSS fails silently at both ends: an unread declaration costs nothing, and a rule naming one
+that does not exist takes the initial value rather than erroring. The check holds one direction
+only; its own header says which and why the other needs three declaration sources modelled at once.
 
 ## The invariants no type and no test holds
 
-**The word for money somebody else gives you is the public page's, and nothing holds the app to
-it.** `web/src/landing/` sells the product on *support* — the dial the reader drags, the legend
-segment and the opinion that earnings and support are two different numbers — and the app says the
-same word in the Goal screen's hero, in the income sources block beside it and in the Transactions
-detail sheet's hint. Those are independent strings in two bundles that share no code, and
-`copy.test.ts` walks both looking for something else entirely, so either half can drift and every
-test in this package stays green. A third copy of the word is one package over, in the label
-`seedDefaults` gives the seeded external source in `backend/src/db/index.ts`; a user who has renamed
-theirs reads their own word instead, which is what the delete confirmation looks up rather than
-writes out.
+**The word for money somebody else gives you is written twice, in two packages, and nothing holds
+the two to each other.** This package says *support* in the Goal screen's hero, in the income
+sources block beside it and in the Transactions detail sheet's hint. The second copy is one package
+over, in the label `seedDefaults` gives the seeded external source in `backend/src/db/index.ts`. The
+packages share no build, `copy.test.ts` walks this side looking for something else entirely, and no
+check compares them — so either half can drift and every test in both packages stays green. A user
+who has renamed theirs reads their own word instead, which is what the delete confirmation looks up
+rather than writes out.
 
 **A check in the other package reads `api.ts` as source and finds its error-budget cap by name.**
 `backend/test/error-budget.test.ts` matches `MAX_ERROR_CHARS` in this file textually, because the

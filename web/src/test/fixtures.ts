@@ -59,7 +59,7 @@ export const TRANSACTIONS: Transaction[] = [];
  * and complains about it on stderr, and chasing that is not this suite's business.
  */
 export const SUMMARY: Summary = {
-  scope: 'workspace',
+  scope: 'all',
   from: '2026-07-01',
   to: '2026-07-31',
   baseCurrency: 'EUR',

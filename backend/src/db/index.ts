@@ -68,9 +68,10 @@ export interface DatabaseHandle {
 
 /**
  * Opens and migrates the database config names: a PostgreSQL server when
- * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Every caller
- * that needs a handle of its own goes through here, so the two engines are chosen
- * in one place.
+ * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Everything in
+ * src that needs a handle goes through here, so the two engines are chosen in one
+ * place; the suite's harness (test/pglite.ts) opens its own and migrates it from
+ * the same directory.
  */
 export async function openDatabase(): Promise<DatabaseHandle> {
   if (config.databaseUrl) {
@@ -658,14 +659,14 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
  * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
  * summaries - otherwise we would be adding euros to hryvnias.
  *
- * The workspace arm's clause, and scopeSql below is the only thing that may name it:
+ * The all-accounts arm's clause, and scopeSql below is the only thing that may name it:
  * per account it drops a real transaction from its own account's total - an import
  * short by a row, in the account's own currency, that nothing reports.
  */
 const CONVERTED = sql`base_amount_cents IS NOT NULL`;
 
-export interface WorkspaceScope {
-  kind: 'workspace';
+export interface AllAccountsScope {
+  kind: 'all';
 }
 
 export interface AccountScope {
@@ -674,7 +675,7 @@ export interface AccountScope {
   currency: string;
 }
 
-export type SummaryScope = WorkspaceScope | AccountScope;
+export type SummaryScope = AllAccountsScope | AccountScope;
 
 /**
  * The rows a scope is about and the column its money lives in - together, from one
@@ -779,8 +780,8 @@ export async function summaryTotals(
   };
 }
 
-async function workspaceMonths(from: string, to: string): Promise<MonthTotals[]> {
-  const { where, money } = scopeSql({ kind: 'workspace' });
+async function allAccountsMonths(from: string, to: string): Promise<MonthTotals[]> {
+  const { where, money } = scopeSql({ kind: 'all' });
   // camelCase aliases must be quoted: PG folds unquoted identifiers to lowercase
   const rows = await rowsOf<{
     month: string;
@@ -858,7 +859,7 @@ async function accountMonths(
 }
 
 export function summaryMonthlyTotals(
-  scope: WorkspaceScope,
+  scope: AllAccountsScope,
   from: string,
   to: string,
 ): Promise<MonthTotals[]>;
@@ -868,7 +869,7 @@ export function summaryMonthlyTotals(
   to: string,
 ): Promise<AccountMonthTotals[]>;
 export function summaryMonthlyTotals(scope: SummaryScope, from: string, to: string) {
-  return scope.kind === 'account' ? accountMonths(scope, from, to) : workspaceMonths(from, to);
+  return scope.kind === 'account' ? accountMonths(scope, from, to) : allAccountsMonths(from, to);
 }
 
 export async function avgMonthlyByCategory(
@@ -877,7 +878,7 @@ export async function avgMonthlyByCategory(
   months: number,
 ): Promise<CategorySummary[]> {
   if (months <= 0) return [];
-  const { where, money } = scopeSql({ kind: 'workspace' });
+  const { where, money } = scopeSql({ kind: 'all' });
   const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
     SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
     FROM transactions

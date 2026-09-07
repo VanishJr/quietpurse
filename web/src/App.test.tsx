@@ -314,8 +314,6 @@ describe('the shell', () => {
   });
 
   it('offers a way past the bar, which is seven controls deep', async () => {
-    // the landing page has had one since it was written; the app, which is the side
-    // people come back to daily, had not
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();

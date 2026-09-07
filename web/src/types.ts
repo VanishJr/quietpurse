@@ -72,7 +72,7 @@ export interface CategoryRule {
  * because the category was set by hand. One type and both required: CATEGORY is
  * COALESCE(category_manual, category), neither number may be read without the other.
  *
- * Workspace-wide and period-blind — hidden accounts included, no filter applied.
+ * Across every account and period-blind — hidden accounts included, no filter applied.
  */
 export interface CategoryRuleCounts {
   matches: number;
@@ -153,7 +153,7 @@ export interface IncomeSourceTotal {
  * compile error instead of a UAH figure labelled EUR.
  */
 export interface Summary {
-  scope: 'workspace';
+  scope: 'all';
   from: string;
   to: string;
   baseCurrency: string;
@@ -217,7 +217,7 @@ export interface AccountMonthTotals {
 }
 
 export interface MonthlySummary {
-  scope: 'workspace';
+  scope: 'all';
   from: string;
   to: string;
   baseCurrency: string;

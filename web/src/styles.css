@@ -132,11 +132,9 @@ textarea {
  *
  * `*` rather than the seven selectors, because the point of the rule is the eighth:
  * a transition written later is covered by something nobody has to remember. `0.01ms`
- * and not `0` for the usual reason — a `transitionend` listener still fires — and it
- * is what `landing.css` already says for the same job.
+ * and not `0` for the usual reason — a `transitionend` listener still fires.
  *
- * Unscoped, where the landing's equivalent sits under `.landing`: this sheet is the
- * app's alone.
+ * Unscoped rather than under a root class: this sheet is the app's alone.
  *
  * `scroll-behavior` IS here, which it did not used to be: the note that stood in its
  * place said nothing in the app scrolled smoothly, and that stopped being true when the
@@ -163,13 +161,16 @@ textarea {
  * casts a shadow onto the page.
  *
  * The light values are measured off the Figma frame (`2103:847`) rather than guessed —
- * the band runs flat `#010710` for the first 46% of the window and then climbs to
+ * the band runs flat `--c-ground` for the first 46% of the window and then climbs to
  * `#0a213f` at the right edge, which is why the stop is where it is and not at 0%. The
  * dark ones are this app's own, chosen to keep the same relationship: the band is
  * lighter than the page it sits on, and the current pill lighter than the band.
+ *
+ * The two shadows still write that colour out as `rgba(1, 7, 16, …)`, because an alpha
+ * over a token needs a channel triple and this file has no use for a second one.
  */
 :root {
-  --ov-band-from: #010710;
+  --ov-band-from: var(--c-ground);
   --ov-band-to: #0a213f;
   --ov-band-shadow: 0 6px 22px rgba(1, 7, 16, 0.2);
   /*
@@ -182,11 +183,11 @@ textarea {
   --ov-card-shadow: 0 1px 2px rgba(1, 7, 16, 0.05), 0 8px 24px rgba(1, 7, 16, 0.08);
   /* the current section: light at its top-right corner, and the mock's own two ends */
   --ov-pill-from: #20262d;
-  --ov-pill-to: #010710;
+  --ov-pill-to: var(--c-ground);
   /* the table's header bar. The spending card's own fill is NOT here — it is
      `--ink-panel`, published by theme.tsx, because Recharts has to be handed that one
      as a string for the donut's sector separators and two copies would drift. */
-  --ov-bar: #010710;
+  --ov-bar: var(--c-ground);
 }
 
 :root[data-theme='dark'] {
@@ -219,9 +220,9 @@ textarea {
 
 /*
  * Past the bar in one key, which is seven controls deep before the first thing on the
- * page. The same idiom as the landing's (`landing.css`), including the park offscreen
- * rather than `display: none` — a hidden element is not focusable, and a skip link
- * that cannot be focused is not a skip link. `--z-raised` is reserved for exactly this
+ * page. Parked offscreen rather than `display: none` — a hidden element is not
+ * focusable, and a skip link that cannot be focused is not a skip link. `--z-raised`
+ * is reserved for exactly this
  * and for the sheet's backdrop (tokens.css); without it the link is painted under the
  * band it is offering to skip past.
  */
@@ -451,8 +452,7 @@ textarea {
  * cannot be paid for by a heading somebody makes long later.
  *
  * Headings only, and not the prose under them. `balance` on a paragraph is the wrong
- * shape — a body of text wants full lines and an even last one, which is `pretty` —
- * and the landing page already draws that line the same way.
+ * shape: a body of text wants full lines and an even last one, which is `pretty`.
  *
  * Three heading classes are deliberately absent. `.row-title` and `.tx-title` are one
  * line with an ellipsis on the end — a rule about how they wrap would be a rule about

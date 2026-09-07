@@ -1,7 +1,8 @@
 /**
  * The one thing the suite can hold about ROADMAP row 28: that the parser still parses
- * where `@napi-rs/canvas` is not installed, which is the production image and is
- * nowhere the suite itself runs.
+ * where `@napi-rs/canvas` is not installed. pdfjs-dist lists it as optional, so npm
+ * skips it on any machine no prebuilt binary matches - which this one may or may not
+ * be, so the child below makes the package unresolvable rather than asking.
  *
  * It has to be a child process. vitest runs one process with one module cache
  * (vitest.config.ts: `isolate: false`), so a hook installed in a test file would only
@@ -12,7 +13,8 @@
  * parse is unchanged, and pdfjs printed the ONE warning it prints when the package is
  * missing and the globals are already in place. A second line - `Cannot polyfill
  * DOMMatrix` - would mean the stubs landed after pdf.mjs evaluated, which type-checks,
- * passes every other test, and ships an image that cannot read a PDF at all.
+ * passes every other test, and ships a build that cannot read a PDF on exactly those
+ * machines.
  */
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

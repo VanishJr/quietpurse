@@ -5,6 +5,9 @@ const API = 'https://api.monobank.ua';
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const UAH_CODE = 980;
 
+/** Exported so the budget is pinned by a literal in rates.test.ts rather than by its own name. */
+export const REQUEST_TIMEOUT_MS = 10_000;
+
 interface CurrencyInfo {
   currencyCodeA: number;
   currencyCodeB: number;
@@ -22,7 +25,9 @@ export async function getRatesToUAH(): Promise<Record<string, number>> {
 
   let list: CurrencyInfo[];
   try {
-    const res = await fetch(`${API}/bank/currency`, { signal: AbortSignal.timeout(10_000) });
+    const res = await fetch(`${API}/bank/currency`, {
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`Monobank /bank/currency -> ${res.status}`);
     list = (await res.json()) as CurrencyInfo[];
   } catch (e) {

@@ -129,9 +129,11 @@ fault, and it keeps the other status.
 
 **A summary body states its own scope.** Without an account it is every account together in the
 base currency; with one it is that account alone in the account's own currency, and the body says
-which. The literal that names the first is `workspace`, which is the wire's word and predates there
-being one person — it stays because the REST API is the contract, and a renamed literal is a
-different API. Transfers between the user's own accounts are out of the income and expense figures
+which. The literal that names the first is `all`, beside `account` for the second. It was
+`workspace` until Finto became one person's tool, and it was renamed on both sides of the wire in one
+diff: the REST API is the contract, and a renamed literal is a different API — which is safe here only
+because the client and the server build from one checkout with one command, so no client that asks for
+the old word can exist. Transfers between the user's own accounts are out of the income and expense figures
 on both arms, and refunds are subtracted from spending in their own category. The per-account
 monthly arm answers a `net` as well — every row of the month summed, transfers included, which is
 what lets the bars add up to the balance shown beside them over a window covering the account's
@@ -268,8 +270,10 @@ in none of them.
 **Nothing is required to start.** Every value the environment can supply has a default that works
 on a machine with nothing installed: the home folder under the person's own home directory, the
 embedded database inside it, the statements folder beside that, loopback, port 4000. A PostgreSQL
-connection string is the one setting that changes an engine rather than a value, and it is read
-only where the database is opened, in `backend/src/db`.
+connection string is the one setting that changes an engine rather than a value, and two places
+read it: `backend/src/db`, where the database is opened, and the process entry, which skips the
+lock file when it is set — `## What the process entry owes the app` above says why that server
+needs none.
 
 **A setting that cannot be stored is refused, never coerced.** An absent key in a patch means *leave
 it alone*; a present one that is not a value this system can hold is a refusal, because `EURO` is

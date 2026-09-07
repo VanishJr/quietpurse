@@ -17,15 +17,21 @@ those files; it is here now. What stayed beside the code is what an edit to its 
   the configuration names, or a PostgreSQL server when a connection string is set. The two are the
   same dialect — every raw `sql` template here carries casts and clauses SQLite would refuse, and
   that is why the engine that replaced the server is Postgres in a process and not a file
-  database. Every caller that needs a handle of its own, the migration script included, goes
-  through that one function, so the choice is made in one place.
+  database. Opening is also migrating: that function applies the migration directory before it
+  hands the handle back, so there is no separate migrate step and no script for one. Everything
+  in `backend/src` that needs a handle goes through it, so the choice is made in one place. The
+  suite is the one opener that does not: `backend/test/pglite.ts` opens its own — in memory, or on
+  the server its own variable names — and migrates it from the same directory.
 - **Every finance query the app makes.** There is one person's data and nothing else in the
   database, so a query names no owner: the whole table is theirs.
-- **The deduplication key format** (`backend/src/db/dedup.ts`), which is a shared format rather than
-  a private one: a script outside this module reconstructs the same keys. If the two ever
-  disagreed, the first re-import after a migration would duplicate a user's whole history. The
-  helpers that take a key apart and put it back together live with the format rather than beside
-  the query that renumbers with them, so the format stays readable in one file.
+- **The deduplication key format** (`backend/src/db/dedup.ts`). It is this module's alone now: its
+  one outside reader, the script that carried a SQLite database over and rebuilt the same keys,
+  went with the SQLite era, and nothing in `backend/src` outside this directory composes or parses
+  a key. What pins the format is `backend/test/imports.test.ts`, which writes the keys it expects
+  out as literals. The helpers that take a key apart and put it back together still live with the
+  format rather than beside the query that renumbers with them, so the format stays readable in
+  one file — a key written one way and read another is a re-import that duplicates a person's
+  whole history.
 - **The diagnostic budget** for a failed import. What holds it is
   `backend/test/error-budget.test.ts`, which reads the client's own cap as source, because the two
   packages share no build.

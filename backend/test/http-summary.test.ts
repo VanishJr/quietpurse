@@ -82,9 +82,10 @@ const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Pro
 const ALL_EXPENSE = EXPENSE + FOREIGN_BASE_EXPENSE;
 
 /**
- * Everything asserted below is exact, so the file starts from an empty database: the
- * suite runs in one process with no truncation between files, and the rows an earlier
- * file left behind would otherwise be in every unfiltered answer here.
+ * Everything asserted below is exact, so the file starts from an empty database. The
+ * setup file already truncates and seeds before every file; this pair is here anyway,
+ * so the exactness rests on a line in this file rather than on a setup file this one
+ * does not name.
  */
 beforeAll(async () => {
   await freshTestDb();
@@ -99,12 +100,24 @@ beforeAll(async () => {
 });
 
 describe('GET /api/summary', () => {
+  /**
+   * The wire's word for the all-accounts scope, named on its own line so a reader
+   * sees what the client narrows on. It is NOT the only holder and cannot fail by
+   * itself: the case below asserts the same literal inside a whole body, and three
+   * more do further down, so a rename reds all of them together.
+   */
+  it('names the all-accounts scope by its exact wire literal', async () => {
+    const res = await agent.get(`/api/summary?${WINDOW}`);
+    expect(res.status).toBe(200);
+    expect(res.body.scope).toBe('all');
+  });
+
   it('answers every account in the base currency when no account is named', async () => {
     const res = await agent.get(`/api/summary?${WINDOW}`);
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      scope: 'workspace',
+      scope: 'all',
       from: FROM,
       to: TO,
       baseCurrency: 'EUR',
@@ -139,7 +152,7 @@ describe('GET /api/summary/months', () => {
     const res = await agent.get(`/api/summary/months?${WINDOW}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ scope: 'workspace', baseCurrency: 'EUR' });
+    expect(res.body).toMatchObject({ scope: 'all', baseCurrency: 'EUR' });
     expect(res.body.months).toHaveLength(1);
     expect(res.body.months[0]).toMatchObject({
       month: '2026-03',
@@ -234,7 +247,7 @@ describe('an account whose currency is not the base currency', () => {
     const all = await agent.get(`/api/summary?${WINDOW}`);
     expect(all.status).toBe(200);
     expect(all.body).toMatchObject({
-      scope: 'workspace',
+      scope: 'all',
       baseCurrency: 'EUR',
       totals: { expense: ALL_EXPENSE, income: INCOME },
     });
@@ -278,7 +291,7 @@ describe('a malformed accountId never means every account', () => {
   it.each(ROUTES)('%s: bracket syntax arrives under another key entirely', async (route) => {
     const res = await agent.get(`${route}?accountId[]=x&${WINDOW}`);
     expect(res.status).toBe(200);
-    expect(res.body.scope).toBe('workspace');
+    expect(res.body.scope).toBe('all');
   });
 
   it.each(ROUTES)('%s: a well-formed id with spaces around it resolves', async (route) => {

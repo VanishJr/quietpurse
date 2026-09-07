@@ -17,8 +17,14 @@ export const config = {
   /**
    * Loopback unless told otherwise: there is no sign-in, so a server reachable from
    * the network is a database reachable from the network.
+   *
+   * FINTO_HOST and deliberately not HOST. `HOST` is a name other software owns -
+   * shells, container images, PaaS wrappers - and reading it lets an environment
+   * nobody wrote for this app both open the port and widen the Host check, with no
+   * line typed by the owner and nothing but a log line to show for it. A namespaced
+   * name can only arrive on purpose.
    */
-  host: process.env.HOST || '127.0.0.1',
+  host: process.env.FINTO_HOST || '127.0.0.1',
   home,
   baseCurrency: (process.env.BASE_CURRENCY || 'EUR').toUpperCase(),
   /** auto tries each provider in turn; ecb or nbu forces one. */

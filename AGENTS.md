@@ -88,7 +88,7 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   database; `src/index.ts` takes it before opening anything and refuses while a live pid holds
   it.
 - **No sign-in, so the port is the boundary.** Whoever can reach the port owns the data behind
-  it. The server binds the loopback interface unless `HOST` says otherwise, and nothing in a
+  it. The server binds the loopback interface unless `FINTO_HOST` says otherwise, and nothing in a
   route asks who is calling. A feature that needs to know who is acting has nowhere to read it
   from; do not add one that pretends to.
 - **Transaction identity.** `transactions.id` is a surrogate UUID; deduplication runs off a

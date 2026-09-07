@@ -68,6 +68,30 @@ describe('the folder Finto keeps everything in', () => {
     }
   });
 
+  /**
+   * The arm the case above cannot reach. mkdir's mode applies to what it CREATES, so
+   * a folder made by an earlier build - or by a person - keeps whatever it had, and
+   * every install predating the mode carried it forward. The repair is on the boot
+   * path rather than on an install step because there is no install step.
+   */
+  ownerOnly('narrows a statements folder that already existed readable by others', async () => {
+    const root = path.join(storageRoot(), 'mode-repair');
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.mkdir(root, { recursive: true });
+    await fs.chmod(root, 0o755);
+    expect(await modeOf(root)).toBe('755');
+
+    const before = config.documentStorePath;
+    try {
+      config.documentStorePath = root;
+      await assertStorageWritable();
+      expect(await modeOf(root)).toBe('700');
+    } finally {
+      config.documentStorePath = before;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   ownerOnly('writes a stored statement readable by nobody else', async () => {
     const doc = { importId: 'mode-check-import', originalFilename: 'modes.csv', sourceType: 'csv' };
     await putDocument(doc, Buffer.from('date,amount,description\n2026-01-01,-1.00,Mode\n', 'utf8'));

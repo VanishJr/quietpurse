@@ -1,36 +1,28 @@
 /**
- * The values the app and the landing page both hold, in the one place that can hold
- * them.
+ * The palette, radii and motion, in the one place that can hold them.
  *
- * They already agreed — every colour below was once declared twice, under two
- * different names with the same hex after it, and nothing anywhere said the two had
- * to stay equal. The first time somebody warms the ground by a few points on one
- * page, the seam between them becomes visible and neither file is wrong.
+ * Every colour below was once declared twice, under two different names with the same
+ * hex after it, and nothing anywhere said the two had to stay equal. So: this file is
+ * the source, and `styles.css` keeps its own names as aliases pointing at it. The
+ * local names are not ceremony — a rule that reads `background: var(--external)` says
+ * which of two meanings of one colour it meant.
  *
- * So: this file is the source, and each stylesheet keeps its own names as aliases
- * pointing at it. The local names are not ceremony — a rule that reads
- * `background: var(--external)` says which of two meanings of one colour it meant.
+ * Nothing here may be declared without a reader. A token nobody reaches is invisible
+ * to `tsc` and to every screen test — it survives whatever deleted its last caller,
+ * and the next person to want that value declares a second one beside it. That is the
+ * drift this file exists to stop, so `tokens.test.ts` refuses it.
  *
- * NOT here: anything only one surface has. The landing's section rhythm was tuned
- * against long prose and is not a shared decision.
- *
- * Loaded by both entry points (`main.tsx` and `landing/main.tsx`).
+ * Loaded by `main.tsx`.
  */
 
 :root {
   /* ---------- ground and paper ---------- */
 
-  /* the dark ground both surfaces sit on */
+  /* the dark ground */
   --c-ground: #010710;
-  /* the landing's primary button, and the app's white discs on the bar */
+  /* the app's white discs on the bar */
   --c-paper: #f4f4f4;
   --c-paper-hi: #ffffff;
-
-  /* ---------- text on paper ---------- */
-
-  --c-ink: #000000;
-  /* secondary: 6.4:1 on --c-paper */
-  --c-ink-2: #595959;
 
   /* ---------- text on the ground ---------- */
 
@@ -42,10 +34,6 @@
 
   /* ---------- lines ---------- */
 
-  /* the frame's own line colour: 4.1:1 on white, which an edge may be */
-  --c-line: #7e7e7e;
-  /* the same line where it is read rather than seen — placeholders: 5.3:1 */
-  --c-line-strong: #6b6b6b;
   /* on the ground: a card edge, which is felt rather than seen */
   --c-hairline: rgba(255, 255, 255, 0.12);
   /* on the ground: the edge OF a control, which WCAG asks to be 3:1. This is 3.05 */
@@ -60,51 +48,24 @@
   --c-wash-2: rgba(255, 255, 255, 0.16);
   --c-wash-3: rgba(255, 255, 255, 0.22);
 
-  /* ---------- meaning ---------- */
-
-  --c-danger: #a70000;
-  /* the tick, on paper */
-  --c-good-paper: #009405;
-  /* the same idea on the dark ground, where #009405 is nearly invisible */
-  --c-good-ground: #35d07f;
-  /* "look at this one" (the box a refusal is about) and "this part is not yours"
-     (the share of a month somebody else covered) — one colour, two sentences */
-  --c-attention: #eceea9;
-
   /* ---------- radii ---------- */
 
-  /* Six steps, from the twelve the landing had drifted to. 10, 11 and 12 were three
-     names for one corner and 6 and 8 for another; 2px and 15px were "fully round" on
-     a 4px track and a 30px switch, which --r-pill draws as well because a radius
-     past half the box is clamped to half the box.
- */
+  /* A step scale, from the dozen near-duplicates this had drifted to: several names
+     for one corner, and two values that meant "fully round" on a 4px track and a 30px
+     switch, which --r-pill draws as well because a radius past half the box is
+     clamped to half the box. */
   --r-xs: 4px;
   --r-sm: 8px;
   --r-md: 12px;
-  --r-lg: 15px;
   --r-xl: 19px;
   /* the app's content panel, laid on the navigation's ground */
   --r-panel: 24px;
   --r-pill: 29px;
 
-  /* ---------- type ---------- */
-
-  /* The landing's, and the landing's alone. Five steps from the six the page had drifted to —
-     13, 14 and 15 were three sizes for one job, and 17 was the same as 16 with a
-     media query in front of it. */
-  --fs-sm: 14px;
-  --fs-md: 16px;
-  --fs-lg: 18px;
-  --fs-xl: 26px;
-  --fs-2xl: 30px;
-
   /* ---------- motion ---------- */
 
   /* 140 and 160 were doing the same job in different rules; one is enough */
   --dur-1: 140ms;
-  --dur-2: 200ms;
-  /* the chart, which is a shape changing rather than a control reacting */
-  --dur-3: 420ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 
   /* ---------- stacking ---------- */

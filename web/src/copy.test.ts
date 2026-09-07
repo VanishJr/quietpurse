@@ -24,12 +24,11 @@ describe('no client copy names a rate source', () => {
   const SELF = 'copy.test.ts';
 
   /**
-   * The page shells sit beside src/ and carry copy of their own - landing.html is
-   * the likeliest place in the package for the claim, being what sells the product.
-   * Derived rather than listed so that a third page added to vite.config.ts's
-   * rollupOptions.input is covered the day it appears. Only the files beside src/,
-   * never a walk of web/: dist/ is build output and still holds the old caption, so
-   * the guard would redden on a directory nobody edited.
+   * The page shell sits beside src/ and carries copy of its own. Derived rather than
+   * listed so that a second page added to vite.config.ts's build input is covered the
+   * day it appears. Only the files beside src/, never a walk of web/: dist/ is build
+   * output and still holds the old caption, so the guard would redden on a directory
+   * nobody edited.
    */
   const SHELLS = readdirSync(resolve(SRC, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.html'))
@@ -54,13 +53,12 @@ describe('no client copy names a rate source', () => {
     ...SHELLS,
   ].filter((file) => file !== SELF);
 
-  it('reads the client source tree and the page shells', () => {
+  it('reads the client source tree and the page shell', () => {
     expect(FILES.length).toBeGreaterThan(0);
     // written out rather than compared against SHELLS, which would be the same list
     // on both sides of the assertion and green however short it got
     expect(FILES).toContain('screens/AnalyticsScreen.tsx');
     expect(FILES).toContain('../index.html');
-    expect(FILES).toContain('../landing.html');
   });
 
   it('finds no rate source named anywhere in the client', () => {

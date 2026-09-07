@@ -206,11 +206,11 @@ describe('the data layer: a manual category, and what may not touch it', () => {
    * splits them in two.
    */
   it('an overridden row shares a bucket with an auto row of the same category', async () => {
-    const spend = await summaryByCategory({ kind: 'workspace' }, FROM, TO);
+    const spend = await summaryByCategory({ kind: 'all' }, FROM, TO);
     expect(spend.filter((r) => r.category === 'transport')).toHaveLength(1);
     expect(totalOf(spend, 'transport')).toBe(AUTO_SPEND + MANUAL_SPEND);
 
-    const income = await summaryIncomeByCategory({ kind: 'workspace' }, FROM, TO);
+    const income = await summaryIncomeByCategory({ kind: 'all' }, FROM, TO);
     expect(income.filter((r) => r.category === 'salary')).toHaveLength(1);
     expect(totalOf(income, 'salary')).toBe(AUTO_INCOME + MANUAL_INCOME);
 

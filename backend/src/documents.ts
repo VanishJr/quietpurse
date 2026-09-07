@@ -65,7 +65,20 @@ export function documentStem(originalFilename: string | null): string {
   return WINDOWS_DEVICE.test(bounded.split('.')[0]) ? `_${bounded}` : bounded;
 }
 
-const ID_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+/**
+ * No `_`, and that absence is the whole of what makes a key name one row.
+ *
+ * `_` is what documentKey puts between the stem and the id, and the stem may contain
+ * one. If the id could too, one key would have two readings: a row carrying
+ * `original_filename` "a_b" and id "c" and a row carrying "a" and id "b_c" both
+ * derive `a_b_c.csv`. A restored backup chooses both fields, so it could aim a row at
+ * a statement it does not own and have DELETE unlink that one instead.
+ *
+ * Nothing is given up. Every id this server mints is a crypto.randomUUID(), which is
+ * hex and dashes, so no key this code has ever produced changes shape - and an id
+ * that does carry `_` still names a file, by the hash arm below.
+ */
+const ID_SHAPE = /^[A-Za-z0-9-]{1,64}$/;
 
 /** An id this server minted goes in verbatim; one a restored backup carried is hashed so it can still name a file. */
 const idSegment = (importId: string): string =>

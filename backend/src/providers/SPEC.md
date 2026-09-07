@@ -67,8 +67,10 @@ parses nothing either.
 
 **A parse cannot be interrupted, and that is a rejected design rather than an oversight.** The
 deadline in `statement.ts` bounds accidental pathology and not somebody who is trying: closing that
-needs an execution context that can be terminated, which is a second thread, and the argument that
-the statements folder is safe rests on there being none.
+needs an execution context that can be terminated, which is a second thread, and this process has
+one. What makes that acceptable is who can upload. On the default loopback bind it is the person at
+the machine, so what the deadline bounds is a bad file of their own; a wider bind puts everyone on
+the network on the port, and `SECURITY.md` says so beside the setting that opens it.
 
 ## Where the boundary runs
 
@@ -94,14 +96,17 @@ what keeps the derivation single-sourced; `pdf.ts` imports the money helpers. No
 list either.
 
 **The PDF reader's globals are installed before pdfjs is loaded, and the reason the stubs exist at
-all is a deployment fact.** pdfjs takes its `DOMMatrix` and `Path2D` from a canvas package the
-production image does not carry: a renderer far larger than the text-layer parser that needs it, for
-a path that reads a text layer and never draws. Without those globals the pdfjs module does not
-merely warn — it constructs a matrix at module scope, so it fails to evaluate, and through the
-static chain from `backend/src/app.ts` through `statement.ts` into `pdf.ts` that is a container that
-cannot boot. `pdfjsloader.ts` is the
-mechanism; the ordering invariant that keeps it working is stated there, where deleting a line is
-what breaks it.
+all is a dependency fact.** pdfjs takes its `DOMMatrix` and `Path2D` from a canvas package it lists
+as optional, which `npm` installs where a prebuilt binary exists for the machine and skips in
+silence everywhere else: a renderer far larger than the text-layer parser that needs it, for a path
+that reads a text layer and never draws. Without those globals the pdfjs module does not merely
+warn — it constructs a matrix at module scope, so it fails to evaluate, and through the static
+chain from `backend/src/app.ts` through `statement.ts` into `pdf.ts` that is a process that cannot
+start, on exactly the machines the package skipped. `pdfjsloader.ts` is the mechanism; the
+ordering invariant that keeps it working is stated there, where deleting a line is what breaks it,
+and `backend/test/canvasabsent.test.ts` holds it in a spawned child where the package is made
+unresolvable, because on a machine that has the package every other test is green whether the
+stubs landed in time or not.
 
 ## The seam every frontend hands its rows to
 

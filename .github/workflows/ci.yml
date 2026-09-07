@@ -86,11 +86,81 @@ jobs:
       # `npm run build` type-checks too, but as its first half: a type error would
       # report as a build failure. Split so the checklist says which one broke.
       - run: npm run typecheck
-      # two projects, one command: the pure functions in node, plus jsdom screen
-      # tests for the App shell, Overview and CsvImport. Still no browser - layout,
-      # styles.css, downloads and charts are outside jsdom and stay manual, and
-      # every other screen is mounted by the App test and asserted about by nothing.
+      # two projects, one command: the pure functions in node, and the screens under
+      # jsdom. Still no browser - layout, styles.css, downloads and charts are outside
+      # jsdom and stay manual; AGENTS.md says what a green run here leaves unverified.
       - run: npm test
         if: always()
       - run: npm run build
         if: always()
+
+  app:
+    name: app (setup + start)
+    runs-on: ubuntu-latest
+    # The two commands a person runs, from the root and as README.md gives them, with
+    # no DATABASE_URL: the jobs above never start the process, and the suite's PGlite
+    # is in memory - so the database folder, the lock beside it and what a SIGKILL
+    # leaves behind are exercised here and nowhere else.
+    defaults:
+      run:
+        shell: bash
+    env:
+      PORT: 4000
+      API: http://127.0.0.1:4000
+    steps:
+      # A folder of the run's own, never the runner's ~/Finto: the steps below read the
+      # database and the lock inside it. Set here rather than in the job's env because
+      # the runner context does not reach that block - GitHub rejects the whole file
+      # for it, and every job in it, which YAML parsing cannot see. $RUNNER_TEMP is the
+      # same value as a plain variable, and the log paths below already use it.
+      - run: echo "FINTO_HOME=$RUNNER_TEMP/finto-home" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            web/package-lock.json
+      # `npm ci` twice and a build, which the jobs above run from inside a package;
+      # the root script itself runs only here
+      - run: npm run setup
+      - name: start, and get the app
+        run: |
+          npm start > "$RUNNER_TEMP/finto-1.log" 2>&1 &
+          for _ in $(seq 60); do curl -sf "$API/api/health" > /dev/null && break; sleep 1; done
+          curl -sf "$API/api/health"
+          curl -sf -H 'Accept: text/html' "$API/" | grep -q '<div id="root">'
+          test -f "$FINTO_HOME/db/PG_VERSION"
+          kill -0 "$(cat "$FINTO_HOME/finto.lock")"
+      # on a port of its own, so the lock is the only thing that can refuse it
+      - name: a second start on the same folder is refused, and by the lock
+        run: |
+          ! PORT=$((PORT + 1)) timeout 60 npm start > "$RUNNER_TEMP/finto-2.log" 2>&1
+          grep -q 'another Finto (pid' "$RUNNER_TEMP/finto-2.log"
+          curl -sf "$API/api/health" > /dev/null
+      # the lock holds the pid of the process that owns the database, so this is the
+      # app dying mid-run and not npm; a SIGKILL runs no shutdown and leaves the file
+      - name: write a row, then SIGKILL the process holding the lock
+        run: |
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"name":"Smoke"}' "$API/api/accounts"
+          cp "$FINTO_HOME/finto.lock" "$RUNNER_TEMP/killed.pid"
+          kill -9 "$(cat "$RUNNER_TEMP/killed.pid")"
+          for _ in $(seq 30); do kill -0 "$(cat "$RUNNER_TEMP/killed.pid")" 2> /dev/null || break; sleep 1; done
+          ! kill -0 "$(cat "$RUNNER_TEMP/killed.pid")" 2> /dev/null
+          test -f "$FINTO_HOME/finto.lock"
+      - name: start again over what the SIGKILL left, and the row is still there
+        run: |
+          npm start > "$RUNNER_TEMP/finto-3.log" 2>&1 &
+          for _ in $(seq 60); do curl -sf "$API/api/health" > /dev/null && break; sleep 1; done
+          curl -sf "$API/api/accounts" | grep -q '"name":"Smoke"'
+          test "$(cat "$FINTO_HOME/finto.lock")" != "$(cat "$RUNNER_TEMP/killed.pid")"
+          kill -0 "$(cat "$FINTO_HOME/finto.lock")"
+      - name: stop, and the lock goes with it
+        run: |
+          kill -TERM "$(cat "$FINTO_HOME/finto.lock")"
+          for _ in $(seq 30); do test -e "$FINTO_HOME/finto.lock" || break; sleep 1; done
+          ! test -e "$FINTO_HOME/finto.lock"
+      - name: what the three starts printed
+        if: always()
+        run: for f in "$RUNNER_TEMP"/finto-*.log; do echo "== $f"; cat "$f"; done
