@@ -130,7 +130,7 @@ Nothing is required. `backend/.env.example` lists what can be set; the ones wort
 |---|---|
 | `PORT` | the port the app is served on, defaults to `4000` |
 | `FINTO_HOME` | the folder everything lives in, defaults to `~/Finto` |
-| `HOST` | listen on every network interface (`0.0.0.0`) instead of this machine only — for a phone on the same Wi-Fi. There is no sign-in, so everyone who can reach the port can read and change your data |
+| `FINTO_HOST` | listen on every network interface (`0.0.0.0`) instead of this machine only — for a phone on the same Wi-Fi. There is no sign-in, so everyone who can reach the port can read and change your data |
 | `OWNER_NAMES`, `FAMILY_NAMES`, `BASE_CURRENCY` | seed the settings on the first start; after that they are edited in the app |
 | `DATABASE_URL` | use a PostgreSQL server instead of the embedded database |
 | `DOCUMENT_STORE_PATH` | keep the uploaded statements somewhere other than `FINTO_HOME/statements` |

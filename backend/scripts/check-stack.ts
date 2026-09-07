@@ -245,7 +245,7 @@ async function teardown(m: Manifest): Promise<TeardownReport> {
   for (const child of m.children) {
     if (!(await portFreed(child.port))) report.busyPorts.push(child.port);
   }
-  assertRunPaths({ repoRoot: m.repoRoot, runDir: m.runDir, home: m.home });
+  assertRunPaths({ repoRoot: m.repoRoot, runDir: m.runDir, home: m.home, ownerHome: config.home });
   // a teardown that did not finish - a process left alone as NOT OURS, a kill that
   // failed, a port still held afterwards - is the one outcome that leaves evidence
   // worth reading, and removing the manifest is what would make the next `down` say
@@ -469,7 +469,7 @@ async function up(options: Options): Promise<void> {
   const runDir = path.join(STACK_ROOT, runId);
   const home = path.join(runDir, 'home');
   const chromeProfileDir = path.join(runDir, 'chrome');
-  assertRunPaths({ repoRoot: REPO_ROOT, runDir, home });
+  assertRunPaths({ repoRoot: REPO_ROOT, runDir, home, ownerHome: config.home });
 
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(chromeProfileDir, { recursive: true });

@@ -265,6 +265,32 @@ describe('the stem a filename becomes', () => {
     const other = documentKey({ importId: '../evil2', originalFilename: null, sourceType: 'csv' });
     expect(other).not.toBe(key);
   });
+
+  /**
+   * The pair a restored backup would use to aim one row at another row's file. `_`
+   * is the separator, so an id carrying one would give the key a second reading;
+   * the hash arm is what takes that away, and the assertion is inequality rather
+   * than a shape, because the defect IS the two being equal.
+   */
+  it('a name and an id that read as each other do not derive the same key', () => {
+    const mine = documentKey({
+      importId: 'b_c',
+      originalFilename: 'a.csv',
+      sourceType: 'csv',
+    });
+    const theirs = documentKey({
+      importId: 'c',
+      originalFilename: 'a_b.csv',
+      sourceType: 'csv',
+    });
+    expect(mine).not.toBe(theirs);
+  });
+
+  it('a minted id is written into the key verbatim, so no stored file is renamed', () => {
+    const id = crypto.randomUUID();
+    const key = documentKey({ importId: id, originalFilename: 'statement.csv', sourceType: 'csv' });
+    expect(key).toBe(`statement_${id}.csv`);
+  });
 });
 
 describe('documents: the domain layer', () => {

@@ -13,7 +13,7 @@
  * all three together.
  */
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
 import { config } from '../src/config';
 import { seedDefaults } from '../src/db';
@@ -75,7 +75,7 @@ describe('the request has to have come from this machine', () => {
 });
 
 /**
- * `HOST=0.0.0.0` — the documented way to open the port so a phone on the same Wi-Fi
+ * `FINTO_HOST=0.0.0.0` — the documented way to open the port so a phone on the same Wi-Fi
  * can reach it. The whole arm is unreachable on the loopback default, so without this
  * block the rule that governs the OPEN configuration would be held by nothing.
  *
@@ -83,7 +83,7 @@ describe('the request has to have come from this machine', () => {
  * is refused in both configurations, which is the half rebinding needs, and brackets
  * are not what makes something an address.
  */
-describe('with HOST set, an address is accepted and a name still is not', () => {
+describe('with FINTO_HOST set, an address is accepted and a name still is not', () => {
   const restore = config.host;
   beforeAll(() => {
     config.host = '0.0.0.0';
@@ -188,4 +188,41 @@ describe('with HOST set, an address is accepted and a name still is not', () => 
       expect(res.body.error).toBe(REFUSAL);
     },
   );
+});
+
+/**
+ * Which variable opens the port, held behaviourally rather than by reading the source.
+ *
+ * `HOST` is a name shells, container images and PaaS wrappers set for their own
+ * reasons. Reading it would let an environment nobody wrote for this app bind every
+ * interface AND widen the Host rule to any address literal, with no line typed by the
+ * owner. The namespaced name is the whole defence, so the arm that matters is the
+ * second case: HOST set and ignored.
+ */
+describe('the variable that opens the port', () => {
+  const load = async (vars: { HOST?: string; FINTO_HOST?: string }): Promise<string> => {
+    const saved = { HOST: process.env.HOST, FINTO_HOST: process.env.FINTO_HOST };
+    const put = (k: 'HOST' | 'FINTO_HOST', v?: string): void => {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    };
+    put('HOST', vars.HOST);
+    put('FINTO_HOST', vars.FINTO_HOST);
+    try {
+      vi.resetModules();
+      return (await import('../src/config')).config.host;
+    } finally {
+      put('HOST', saved.HOST);
+      put('FINTO_HOST', saved.FINTO_HOST);
+      vi.resetModules();
+    }
+  };
+
+  it('is FINTO_HOST', async () => {
+    expect(await load({ FINTO_HOST: '0.0.0.0' })).toBe('0.0.0.0');
+  });
+
+  it('is not HOST, whatever other software set it to', async () => {
+    expect(await load({ HOST: '0.0.0.0' })).toBe('127.0.0.1');
+  });
 });

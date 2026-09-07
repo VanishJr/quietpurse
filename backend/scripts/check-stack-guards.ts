@@ -221,13 +221,22 @@ const isAtOrInside = (child: string, parent: string): boolean => {
 };
 
 /**
- * Nothing this script writes may land in the repository. `.gitignore` blankets
- * `*.log`, `*.csv` and `*.pdf` repository-wide, so a log written inside the tree
- * would not show in `git status` either. The home folder is checked on its own even
- * though it sits inside the run directory today: the day one moves, the other check
- * still stands.
+ * Nothing this script writes may land in the repository, or among the person's own
+ * data. `.gitignore` blankets `*.log`, `*.csv` and `*.pdf` repository-wide, so a log
+ * written inside the tree would not show in `git status` either. The home folder is
+ * checked on its own even though it sits inside the run directory today: the day one
+ * moves, the other check still stands.
+ *
+ * `ownerHome` is optional so that a caller with no notion of one - every test here -
+ * needs no value for it, and so that this module keeps reaching nothing but
+ * `node:path`: the real FINTO_HOME is resolved by the caller, never read here.
  */
-export function assertRunPaths(o: { repoRoot: string; runDir: string; home: string }): void {
+export function assertRunPaths(o: {
+  repoRoot: string;
+  runDir: string;
+  home: string;
+  ownerHome?: string;
+}): void {
   const ownerDocuments = path.join(o.repoRoot, 'backend', 'data');
   const places: [string, string][] = [
     ['run directory', o.runDir],
@@ -244,6 +253,12 @@ export function assertRunPaths(o: { repoRoot: string; runDir: string; home: stri
       throw new Error(
         `the check stack's ${what} resolves to ${p}, inside the repository (${o.repoRoot}) - ` +
           `everything it writes would land in the diff, and .gitignore hides logs from git status`,
+      );
+    }
+    if (o.ownerHome && isAtOrInside(p, o.ownerHome)) {
+      throw new Error(
+        `the check stack's ${what} resolves to ${p}, at or inside the owner's own Finto folder ` +
+          `(${o.ownerHome}) - a check must not write among the person's real database and statements`,
       );
     }
   }

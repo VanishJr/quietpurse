@@ -87,7 +87,7 @@ import {
 } from './documents';
 import { backfillBaseAmounts } from './fxrates';
 import { computeIndependence } from './independence';
-import { causeChain, logHttp, logImport, logger } from './logger';
+import { causeChain, logHttp, logImport, logger, reasonFirst } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { type StatementDestination, importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
@@ -103,6 +103,11 @@ app.use((req, res, next) => {
   // which is every session, always. On every response and not only on the pages: a
   // header that is right for some paths is one somebody has to keep right.
   res.setHeader('X-Frame-Options', 'DENY');
+  // Everything this app loads it ships itself; there is no CDN, no analytics and no
+  // embed. Nothing reachable today injects markup, so this is the header that keeps
+  // that true rather than one repairing a hole.
+  res.setHeader('Content-Security-Policy', "default-src 'self'; object-src 'none'; frame-ancestors 'none'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.on('finish', () => {
     logHttp.debug(`${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - startedAt}ms`);
   });
@@ -120,7 +125,7 @@ app.use((req, res, next) => {
  * Host closes DNS rebinding. A page at http://evil.example whose name is made to
  * resolve to 127.0.0.1 arrives here same-origin with itself, and the only part of it
  * still under the attacker's control is the NAME in this header - so a name is
- * refused and an address is not. That also leaves HOST=0.0.0.0 working: a phone on
+ * refused and an address is not. That also leaves FINTO_HOST=0.0.0.0 working: a phone on
  * the same Wi-Fi reaches this server by its address and never by a name.
  *
  * Origin closes the plain cross-origin write, which needs no rebind at all.
@@ -1642,16 +1647,45 @@ app.post(
       });
       return;
     }
+    let data: ReturnType<typeof parseBackup>;
     try {
       const input: unknown = Buffer.isBuffer(raw) ? JSON.parse(raw.toString('utf8')) : raw;
-      const data = parseBackup(input);
-      const { tables, rows } = await restoreBackup(data);
-      await reclassifyAll(); // the backup may predate the current tagging rules
-      logger.info(`restored from backup: tables ${tables}, rows ${rows}`);
-      res.json({ restored: true, tables, rows });
+      data = parseBackup(input);
     } catch (e) {
+      // The parser's own sentences describe the file the caller sent, so echoing them
+      // tells them what to fix and gives away nothing they did not already have.
       res.status(400).json({ error: `backup could not be restored: ${(e as Error).message}` });
+      return;
     }
+
+    let tables: number;
+    let rows: number;
+    try {
+      const done = await restoreBackup(data);
+      tables = done.tables;
+      rows = done.rows;
+    } catch (e) {
+      // Never the message here: drizzle wraps every driver error, so its message is the
+      // whole failed statement and every bound value. The chain goes to the log, and
+      // the body gets a sentence that names no column and no row.
+      logger.error(`restore failed: ${reasonFirst(e)}`);
+      res.status(400).json({
+        error:
+          'backup could not be restored: the file was read, but writing it to the database failed - the reason is in the log this server printed',
+      });
+      return;
+    }
+
+    // Outside the block above on purpose. By here the database is already replaced, so
+    // a throw from re-tagging is not a failed restore and answering 400 for it would
+    // send the person back to a restore that has in fact already happened.
+    try {
+      await reclassifyAll(); // the backup may predate the current tagging rules
+    } catch (e) {
+      logger.error(`restored, but re-tagging it failed: ${reasonFirst(e)}`);
+    }
+    logger.info(`restored from backup: tables ${tables}, rows ${rows}`);
+    res.json({ restored: true, tables, rows });
   },
 );
 

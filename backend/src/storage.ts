@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 import { config } from './config';
-import { causeChain } from './logger';
+import { causeChain, logger } from './logger';
 
 /**
  * NOT a sanitiser: nothing is cleaned up into something acceptable, anything outside
@@ -43,13 +43,18 @@ function resolveKey(key: string): string {
  * Nobody but this user. The statements are bank statements and the database beside
  * them is every transaction in them, and row 72 removed the encryption that used to
  * stand between them and a second account on the machine - so the only thing left is
- * the mode, and it is set where the file is created rather than repaired afterwards.
+ * the mode: set where a file is created, and re-checked on every boot for a folder
+ * that was not.
  *
  * 0700 on a directory is the load-bearing half: PGlite writes its own files inside
  * the database folder under its own modes, and a folder nobody else may traverse
  * covers them whatever they are. An umask can only take permissions away here, never
- * add them. A directory that already exists keeps the mode it has - Node applies this
- * to what it creates - which is why a folder from an earlier build stays as it was.
+ * add them.
+ *
+ * mkdir applies this to what it CREATES and leaves an existing directory at whatever
+ * mode it has, so the create-time mode alone leaves every folder made before this
+ * code existed open. assertWritableDir repairs instead of refusing: refusing would
+ * turn a folder the user already has data in into a server that will not boot.
  */
 export const OWNER_ONLY_DIR = 0o700;
 export const OWNER_ONLY_FILE = 0o600;
@@ -69,6 +74,14 @@ export async function assertWritableDir(dir: string, what: string): Promise<void
   const probe = path.join(dir, `.writable-${crypto.randomUUID()}`);
   try {
     await fs.mkdir(dir, { recursive: true, mode: OWNER_ONLY_DIR });
+    // A directory that already existed kept its own mode, so the create-time mode
+    // above says nothing about this one. Widened bits are cleared on every boot
+    // rather than once at install: whatever set them can set them again.
+    const { mode } = await fs.stat(dir);
+    if (mode & 0o077) {
+      await fs.chmod(dir, OWNER_ONLY_DIR);
+      logger.warn(`${what} at ${dir} was readable by other accounts; set to 0700`);
+    }
     await fs.writeFile(probe, 'finto', { mode: OWNER_ONLY_FILE });
     await fs.unlink(probe);
   } catch (e) {

@@ -38,6 +38,9 @@ export type ParsedAppSettingsPatch =
   | { ok: true; patch: AppSettingsPatch }
   | { ok: false; error: string };
 
+const MAX_OWNER_NAMES = 50;
+const MAX_OWNER_NAME_LENGTH = 200;
+
 /** An absent key means "leave it alone"; a present one that cannot be stored is refused, never coerced. */
 export function parseAppSettingsPatch(body: {
   baseCurrency?: unknown;
@@ -55,6 +58,18 @@ export function parseAppSettingsPatch(body: {
   if (body.ownerNames !== undefined) {
     if (!Array.isArray(body.ownerNames) || body.ownerNames.some((n) => typeof n !== 'string')) {
       return { ok: false, error: 'ownerNames: an array of strings' };
+    }
+    // Bounded like every other door. This list is re-read and concatenated into the
+    // rules signature on every classify pass, so an unbounded one is paid for again
+    // at every import rather than once at the write.
+    if (body.ownerNames.length > MAX_OWNER_NAMES) {
+      return { ok: false, error: `ownerNames: at most ${MAX_OWNER_NAMES} names` };
+    }
+    if ((body.ownerNames as string[]).some((n) => n.length > MAX_OWNER_NAME_LENGTH)) {
+      return {
+        ok: false,
+        error: `ownerNames: each name is at most ${MAX_OWNER_NAME_LENGTH} characters`,
+      };
     }
     patch.ownerNames = (body.ownerNames as string[]).map((s) => s.trim()).filter(Boolean);
   }
