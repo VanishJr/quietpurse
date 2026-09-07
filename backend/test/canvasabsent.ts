@@ -1,13 +1,13 @@
 /**
  * What the PDF parser answers, reduced to something two processes can compare.
  *
- * The point of this row is that the production image carries no `@napi-rs/canvas`
- * (ROADMAP row 28), and no test on any developer's machine can see that: canvas is
- * installed everywhere the suite runs, so the stubs in src/providers/pdfjsloader.ts
- * are dead code here and the parser would keep passing with them deleted. So this
- * module is imported twice - once by canvasabsent.test.ts with the package present,
- * once by canvasabsent.child.ts in a child process where it has been made
- * unresolvable - and the two answers are compared.
+ * The parser has to keep parsing where `@napi-rs/canvas` is not installed. pdfjs-dist
+ * lists it as optional, so npm skips it on any machine no prebuilt binary matches, and
+ * whether this one has it is not knowable from here - which is why the child below
+ * makes the package unresolvable rather than asking. So this module is imported twice
+ * - once by canvasabsent.test.ts as the machine found it, once by
+ * canvasabsent.child.ts in a child process where it cannot be resolved - and the two
+ * answers are compared.
  *
  * The template is synthetic. It is not either shipped layout and is not evidence
  * about one: what it has to exercise is the four ways readPdf can answer, one of

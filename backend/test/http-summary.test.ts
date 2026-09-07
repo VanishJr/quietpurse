@@ -82,9 +82,10 @@ const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Pro
 const ALL_EXPENSE = EXPENSE + FOREIGN_BASE_EXPENSE;
 
 /**
- * Everything asserted below is exact, so the file starts from an empty database: the
- * suite runs in one process with no truncation between files, and the rows an earlier
- * file left behind would otherwise be in every unfiltered answer here.
+ * Everything asserted below is exact, so the file starts from an empty database. The
+ * setup file already truncates and seeds before every file; this pair is here anyway,
+ * so the exactness rests on a line in this file rather than on a setup file this one
+ * does not name.
  */
 beforeAll(async () => {
   await freshTestDb();
@@ -100,9 +101,10 @@ beforeAll(async () => {
 
 describe('GET /api/summary', () => {
   /**
-   * The wire's word for the all-accounts scope, pinned on its own: the client narrows
-   * on this literal and both packages build from one tree, so the day it changes this
-   * is the one line that says so on the server side.
+   * The wire's word for the all-accounts scope, named on its own line so a reader
+   * sees what the client narrows on. It is NOT the only holder and cannot fail by
+   * itself: the case below asserts the same literal inside a whole body, and three
+   * more do further down, so a rename reds all of them together.
    */
   it('names the all-accounts scope by its exact wire literal', async () => {
     const res = await agent.get(`/api/summary?${WINDOW}`);

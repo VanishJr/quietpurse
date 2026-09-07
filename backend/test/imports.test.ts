@@ -418,11 +418,10 @@ describe('imports: the file layer', () => {
  * `limit` of it, so a panel can say how many are not listed instead of counting what
  * it was sent.
  *
- * Every case starts with nothing imported and this describe is the last in the file:
- * vitest runs this suite in one process, files in order and with no truncation between
- * them, so 101 imports left behind would be in every later file's unfiltered
- * listImports() for the rest of the run - which is why the truncate is inside each
- * case rather than at the end of the describe, where a failing case would skip it.
+ * Every case starts with nothing imported and this describe is the last in the file.
+ * The setup file truncates before each FILE, so what 101 imports left behind would
+ * reach is the rest of THIS one - and the truncate is inside each case rather than at
+ * the end of the describe, where a failing case would skip it.
  */
 describe('listImports: the filter and the totals', () => {
   let seq = 0;

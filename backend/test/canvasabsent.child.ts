@@ -1,8 +1,8 @@
 /**
  * The same parse as the parent, in a process where `@napi-rs/canvas` cannot be
- * resolved - which is the production image (ROADMAP row 28) and is a state no test
- * running in the suite's own process can reach: canvas is installed on every machine
- * the suite runs on, and pdfjs is loaded once per process.
+ * resolved - the state of any machine npm skipped the optional package on, and one no
+ * test running in the suite's own process can reach, because pdfjs is loaded once per
+ * process and the parent may well have found the package.
  *
  * The hook has to be installed before anything imports pdf.mjs, so this file imports
  * nothing above it. One JSON line on stdout; pdfjs's own warning goes to stderr,

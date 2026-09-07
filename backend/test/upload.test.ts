@@ -50,9 +50,10 @@ const imports = async (): Promise<
 const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
 
 /**
- * Everything asserted below is exact, so the file starts from an empty database: the
- * suite runs in one process with no truncation between files, and the rows an earlier
- * file left behind would otherwise be in every unfiltered answer here.
+ * Everything asserted below is exact, so the file starts from an empty database. The
+ * setup file already truncates and seeds before every file; this pair is here anyway,
+ * so the exactness rests on a line in this file rather than on a setup file this one
+ * does not name.
  */
 beforeAll(async () => {
   await freshTestDb();
