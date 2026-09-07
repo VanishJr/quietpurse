@@ -105,12 +105,15 @@ jobs:
       run:
         shell: bash
     env:
-      # a folder of the run's own, never the runner's ~/Finto: the steps below read
-      # the database and the lock inside it
-      FINTO_HOME: ${{ runner.temp }}/finto-home
       PORT: 4000
       API: http://127.0.0.1:4000
     steps:
+      # A folder of the run's own, never the runner's ~/Finto: the steps below read the
+      # database and the lock inside it. Set here rather than in the job's env because
+      # the runner context does not reach that block - GitHub rejects the whole file
+      # for it, and every job in it, which YAML parsing cannot see. $RUNNER_TEMP is the
+      # same value as a plain variable, and the log paths below already use it.
+      - run: echo "FINTO_HOME=$RUNNER_TEMP/finto-home" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
