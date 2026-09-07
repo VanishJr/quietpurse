@@ -161,6 +161,9 @@ describe('the calls the offline product depends on', () => {
     expect(blob).toBeInstanceOf(Blob);
     expect(await blob.text()).toBe('{"format":"finto-backup"}');
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/backup');
+    // The effective method, not the absence of an init: passing no init IS a GET, and
+    // a header added later must not read as this assertion breaking.
+    expect(fetchMock.mock.calls[0][1]?.method ?? 'GET').toBe('GET');
   });
 
   it('api.backup() rejects with the server sentence instead of handing back the refusal as bytes', async () => {

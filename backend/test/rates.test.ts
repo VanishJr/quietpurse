@@ -5,10 +5,12 @@
  * transfer with or without a rate - so it is driven end to end here as well.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { REQUEST_TIMEOUT_MS } from '../src/rates';
 import type { NewTransaction } from '../src/types';
 
 const ENDPOINT = 'https://api.monobank.ua/bank/currency';
 const TTL_MS = 10 * 60 * 1000;
+const TIMEOUT_MS = 10_000;
 
 /** Monobank's shape: ISO 4217 numeric codes, and a cross rate or a buy/sell pair. */
 const LIST = [
@@ -62,13 +64,30 @@ describe('getRatesToUAH', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(ENDPOINT);
   });
 
-  it('asks with a timeout on the request', async () => {
+  /**
+   * `toBeInstanceOf(AbortSignal)` alone is green against a signal that has ALREADY
+   * fired, and against a budget of one millisecond - both of which abort the call
+   * before it leaves, where ratesOrEmpty swallows the throw and every cross-currency
+   * pair is then decided on time alone. So the signal is read for its state, and the
+   * wait is real: AbortSignal.timeout runs on Node's own timer, which vi's fake ones
+   * do not reach.
+   */
+  it('asks with a timeout that is neither already fired nor a token one', async () => {
     const fetchMock = answering(LIST);
     install(fetchMock);
     const getRatesToUAH = await freshRates();
 
     await getRatesToUAH();
-    expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+    const signal = fetchMock.mock.calls[0][1]?.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((signal as AbortSignal).aborted).toBe(false);
+  });
+
+  it('gives that call ten seconds', () => {
+    expect(REQUEST_TIMEOUT_MS).toBe(TIMEOUT_MS);
   });
 
   it('answers the cache for just under ten minutes and asks again at ten', async () => {

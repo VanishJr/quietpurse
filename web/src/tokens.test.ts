@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  * the initial value rather than erroring. So a token outlives whatever deleted its
  * last caller, and the next person wanting that value writes a second declaration
  * beside it - which is the drift tokens.css was written to end. Deleting the public
- * page left sixteen of them behind, and every suite stayed green.
+ * page left a batch of them behind, and every suite stayed green.
  *
  * SRC resolves from import.meta.url, not process.cwd(), for the reason copy.test.ts
  * states: the root of this walk IS the directory this file sits in.
@@ -81,7 +81,10 @@ describe('every design token has a reader', () => {
       const text = readFileSync(resolve(SRC, file), 'utf8');
       for (const token of declared) {
         // the closing paren is not matched: var() takes a fallback after a comma
-        if (new RegExp(`var\\(\\s*${token}\\b`).test(text)) {
+        // `\b` would end the name at the hyphen that STARTS a longer one, so
+        // var(--c-paper-hi) would answer for --c-paper. The close paren and the
+        // comma are the only two things that may follow a name inside var().
+        if (new RegExp(`var\\(\\s*${token}\\s*[),]`).test(text)) {
           readers.set(token, [...(readers.get(token) ?? []), file]);
         }
       }
