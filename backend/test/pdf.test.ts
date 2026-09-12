@@ -559,7 +559,11 @@ describe('pdf: the fee on a continuation line', () => {
     const contradictory: PdfTemplate = {
       ...revolut,
       id: 'fee-label-kept',
-      rows: { kind: 'labelled-continuations', keep: [label()] },
+      rows: {
+        kind: 'labelled-continuations',
+        keep: [label()],
+        accountNumbers: { kind: 'not-printed' },
+      },
     };
     const st = await readPdf(
       buildPdf([
@@ -1590,6 +1594,96 @@ describe('pdf: the third layout', () => {
     expect(TEMPLATES).toHaveLength(5);
     expect(examined).toBe(18);
     expect(declaringMcc).toBe(2);
+  });
+
+  /**
+   * The stance's other half. tsc holds that every continuation template states one;
+   * what it cannot see is the stance agreeing with the list `wanted` actually reads,
+   * because that is two fields of one literal. Where a clause claims coverage - every
+   * line under a declared label decided by the list - the match is `wanted`'s own and
+   * runs one way: a list entry that is a prefix of the declared label, or the label
+   * itself. Matched in either direction, an entry that merely extends the label is
+   * green here while `wanted` decides only the lines that start with the longer entry.
+   * Where a clause claims the lists do not meet, any overlap in either direction is the
+   * contradiction: matched by equality, a `keep` naming a prefix of a dropped label is
+   * green here and appends the line there; matched one way, the clause passes a `keep`
+   * extending a dropped label, which admits a subset of the lines the stance declares
+   * dropped. The last clause is cross-template, for the way templates are written here
+   * - by cloning - so a `drop: ['IBAN:']` copied under a `not-printed` stance is a
+   * contradiction the per-template clauses cannot see; its label set is a literal rather
+   * than the union of the stances, or the one template declaring a label could drop the
+   * declaration and take the label out of the set with it.
+   *
+   * The counts under it are the non-vacuity literals, as above.
+   */
+  it('every template states which continuation labels carry an account number, and the stance agrees with what it keeps and drops', () => {
+    const IDENTIFIER_LABELS = ['Получатель:', 'Отправитель:', 'Карта:', 'IBAN:'] as const;
+    const names = (list: readonly string[], label: string): boolean =>
+      list.some((l) => l.startsWith(label) || label.startsWith(l));
+    const decides = (list: readonly string[], label: string): boolean =>
+      list.some((l) => label.startsWith(l));
+
+    const continuations = TEMPLATES.flatMap((t) =>
+      t.rows.kind === 'one-line' ? [] : [{ id: t.id, rows: t.rows }],
+    );
+    const declared = new Set(
+      continuations.flatMap(({ rows: { accountNumbers } }) =>
+        accountNumbers.kind === 'printed'
+          ? [...accountNumbers.kept, ...accountNumbers.dropped]
+          : [],
+      ),
+    );
+
+    const problems: string[] = [];
+    const stances = { printed: 0, notPrinted: 0 };
+    for (const { id, rows } of continuations) {
+      const stance = rows.accountNumbers;
+      if (stance.kind === 'not-printed') {
+        stances.notPrinted++;
+      } else {
+        stances.printed++;
+        if (stance.kept.length === 0 && stance.dropped.length === 0) {
+          problems.push(`${id}: printed, and names no line`);
+        }
+        for (const label of stance.kept) {
+          if (names(stance.dropped, label)) problems.push(`${id}: "${label}" is both kept and dropped`);
+        }
+      }
+      const kept = stance.kind === 'printed' ? stance.kept : [];
+      const dropped = stance.kind === 'printed' ? stance.dropped : [];
+      switch (rows.kind) {
+        case 'continuations':
+          for (const label of dropped) {
+            if (!decides(rows.drop, label)) problems.push(`${id}: "${label}" is dropped by the stance and not by drop`);
+          }
+          for (const label of kept) {
+            if (names(rows.drop, label)) problems.push(`${id}: "${label}" is kept by the stance and dropped by drop`);
+          }
+          for (const label of rows.drop) {
+            if (names(IDENTIFIER_LABELS, label) && !names(dropped, label)) {
+              problems.push(`${id}: drop names "${label}", an identifier label, and the stance does not`);
+            }
+          }
+          break;
+        case 'labelled-continuations':
+          for (const label of kept) {
+            if (!decides(rows.keep, label)) problems.push(`${id}: "${label}" is kept by the stance and not by keep`);
+          }
+          for (const label of dropped) {
+            if (names(rows.keep, label)) problems.push(`${id}: "${label}" is dropped by the stance and kept by keep`);
+          }
+          for (const label of rows.keep) {
+            if (names(IDENTIFIER_LABELS, label) && !names(kept, label)) {
+              problems.push(`${id}: keep names "${label}", an identifier label, and the stance does not`);
+            }
+          }
+          break;
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(TEMPLATES).toHaveLength(5);
+    expect(stances).toEqual({ printed: 2, notPrinted: 3 });
+    expect([...declared].sort()).toEqual([...IDENTIFIER_LABELS].sort());
   });
 
   it('imports one inside a signed container, end to end', async () => {
