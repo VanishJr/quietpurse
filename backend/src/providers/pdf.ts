@@ -170,10 +170,20 @@ interface AmountFormat {
   example: string;
 }
 
+/**
+ * Declarative: `wanted` decides a continuation line off `drop` and `keep` alone, and this
+ * arm only states which labelled lines carry an account or card number. An edit to
+ * `wanted` that starts reading it would turn a stance nothing checks against a document
+ * into behaviour.
+ */
+type AccountNumbers =
+  | { kind: 'not-printed' }
+  | { kind: 'printed'; kept: readonly string[]; dropped: readonly string[] };
+
 type RowExtent =
   | { kind: 'one-line' }
-  | { kind: 'continuations'; drop: readonly string[] }
-  | { kind: 'labelled-continuations'; keep: readonly string[] };
+  | { kind: 'continuations'; drop: readonly string[]; accountNumbers: AccountNumbers }
+  | { kind: 'labelled-continuations'; keep: readonly string[]; accountNumbers: AccountNumbers };
 
 /**
  * The fee's number is in the LABEL'S OWN CELL and not in an amount column: on the layout
@@ -1093,6 +1103,11 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     rows: {
       kind: 'labelled-continuations',
       keep: ['Получатель:', 'Реквизиты:', 'Отправитель:'],
+      accountNumbers: {
+        kind: 'printed',
+        kept: ['Получатель:', 'Отправитель:'],
+        dropped: ['Карта:'],
+      },
     },
     // "Комиссия:" is deliberately NOT in the keep list above and must not be added to
     // it: a fee line is read here and reaches no description.
@@ -1149,16 +1164,17 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       currency: { kind: 'in-the-cell', symbols: { '€': 'EUR' } },
       example: '-1.234,56€',
     },
-    // The one line dropped is the counterparty's IBAN and BIC. Other people's
-    // identifiers do not belong in a column the categoriser, the transfer detector and
-    // the export all read, and "the bytes are already stored" is a different fact - the
-    // stored document is encrypted and not queryable. The label alone is the rule: the
-    // shape this was written as before matched the value's character class, so a grouped
-    // IBAN or a line missing its BIC half landed whole in the column.
+    // The label alone is the rule: the shape this was written as before matched the
+    // value's character class, so a grouped IBAN or a line missing its BIC half landed
+    // whole in the column.
     //
     // What that costs: the unit is the LINE, so a reference printed after the identifier
     // on the same line goes with it, with nothing refusing and nothing noting it.
-    rows: { kind: 'continuations', drop: ['IBAN:'] },
+    rows: {
+      kind: 'continuations',
+      drop: ['IBAN:'],
+      accountNumbers: { kind: 'printed', kept: [], dropped: ['IBAN:'] },
+    },
     fee: { kind: 'none' },
     mcc: { kind: 'none' },
     balances: {
@@ -1227,6 +1243,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     rows: {
       kind: 'continuations',
       drop: ['Операційний директор', 'Вклади гарантуються', 'Детальна інформація'],
+      accountNumbers: { kind: 'not-printed' },
     },
     fee: { kind: 'none' },
     // The whole gap between the two windows either side of it, and a literal rather than
@@ -1272,6 +1289,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     rows: {
       kind: 'continuations',
       drop: ['Operating Director', 'Deposits are guaranteed', 'Details in the Reference'],
+      accountNumbers: { kind: 'not-printed' },
     },
     fee: { kind: 'none' },
     // It is the code that carries this locale, not a merchant name - the description
@@ -1361,7 +1379,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // can separate them: a drop list naming it takes the real detail line with the
     // footer, which is a silent truncation of a real description. Only a rule keyed on x
     // can tell them apart, and the span is that rule.
-    rows: { kind: 'continuations', drop: [] },
+    rows: { kind: 'continuations', drop: [], accountNumbers: { kind: 'not-printed' } },
     fee: { kind: 'none' },
     mcc: { kind: 'none' },
     balances: {

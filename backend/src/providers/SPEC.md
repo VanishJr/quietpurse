@@ -204,6 +204,31 @@ plausible and wrong. So the reader groups by coordinate and never by position.
   deliberate rather than an unfinished vocabulary. The sheet path already carries both conventions,
   the two corrupt money in opposite directions, and an author who meets an on-top layout has to add
   the arm and is dragged by `tsc` into adding its case at the mapper in the same edit.
+- **A continuation template states which of its labelled lines carry an account or card number,
+  and the stance drives nothing.** Both continuation members of `RowExtent` carry a required
+  `accountNumbers` arm, so a template that does not state one does not compile. `not-printed` says
+  the layout prints no account or card number on any labelled line under a transaction. `printed`
+  names, under `kept`, the labels of such lines the template appends to the description whole, and
+  under `dropped`, the labels of such lines it refuses. `kept` exists because of the layout it was
+  measured on: there the counterparty's account number and the counterparty's name are the same
+  text item on the same line, so a rule keyed on the label or on a coordinate cannot take the number
+  without taking the name — which is what a labelled keep list exists to keep — and a rule that
+  reads the value's characters is refused, for the reason written beside the template whose drop
+  rule was once written that way. That is the exception, and the default is the drop: where a
+  layout prints an account or card number on a labelled line of its own, the template drops that
+  line and declares its label under `dropped`; `kept` is for a layout where the number and the name
+  are one text item. `kept` is a measurement and not a policy: it names the kept labels under which
+  an account number was seen on the document the template was built from, and a kept label absent
+  from it is kept whole all the same, because on a labelled layout `wanted` reads `keep` and never
+  the arm. The arm drives no behaviour — `wanted` decides a continuation line off `keep` and `drop`
+  alone — and it must not acquire a reader without a holder that checks it against a document,
+  because a reader that trusts it inherits the gap named under the invariants below. What the
+  stance is declared for is the column a kept line lands in: the categoriser, the transfer
+  detector, the recurring key, the CSV export and the backup all read a stored description whole,
+  so what a template appends is a decision about each of them, made per template rather than
+  assumed. A stance is prospective: nothing re-parses a statement already stored and nothing
+  rewrites a stored description, so a template edited today changes what the next upload stores
+  and nothing already in the database.
 
 ## The diagnostic budget, and the one chain written in code
 
@@ -275,6 +300,31 @@ the next producer is not.
 span pointing at a neighbouring column is silent by design where the value it reads refuses nothing
 and reaches no gate. What holds the spans that *can* be checked is the guard over the templates in
 `backend/test/pdf.test.ts`; a layout whose second document differs is unheld by anything at all.
+
+**A `not-printed` stance is an author's assertion, and nothing checks it against a document.** The
+`accountNumbers` arm on a continuation template has the standing of `fee: { kind: 'none' }` and
+`mcc: { kind: 'none' }`: a named "no" whose only holder is the person who read the document. It is
+not the balances' refused shape, because a wrong "no" here switches nothing off — no code path reads
+the arm, so a `not-printed` written over a layout that does print an account number costs a false
+literal and nothing else. What the guard over the templates beside the spans guard holds is the
+stance agreeing with the list `wanted` reads, stated per member and matched in the direction each
+claim needs. Where the guard claims coverage — every line under a declared label decided by the
+list — the match is `wanted`'s own and runs one way: a list entry that is a prefix of the declared
+label, or the label itself, because an entry that extends the label decides only the lines that
+begin with the longer entry, and to every other line under that label the list is silent. Where
+the guard claims separation — a label declared one way absent from the list that sends a line the
+other way, and no label declared both ways — any overlap in either direction is the contradiction.
+So on a drop-list layout every label declared dropped has an entry of `drop` as its prefix and no
+label declared kept overlaps one; on a keep-list layout every label declared kept has an entry of
+`keep` as its prefix and no label declared dropped overlaps one; on either, no label declared kept
+overlaps one declared dropped, and a `printed` stance names at least a label. And an edge across
+templates: the guard carries the identifier labels as a literal of its own, holds that literal
+equal to what the stances declare, and refuses any template whose `keep` or `drop` overlaps one of
+them, in either direction, without declaring it — so a template whose drop list names one and
+whose stance is `not-printed` is refused, whether it was cloned into that state or edited into
+it. What no guard holds is the document: a layout that prints an account number under a label no
+template has declared, stamped `not-printed` by an author who did not look, is green everywhere,
+and only the next reader of that document corrects it.
 
 **A fee's convention is held by `tsc`'s exhaustive switches and by nothing else.** The two
 conventions move a row's amount in opposite directions, so a producer that states a fee without its

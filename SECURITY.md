@@ -45,6 +45,16 @@ Stated because they are decisions, not oversights.
 - **Stored statements are plain files.** Decided on purpose, and the first row of the table above
   is the whole of what stands in for the encryption that went. A machine without disk encryption
   holds the statements readable, and Finto does not say so at start-up.
+- **A transaction's description is the statement's own text, and it goes wherever a description
+  goes.** Of the detail lines a bank prints under a transaction, the ones the parser keeps are
+  appended to the description whole, never redacted, and on some layouts one of them carries the
+  counterparty's account number beside the counterparty's name: the two are one line and one run
+  of text, so the number is kept because the name is. On the layout that prints the counterparty's
+  account number on a line of its own, that line is dropped. Nothing reads a stored description as
+  anything but text — the categoriser, the transfer detector, the recurring grouping, the CSV
+  export and the backup all read it whole — so a backup or an export the person passes on carries
+  the number with it. It also outlives the statement file: "Delete file" in Import history removes
+  the uploaded file and leaves every transaction, description included, exactly as it was.
 - **The port has no password, and the request check is not one.** A person who sets `FINTO_HOST=0.0.0.0`
   for a phone has given their whole network read and write access to their finances for as long as
   the app runs. The `Host`, `Origin` and `Sec-Fetch-Site` check refuses a request that came from a
