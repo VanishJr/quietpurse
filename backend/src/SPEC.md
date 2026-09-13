@@ -91,9 +91,9 @@ because a body-less browser `fetch` and a body under another type are indistingu
 request's own type check once a zero content length is present. An empty JSON object is an object
 and passes: the parser hands an empty body over as one, and a route that refuses it turns a no-op
 patch into a refusal. The upload route is guarded the other way round — `uploadFile` refuses a
-request that is not multipart before the route reads a field, with the sentence the multipart
-parser's own refusals use, because a person who sent JSON to the upload door needs to hear
-*multipart*, not *JSON*.
+request that is not multipart before the route reads a field, with the sentence `uploadError`
+already answers a body the multipart parser could not read at all, because a person who sent JSON
+to the upload door needs to hear *multipart*, not *JSON*.
 
 ## Where the boundary runs
 
@@ -127,11 +127,12 @@ separate reduction, which is `## What is kept of an upload` below.
 
 **4xx is the caller's fault and 5xx is the server's, and the split is about the log as much as the
 user's screen.** A refusal the server caused stays 5xx even when the user can act on it. What a
-route may change is the *body*: the global handler answers `internal error` and puts the real
-message in the log — it tends to carry table names and SQL fragments — and a route with something
-more useful to say answers it itself rather than falling through. On the one screen whose job is
-telling a person whether their rows landed, `internal error` reads as transient and invites the same
-failing press again, so that route's own sentence names the way out instead.
+route may change is the *body*: the global handler answers `internal error` to everything that is
+not a parser's own refusal (next paragraph) and puts the real message in the log — it tends to
+carry table names and SQL fragments — and a route with something more useful to say answers it
+itself rather than falling through. On the one screen whose job is telling a person whether their
+rows landed, `internal error` reads as transient and invites the same failing press again, so that
+route's own sentence names the way out instead.
 
 **The last handler answers a caller's error with the caller's status, and the test for "the
 caller's" is the `http-errors` contract.** `errorHandler` passes an error through when it carries a

@@ -1797,7 +1797,6 @@ app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
 const ECHO_MAX = 200;
 const BODY_NOT_JSON_PREFIX = 'the request body could not be read as JSON: ';
 
-/** The http-errors contract body-parser and raw-body honour; the router's URIError does not meet it. */
 const callerFault = (err: unknown): err is { status: number; expose: true; type?: unknown; message: string } => {
   if (typeof err !== 'object' || err === null) return false;
   const { status, expose, message } = err as { status?: unknown; expose?: unknown; message?: unknown };

@@ -23,8 +23,6 @@ const NOT_MULTIPART = 'the upload is not a valid multipart form';
 const BODY_TOO_LARGE =
   'the request body is larger than 25 MB, the ceiling for a JSON body or a backup file - nothing was changed';
 
-const NOT_JSON_PREFIX = /^the request body could not be read as JSON: /;
-
 /** An independent literal: a pin that imported the constant would move with it. */
 const CEILING = 25 * 1024 * 1024;
 
@@ -75,6 +73,13 @@ describe('a write with no body', () => {
   /** The upload door is not a JSON door: what it wants to hear about is multipart. */
   it('POST /api/imports with no body is refused as not a multipart form', async () => {
     const res = await agent.post('/api/imports');
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body).toEqual({ error: NOT_MULTIPART });
+  });
+
+  /** No body cannot tell a multipart guard from a body-presence guard; a JSON object can. */
+  it('POST /api/imports with a JSON object is refused as not a multipart form', async () => {
+    const res = await agent.post('/api/imports').send({ accountId: 'x' });
     expect(res.status, JSON.stringify(res.body)).toBe(400);
     expect(res.body).toEqual({ error: NOT_MULTIPART });
   });
@@ -138,9 +143,8 @@ describe('what the last handler answers', () => {
   });
 
   /**
-   * The general exposed-4xx arm, and this is its only holder. The phrase is
-   * body-parser's, not this door's: when this reds on an upgrade, that is the side
-   * that moved.
+   * The general exposed-4xx arm. The phrase is body-parser's, not this door's: when
+   * this reds on an upgrade, that is the side that moved.
    */
   it("a charset the parser does not read is a 415 in the parser's words", async () => {
     const res = await agent
@@ -187,10 +191,11 @@ describe('what the last handler answers', () => {
  * The rule no type holds: a route may read req.body only through one of four shapes,
  * because a bare read of a body no parser claimed is a TypeError answered as the
  * server's fault. Held by reading app.ts as text, so it sees the next route
- * written the old way. The one token it reads is `req.body`, and that names its two
- * holes, stated rather than half-closed: a route whose request parameter is not
- * called `req`, and a body reached as `const { body } = req`. Every route in the file
- * names `req` or `_req`, and the failure this exists for is a copied neighbour.
+ * written the old way. The one token it reads is `req.body`; a spelling that does
+ * not carry that token - a renamed request parameter, `const { body } = req`,
+ * `req['body']`, an alias - and a line whose read sits after a `//` inside a string
+ * are not seen, and none is closed here. The failure this exists for is a copied
+ * neighbour.
  */
 describe('no route reads req.body bare', () => {
   const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app.ts'), 'utf8');
@@ -285,5 +290,23 @@ describe('no route reads req.body bare', () => {
       .map(({ line, i }) => `src/app.ts:${i + 1}: ${line.trim()} - bind it, then return when it is undefined`);
     expect(odd).toEqual([]);
     expect(uses.length, 'fewer jsonBody calls than JSON routes').toBeGreaterThanOrEqual(11);
+  });
+
+  /**
+   * The pair above holds every caller and is blind to the callee: `return {};` on
+   * the refusal arm compiles, and every `if (!body) return;` is then dead.
+   */
+  it("jsonBody's refusal arm returns undefined", () => {
+    const ARM = /^\s*res\.status\(400\)\.json\(\{ error: NOT_A_JSON_OBJECT \}\);$/;
+    const arms = lines
+      .map((line, i) => ({ line, i }))
+      .filter(({ line, i }) => ARM.test(line) && SHAPES.helper.owner.test(ownerOf(i)));
+    expect(arms.length, 'jsonBody no longer answers NOT_A_JSON_OBJECT on a line of its own').toBe(1);
+    const at = arms[0].i + 1;
+    const next = lines[at] ?? '';
+    expect(
+      next,
+      `src/app.ts:${at + 1}: ${next.trim()} - the arm must return undefined, so the route's if (!body) return; fires`,
+    ).toMatch(/^\s*return undefined;$/);
   });
 });

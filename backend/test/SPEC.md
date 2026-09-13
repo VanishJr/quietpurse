@@ -40,11 +40,15 @@ layer's summary block and refuses a further summary query written with the scopi
 rather than through it; `backend/test/http-body.test.ts` reads the HTTP door and refuses a route
 that reads `req.body` by any shape but the four it names — a zod parse, the JSON-body helper's own
 read into `unknown`, the restore route's read into `unknown`, and the upload route's read of what
-multer populated — and refuses a call to that helper that is not a binding followed by its return,
-because a bare read of a body no parser claimed is a `TypeError` answered as the server's fault, a
-helper call whose result is defaulted lands a write behind a refusal, and only the file's text can
-see the next route written either way; its one instrument is the token `req.body`, and it names
-the two spellings that token cannot see rather than half-closing them;
+multer populated — refuses a call to that helper that is not a binding followed by its return, and
+refuses the helper's own refusal arm unless its next line is `return undefined;`, because a bare
+read of a body no parser claimed is a `TypeError` answered as the server's fault, a helper call
+whose result is defaulted lands a write behind a refusal, a helper that answers the refusal and
+hands an object back leaves every route's return dead, and only the file's text can see the next
+route written any of those ways; the shape rule's one instrument is the token `req.body`; a
+spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
+`req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
+and none is closed here;
 `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
 `backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
 `node:path` and no other module and to run nothing at its top level, because a test that imported the
