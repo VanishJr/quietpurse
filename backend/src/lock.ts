@@ -9,24 +9,19 @@ import { OWNER_ONLY_DIR, OWNER_ONLY_FILE } from './storage';
  */
 const EMPTY_WAIT_STEPS = 30;
 const EMPTY_WAIT_MS = 10;
-/** A takeover is a read and an unlink; a marker older than this was left by a taker that died. */
-const TAKEOVER_STALE_MS = 2_000;
-/**
- * Longer in total than TAKEOVER_STALE_MS, so a start that waits on a dead taker's
- * marker outlives it and clears it rather than giving up first.
- */
+/** A takeover is a read and an unlink, so a marker held longer than this is one nobody is inside. */
 const MARKER_WAIT_STEPS = 300;
 const MARKER_WAIT_MS = 10;
 
 const NO_FILE = Symbol('no file');
 const UNREADABLE = Symbol('unreadable');
-/** What a read of the lock file found: its text, or one of the two sentinels. */
 type Holder = string | typeof NO_FILE | typeof UNREADABLE;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Read from config when called, never at load: a test points each case at a folder of its own. */
 const lockPath = (): string => path.join(config.home, 'finto.lock');
+const markerPath = (lockFile: string): string => `${lockFile}.takeover`;
 
 /** EPERM is a process that exists under another account, so it is alive. */
 export const pidAlive = (pid: number): boolean => {
@@ -60,18 +55,13 @@ async function readHolder(lockFile: string): Promise<Holder> {
  * taker is inside; anything else is a disk that refused and is thrown.
  */
 async function takeOver(lockFile: string, seen: Holder): Promise<void> {
-  const marker = `${lockFile}.takeover`;
+  const marker = markerPath(lockFile);
   for (let i = 0; ; i += 1) {
     try {
       await fs.mkdir(marker, { mode: OWNER_ONLY_DIR });
       break;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-    }
-    const stat = await fs.stat(marker).catch(() => undefined);
-    if (stat && Date.now() - stat.mtimeMs > TAKEOVER_STALE_MS) {
-      await fs.rm(marker, { recursive: true, force: true });
-      continue;
     }
     if (i >= MARKER_WAIT_STEPS) return;
     await sleep(MARKER_WAIT_MS);
@@ -101,7 +91,8 @@ export async function acquireLock(): Promise<void> {
     const held = await readHolder(lockFile);
     if (held === NO_FILE) continue;
     const pid = typeof held === 'string' ? parseInt(held, 10) : NaN;
-    if (Number.isInteger(pid) && pid !== process.pid && pidAlive(pid)) {
+    // 0 and a negative number are a process group to kill(), never a Finto
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && pidAlive(pid)) {
       throw new Error(
         `another Finto (pid ${pid}) is already running on ${config.home} - stop it first, or delete ${lockFile} if that process is gone`,
       );
@@ -109,7 +100,7 @@ export async function acquireLock(): Promise<void> {
     await takeOver(lockFile, held);
   }
   throw new Error(
-    `could not claim ${lockFile}: another Finto took it while this one was starting - start again`,
+    `could not claim ${lockFile}: another Finto took it while this one was starting - start again, or delete ${markerPath(lockFile)} if it is still there and no Finto is starting`,
   );
 }
 

@@ -167,8 +167,9 @@ file the file does not name.
 `npm run coverage` in either package prints a per-file reading of what the suite reached —
 `src/**` and `scripts/**` in `backend/`, `src/**` less the test files and the harness in `web/` —
 with the entry points (`src/index.ts`, `src/main.tsx`) left in and reading nothing, because they
-boot on import and the `app` CI job is what runs them. It is a reading and not a gate: no
-threshold, and no CI step reads it.
+boot on import, so no case imports them — `backend/src/index.ts` is exercised by the `app` job in
+CI, `web/src/main.tsx` is built by it and runs only in a browser. It is a reading and not a gate:
+no threshold, and no CI step reads it.
 
 One backend test never runs on Windows or as root: `test/documents.test.ts` skips there, so a green
 local run on either is one short of the total. It is the boot check that a statements folder which

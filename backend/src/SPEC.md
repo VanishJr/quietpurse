@@ -203,20 +203,27 @@ there is a question about the pid inside it: a live one refuses the start and na
 way out; a dead one, garbage, or a file that stays empty is taken over — a crash leaves a file, not
 a locked-out person. An empty file is first a claim between its create and its write, and
 `readHolder` waits it out for a bounded time before calling it stale; the removal of a stale file
-runs inside an exclusive marker, the directory `takeOver` makes beside the lock, and re-reads the
-file under it, so two starts that both find a dead pid cannot each remove the other's fresh claim.
-A start that finds the marker held waits for it to go and looks again. A marker older than
-`TAKEOVER_STALE_MS` was left by a taker that died; it is harmless and the next start clears it, so a
-person who opens the folder and finds `finto.lock.takeover` there knows what it is. The second
-refusal sentence — *another Finto took it while this one was starting* — is what a start prints
-when those bounded waits run out. The release removes the file only when it holds this process's
-pid, so a refused start, or a shutdown after another Finto took the folder over, leaves the
-holder's file alone. The path is read from `backend/src/config.ts` when the call runs, not when the
-module loads, which is what lets `backend/test/lock.test.ts` point every case at a folder of its
-own. Neither the claim nor the release does anything when a PostgreSQL server is configured
-instead; that server has its own. What the suite holds is in that test file; what it cannot — the
-second refusal, which needs a process that wins between one removal and the next exclusive create —
-is stated in the file's header.
+runs inside an exclusive marker, the directory `takeOver` makes beside the lock and removes on its
+own way out, and re-reads the file under it, so two starts that both find a dead pid cannot each
+remove the other's fresh claim. A start that finds the marker held waits a bounded time for it to go
+and looks again, and it never removes a marker it did not make: an age check and then a removal by
+path are two steps, and starts that all take them remove each other's fresh markers and are all
+inside at once, which was measured before the clearance was taken out. So a marker left by a taker
+that died inside a takeover stays until a person deletes it. Every later start waits its bound out
+on both attempts and prints the second refusal sentence — *another Finto took it while this one was
+starting* — which names `finto.lock.takeover` beside the lock file as the way out, so whoever reads
+that sentence, or opens the folder and finds the directory, knows what it is and what to do. That
+sentence is also what a genuine race prints, when another Finto claims between one removal and the
+next exclusive create and both attempts run out. A file holding a process group rather than a pid —
+a hand-edited zero, a negative number — is garbage and is taken over, because signalling a group
+succeeds and would otherwise read as a live Finto forever. The release removes the file only when
+it holds this process's pid, so a refused start, or a shutdown after another Finto took the folder
+over, leaves the holder's file alone. The path is read from `backend/src/config.ts` when the call
+runs, not when the module loads, which is what lets `backend/test/lock.test.ts` point every case at
+a folder of its own. Neither the claim nor the release does anything when a PostgreSQL server is
+configured instead; that server has its own. What the suite holds is in that test file; what it
+cannot — the second refusal reached through a genuine race — is stated in the file's header, and
+the sentence itself is held through the marker nobody is inside.
 
 **Refuse first, listen last.** A folder for the statements that nobody can write to is refused
 before the port is open, because the alternative is discovering it through the first upload that

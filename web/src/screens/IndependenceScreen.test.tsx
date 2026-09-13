@@ -677,6 +677,24 @@ describe('the hourly rate', () => {
     release(ok({ ...INDEPENDENCE.settings, hourlyRate: 25.5 }));
     await waitFor(() => expect(okBeside(rateInput())).toBeEnabled());
   });
+
+  // the hours share this handler, so one refusal holds both saves' error path
+  it('keeps the figure, the typed rate and an enabled OK when the save is refused', async () => {
+    await mountServer({ hourlyRate: 20 }, [], {
+      'PATCH /api/settings': () => fail(500, { error: 'the settings could not be saved' }),
+    });
+    expect(await screen.findByText(/20 EUR\/hr × 40 hr\/wk/)).toBeInTheDocument();
+
+    fireEvent.change(rateInput(), { target: { value: '25,5' } });
+    fireEvent.click(okBeside(rateInput()));
+
+    expect(await screen.findByText(/Error: the settings could not be saved/)).toBeInTheDocument();
+    expect(screen.getByText(/20 EUR\/hr × 40 hr\/wk/)).toBeInTheDocument();
+    expect(screen.queryByText(/25\.50 EUR\/hr/)).toBeNull();
+    expect(rateInput()).toHaveValue('25,5');
+    await waitFor(() => expect(okBeside(rateInput())).toBeEnabled());
+    expect(reads()).toBe(1);
+  });
 });
 
 describe('the weekly hours', () => {
@@ -794,6 +812,23 @@ describe('a minimum line item', () => {
     expect(screen.getByLabelText('Amount for Housing')).toHaveValue('700');
     expect(screen.queryByText('700')).toBeNull();
   });
+
+  it('keeps the row, still open for editing, when the delete is refused', async () => {
+    await mountServer({}, [HOUSING, FOOD], {
+      'PUT /api/baseline': () => fail(500, { error: 'the line item could not be removed' }),
+    });
+    const input = await openHousing();
+
+    fireEvent.click(within(input.closest('.legend-row') as HTMLElement).getByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByText(/Error: the line item could not be removed/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount for Housing')).toHaveValue('650');
+    expect(screen.getByText('Food')).toBeInTheDocument();
+    // Cancel shows the row the screen still holds: nothing was removed
+    fireEvent.click(within(input.closest('.legend-row') as HTMLElement).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByText('Housing')).toBeInTheDocument();
+    expect(screen.getByText('650')).toBeInTheDocument();
+  });
 });
 
 describe('adding a line item', () => {
@@ -835,5 +870,23 @@ describe('adding a line item', () => {
     expect(requests()).not.toContain('PUT /api/baseline');
     expect(nameInput()).toHaveValue(name);
     expect(amountInput()).toHaveValue(amount);
+  });
+
+  it('keeps the form, with the typed name and amount, when the save is refused', async () => {
+    await mountServer({}, [HOUSING], {
+      'PUT /api/baseline': () => fail(500, { error: 'the line item could not be added' }),
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add line item' }));
+    fireEvent.change(nameInput(), { target: { value: 'transport' } });
+    fireEvent.change(amountInput(), { target: { value: '80' } });
+    fireEvent.click(okBeside(amountInput()));
+
+    expect(await screen.findByText(/Error: the line item could not be added/)).toBeInTheDocument();
+    expect(nameInput()).toHaveValue('transport');
+    expect(amountInput()).toHaveValue('80');
+    expect(screen.queryByRole('button', { name: '+ Add line item' })).toBeNull();
+    expect(screen.queryByText('Transport')).toBeNull();
+    expect(screen.getByText('Housing')).toBeInTheDocument();
   });
 });

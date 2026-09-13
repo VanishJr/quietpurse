@@ -16,19 +16,22 @@
  * that exited would leave a dead pid for the next child to take over by design. The
  * children are stopped by their recorded pids and each one is re-observed gone.
  *
- * Three bounds of the module are raced here. "a claim whose write has not landed"
- * races the empty-file wait (EMPTY_WAIT_STEPS × EMPTY_WAIT_MS), "a takeover another
- * start is inside" the wait on a held marker (MARKER_WAIT_STEPS × MARKER_WAIT_MS), and
- * "the marker a taker died inside" the age past which a marker is a dead taker's
- * (TAKEOVER_STALE_MS); the delays injected sit well inside those bounds rather than
- * beside them. A dead pid is a process observed alive and then observed exited, asserted
- * dead again immediately before it is written: on Linux the number is not reissued
- * within the case, on Windows it can be, to the very next spawn.
+ * Two bounds of the module are raced here. "a claim whose write has not landed"
+ * races the empty-file wait (EMPTY_WAIT_STEPS × EMPTY_WAIT_MS) and "a takeover another
+ * start is inside" the wait on a held marker (MARKER_WAIT_STEPS × MARKER_WAIT_MS); the
+ * delays injected sit well inside those bounds rather than beside them. A marker nobody
+ * releases is never removed by a start that did not make it, so the two cases that seed
+ * one wait the whole bound out on both attempts and take as long as that is. A dead pid is
+ * a process observed alive and then observed exited, asserted dead again immediately
+ * before it is written: on Linux the number is not reissued within the case, on Windows
+ * it can be, to the very next spawn.
  *
  * Not held: the second refusal of the two-attempt claim ("took it while this one was
- * starting") needs a process that wins between one removal and the next exclusive
- * create, and the race holds the property that sentence guards - one winner - with
- * every loser reading the first refusal and never the second.
+ * starting") on a genuine race needs a process that wins between one removal and the
+ * next exclusive create, and the race holds the property that sentence guards - one
+ * winner - with every loser reading the first refusal and never the second. The
+ * sentence itself is held through the other way it is reached, a marker nobody is
+ * inside.
  */
 import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -212,6 +215,27 @@ describe('two starts on one folder', () => {
       expect(await exists(lockFile)).toBe(false);
     });
   }, 60_000);
+
+  it('lets none of five simultaneous starts past a marker nobody is inside, and every refusal names it', async () => {
+    await inHome('race-stale-marker', async (home, lockFile) => {
+      const dead = deadPid();
+      await seed(lockFile, String(dead));
+      const marker = `${lockFile}.takeover`;
+      await fs.mkdir(marker);
+      const { outcomes, stop } = await race(home, 5);
+      try {
+        expect(outcomes.filter((o) => o.won), JSON.stringify(outcomes)).toHaveLength(0);
+        for (const o of outcomes) {
+          expect(o.message).toContain('start again');
+          expect(o.message).toContain(marker);
+        }
+      } finally {
+        await stop();
+      }
+      expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
+      expect(await exists(marker)).toBe(true);
+    });
+  }, 60_000);
 });
 
 describe('a file already there', () => {
@@ -240,6 +264,17 @@ describe('a file already there', () => {
   it('takes over garbage', async () => {
     await inHome('garbage', async (_home, lockFile) => {
       await seed(lockFile, 'not a pid');
+      await acquireLock();
+      expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.pid));
+      await releaseLock();
+    });
+  });
+
+  // kill(0, 0) signals this process's own group and kill(-1, 0) every process, and
+  // both succeed, so without the guard either reads as a live Finto
+  it.each(['0', '-1'])('takes over a file holding %s, which is a process group and not a pid', async (held) => {
+    await inHome(`group-${held}`, async (_home, lockFile) => {
+      await seed(lockFile, held);
       await acquireLock();
       expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.pid));
       await releaseLock();
@@ -288,19 +323,36 @@ describe('a file already there', () => {
     });
   }, 15_000);
 
-  it('clears the marker a taker died inside and claims', async () => {
+  it('refuses over a marker nobody is inside, names it, and removes nothing', async () => {
     await inHome('marker-dead', async (_home, lockFile) => {
-      await seed(lockFile, String(deadPid()));
+      const dead = deadPid();
+      await seed(lockFile, String(dead));
       const marker = `${lockFile}.takeover`;
       await fs.mkdir(marker);
-      const twentySecondsAgo = new Date(Date.now() - 20_000);
-      await fs.utimes(marker, twentySecondsAgo, twentySecondsAgo);
-      await acquireLock();
-      expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.pid));
-      expect(await exists(marker)).toBe(false);
-      await releaseLock();
+      const e = await acquireLock().then(
+        () => new Error('resolved'),
+        (err: Error) => err,
+      );
+      expect(e.message).toContain('another Finto took it while this one was starting - start again');
+      expect(e.message).toContain(marker);
+      expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
+      expect(await exists(marker)).toBe(true);
     });
   }, 15_000);
+
+  it('refuses with the real error when the lock path is a directory', async () => {
+    await inHome('lock-is-dir', async (_home, lockFile) => {
+      await fs.mkdir(lockFile, { recursive: true });
+      const e = await acquireLock().then(
+        () => new Error('resolved'),
+        (err: Error) => err,
+      );
+      expect(e.message).toContain('EISDIR');
+      expect(e.message).not.toContain('another Finto');
+      expect((await fs.stat(lockFile)).isDirectory()).toBe(true);
+      expect(await exists(`${lockFile}.takeover`)).toBe(false);
+    });
+  });
 });
 
 describe('the release', () => {

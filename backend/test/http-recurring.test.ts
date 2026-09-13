@@ -5,7 +5,7 @@
  * that stops counting it - because the Goal screen reads that total and nothing on it
  * says which groups went into it.
  *
- * The dates are built from today: the route reads twelve months back from now, so
+ * The dates are built from today: the route reads a fixed window back from now, so
  * a literal year is green until it is not, for a reason nobody connects to this file.
  */
 import request from 'supertest';
@@ -17,7 +17,7 @@ import { idOf } from './helpers';
 import { freshTestDb } from './pglite';
 
 const RENT = 900;
-/** The last three whole months: well inside the twelve the route reads. */
+/** The last three whole months: well inside the window the route reads. */
 const DELTAS = [-3, -2, -1];
 
 const now = new Date();

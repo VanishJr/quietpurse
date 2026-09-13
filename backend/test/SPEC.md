@@ -23,9 +23,10 @@ carry their own reasoning in their headers. Nothing below repeats them.
   `web/vitest.config.ts`: everything under `backend/src/` and `backend/scripts/` here, everything
   under `web/src/` less the test files and the harness in `web/src/test/` there — the harness is not
   product, and vitest excludes only the root setup files by itself, which the `dom` project's is
-  not. The entry points, `backend/src/index.ts` and `web/src/main.tsx`, stay in and read nothing,
-  because they boot on import and the `app` job in `.github/workflows/ci.yml` is what runs them. It
-  is a reading and not a gate: no threshold, and no CI step reads it.
+  not. The entry points, `backend/src/index.ts` and `web/src/main.tsx`, stay in and read nothing:
+  they boot on import, so no case imports them — `backend/src/index.ts` is exercised by the `app`
+  job in `.github/workflows/ci.yml`, `web/src/main.tsx` is built by it and runs only in a browser.
+  It is a reading and not a gate: no threshold, and no CI step reads it.
 
 ## Where the boundary runs
 

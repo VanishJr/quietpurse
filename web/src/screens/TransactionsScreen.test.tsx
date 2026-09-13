@@ -770,6 +770,27 @@ describe('the transfer rule', () => {
     expect(requests()).not.toContain('POST /api/transfer-rules');
     expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
   });
+
+  it('keeps the row and the sheet, and re-enables the switch, when the rule is refused', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'POST /api/transfer-rules': () => fail(500, { error: 'the rule could not be saved' }),
+    });
+    mount();
+    await openSheet('REWE Berlin');
+
+    fireEvent.click(ruleSwitch());
+
+    expect(await screen.findByText(/Error: the rule could not be saved/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // the list row and the sheet's own heading: neither emptied nor closed
+    expect(screen.getAllByText('REWE Berlin')).toHaveLength(2);
+    expect(screen.queryByText('transfer')).toBeNull();
+    expect(ruleSwitch()).not.toBeChecked();
+    expect(ruleSwitch()).toBeEnabled();
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(1);
+  });
 });
 
 describe('while a write is in flight', () => {

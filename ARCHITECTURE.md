@@ -53,7 +53,7 @@ previous one.
 |---|---|
 | `app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `index.ts` so the whole route table is testable over real HTTP |
 | `index.ts` | Process start: the lock (`lock.ts`), the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
-| `lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the serialised takeover of a stale one, and a release that removes only its own pid |
+| `lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the takeover of a stale one under a marker the process never clears for another, and a release that removes only its own pid |
 | `config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |
 | `db/schema.ts` | Drizzle table definitions. The source the migrations are generated from |
 | `db/index.ts` | Opening the database — PGlite in the folder, or a PostgreSQL server — and every query. Raw `sql` templates, not the Drizzle query builder — so renaming a column in `schema.ts` breaks at runtime, not at build. Known, and deliberate for now: the SQL arrived written, from the SQLite era |
