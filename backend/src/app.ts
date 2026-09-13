@@ -215,7 +215,11 @@ app.use('/api', (req, res, next) => {
 });
 
 // the ceiling is raised from the default for one caller: a backup restored as JSON
-app.use(express.json({ limit: '25mb' }));
+const MAX_BODY_BYTES = 25 * 1024 * 1024;
+const BODY_TOO_LARGE =
+  `the request body is larger than ${MAX_BODY_BYTES / 1024 / 1024} MB, the ceiling for a JSON body or a backup file - nothing was changed`;
+
+app.use(express.json({ limit: MAX_BODY_BYTES }));
 
 const q = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -301,6 +305,19 @@ const badRequest = (error: z.ZodError): string => {
   return issue?.code === 'unrecognized_keys'
     ? `unknown field: ${issue.keys.map((k) => `"${k}"`).join(', ')}`
     : (issue?.message ?? 'the request body is not valid');
+};
+
+const NOT_A_JSON_OBJECT =
+  'the request body is not a JSON object - send the fields as a JSON object with Content-Type: application/json';
+
+/** Answers the refusal itself; a route that gets undefined back returns. */
+const jsonBody = (req: express.Request, res: express.Response): Record<string, unknown> | undefined => {
+  const body: unknown = req.body;
+  if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
+    return body as Record<string, unknown>;
+  }
+  res.status(400).json({ error: NOT_A_JSON_OBJECT });
+  return undefined;
 };
 
 /**
@@ -454,7 +471,9 @@ app.get('/api/transactions', async (req, res) => {
 
 /** Manual "transfer between own accounts" mark; null hands the decision back to auto-detection. */
 app.patch('/api/transactions/:id/transfer', async (req, res) => {
-  const value = (req.body as { transfer?: unknown }).transfer;
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const value = body.transfer;
   if (value !== true && value !== false && value !== null) {
     res.status(400).json({ error: 'transfer field required: true | false | null' });
     return;
@@ -473,7 +492,9 @@ app.patch('/api/transactions/:id/transfer', async (req, res) => {
  * nothing derived reads the manual category, and a manual mark is not a rule.
  */
 app.patch('/api/transactions/:id/category', async (req, res) => {
-  const category = (req.body as { category?: unknown }).category;
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const category = body.category;
   if (category !== null && !isCategory(category)) {
     res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
     return;
@@ -499,7 +520,9 @@ app.get('/api/transfer-rules', async (_req, res) => {
 });
 
 app.post('/api/transfer-rules', async (req, res) => {
-  const txId = (req.body as { txId?: unknown }).txId;
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const txId = body.txId;
   if (typeof txId !== 'string' || !txId) {
     res.status(400).json({ error: 'txId field required' });
     return;
@@ -752,7 +775,9 @@ app.put('/api/analytics/charts', async (req, res) => {
 
 /** Manual income source mark (an id from income_sources); null - back to auto-detection. */
 app.patch('/api/transactions/:id/source', async (req, res) => {
-  const source = (req.body as { source?: unknown }).source;
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const source = body.source;
   if (source !== null && (typeof source !== 'string' || !(await getIncomeSource(source)))) {
     const ids = (await listIncomeSources()).map((s) => s.id);
     res.status(400).json({ error: `source field required: ${ids.join(' | ')} | null` });
@@ -879,7 +904,9 @@ app.delete('/api/income-sources/:id', async (req, res) => {
 });
 
 app.patch('/api/transactions/:id/one-off', async (req, res) => {
-  const oneOff = (req.body as { oneOff?: unknown }).oneOff;
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const oneOff = body.oneOff;
   if (typeof oneOff !== 'boolean') {
     res.status(400).json({ error: 'oneOff field required: true | false' });
     return;
@@ -913,7 +940,8 @@ app.get('/api/recurring', async (_req, res) => {
 
 /** The group is identified by its normalized description, as in the detector. */
 app.post('/api/recurring/ignore', async (req, res) => {
-  const body = req.body as { description?: unknown; ignored?: unknown };
+  const body = jsonBody(req, res);
+  if (!body) return;
   if (typeof body.description !== 'string' || !body.description.trim()) {
     res.status(400).json({ error: 'description field required' });
     return;
@@ -935,7 +963,9 @@ app.get('/api/settings', async (_req, res) => {
 });
 
 app.patch('/api/settings', async (req, res) => {
-  res.json(await updateSettings(req.body as Record<string, unknown>));
+  const body = jsonBody(req, res);
+  if (!body) return;
+  res.json(await updateSettings(body));
 });
 
 app.get('/api/app-settings', async (_req, res) => {
@@ -943,7 +973,9 @@ app.get('/api/app-settings', async (_req, res) => {
 });
 
 app.patch('/api/app-settings', async (req, res) => {
-  const parsed = parseAppSettingsPatch(req.body as { baseCurrency?: unknown; ownerNames?: unknown });
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const parsed = parseAppSettingsPatch(body);
   if (!parsed.ok) {
     res.status(400).json({ error: parsed.error });
     return;
@@ -972,7 +1004,8 @@ app.get('/api/baseline', async (_req, res) => {
 
 /** monthly: null deletes the line item. */
 app.put('/api/baseline', async (req, res) => {
-  const body = req.body as { label?: unknown; monthly?: unknown; sort?: unknown };
+  const body = jsonBody(req, res);
+  if (!body) return;
   const label = typeof body.label === 'string' ? body.label.trim() : '';
   if (!label) {
     res.status(400).json({ error: 'label: non-empty string' });
@@ -1002,7 +1035,8 @@ app.get('/api/category-rules', async (_req, res) => {
 });
 
 app.post('/api/category-rules', async (req, res) => {
-  const body = req.body as { txId?: unknown; pattern?: unknown; category?: unknown };
+  const body = jsonBody(req, res);
+  if (!body) return;
   const category = typeof body.category === 'string' ? body.category : '';
   if (!(CATEGORIES as readonly string[]).includes(category)) {
     res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
@@ -1066,7 +1100,8 @@ app.get('/api/budgets', async (_req, res) => {
 
 /** monthly: null removes the budget from the category. */
 app.put('/api/budgets', async (req, res) => {
-  const body = req.body as { category?: unknown; monthly?: unknown };
+  const body = jsonBody(req, res);
+  if (!body) return;
   const category = typeof body.category === 'string' ? body.category : '';
   if (!(CATEGORIES as readonly string[]).includes(category)) {
     res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
@@ -1144,12 +1179,14 @@ const upload = multer({
   defParamCharset: 'utf8',
 });
 
+const NOT_MULTIPART = 'the upload is not a valid multipart form';
+
 /**
  * One message per code: a field over the size limit reported as a problem with the
  * file field sends the caller looking in the wrong place.
  */
 function uploadError(err: unknown): string {
-  if (!(err instanceof multer.MulterError)) return 'the upload is not a valid multipart form';
+  if (!(err instanceof multer.MulterError)) return NOT_MULTIPART;
   // caller-supplied, and on its way into a response body
   const field = String(err.field ?? 'form').slice(0, 40);
   const mb = (bytes: number): number => bytes / 1024 / 1024;
@@ -1172,6 +1209,10 @@ function uploadError(err: unknown): string {
 }
 
 const uploadFile: express.RequestHandler = (req, res, next) => {
+  if (!req.is('multipart')) {
+    res.status(400).json({ error: NOT_MULTIPART });
+    return;
+  }
   upload.single('file')(req, res, (err: unknown) => {
     if (!err) {
       next();
@@ -1633,9 +1674,7 @@ app.get('/api/backup', async (_req, res) => {
 
 app.post(
   '/api/restore',
-  // the same ceiling as the JSON parser above, and it has to stay the same: the body
-  // reaches one of the two depending on the content type the client sent
-  express.raw({ type: 'application/octet-stream', limit: '25mb' }),
+  express.raw({ type: 'application/octet-stream', limit: MAX_BODY_BYTES }),
   async (req, res) => {
     // the file arrives either as a raw octet-stream (Buffer) or, when the client
     // sends application/json, already parsed by the global json middleware
@@ -1755,10 +1794,47 @@ app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
   res.sendFile(index);
 });
 
+const ECHO_MAX = 200;
+const BODY_NOT_JSON_PREFIX = 'the request body could not be read as JSON: ';
+
+const callerFault = (err: unknown): err is { status: number; expose: true; type?: unknown; message: string } => {
+  if (typeof err !== 'object' || err === null) return false;
+  const { status, expose, message } = err as { status?: unknown; expose?: unknown; message?: unknown };
+  return (
+    typeof status === 'number' &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 500 &&
+    expose === true &&
+    typeof message === 'string'
+  );
+};
+
 // One handler, and no per-route wrapper: Express 5 catches an async route's rejection
-// itself. The message goes to the log and not to the client - it tends to carry table
+// itself. A parser's refusal is the caller's and keeps the parser's status; on the 500
+// arm the message goes to the log and not to the client - it tends to carry table
 // names and SQL fragments.
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+export const errorHandler: express.ErrorRequestHandler = (err: unknown, req, res, next) => {
+  if (res.headersSent) {
+    logHttp.error(err);
+    next(err);
+    return;
+  }
+  if (callerFault(err)) {
+    const said = err.message.slice(0, ECHO_MAX);
+    const error =
+      err.type === 'entity.too.large'
+        ? BODY_TOO_LARGE
+        : err.type === 'entity.parse.failed'
+          ? `${BODY_NOT_JSON_PREFIX}${said}`
+          : said;
+    // fields only: a parse failure carries the whole request body as an own property
+    logHttp.warn(`refused ${req.method} ${req.originalUrl}: ${String(err.type ?? 'error')} (${err.status})`);
+    res.status(err.status).json({ error });
+    return;
+  }
   logHttp.error(err);
   res.status(500).json({ error: 'internal error' });
-});
+};
+
+app.use(errorHandler);
