@@ -98,11 +98,11 @@ to the upload door needs to hear *multipart*, not *JSON*.
 ## Where the boundary runs
 
 **The application is separable from the process that starts it.** `backend/src/app.ts` exports an
-app that has connected to nothing; `backend/src/index.ts` is what takes the lock, opens the
-database and listens. The separation exists so the whole route table can be driven over real HTTP
-against an embedded database in the suite. Anything that reaches out to the world at import time
-breaks that and breaks it silently: the app still imports, and the tests then run against a process
-that has already done half a boot.
+app that has connected to nothing; `backend/src/index.ts` takes the lock through
+`backend/src/lock.ts`, opens the database and listens. The separation exists so the whole route
+table can be driven over real HTTP against an embedded database in the suite. Anything that reaches
+out to the world at import time breaks that and breaks it silently: the app still imports, and the
+tests then run against a process that has already done half a boot.
 
 **A value is normalised at the door that writes it, once.** The account doors upper-case a currency
 because an account stored as `usd` lists every one of its own transactions as foreign to it on
@@ -193,10 +193,30 @@ The boot order is a sequence of refusals before anything listens, then the work 
 
 **One process per folder, and the lock is the process's own.** The embedded database does not
 refuse a second opener: two processes on one data directory write over each other's files with
-nothing failing, which was measured rather than assumed. So the entry writes its pid into a lock
-file beside the data before it opens anything, refuses to start while another live pid holds it,
-and takes a dead pid's lock over — a crash leaves a file, not a locked-out person. The lock is not
-taken when a PostgreSQL server is configured instead; that server has its own.
+nothing failing, which was measured rather than assumed. So `backend/src/lock.ts` claims a file
+beside the data before the entry opens anything, and it claims by exclusive create — never by
+looking first and writing second, because two Fintos started together both look at nothing and
+both write. The file holds the claimant's pid and nothing else, and a refused start's sentence
+begins by naming that pid: the `app` job in `.github/workflows/ci.yml` reads the file back with
+`kill -0` and greps the sentence's first words, so neither moves without that job. A file already
+there is a question about the pid inside it: a live one refuses the start and names the file as the
+way out; a dead one, garbage, or a file that stays empty is taken over — a crash leaves a file, not
+a locked-out person. An empty file is first a claim between its create and its write, and
+`readHolder` waits it out for a bounded time before calling it stale; the removal of a stale file
+runs inside an exclusive marker, the directory `takeOver` makes beside the lock, and re-reads the
+file under it, so two starts that both find a dead pid cannot each remove the other's fresh claim.
+A start that finds the marker held waits for it to go and looks again. A marker older than
+`TAKEOVER_STALE_MS` was left by a taker that died; it is harmless and the next start clears it, so a
+person who opens the folder and finds `finto.lock.takeover` there knows what it is. The second
+refusal sentence — *another Finto took it while this one was starting* — is what a start prints
+when those bounded waits run out. The release removes the file only when it holds this process's
+pid, so a refused start, or a shutdown after another Finto took the folder over, leaves the
+holder's file alone. The path is read from `backend/src/config.ts` when the call runs, not when the
+module loads, which is what lets `backend/test/lock.test.ts` point every case at a folder of its
+own. Neither the claim nor the release does anything when a PostgreSQL server is configured
+instead; that server has its own. What the suite holds is in that test file; what it cannot — the
+second refusal, which needs a process that wins between one removal and the next exclusive create —
+is stated in the file's header.
 
 **Refuse first, listen last.** A folder for the statements that nobody can write to is refused
 before the port is open, because the alternative is discovering it through the first upload that
@@ -303,9 +323,9 @@ in none of them.
 on a machine with nothing installed: the home folder under the person's own home directory, the
 embedded database inside it, the statements folder beside that, loopback, port 4000. A PostgreSQL
 connection string is the one setting that changes an engine rather than a value, and two places
-read it: `backend/src/db`, where the database is opened, and the process entry, which skips the
-lock file when it is set — `## What the process entry owes the app` above says why that server
-needs none.
+read it: `backend/src/db`, where the database is opened, and `backend/src/lock.ts`, which claims
+and releases no file when it is set — `## What the process entry owes the app` above says why that
+server needs none.
 
 **A setting that cannot be stored is refused, never coerced.** An absent key in a patch means *leave
 it alone*; a present one that is not a value this system can hold is a refusal, because `EURO` is

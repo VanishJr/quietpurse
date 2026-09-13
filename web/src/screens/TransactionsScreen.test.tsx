@@ -1,8 +1,8 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, INCOME_SOURCES, TRANSFER_RULES } from '../test/fixtures';
-import { fail, mockFetch, ok, renderThemed, requestUrls, Routes } from '../test/harness';
-import { Transaction } from '../types';
+import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
+import { IncomeSourceDef, Transaction, TransferRule } from '../types';
 import { TransactionsScreen } from './TransactionsScreen';
 
 /**
@@ -499,5 +499,307 @@ describe('the category of a whole group', () => {
     expect(caption).toHaveTextContent('15 transactions match that text');
     expect(caption).toHaveTextContent('3 of them keep a category you set by hand');
     expect(caption).not.toHaveTextContent('loaded');
+  });
+});
+
+/**
+ * The sheet's other writes (ROADMAP row 75): the transfer flag, the one-off mark, the
+ * income source and the transfer rule. Each case asserts the body the route received
+ * and the effect on the screen with a presence anchor beside every absence.
+ *
+ * "Rule off with no rule sends nothing" is not a case: the switch is checked exactly
+ * when a rule exists, so a click on an unchecked switch arrives as `checked: true`
+ * and the control cannot produce that event.
+ */
+
+/** An expense the sheet offers every switch for, and an income it offers the sources for. */
+const EXPENSE = row({ id: 'tx-1', description: 'REWE Berlin', amount: -42.5, category: 'food' });
+const INCOME = row({
+  id: 'tx-in',
+  description: 'ZZ Income',
+  amount: 100,
+  category: 'other',
+  incomeSource: 'other',
+  incomeSourceManual: false,
+});
+
+/** A catalog of this file's own: the shared fixture is `[]`. */
+const SOURCES: IncomeSourceDef[] = [
+  { id: 'salary', label: 'Salary', kind: 'own', patterns: [], sort: 0, builtin: true },
+  { id: 'family', label: 'Support', kind: 'external', patterns: [], sort: 1, builtin: true },
+];
+
+const RULE: TransferRule = {
+  id: 7,
+  description: 'REWE Berlin',
+  accountId: 'acc-1',
+  createdAt: '2026-07-20T10:00:00.000Z',
+  matches: 3,
+};
+
+const transferSwitch = () => screen.getByRole('checkbox', { name: /Transfer between own accounts/ });
+const ruleSwitch = () => screen.getByRole('checkbox', { name: /on this account/ });
+const oneOffSwitch = () => screen.getByRole('checkbox', { name: /One-off large purchase/ });
+/** Inside the sheet: the category filter above the list carries a chip of the same name. */
+const sourceChip = (label: string) =>
+  within(screen.getByRole('dialog')).getByRole('button', { name: label });
+
+const openSheet = async (description: string) => {
+  fireEvent.click(await screen.findByText(description));
+  await screen.findByRole('dialog');
+};
+
+/** The body a handler received, parsed. */
+const bodyOf = (init?: RequestInit): unknown => JSON.parse(String(init?.body));
+
+describe('the transfer flag', () => {
+  it('marks the row by hand, and back to auto-detection sends null', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'PATCH /api/transactions/tx-1/transfer': (init) => {
+        const { transfer } = bodyOf(init) as { transfer: boolean | null };
+        sent.push({ transfer });
+        return ok({ ...EXPENSE, transfer: transfer ?? false, transferManual: transfer });
+      },
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    expect(screen.getByText(/Counted as neither income nor expense · auto-detected/)).toBeInTheDocument();
+
+    fireEvent.click(transferSwitch());
+
+    // the badge is the answer replacing the row in the list; the hint, in the sheet
+    expect(await screen.findByText('transfer')).toBeInTheDocument();
+    expect(screen.getByText(/Counted as neither income nor expense · set manually/)).toBeInTheDocument();
+    expect(transferSwitch()).toBeChecked();
+    expect(sent).toEqual([{ transfer: true }]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to auto-detection' }));
+
+    await waitFor(() => expect(sent).toEqual([{ transfer: true }, { transfer: null }]));
+    expect(await screen.findByText(/Counted as neither income nor expense · auto-detected/)).toBeInTheDocument();
+    expect(screen.queryByText('transfer')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Back to auto-detection' })).toBeNull();
+  });
+
+  it('keeps the row and the sheet, and re-enables the switch, when the write is refused', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'PATCH /api/transactions/tx-1/transfer': () =>
+        fail(500, { error: 'the transfer flag could not be saved' }),
+    });
+    mount();
+    await openSheet('REWE Berlin');
+
+    fireEvent.click(transferSwitch());
+
+    expect(await screen.findByText(/the transfer flag could not be saved/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText('transfer')).toBeNull();
+    expect(transferSwitch()).not.toBeChecked();
+    expect(transferSwitch()).toBeEnabled();
+  });
+});
+
+describe('the one-off mark', () => {
+  it('sets it', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'PATCH /api/transactions/tx-1/one-off': (init) => {
+        sent.push(bodyOf(init));
+        return ok({ ...EXPENSE, oneOff: true });
+      },
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    expect(screen.queryByText('one-off')).toBeNull();
+
+    fireEvent.click(oneOffSwitch());
+
+    expect(await screen.findByText('one-off')).toBeInTheDocument();
+    expect(oneOffSwitch()).toBeChecked();
+    expect(sent).toEqual([{ oneOff: true }]);
+  });
+
+  /** Its own case: a handler sending a literal `true` is invisible to the one above. */
+  it('clears it, and the row stays', async () => {
+    const marked = { ...EXPENSE, oneOff: true };
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([marked]),
+      'PATCH /api/transactions/tx-1/one-off': (init) => {
+        sent.push(bodyOf(init));
+        return ok({ ...marked, oneOff: false });
+      },
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    expect(screen.getByText('one-off')).toBeInTheDocument();
+    expect(oneOffSwitch()).toBeChecked();
+
+    fireEvent.click(oneOffSwitch());
+
+    await waitFor(() => expect(screen.queryByText('one-off')).toBeNull());
+    expect(screen.getAllByText('REWE Berlin').length).toBeGreaterThan(0);
+    expect(oneOffSwitch()).not.toBeChecked();
+    expect(sent).toEqual([{ oneOff: false }]);
+  });
+
+  it('keeps the row and the sheet, and re-enables the switch, when the write is refused', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'PATCH /api/transactions/tx-1/one-off': () =>
+        fail(500, { error: 'the one-off mark could not be saved' }),
+    });
+    mount();
+    await openSheet('REWE Berlin');
+
+    fireEvent.click(oneOffSwitch());
+
+    expect(await screen.findByText(/the one-off mark could not be saved/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText('one-off')).toBeNull();
+    expect(oneOffSwitch()).not.toBeChecked();
+    expect(oneOffSwitch()).toBeEnabled();
+  });
+});
+
+describe('the income source', () => {
+  it('marks the row with a chip, and back to auto-detection sends null', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok([INCOME]),
+      'PATCH /api/transactions/tx-in/source': (init) => {
+        const { source } = bodyOf(init) as { source: string | null };
+        sent.push({ source });
+        return ok({ ...INCOME, incomeSource: source ?? 'other', incomeSourceManual: source !== null });
+      },
+    });
+    mount();
+    await openSheet('ZZ Income');
+    await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'false'));
+    expect(screen.queryByRole('button', { name: 'Source: back to auto-detection' })).toBeNull();
+
+    fireEvent.click(sourceChip('Salary'));
+
+    await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'true'));
+    expect(sourceChip('Support')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText(/sources are added and renamed · set manually/)).toBeInTheDocument();
+    expect(sent).toEqual([{ source: 'salary' }]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Source: back to auto-detection' }));
+
+    await waitFor(() => expect(sent).toEqual([{ source: 'salary' }, { source: null }]));
+    await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'false'));
+    expect(screen.getByText(/sources are added and renamed · auto-detected/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Source: back to auto-detection' })).toBeNull();
+  });
+
+  it('keeps the row and the sheet, and re-enables the chips, when the write is refused', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok([INCOME]),
+      'PATCH /api/transactions/tx-in/source': () =>
+        fail(500, { error: 'the income source could not be saved' }),
+    });
+    mount();
+    await openSheet('ZZ Income');
+    await waitFor(() => expect(sourceChip('Salary')).toBeInTheDocument());
+
+    fireEvent.click(sourceChip('Salary'));
+
+    expect(await screen.findByText(/the income source could not be saved/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'false');
+    expect(sourceChip('Salary')).toBeEnabled();
+    expect(screen.queryByText(/· set manually/)).toBeNull();
+  });
+});
+
+describe('the transfer rule', () => {
+  it('creates one from the row, re-reads the rules and the list, and closes the sheet', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'POST /api/transfer-rules': (init) => {
+        sent.push(bodyOf(init));
+        return ok({ rule: RULE, matches: 1 });
+      },
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    expect(ruleSwitch()).not.toBeChecked();
+
+    fireEvent.click(ruleSwitch());
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent).toEqual([{ txId: 'tx-1' }]);
+    // the row is still there: the sheet closed, the list did not empty
+    expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
+    expect(requests().filter((r) => r === 'GET /api/transfer-rules')).toHaveLength(2);
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
+  });
+
+  it('deletes the rule the row already has', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transfer-rules': () => ok([RULE]),
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'DELETE /api/transfer-rules/7': () => ok({ deleted: true }),
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    await waitFor(() => expect(ruleSwitch()).toBeChecked());
+    expect(screen.getByText('Rule on · transactions tagged: 3')).toBeInTheDocument();
+
+    fireEvent.click(ruleSwitch());
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(requests()).toContain('DELETE /api/transfer-rules/7');
+    expect(requests()).not.toContain('POST /api/transfer-rules');
+    expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
+  });
+});
+
+describe('while a write is in flight', () => {
+  it('disables every switch and chip in the sheet, and frees them when it lands', async () => {
+    let release: (r: Response) => void = () => {};
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([EXPENSE]),
+      'PATCH /api/transactions/tx-1/transfer': () =>
+        new Promise<Response>((resolve) => (release = resolve)),
+    });
+    mount();
+    await openSheet('REWE Berlin');
+    const foodChip = () => screen.getByRole('button', { name: 'Food, this transaction only' });
+    expect(transferSwitch()).toBeEnabled();
+
+    fireEvent.click(transferSwitch());
+
+    expect(transferSwitch()).toBeDisabled();
+    expect(ruleSwitch()).toBeDisabled();
+    expect(oneOffSwitch()).toBeDisabled();
+    expect(foodChip()).toBeDisabled();
+
+    // "not a transfer, by hand": the row keeps every switch it had
+    release(ok({ ...EXPENSE, transfer: false, transferManual: false }));
+
+    await waitFor(() => expect(transferSwitch()).toBeEnabled());
+    expect(ruleSwitch()).toBeEnabled();
+    expect(oneOffSwitch()).toBeEnabled();
+    expect(foodChip()).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Back to auto-detection' })).toBeEnabled();
   });
 });

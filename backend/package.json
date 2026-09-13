@@ -12,6 +12,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
+    "coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "check:stack": "tsx scripts/check-stack.ts",
     "check:comments": "tsx scripts/comment-check.ts"
@@ -35,6 +36,7 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.10",
     "supertest": "^7.2.2",
     "tsx": "^4.20.6",

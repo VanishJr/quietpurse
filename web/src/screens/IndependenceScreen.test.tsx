@@ -1,8 +1,8 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { INDEPENDENCE } from '../test/fixtures';
-import { mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { Independence, IncomeSourceDef, IndependenceMonth, Settings } from '../types';
+import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
+import { BaselineItem, Independence, IncomeSourceDef, IndependenceMonth, Settings } from '../types';
 import { IndependenceScreen } from './IndependenceScreen';
 
 /**
@@ -543,5 +543,297 @@ describe('the Goal screen', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/That covers/)).toBeNull();
     expect(screen.queryByText(/that's 0% of/)).toBeNull();
+  });
+});
+
+/**
+ * The write path (ROADMAP row 75). Everything the screen shows arrives in one body,
+ * GET /api/independence, so the presence anchor for every save is that body answering
+ * differently on the second read: the handler serves what the PATCH and PUT handlers
+ * last wrote. A handler answering the fixture twice would make each reload assertion
+ * below vacuous.
+ *
+ * Garbage typed into a line item's amount is deliberately not pinned in either
+ * direction; DEBT.md carries what the code does with it today.
+ */
+interface ItemWrite {
+  label: string;
+  monthly: number | null;
+}
+
+const HOUSING: BaselineItem = { id: 1, label: 'housing', monthly: 650, sort: 0 };
+const FOOD: BaselineItem = { id: 2, label: 'food', monthly: 250, sort: 1 };
+
+const sumOf = (items: BaselineItem[]): number => items.reduce((n, i) => n + i.monthly, 0);
+
+const goalServer = (settings: Partial<Settings> = {}, items: BaselineItem[] = []) => {
+  let current: Settings = { ...INDEPENDENCE.settings, goalMode: 'baseline', ...settings };
+  let lines = items;
+  const patches: Partial<Settings>[] = [];
+  const puts: ItemWrite[] = [];
+  const routes: Routes = {
+    'GET /api/independence': () =>
+      ok(
+        body(
+          {
+            baselineItems: lines,
+            baselineSum: sumOf(lines),
+            effectiveMode: 'baseline',
+            months: [month()],
+          },
+          current,
+        ),
+      ),
+    'GET /api/income-sources': () => ok(SOURCES),
+    'PATCH /api/settings': (init) => {
+      const patch = JSON.parse(String(init?.body)) as Partial<Settings>;
+      patches.push(patch);
+      current = { ...current, ...patch };
+      return ok(current);
+    },
+    'PUT /api/baseline': (init) => {
+      const sent = JSON.parse(String(init?.body)) as ItemWrite;
+      puts.push(sent);
+      const rest = lines.filter((i) => i.label !== sent.label);
+      lines =
+        sent.monthly === null
+          ? rest
+          : [...rest, { id: 100 + puts.length, label: sent.label, monthly: sent.monthly, sort: 9 }];
+      return ok({ baseCurrency: 'EUR', items: lines, total: sumOf(lines) });
+    },
+  };
+  return { routes, patches, puts };
+};
+
+const mountServer = async (settings: Partial<Settings> = {}, items: BaselineItem[] = [], extra: Routes = {}) => {
+  const server = goalServer(settings, items);
+  mockFetch({ ...server.routes, ...extra });
+  renderThemed(<IndependenceScreen />);
+  await screen.findByRole('heading', { name: 'Goal', level: 1 });
+  return server;
+};
+
+const reads = () => requests().filter((r) => r === 'GET /api/independence').length;
+
+const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+
+const rateInput = () => screen.getByLabelText('Hourly rate, net');
+const hoursInput = () => screen.getByLabelText('Work hours per week');
+/** The OK beside an input, and not the other one. */
+const okBeside = (input: HTMLElement) =>
+  within(input.closest('.inline-row, .legend-row') as HTMLElement).getByRole('button', { name: 'OK' });
+
+describe('the hourly rate', () => {
+  it('saves what was typed, with a comma decimal, and shows the figure the server now holds', async () => {
+    const { patches } = await mountServer();
+    expect(screen.getByText(/Enter your rate and weekly hours/)).toBeInTheDocument();
+
+    fireEvent.change(rateInput(), { target: { value: '25,5' } });
+    fireEvent.click(okBeside(rateInput()));
+
+    expect(await screen.findByText(/25\.50 EUR\/hr × 40 hr\/wk/)).toBeInTheDocument();
+    expect(patches).toEqual([{ hourlyRate: 25.5 }]);
+    expect(reads()).toBe(2);
+  });
+
+  it('saves on Enter too', async () => {
+    const { patches } = await mountServer();
+
+    fireEvent.change(rateInput(), { target: { value: '25,5' } });
+    fireEvent.keyDown(rateInput(), { key: 'Enter' });
+
+    expect(await screen.findByText(/25\.50 EUR\/hr × 40 hr\/wk/)).toBeInTheDocument();
+    expect(patches).toEqual([{ hourlyRate: 25.5 }]);
+  });
+
+  /**
+   * A pin and not a defect test: a rate that is not a number is sent as null, which
+   * is the code's rule today and means "no rate" on this field.
+   */
+  it('sends null for a rate that is not a number, and the hint comes back', async () => {
+    const { patches } = await mountServer({ hourlyRate: 20 });
+    expect(await screen.findByText(/20 EUR\/hr × 40 hr\/wk/)).toBeInTheDocument();
+
+    fireEvent.change(rateInput(), { target: { value: 'abc' } });
+    fireEvent.click(okBeside(rateInput()));
+
+    expect(await screen.findByText(/Enter your rate and weekly hours/)).toBeInTheDocument();
+    expect(patches).toEqual([{ hourlyRate: null }]);
+    expect(screen.queryByText(/20 EUR\/hr/)).toBeNull();
+  });
+
+  it('disables its OK while the save is in flight', async () => {
+    let release: (r: Response) => void = () => {};
+    await mountServer({}, [], {
+      'PATCH /api/settings': () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+
+    fireEvent.change(rateInput(), { target: { value: '25,5' } });
+    fireEvent.click(okBeside(rateInput()));
+    expect(okBeside(rateInput())).toBeDisabled();
+    // the other save is its own flag
+    expect(okBeside(hoursInput())).toBeEnabled();
+
+    release(ok({ ...INDEPENDENCE.settings, hourlyRate: 25.5 }));
+    await waitFor(() => expect(okBeside(rateInput())).toBeEnabled());
+  });
+});
+
+describe('the weekly hours', () => {
+  it('saves what was typed, with a comma decimal', async () => {
+    const { patches } = await mountServer({ hourlyRate: 20 });
+    expect(await screen.findByText(/× 40 hr\/wk/)).toBeInTheDocument();
+
+    fireEvent.change(hoursInput(), { target: { value: '37,5' } });
+    fireEvent.click(okBeside(hoursInput()));
+
+    expect(await screen.findByText(/20 EUR\/hr × 37\.5 hr\/wk/)).toBeInTheDocument();
+    expect(patches).toEqual([{ hoursCapPerWeek: 37.5 }]);
+    expect(reads()).toBe(2);
+  });
+
+  it('keeps the previous hours when the input is not a number', async () => {
+    const { patches } = await mountServer({ hourlyRate: 20 });
+    expect(await screen.findByText(/× 40 hr\/wk/)).toBeInTheDocument();
+
+    fireEvent.change(hoursInput(), { target: { value: 'abc' } });
+    fireEvent.click(okBeside(hoursInput()));
+
+    await waitFor(() => expect(patches).toHaveLength(1));
+    // the key's absence, not `{}`: an absent key means "leave it alone" at the door
+    expect(Object.keys(patches[0])).not.toContain('hoursCapPerWeek');
+    await waitFor(() => expect(reads()).toBe(2));
+    expect(screen.getByText(/× 40 hr\/wk/)).toBeInTheDocument();
+  });
+
+  it('disables its OK while the save is in flight', async () => {
+    let release: (r: Response) => void = () => {};
+    await mountServer({}, [], {
+      'PATCH /api/settings': () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+
+    fireEvent.change(hoursInput(), { target: { value: '37,5' } });
+    fireEvent.click(okBeside(hoursInput()));
+    expect(okBeside(hoursInput())).toBeDisabled();
+    expect(okBeside(rateInput())).toBeEnabled();
+
+    release(ok({ ...INDEPENDENCE.settings, hoursCapPerWeek: 37.5 }));
+    await waitFor(() => expect(okBeside(hoursInput())).toBeEnabled());
+  });
+});
+
+describe('a minimum line item', () => {
+  const openHousing = async () => {
+    fireEvent.click(await screen.findByText('Housing'));
+    const input = screen.getByLabelText('Amount for Housing');
+    expect(input).toHaveValue('650');
+    return input;
+  };
+
+  it('opens with its figure, saves the new one, and the row shows what the server now holds', async () => {
+    const { puts } = await mountServer({}, [HOUSING, FOOD]);
+    const input = await openHousing();
+
+    fireEvent.change(input, { target: { value: '700' } });
+    fireEvent.click(okBeside(input));
+
+    await waitFor(() => expect(puts).toEqual([{ label: 'housing', monthly: 700 }]));
+    expect(await screen.findByText('700')).toBeInTheDocument();
+    // the row being back is the close
+    expect(screen.getByText('Housing')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Amount for Housing')).toBeNull();
+    expect(screen.getByText('Food')).toBeInTheDocument();
+  });
+
+  it('saves on Enter too', async () => {
+    const { puts } = await mountServer({}, [HOUSING, FOOD]);
+    const input = await openHousing();
+
+    fireEvent.change(input, { target: { value: '700' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(puts).toEqual([{ label: 'housing', monthly: 700 }]));
+    expect(await screen.findByText('700')).toBeInTheDocument();
+  });
+
+  it('deletes it with null, and the other row stays', async () => {
+    const { puts } = await mountServer({}, [HOUSING, FOOD]);
+    const input = await openHousing();
+
+    fireEvent.click(within(input.closest('.legend-row') as HTMLElement).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(puts).toEqual([{ label: 'housing', monthly: null }]));
+    await waitFor(() => expect(screen.queryByText('Housing')).toBeNull());
+    expect(screen.getByText('Food')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Amount for Housing')).toBeNull();
+  });
+
+  it('cancels without a request, and the row is back', async () => {
+    await mountServer({}, [HOUSING, FOOD]);
+    const input = await openHousing();
+
+    fireEvent.change(input, { target: { value: '700' } });
+    fireEvent.click(within(input.closest('.legend-row') as HTMLElement).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByText('Housing')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Amount for Housing')).toBeNull();
+    expect(screen.getByText('650')).toBeInTheDocument();
+    expect(requests()).not.toContain('PUT /api/baseline');
+  });
+
+  it('keeps the input open, with what was typed, when the save is refused', async () => {
+    await mountServer({}, [HOUSING, FOOD], {
+      'PUT /api/baseline': () => fail(500, { error: 'the line item could not be saved' }),
+    });
+    const input = await openHousing();
+
+    fireEvent.change(input, { target: { value: '700' } });
+    fireEvent.click(okBeside(input));
+
+    expect(await screen.findByText(/the line item could not be saved/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Amount for Housing')).toHaveValue('700');
+    expect(screen.queryByText('700')).toBeNull();
+  });
+});
+
+describe('adding a line item', () => {
+  const addControl = () => screen.getByRole('button', { name: '+ Add line item' });
+  const nameInput = () => screen.getByLabelText('Line item name');
+  const amountInput = () => screen.getByLabelText('Amount per month');
+
+  it('sends the name and the amount, closes, and reopens empty', async () => {
+    const { puts } = await mountServer({}, [HOUSING]);
+
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add line item' }));
+    fireEvent.change(nameInput(), { target: { value: 'transport' } });
+    fireEvent.change(amountInput(), { target: { value: '80' } });
+    fireEvent.click(okBeside(amountInput()));
+
+    // the new row is the re-read, and the button being back is the close
+    expect(await screen.findByText('Transport')).toBeInTheDocument();
+    expect(puts).toEqual([{ label: 'transport', monthly: 80 }]);
+    expect(addControl()).toBeInTheDocument();
+    expect(screen.queryByLabelText('Line item name')).toBeNull();
+
+    fireEvent.click(addControl());
+    expect(nameInput()).toHaveValue('');
+    expect(amountInput()).toHaveValue('');
+  });
+
+  it.each([
+    ['a blank name', '   ', '80'],
+    ['a zero amount', 'transport', '0'],
+  ])('sends nothing for %s, and the form stays', async (_what, name, amount) => {
+    await mountServer({}, [HOUSING]);
+
+    fireEvent.click(await screen.findByRole('button', { name: '+ Add line item' }));
+    fireEvent.change(nameInput(), { target: { value: name } });
+    fireEvent.change(amountInput(), { target: { value: amount } });
+    fireEvent.click(okBeside(amountInput()));
+    await settle();
+
+    expect(requests()).not.toContain('PUT /api/baseline');
+    expect(nameInput()).toHaveValue(name);
+    expect(amountInput()).toHaveValue(amount);
   });
 });
