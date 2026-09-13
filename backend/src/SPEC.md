@@ -28,9 +28,13 @@ The door owns what crosses it and nothing behind it.
   sentences differ because the ways out differ. A refusal that has to quote something quotes what is
   on the user's screen, not what arrived in the request.
 - **The transport caps.** `UPLOAD_LIMITS` bounds a multipart request before anything decodes it, and
-  the JSON parser's ceiling bounds a body before anything parses it. The per-format caps that apply
-  *after* a decode are `backend/src/providers`' and are stated there; neither document repeats the
-  other.
+  the JSON parser and the restore route's raw parser bound a body before anything parses it. Those
+  two read one constant, `MAX_BODY_BYTES`, and the sentence a body over it is refused with is
+  composed from the same constant: the body reaches one of the two parsers by content type, so two
+  literals would give a client sending JSON one ceiling and a client sending bytes another. The
+  multipart cap is a separate constant on purpose — it bounds a different door with its own
+  sentences, and the two numbers agreeing is not a rule. The per-format caps that apply *after* a
+  decode are `backend/src/providers`' and are stated there; neither document repeats the other.
 - **The built client.** Below every `/api` route the door serves what `web/dist` holds, and a GET
   for any path that is not an API path answers the app's own page, so a reloaded `?screen=` URL
   lands where it names. A POST to an unknown path is refused rather than answered with a page, and
@@ -78,8 +82,18 @@ backend itself, so every request the client makes is same-origin: there is no al
 maintain, no preflight and no credential to carry.
 
 **The multipart parser is mounted per route, not globally.** No other route pays for a multipart
-parse it never asked for, and a caller who sends a form to a JSON route is refused by the JSON
-parser's own ceiling.
+parse it never asked for. A body under a content type no parser claims — a form sent to a JSON
+route, plain text, or no body at all — reaches the route unparsed with `req.body` undefined, so
+every route that reads a JSON body without a schema in front of it reads it through `jsonBody`,
+which refuses anything that is not an object with one sentence naming the content type the door
+takes, and answers that refusal itself so the route has only to return. One sentence and not two,
+because a body-less browser `fetch` and a body under another type are indistinguishable to the
+request's own type check once a zero content length is present. An empty JSON object is an object
+and passes: the parser hands an empty body over as one, and a route that refuses it turns a no-op
+patch into a refusal. The upload route is guarded the other way round — `uploadFile` refuses a
+request that is not multipart before the route reads a field, with the sentence the multipart
+parser's own refusals use, because a person who sent JSON to the upload door needs to hear
+*multipart*, not *JSON*.
 
 ## Where the boundary runs
 
@@ -118,6 +132,23 @@ message in the log — it tends to carry table names and SQL fragments — and a
 more useful to say answers it itself rather than falling through. On the one screen whose job is
 telling a person whether their rows landed, `internal error` reads as transient and invites the same
 failing press again, so that route's own sentence names the way out instead.
+
+**The last handler answers a caller's error with the caller's status, and the test for "the
+caller's" is the `http-errors` contract.** `errorHandler` passes an error through when it carries a
+4xx `status` *and* `expose` true — what body-parser and raw-body throw — and answers everything else
+as `internal error` with the object in the log. Both properties are read by property access, never
+by an own-key check: on the class-based errors they sit on the prototype. The router's `URIError` for
+a path that will not decode carries a status and no `expose`, so it stays a 500 by design rather
+than by oversight. A body over the ceiling is answered with the sentence composed from
+`MAX_BODY_BYTES`; a body the JSON parser could not read keeps the parser's words behind a prefix
+the door owns, because those words describe what the caller sent and are the only hint of where the
+stray comma is; any other exposed refusal keeps the parser's own short phrase. The echoed message is
+bounded on its way into the body, as every caller-supplied string here is. **The 4xx arm logs one
+line of fields it composes and never the error object:** a parse failure carries the whole request
+body as an own enumerable property, and pino's serializer copies own properties, so logging the
+object on a near-miss under the ceiling is a log line the size of the body. When headers have
+already gone out, the handler logs the cause and hands the error on, because the fallback that
+closes the socket writes to stderr and not to the structured log.
 
 **An identifier that names nothing is answered with one sentence.** An id that never existed, a row
 that claims no document, and a row whose claimed file is not on this disk reach the same answer and
