@@ -156,6 +156,23 @@ describe('what the last handler answers', () => {
   });
 
   /**
+   * That phrase carries the caller's own charset back, so the echo is cut at a
+   * bound the door owns; the six-character charset above cannot see the cut. The
+   * length is an independent literal - a pin that imported the bound would move
+   * with it - and the match stops at the phrase: what follows is the caller's
+   * charset, upper-cased by body-parser.
+   */
+  it("a long charset is echoed in the 415 only up to the door's bound", async () => {
+    const res = await agent
+      .post('/api/transfer-rules')
+      .set('Content-Type', `application/json; charset=${'k'.repeat(300)}`)
+      .send('{"txId":"abc"}');
+    expect(res.status, JSON.stringify(res.body)).toBe(415);
+    expect(res.body.error).toMatch(/^unsupported charset "K/);
+    expect(res.body.error).toHaveLength(200);
+  });
+
+  /**
    * Built inside the case and not beside the describe: on a tree with no
    * errorHandler export, an app built at collection time would take every case in
    * this file down with it.
@@ -188,14 +205,14 @@ describe('what the last handler answers', () => {
 });
 
 /**
- * The rule no type holds: a route may read req.body only through one of four shapes,
- * because a bare read of a body no parser claimed is a TypeError answered as the
- * server's fault. Held by reading app.ts as text, so it sees the next route
- * written the old way. The one token it reads is `req.body`; a spelling that does
- * not carry that token - a renamed request parameter, `const { body } = req`,
- * `req['body']`, an alias - and a line whose read sits after a `//` inside a string
- * are not seen, and none is closed here. The failure this exists for is a copied
- * neighbour.
+ * The rule no type holds: a route may read req.body only through one of the shapes
+ * `SHAPES` names, because a bare read of a body no parser claimed is a TypeError
+ * answered as the server's fault. Held by reading app.ts as text, so it sees the
+ * next route written the old way. The one token it reads is `req.body`; a spelling
+ * that does not carry that token - a renamed request parameter,
+ * `const { body } = req`, `req['body']`, an alias - and a line whose read sits after
+ * a `//` inside a string are not seen, and none is closed here. The failure this
+ * exists for is a copied neighbour.
  */
 describe('no route reads req.body bare', () => {
   const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app.ts'), 'utf8');
@@ -267,7 +284,7 @@ describe('no route reads req.body bare', () => {
     expect(counts.upload, "the upload route's read moved out from behind uploadFile").toBeGreaterThanOrEqual(1);
   });
 
-  it('every req.body read is one of the four shapes', () => {
+  it('every req.body read is one of the shapes SHAPES names', () => {
     const bare = reads
       .filter((r) => shapeOf(r) === undefined)
       .map(({ line, i }) => `src/app.ts:${i + 1}: ${line.trim()} - read the body through jsonBody(req, res)`);
@@ -290,6 +307,7 @@ describe('no route reads req.body bare', () => {
       .map(({ line, i }) => `src/app.ts:${i + 1}: ${line.trim()} - bind it, then return when it is undefined`);
     expect(odd).toEqual([]);
     expect(uses.length, 'fewer jsonBody calls than JSON routes').toBeGreaterThanOrEqual(11);
+    expect(uses.length, 'a jsonBody route with no row in JSON_ROUTES').toBe(JSON_ROUTES.length);
   });
 
   /**

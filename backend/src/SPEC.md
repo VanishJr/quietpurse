@@ -144,12 +144,12 @@ than by oversight. A body over the ceiling is answered with the sentence compose
 `MAX_BODY_BYTES`; a body the JSON parser could not read keeps the parser's words behind a prefix
 the door owns, because those words describe what the caller sent and are the only hint of where the
 stray comma is; any other exposed refusal keeps the parser's own short phrase. The echoed message is
-bounded on its way into the body, as every caller-supplied string here is. **The 4xx arm logs one
-line of fields it composes and never the error object:** a parse failure carries the whole request
-body as an own enumerable property, and pino's serializer copies own properties, so logging the
-object on a near-miss under the ceiling is a log line the size of the body. When headers have
-already gone out, the handler logs the cause and hands the error on, because the fallback that
-closes the socket writes to stderr and not to the structured log.
+bounded on its way into the body. **The 4xx arm logs one line of fields it composes and never the
+error object:** a parse failure carries the whole request body as an own enumerable property, and
+pino's serializer copies own properties, so logging the object on a near-miss under the ceiling is
+a log line the size of the body. When headers have already gone out, the handler logs the cause and
+hands the error on, because the fallback that closes the socket writes to stderr and not to the
+structured log.
 
 **An identifier that names nothing is answered with one sentence.** An id that never existed, a row
 that claims no document, and a row whose claimed file is not on this disk reach the same answer and
