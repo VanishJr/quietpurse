@@ -1,20 +1,7 @@
 import { getMeta, setMeta } from './db';
+import type { Settings } from './wire';
 
-/** The two modes are derived in full in independence.ts's header. */
-export type GoalMode = 'baseline' | 'lifestyle';
-
-export interface Settings {
-  /** buffer on top of the minimum/spending, % (threshold = base * (1 + bufferPct/100)) */
-  bufferPct: number;
-  /** averaging window for spending/income, in whole calendar months */
-  windowMonths: number;
-  /** net hourly rate for side work in the base currency; null = not set */
-  hourlyRate: number | null;
-  /** how many hours a week the user works - the cap when converting to hours */
-  hoursCapPerWeek: number;
-  /** what to compute the threshold from */
-  goalMode: GoalMode;
-}
+export type { GoalMode, Settings } from './wire';
 
 const DEFAULTS: Settings = {
   bufferPct: 10,

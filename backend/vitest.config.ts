@@ -17,6 +17,13 @@ export default defineConfig({
     server: {
       deps: { external: [/@electric-sql\/pglite/] },
     },
+    // test/setup.ts drains the answer check's record in afterAll as well as afterEach,
+    // and its afterAll has to run after the test file's own: a mismatch recorded from
+    // a file's afterAll is otherwise dropped when the next file installs a fresh
+    // reporter. 'stack' is reverse registration order, and the setup file registers
+    // first. Pinned rather than left to the runner's default, which is what the
+    // drain would otherwise rest on.
+    sequence: { hooks: 'stack' },
     // A reading, not a gate: no threshold, and CI does not run it. What the include
     // means is in test/SPEC.md.
     coverage: {

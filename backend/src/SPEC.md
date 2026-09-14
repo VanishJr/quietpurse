@@ -22,7 +22,10 @@ The door owns what crosses it and nothing behind it.
 - **The wire vocabulary** — the field names, the shapes a body may take, the status codes, and the
   sentences a refusal is written in. A schema at the door is the only thing between a hand-written
   request and a writer that takes a typed value, so the door narrows rather than casts: a predicate
-  that answers a boolean leaves a caller's string a string.
+  that answers a boolean leaves a caller's string a string. The request schemas stay here; what a
+  route *answers* is declared once in `backend/src/wire`, whose spec carries the rule and the three
+  holds — the typed reply helper, the wrapper under the suite and the walk at import — that keep
+  every answer to its declaration.
 - **The refusal sentences themselves.** They are read by a person who is stuck, so each one says
   what to do next rather than what went wrong, and where two states refuse the same write the two
   sentences differ because the ways out differ. A refusal that has to quote something quotes what is
@@ -348,7 +351,7 @@ to the next caller, which is where it was found the first time.
 There are few of them and a table would not pay for itself; what that buys in ceremony it takes back
 in checking, because no column type bounds anything. The unit a field is denominated in, and the
 meaning of a sentinel where a field has one, are therefore stated on the field in
-`backend/src/settings.ts`; the numeric bounds are in the update's own clamping, which is also the
+`backend/src/wire`, where the shape is declared; the numeric bounds are in the update's own clamping, which is also the
 only thing between a hand-written body and a threshold computed from a window nobody could live in.
 
 ## What is kept of an upload, and what a crash may leave behind

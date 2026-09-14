@@ -27,75 +27,18 @@
  * their yearly total - otherwise a single large electronics order inflates the median
  * of a random month, while "living lean" on a median without one-offs is self-deception.
  */
-import { CategorySummary, MonthTotals } from './types';
+import { MonthTotals } from './types';
 import {
-  BaselineItem,
   avgMonthlyByCategory,
   baselineTotal,
   currentBaseCurrency,
   listBaselineItems,
   summaryMonthlyTotals,
 } from './db';
-import { GoalMode, Settings, getSettings } from './settings';
+import { GoalMode, getSettings } from './settings';
+import type { Independence, IndependenceMonth } from './wire';
 
-export interface IndependenceMonth {
-  /** YYYY-MM */
-  month: string;
-  /** the month's spending without one-offs, plus the one-off amortization */
-  spend: number;
-  ownIncome: number;
-  /** help from external sources (kind = external) */
-  external: number;
-}
-
-export interface Independence {
-  baseCurrency: string;
-  settings: Settings;
-  /** [from, to] of the averaging window (whole months) */
-  from: string;
-  to: string;
-  /** median monthly spending over the window (one-offs amortized) */
-  avgSpend: number;
-  /** one-off amortization: the sum of one_off over 12 months / 12 */
-  oneOffMonthly: number;
-  /** average own income (kind = own) over the window */
-  ownIncomeAvg: number;
-  /** average help from external sources (kind = external) over the window */
-  externalAvg: number;
-  /** the sum of the baseline minimum line items (before the buffer) */
-  baselineSum: number;
-  baselineItems: BaselineItem[];
-  /** baseline minimum * (1 + buffer) */
-  baselineThreshold: number;
-  /** median spending * (1 + buffer) */
-  lifestyleThreshold: number;
-  /**
-   * the mode the figures below were actually computed in, against settings.goalMode
-   * which is the mode that was asked for - the two differ when the fallback fires
-   */
-  effectiveMode: GoalMode;
-  /** the active threshold: baselineThreshold or lifestyleThreshold per effectiveMode */
-  threshold: number;
-  /** threshold minus own income (never negative) */
-  deficit: number;
-  /** own income / the active mode's base */
-  selfSufficiency: number;
-  months: IndependenceMonth[];
-  /** what the threshold is made of: average monthly spending by category */
-  byCategory: CategorySummary[];
-  /** the shortfall expressed in side-work hours; null if no rate is set */
-  hours: {
-    hourlyRate: number;
-    /** how many MORE hours a month are needed to close the shortfall */
-    extraHoursPerMonth: number;
-    /** how many hours a month the whole threshold would cost */
-    totalHoursPerMonth: number;
-    /** the monthly hours ceiling from hoursCapPerWeek */
-    capPerMonth: number;
-    /** the threshold doesn't fit under the ceiling - side work alone won't do it */
-    capExceeded: boolean;
-  } | null;
-}
+export type { Independence, IndependenceMonth } from './wire';
 
 const median = (values: number[]): number => {
   if (values.length === 0) return 0;

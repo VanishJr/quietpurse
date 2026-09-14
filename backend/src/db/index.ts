@@ -30,6 +30,23 @@ import {
   TransferRule,
 } from '../types';
 import {
+  type BaselineItem,
+  type Budget,
+  CHART_METRICS,
+  type CategoryRule,
+  type CategoryRuleCounts,
+  type Chart,
+  type ChartList,
+  type ChartMetric,
+  ERROR_DETAIL_MAX,
+  type ImportList,
+  type ImportRecord,
+  type ImportSourceType,
+  type ImportStatus,
+  type ImportTotals,
+  type RecurringGroup,
+} from '../wire';
+import {
   COMPUTED_PREFIX,
   computedDedupKey,
   computedGroupPrefix,
@@ -39,6 +56,36 @@ import {
   withOrdinal,
 } from './dedup';
 import * as s from './schema';
+
+export {
+  CHART_ACCOUNT_ID_MAX,
+  CHART_BREAKDOWNS,
+  CHART_ID_MAX,
+  CHART_ID_SHAPE,
+  CHART_KINDS,
+  CHART_METRICS,
+  CHART_RANGES,
+  CHART_TITLE_MAX,
+  CHARTS_MAX,
+  ERROR_DETAIL_MAX,
+} from '../wire';
+export type {
+  BaselineItem,
+  Budget,
+  CategoryRule,
+  Chart,
+  ChartBreakdown,
+  ChartKind,
+  ChartList,
+  ChartMetric,
+  ChartRange,
+  ImportList,
+  ImportRecord,
+  ImportSourceType,
+  ImportStatus,
+  ImportTotals,
+  RecurringGroup,
+} from '../wire';
 
 export type Db = PgDatabase<PgQueryResultHKT, any, any>;
 
@@ -244,11 +291,11 @@ export async function setMeta(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: [s.meta.key], set: { value } });
 }
 
-export async function upsertAccount(a: Account): Promise<void> {
+export async function upsertAccount(a: Omit<Account, 'hidden'>): Promise<void> {
   await upsertAccountOn(getDb(), a);
 }
 
-export async function upsertAccountOn(d: Db, a: Account): Promise<void> {
+export async function upsertAccountOn(d: Db, a: Omit<Account, 'hidden'>): Promise<void> {
   await d
     .insert(s.accounts)
     .values({
@@ -906,39 +953,6 @@ export async function accountOtherCurrencies(scope: AccountScope): Promise<strin
 
 type ImportRow = typeof s.imports.$inferSelect;
 
-export type ImportSourceType = ImportRow['sourceType'];
-export type ImportStatus = ImportRow['status'];
-
-export interface ImportRecord {
-  id: string;
-  fileHash: string;
-  sourceType: ImportSourceType;
-  originalFilename: string | null;
-  accountName: string | null;
-  /**
-   * The account the rows are going to, resolved at staging. NULL wherever
-   * accountName is, and it is the id and not the name that says where they landed:
-   * a rename moves the account, never this row's accountName.
-   */
-  accountId: string | null;
-  uploadedAt: string;
-  parserVersion: number;
-  status: ImportStatus;
-  rowsAccepted: number;
-  rowsRejected: number;
-  errorDetail: string | null;
-  transactions: number;
-  /**
-   * Whether the ROW claims a document, which is not whether the file is on this
-   * disk: the key is derived from originalFilename, id and sourceType, all three of
-   * which a backup carries, so the claim survives a restore and the file may not.
-   * The document route answers what is actually readable; nothing here touches disk.
-   */
-  documentAvailable: boolean;
-}
-
-export const ERROR_DETAIL_MAX = 500;
-
 const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => ({
   id: r.id,
   fileHash: r.fileHash,
@@ -1075,22 +1089,6 @@ export async function failImport(id: string, message: string): Promise<void> {
       .delete(s.stagedTransactions)
       .where(eq(s.stagedTransactions.importId, id));
   });
-}
-
-/** Counts over the whole filtered set, never over the page (see listImports). */
-export interface ImportTotals {
-  imports: number;
-  documents: number;
-  /**
-   * Transactions those imports own (transactions.import_id, "first wrote"), which
-   * is NOT "this account's transactions": a row no import owns is in neither.
-   */
-  transactions: number;
-}
-
-export interface ImportList {
-  imports: ImportRecord[];
-  totals: ImportTotals;
 }
 
 /** COUNT is a number on PGlite; int8 and numeric arrive as strings on node-postgres. */
@@ -2262,17 +2260,6 @@ export async function applyBaseRate(day: string, currency: string, k: number): P
     WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day}`);
 }
 
-export interface RecurringGroup {
-  description: string;
-  category: string;
-  months: number;
-  count: number;
-  avgAmount: number;
-  monthlyAvg: number;
-  lastDate: string;
-  ignored: boolean;
-}
-
 export async function setRecurringIgnored(description: string, ignored: boolean): Promise<void> {
   const key = recurringKey(description);
   if (ignored) {
@@ -2343,13 +2330,6 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
     .sort((a, b) => b.monthlyAvg - a.monthlyAvg);
 }
 
-export interface CategoryRule {
-  id: number;
-  pattern: string;
-  category: string;
-  createdAt: string;
-}
-
 export async function listCategoryRules(): Promise<CategoryRule[]> {
   const rows = await getDb()
     .select()
@@ -2393,9 +2373,7 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
  * two can never be taken through different filters and matches - overridden go wrong
  * as soon as one account is hidden.
  */
-export async function countCategoryRuleMatches(
-  pattern: string,
-): Promise<{ matches: number; overridden: number }> {
+export async function countCategoryRuleMatches(pattern: string): Promise<CategoryRuleCounts> {
   const rows = await rowsOf<{ matches: string; overridden: string }>(
     sql`SELECT COUNT(*) AS matches,
                COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
@@ -2403,11 +2381,6 @@ export async function countCategoryRuleMatches(
         WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0`,
   );
   return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
-}
-
-export interface Budget {
-  category: string;
-  monthly: number;
 }
 
 export async function listBudgets(): Promise<Budget[]> {
@@ -2435,40 +2408,6 @@ export async function setBudget(category: string, monthly: number | null): Promi
   }
 }
 
-export { CHART_BREAKDOWNS, CHART_KINDS, CHART_METRICS, CHART_RANGES } from './schema';
-
-export type ChartKind = (typeof s.CHART_KINDS)[number];
-export type ChartRange = (typeof s.CHART_RANGES)[number];
-export type ChartBreakdown = (typeof s.CHART_BREAKDOWNS)[number];
-export type ChartMetric = (typeof s.CHART_METRICS)[number];
-
-export const CHARTS_MAX = 100;
-export const CHART_TITLE_MAX = 120;
-export const CHART_ID_MAX = 64;
-export const CHART_ACCOUNT_ID_MAX = 64;
-
-export const CHART_ID_SHAPE = /^[A-Za-z0-9._~-]+$/;
-
-/**
- * One saved chart, as both routes carry it: the dock's order is array position, so `sort`
- * is not on this type. It IS in a downloaded backup, which selects the columns rather than
- * this shape - say "not on the charts API", never "never leaves".
- */
-export interface Chart {
-  id: string;
-  kind: ChartKind;
-  title: string;
-  accountId: string | null;
-  metrics: ChartMetric[];
-  breakdown: ChartBreakdown;
-  range: ChartRange;
-}
-
-export interface ChartList {
-  version: number;
-  charts: Chart[];
-}
-
 export type ChartsWrite =
   | { ok: true; version: number; charts: Chart[] }
   | { ok: false; reason: 'stale'; version: number; charts: Chart[] };
@@ -2492,7 +2431,7 @@ const chartsVersionRow = async (d: Db): Promise<string | undefined> =>
 
 type ChartRow = typeof s.analyticsCharts.$inferSelect;
 
-const KNOWN_METRICS = new Set<string>(s.CHART_METRICS);
+const KNOWN_METRICS = new Set<string>(CHART_METRICS);
 
 function rowToChart(r: ChartRow): Chart {
   let metrics: ChartMetric[] = [];
@@ -2587,13 +2526,6 @@ export async function replaceCharts(expected: number, charts: Chart[]): Promise<
     // that answers with what it was sent reports a write that did not happen as 200
     return { ok: true, ...(await chartListOn(tx)) };
   });
-}
-
-export interface BaselineItem {
-  id: number;
-  label: string;
-  monthly: number;
-  sort: number;
 }
 
 type BaselineItemRow = typeof s.baselineItems.$inferSelect;

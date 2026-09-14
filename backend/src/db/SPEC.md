@@ -253,11 +253,12 @@ tables, so renumbering costs nothing.
 
 ## The vocabularies the client composes against
 
-**The chart vocabularies are written in the schema module**, and the door and the database both
-derive from them rather than restating them: the route's schema and the check constraints are built
-from those arrays. But the constraint the database actually applies is the one in the generated
-migration, so a member added without regenerating widens the door and leaves the column where it
-was.
+**The chart vocabularies are declared once, in `backend/src/wire`**, and this module imports them
+for its column options and its check constraints and never restates them; the door's request schema
+composes over the same tuples. But the constraint the database actually applies is the one in the
+generated migration, so a member added to the wire's tuple without `npm run db:generate` widens the
+door and leaves the column where it was — and `backend/test/db.test.ts`, which inserts every
+`CHART_KINDS` member and expects `23514` on a value outside the list, is what reds.
 
 They are in the database and not only at the door because **the client substitutes rather than
 refuses**: `web/src/analytics.ts` falls back to the first kind, so a restored value it does not know
@@ -265,10 +266,11 @@ would draw as a different chart under the reader's own title. Length bounds get 
 because an over-long title substitutes nothing.
 
 **The chart id's charset is one the client composes against and cannot import**, since the two
-packages share no build. It sits with the other bounds on a chart, which is where
-`backend/test/charts-door.test.ts` looks for the things that cross that boundary. A narrowing here
-that the client does not follow means the client keeps sending an id the route now refuses — and
-the route refuses the whole list over it.
+packages share no build. It is declared beside the other bounds on a chart in `backend/src/wire`
+and re-exported through this module, which is where `backend/test/charts-door.test.ts` reads it
+until the client derives its own copy from the wire and that test retires. A narrowing there that
+the client does not follow means the client keeps sending an id the route now refuses — and the
+route refuses the whole list over it.
 
 ## The invariants no type and no test holds
 

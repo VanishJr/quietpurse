@@ -93,10 +93,104 @@ import { type StatementDestination, importStatement } from './providers/statemen
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
 import { getSettings, updateSettings } from './settings';
 import { Account, AccountMonthlySummary, AccountSummary, MonthlySummary, Summary } from './types';
+import {
+  ANSWERS,
+  type AnswerBody,
+  type Declared,
+  INCOME_SOURCE_KINDS,
+  type JsonRoute,
+  refusalSchema,
+} from './wire';
 
 export const app = express();
 
-app.use((req, res, next) => {
+export const ANSWER_CHECK = 'answer check';
+
+export type AnswerReporter = (mismatch: string) => void;
+
+const declaredAnswer = (key: string | undefined): Declared | undefined =>
+  key === undefined ? undefined : (ANSWERS as Record<string, Declared | undefined>)[key];
+
+const answerKey = (req: express.Request): string | undefined => {
+  const route = req.route as { path: unknown } | undefined;
+  if (!route) return undefined;
+  return `${req.method === 'HEAD' ? 'GET' : req.method} ${String(route.path)}`;
+};
+
+const issuePaths = (error: z.ZodError): string =>
+  error.issues.map((i) => `${i.path.join('.') || '(body)'}: ${i.message}`).join('; ');
+
+/**
+ * How what a route answered disagrees with ANSWERS, or undefined. The body is parsed
+ * in its serialised form: an undefined property and a Date are different things
+ * before and after the wire.
+ */
+export function answerMismatch(
+  req: express.Request,
+  status: number,
+  body: unknown,
+  via: 'json' | 'send',
+): string | undefined {
+  const key = answerKey(req);
+  const entry = declaredAnswer(key);
+  const where = `${req.method} ${req.originalUrl} (${key ?? 'no route'}) answered ${status}`;
+  const success = status >= 200 && status < 300;
+  if (via === 'send') {
+    return success && entry?.kind === 'json'
+      ? `${where}: declared JSON route answered through res.send`
+      : undefined;
+  }
+  let schema: z.ZodType;
+  if (success) {
+    if (!entry) return `${where}: ${key === undefined ? 'no route matched' : 'not declared in ANSWERS'}`;
+    if (entry.kind !== 'json') return `${where}: declared ${entry.kind}, answered JSON`;
+    if (status !== entry.status) return `${where}: declared ${entry.status}`;
+    schema = entry.body;
+  } else {
+    schema = (entry?.kind === 'json' && entry.refusals?.[status]) || refusalSchema;
+  }
+  const parsed = schema.safeParse(JSON.parse(JSON.stringify(body)));
+  return parsed.success ? undefined : `${where}: ${issuePaths(parsed.error)}`;
+}
+
+export const answerCheck: express.RequestHandler = (req, res, next) => {
+  const report = req.app.get(ANSWER_CHECK) as AnswerReporter | undefined;
+  if (!report) {
+    next();
+    return;
+  }
+  const json = res.json.bind(res);
+  const send = res.send.bind(res);
+  let viaJson = false;
+  const check = (via: 'json' | 'send', body: unknown): void => {
+    try {
+      const mismatch = answerMismatch(req, res.statusCode, body, via);
+      if (mismatch) report(mismatch);
+    } catch (e) {
+      report(
+        `${req.method} ${req.originalUrl} answered ${res.statusCode}: the answer check threw: ${(e as Error).message}`,
+      );
+    }
+  };
+  res.json = ((body: unknown) => {
+    viaJson = true;
+    check('json', body);
+    return json(body);
+  }) as typeof res.json;
+  res.send = ((body?: unknown) => {
+    if (!viaJson) check('send', body);
+    return send(body);
+  }) as typeof res.send;
+  next();
+};
+
+app.use(answerCheck);
+
+const answer = <R extends JsonRoute>(res: express.Response, route: R, body: AnswerBody<R>): void => {
+  res.status(ANSWERS[route].status).json(body);
+};
+
+const headersAndLog: express.RequestHandler = (req, res, next) => {
   const startedAt = Date.now();
   // Nothing may frame this app. There is no sign-in, so a page that gets it into an
   // iframe can walk the person through their own Delete with their own session -
@@ -112,7 +206,9 @@ app.use((req, res, next) => {
     logHttp.debug(`${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - startedAt}ms`);
   });
   next();
-});
+};
+
+app.use(headersAndLog);
 
 /**
  * Where the request came from, which is the whole of the boundary: there is no
@@ -191,7 +287,7 @@ const originIsLocal = (origin: string): boolean => {
   }
 };
 
-app.use('/api', (req, res, next) => {
+const originCheck: express.RequestHandler = (req, res, next) => {
   const host = req.headers.host;
   const origin = req.headers.origin;
   const site = req.headers['sec-fetch-site'];
@@ -212,7 +308,9 @@ app.use('/api', (req, res, next) => {
     return;
   }
   next();
-});
+};
+
+app.use('/api', originCheck);
 
 // the ceiling is raised from the default for one caller: a backup restored as JSON
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
@@ -227,7 +325,7 @@ const q = (v: unknown): string | undefined =>
 const isCategory = (v: unknown): v is Category => (CATEGORIES as readonly unknown[]).includes(v);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  answer(res, 'GET /api/health', { ok: true });
 });
 
 /**
@@ -334,7 +432,7 @@ const nameTaken = (taken: Account | undefined, requested: string): string => {
 };
 
 app.get('/api/accounts', async (req, res) => {
-  res.json(await listAccounts(q(req.query.all) === '1'));
+  answer(res, 'GET /api/accounts', await listAccounts(q(req.query.all) === '1'));
 });
 
 /** An empty account: a name can exist before any statement has been uploaded into it. */
@@ -356,7 +454,7 @@ app.post('/api/accounts', async (req, res) => {
     res.status(409).json({ error: nameTaken(result.taken, parsed.data.name) });
     return;
   }
-  res.status(201).json(result.account);
+  answer(res, 'POST /api/accounts', result.account);
 });
 
 /**
@@ -388,7 +486,7 @@ app.patch('/api/accounts/:id', async (req, res) => {
   }
   const result = await updateAccount(req.params.id, patch);
   if (result.ok) {
-    res.json(result.account);
+    answer(res, 'PATCH /api/accounts/:id', result.account);
     return;
   }
   // one switch over the union rather than a chain of ifs, for confirmConflict's
@@ -437,7 +535,7 @@ app.delete('/api/accounts/:id', async (req, res) => {
     // transfer pairing changes when a whole leg disappears, and allTransactions()
     // deliberately included this account's rows (see VISIBLE_ACCOUNT in db/index.ts)
     await reclassifyAll();
-    res.json({ deleted: true, transactions, imports, documents });
+    answer(res, 'DELETE /api/accounts/:id', { deleted: true, transactions, imports, documents });
     return;
   }
   // one switch over the union, as the PATCH above: a refusal added to AccountDelete
@@ -458,7 +556,9 @@ app.delete('/api/accounts/:id', async (req, res) => {
 
 app.get('/api/transactions', async (req, res) => {
   const limit = q(req.query.limit) ? parseInt(q(req.query.limit)!, 10) : undefined;
-  res.json(
+  answer(
+    res,
+    'GET /api/transactions',
     await listTransactions({
       from: q(req.query.from),
       to: q(req.query.to),
@@ -483,7 +583,7 @@ app.patch('/api/transactions/:id/transfer', async (req, res) => {
     res.status(404).json({ error: 'transaction not found' });
     return;
   }
-  res.json(tx);
+  answer(res, 'PATCH /api/transactions/:id/transfer', tx);
 });
 
 /**
@@ -504,12 +604,14 @@ app.patch('/api/transactions/:id/category', async (req, res) => {
     res.status(404).json({ error: 'transaction not found' });
     return;
   }
-  res.json(tx);
+  answer(res, 'PATCH /api/transactions/:id/category', tx);
 });
 
 app.get('/api/transfer-rules', async (_req, res) => {
   const rules = await listTransferRules();
-  res.json(
+  answer(
+    res,
+    'GET /api/transfer-rules',
     await Promise.all(
       rules.map(async (r) => ({
         ...r,
@@ -540,7 +642,10 @@ app.post('/api/transfer-rules', async (req, res) => {
   // otherwise an old manual "this is not a transfer" would override the rule just created
   await clearManualForRule(tx.description, tx.accountId);
   await reclassifyAll();
-  res.json({ rule, matches: await countRuleMatches(rule.description, rule.accountId) });
+  answer(res, 'POST /api/transfer-rules', {
+    rule,
+    matches: await countRuleMatches(rule.description, rule.accountId),
+  });
 });
 
 app.delete('/api/transfer-rules/:id', async (req, res) => {
@@ -554,7 +659,7 @@ app.delete('/api/transfer-rules/:id', async (req, res) => {
     return;
   }
   await reclassifyAll();
-  res.json({ deleted: true });
+  answer(res, 'DELETE /api/transfer-rules/:id', { deleted: true });
 });
 
 type ScopeResult =
@@ -621,7 +726,7 @@ app.get('/api/summary', async (req, res) => {
       incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
       incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
     };
-    res.json(summary);
+    answer(res, 'GET /api/summary', summary);
     return;
   }
   const summary: Summary = {
@@ -634,7 +739,7 @@ app.get('/api/summary', async (req, res) => {
     incomeByCategory: await summaryIncomeByCategory(scope, fromIso, toIso),
     incomeBySource: await summaryIncomeBySource(scope, fromIso, toIso),
   };
-  res.json(summary);
+  answer(res, 'GET /api/summary', summary);
 });
 
 /** The whole calendar year by default, its unreached months included. */
@@ -660,7 +765,7 @@ app.get('/api/summary/months', async (req, res) => {
       otherCurrencies: await accountOtherCurrencies(scope),
       months: await summaryMonthlyTotals(scope, fromIso, toIso),
     };
-    res.json(months);
+    answer(res, 'GET /api/summary/months', months);
     return;
   }
   const months: MonthlySummary = {
@@ -670,7 +775,7 @@ app.get('/api/summary/months', async (req, res) => {
     baseCurrency: await currentBaseCurrency(),
     months: await summaryMonthlyTotals(scope, fromIso, toIso),
   };
-  res.json(months);
+  answer(res, 'GET /api/summary/months', months);
 });
 
 /**
@@ -684,8 +789,6 @@ const chartSchema = z.strictObject({
     .string({ error: 'chart id must be text' })
     .min(1, { error: 'chart id must not be empty' })
     .max(CHART_ID_MAX, { error: `chart id must be at most ${CHART_ID_MAX} characters` })
-    // the shape is beside the four bounds in db/, where the client's copy of it is
-    // held against this one
     .regex(CHART_ID_SHAPE, {
       error: 'chart id may contain only letters, digits, and . _ ~ -',
     }),
@@ -756,7 +859,7 @@ export const CHARTS_STALE =
   'These charts were changed somewhere else after this list was loaded. What you see now is the current version - save again and it will go through.';
 
 app.get('/api/analytics/charts', async (_req, res) => {
-  res.json(await listCharts());
+  answer(res, 'GET /api/analytics/charts', await listCharts());
 });
 
 app.put('/api/analytics/charts', async (req, res) => {
@@ -770,7 +873,7 @@ app.put('/api/analytics/charts', async (req, res) => {
     res.status(409).json({ error: CHARTS_STALE, version: result.version, charts: result.charts });
     return;
   }
-  res.json({ version: result.version, charts: result.charts });
+  answer(res, 'PUT /api/analytics/charts', { version: result.version, charts: result.charts });
 });
 
 /** Manual income source mark (an id from income_sources); null - back to auto-detection. */
@@ -788,11 +891,11 @@ app.patch('/api/transactions/:id/source', async (req, res) => {
     res.status(404).json({ error: 'transaction not found' });
     return;
   }
-  res.json(tx);
+  answer(res, 'PATCH /api/transactions/:id/source', tx);
 });
 
 app.get('/api/income-sources', async (_req, res) => {
-  res.json(await listIncomeSources());
+  answer(res, 'GET /api/income-sources', await listIncomeSources());
 });
 
 function slugifySourceId(label: string): string {
@@ -827,7 +930,7 @@ const incomeSourceLabelSchema = z
   })
   .min(1, { error: 'income source label must not be empty' });
 
-const incomeSourceKindSchema = z.enum(['own', 'external'], {
+const incomeSourceKindSchema = z.enum(INCOME_SOURCE_KINDS, {
   error:
     "income source kind must be 'own' (your own earnings) or 'external' (support from outside)",
 });
@@ -865,7 +968,7 @@ app.post('/api/income-sources', async (req, res) => {
   for (let n = 2; await getIncomeSource(id); n++) id = `${slugifySourceId(label)}-${n}`;
   const source = await upsertIncomeSource({ id, label, kind, patterns: patterns ?? [] });
   await reclassifyAll();
-  res.json(source);
+  answer(res, 'POST /api/income-sources', source);
 });
 
 /**
@@ -891,7 +994,7 @@ app.put('/api/income-sources/:id', async (req, res) => {
     patterns: parsed.data.patterns ?? existing.patterns,
   });
   await reclassifyAll();
-  res.json(source);
+  answer(res, 'PUT /api/income-sources/:id', source);
 });
 
 app.delete('/api/income-sources/:id', async (req, res) => {
@@ -900,7 +1003,7 @@ app.delete('/api/income-sources/:id', async (req, res) => {
     return;
   }
   await reclassifyAll();
-  res.json({ deleted: true });
+  answer(res, 'DELETE /api/income-sources/:id', { deleted: true });
 });
 
 app.patch('/api/transactions/:id/one-off', async (req, res) => {
@@ -916,7 +1019,7 @@ app.patch('/api/transactions/:id/one-off', async (req, res) => {
     res.status(404).json({ error: 'transaction not found' });
     return;
   }
-  res.json(tx);
+  answer(res, 'PATCH /api/transactions/:id/one-off', tx);
 });
 
 /** Groups hidden by the user still come back, so the app can show them in edit mode. */
@@ -935,7 +1038,7 @@ async function recurringPayload() {
 }
 
 app.get('/api/recurring', async (_req, res) => {
-  res.json(await recurringPayload());
+  answer(res, 'GET /api/recurring', await recurringPayload());
 });
 
 /** The group is identified by its normalized description, as in the detector. */
@@ -951,25 +1054,25 @@ app.post('/api/recurring/ignore', async (req, res) => {
     return;
   }
   await setRecurringIgnored(body.description, body.ignored);
-  res.json(await recurringPayload());
+  answer(res, 'POST /api/recurring/ignore', await recurringPayload());
 });
 
 app.get('/api/independence', async (_req, res) => {
-  res.json(await computeIndependence());
+  answer(res, 'GET /api/independence', await computeIndependence());
 });
 
 app.get('/api/settings', async (_req, res) => {
-  res.json(await getSettings());
+  answer(res, 'GET /api/settings', await getSettings());
 });
 
 app.patch('/api/settings', async (req, res) => {
   const body = jsonBody(req, res);
   if (!body) return;
-  res.json(await updateSettings(body));
+  answer(res, 'PATCH /api/settings', await updateSettings(body));
 });
 
 app.get('/api/app-settings', async (_req, res) => {
-  res.json(await getAppSettings());
+  answer(res, 'GET /api/app-settings', await getAppSettings());
 });
 
 app.patch('/api/app-settings', async (req, res) => {
@@ -989,7 +1092,7 @@ app.patch('/api/app-settings', async (req, res) => {
     );
   }
   if (ownerNamesChanged) await reclassifyAll();
-  res.json(settings);
+  answer(res, 'PATCH /api/app-settings', settings);
 });
 
 const baselinePayload = async () => ({
@@ -999,7 +1102,7 @@ const baselinePayload = async () => ({
 });
 
 app.get('/api/baseline', async (_req, res) => {
-  res.json(await baselinePayload());
+  answer(res, 'GET /api/baseline', await baselinePayload());
 });
 
 /** monthly: null deletes the line item. */
@@ -1013,7 +1116,7 @@ app.put('/api/baseline', async (req, res) => {
   }
   if (body.monthly === null) {
     await deleteBaselineItem(label);
-    res.json(await baselinePayload());
+    answer(res, 'PUT /api/baseline', await baselinePayload());
     return;
   }
   if (typeof body.monthly !== 'number' || !Number.isFinite(body.monthly) || body.monthly <= 0) {
@@ -1022,12 +1125,14 @@ app.put('/api/baseline', async (req, res) => {
   }
   // sort not provided - keep the previous one (editing an amount sends only monthly)
   await upsertBaselineItem(label, body.monthly, typeof body.sort === 'number' ? body.sort : undefined);
-  res.json(await baselinePayload());
+  answer(res, 'PUT /api/baseline', await baselinePayload());
 });
 
 app.get('/api/category-rules', async (_req, res) => {
   const rules = await listCategoryRules();
-  res.json(
+  answer(
+    res,
+    'GET /api/category-rules',
     await Promise.all(
       rules.map(async (r) => ({ ...r, ...(await countCategoryRuleMatches(r.pattern)) })),
     ),
@@ -1057,7 +1162,7 @@ app.post('/api/category-rules', async (req, res) => {
   }
   const rule = await addCategoryRule(pattern, category);
   await reclassifyAll();
-  res.json({ rule, ...(await countCategoryRuleMatches(rule.pattern)) });
+  answer(res, 'POST /api/category-rules', { rule, ...(await countCategoryRuleMatches(rule.pattern)) });
 });
 
 app.delete('/api/category-rules/:id', async (req, res) => {
@@ -1071,7 +1176,7 @@ app.delete('/api/category-rules/:id', async (req, res) => {
     return;
   }
   await reclassifyAll();
-  res.json({ deleted: true });
+  answer(res, 'DELETE /api/category-rules/:id', { deleted: true });
 });
 
 app.get('/api/budgets', async (_req, res) => {
@@ -1085,7 +1190,7 @@ app.get('/api/budgets', async (_req, res) => {
   const daysInMonth = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
   ).getUTCDate();
-  res.json({
+  answer(res, 'GET /api/budgets', {
     baseCurrency: await currentBaseCurrency(),
     budgets: (await listBudgets()).map((b) => {
       const s = spent.get(b.category) ?? 0;
@@ -1112,7 +1217,7 @@ app.put('/api/budgets', async (req, res) => {
     return;
   }
   await setBudget(category, body.monthly as number | null);
-  res.json({ budgets: await listBudgets() });
+  answer(res, 'PUT /api/budgets', { budgets: await listBudgets() });
 });
 
 app.get('/api/export.csv', async (req, res) => {
@@ -1321,7 +1426,7 @@ function parseMapping(raw: string): ParsedMapping {
 }
 
 app.get('/api/imports/presets', (_req, res) => {
-  res.json({
+  answer(res, 'GET /api/imports/presets', {
     presets: [
       { key: 'generic', title: 'Any statement (auto-detect the date, amount and description columns)' },
       ...Object.entries(CSV_PRESETS).map(([key, p]) => ({ key, title: p.title })),
@@ -1398,14 +1503,14 @@ app.post('/api/imports', uploadFile, async (req, res) => {
     if (result.outcome === 'duplicate') {
       const where = result.accountIds.join(', ') || 'no account (its rows were already there)';
       logImport.info(`already imported as ${result.importId}, rows in ${where}`);
-      res.json(result);
+      answer(res, 'POST /api/imports', result);
       return;
     }
     const { summary } = result;
     logImport.info(
       `import ${summary.importId} staged for ${summary.accountId}: ${summary.accepted} rows read, ${summary.newRows} new, skipped ${summary.skipped} of ${summary.total}`,
     );
-    res.json(result);
+    answer(res, 'POST /api/imports', result);
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
@@ -1473,7 +1578,7 @@ app.post('/api/imports/:id/confirm', async (req, res) => {
     `import ${req.params.id} confirmed into ${result.accountId}: new ${result.inserted} of ${result.rowsAccepted}`,
   );
   await reclassifyAll();
-  res.json({
+  answer(res, 'POST /api/imports/:id/confirm', {
     importId: req.params.id,
     accountId: result.accountId,
     accountIds: result.accountIds,
@@ -1504,7 +1609,7 @@ app.post('/api/imports/:id/discard', async (req, res) => {
     return;
   }
   logImport.info(`import ${req.params.id} discarded`);
-  res.json({ discarded: true, importId: req.params.id });
+  answer(res, 'POST /api/imports/:id/discard', { discarded: true, importId: req.params.id });
 });
 
 /**
@@ -1521,10 +1626,10 @@ app.get('/api/imports', async (req, res) => {
       res.status(400).json({ error: 'accountId must be sent once, as a single value' });
       return;
     }
-    res.json(await listImports({ accountId }));
+    answer(res, 'GET /api/imports', await listImports({ accountId }));
     return;
   }
-  res.json(await listImports());
+  answer(res, 'GET /api/imports', await listImports());
 });
 
 app.delete('/api/imports/:id', async (req, res) => {
@@ -1535,7 +1640,7 @@ app.delete('/api/imports/:id', async (req, res) => {
   }
   logger.info(`import ${req.params.id} deleted: ${result.removed} transactions removed`);
   await reclassifyAll(); // transfer pairing changes when the other leg disappears
-  res.json({ deleted: true, transactions: result.removed });
+  answer(res, 'DELETE /api/imports/:id', { deleted: true, transactions: result.removed });
 });
 
 /** A whitelist, so a character nobody thought of is replaced rather than passed on. */
@@ -1658,7 +1763,7 @@ app.delete('/api/imports/:id/document', async (req, res) => {
   // cleared either way, or the row goes on claiming a readable one.
   await clearImportDocument(req.params.id);
   logImport.info(`import ${req.params.id} document deleted (bytes removed: ${bytesRemoved})`);
-  res.json({ deleted: true, importId: req.params.id, bytesRemoved });
+  answer(res, 'DELETE /api/imports/:id/document', { deleted: true, importId: req.params.id, bytesRemoved });
 });
 
 app.get('/api/backup', async (_req, res) => {
@@ -1724,7 +1829,7 @@ app.post(
       logger.error(`restored, but re-tagging it failed: ${reasonFirst(e)}`);
     }
     logger.info(`restored from backup: tables ${tables}, rows ${rows}`);
-    res.json({ restored: true, tables, rows });
+    answer(res, 'POST /api/restore', { restored: true, tables, rows });
   },
 );
 
@@ -1838,3 +1943,54 @@ export const errorHandler: express.ErrorRequestHandler = (err: unknown, req, res
 };
 
 app.use(errorHandler);
+
+type RouteLayer = {
+  route?: { path: unknown; methods: Record<string, boolean> };
+  handle?: { stack?: unknown; name?: string };
+};
+
+const DOOR_MIDDLEWARES = new Set<string>([
+  ...[answerCheck, headersAndLog, originCheck, errorHandler].map((fn) => fn.name),
+  'jsonParser',
+  'serveStatic',
+]);
+
+export function registeredAnswerKeys(target: express.Express): string[] {
+  const keys: string[] = [];
+  for (const layer of target.router.stack as RouteLayer[]) {
+    if (layer.route) {
+      for (const method of Object.keys(layer.route.methods)) {
+        keys.push(`${method.toUpperCase()} ${String(layer.route.path)}`);
+      }
+    } else if (Array.isArray(layer.handle?.stack) || layer.handle?.name === 'mounted_app') {
+      throw new Error(
+        'a router is mounted on the app: routes are registered on app directly so the declaration walk can see them',
+      );
+    } else if (!DOOR_MIDDLEWARES.has(layer.handle?.name ?? '')) {
+      throw new Error(
+        `a middleware the door does not name is on the app: ${layer.handle?.name || 'anonymous'} - the app's non-route layers are the door's named middlewares and nothing else`,
+      );
+    }
+  }
+  return keys;
+}
+
+export function assertAnswersDeclared(target: express.Express): void {
+  const [first] = target.router.stack as RouteLayer[];
+  if (first?.handle !== answerCheck) {
+    throw new Error(
+      `the answer check is not the first layer on the app (${first?.handle?.name || 'anonymous'} is): every route and every refusing middleware sits behind it or its answer goes unparsed`,
+    );
+  }
+  const registered = new Set(registeredAnswerKeys(target));
+  const declared = new Set(Object.keys(ANSWERS));
+  const undeclared = [...registered].filter((k) => !declared.has(k));
+  const unregistered = [...declared].filter((k) => !registered.has(k));
+  if (undeclared.length > 0 || unregistered.length > 0) {
+    throw new Error(
+      `every route declares its answer in src/wire: registered and not declared: ${undeclared.join(', ') || 'none'}; declared and not registered: ${unregistered.join(', ') || 'none'}`,
+    );
+  }
+}
+
+assertAnswersDeclared(app);

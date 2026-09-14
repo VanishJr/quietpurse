@@ -14,7 +14,13 @@ carry their own reasoning in their headers. Nothing below repeats them.
   before anything reads config, which is why the database modules there are dynamic imports.
   It is a vitest setup file, so it runs once per test file and truncates before each one — what
   the files share is the engine instance and the module registry, never the rows.
-  `backend/test/helpers.ts` is the fixture layer.
+  `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
+  door records an answer mismatch into and the drain the setup file empties in its after hooks, so
+  the case that produced the mismatch is the case that fails with it; the rule it holds is
+  `backend/src/wire`'s. The drain runs in `afterAll` as well as `afterEach`, because an answer a
+  file issues from its own `afterAll` has no case left to fail — and it needs the setup file's hook
+  to run after the test file's own, which `sequence.hooks` pinned to `'stack'` in
+  `backend/vitest.config.ts` is what provides.
 - **The checks that read another file as text** instead of importing it. They exist where an
   invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
   to agree with one in a package that shares no build with this one.
@@ -59,6 +65,10 @@ spelling that does not carry that token — a renamed request parameter, `const 
 `req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
 and none is closed here;
 `backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
+`backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
+name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
+`import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
+own typecheck will compile that module and pull in whatever it imports;
 `backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
 `node:path` and no other module and to run nothing at its top level, because a test that imported the
 entry point beside it would spawn servers to reach one predicate;

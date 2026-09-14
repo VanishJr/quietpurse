@@ -11,6 +11,14 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import {
+  CHART_BREAKDOWNS,
+  CHART_KINDS,
+  CHART_RANGES,
+  IMPORT_SOURCE_TYPES,
+  IMPORT_STATUSES,
+  INCOME_SOURCE_KINDS,
+} from '../wire';
 
 export const accounts = pgTable(
   'accounts',
@@ -41,7 +49,7 @@ export const imports = pgTable(
     // sha256 of the raw uploaded bytes - the file on the user's disk, hashed
     // before any decoding, sniffing or parsing (see providers/statement.ts)
     fileHash: text('file_hash').notNull(),
-    sourceType: text('source_type', { enum: ['csv', 'xlsx', 'pdf'] }).notNull(),
+    sourceType: text('source_type', { enum: IMPORT_SOURCE_TYPES }).notNull(),
     originalFilename: text('original_filename'),
     // All three are NULL on every import that never reached the parse, and on
     // every one from before the confirmation step.
@@ -51,9 +59,7 @@ export const imports = pgTable(
     uploadedAt: text('uploaded_at').notNull(),
     // per parser, keyed by source_type: what makes re-parsing targetable later
     parserVersion: integer('parser_version').notNull(),
-    status: text('status', {
-      enum: ['pending', 'awaiting_confirmation', 'committed', 'failed', 'discarded'],
-    }).notNull(),
+    status: text('status', { enum: IMPORT_STATUSES }).notNull(),
     // rows the parser turned into transactions, and rows it could not use. How many
     // of the accepted ones were genuinely new is a COUNT over transactions.import_id
     rowsAccepted: integer('rows_accepted').notNull().default(0),
@@ -222,24 +228,16 @@ export const baselineItems = pgTable('baseline_items', {
 export const incomeSources = pgTable('income_sources', {
   id: text('id').primaryKey(), // slug: salary, family, other, freelance...
   label: text('label').notNull(),
-  kind: text('kind', { enum: ['own', 'external'] }).notNull(),
+  kind: text('kind', { enum: INCOME_SOURCE_KINDS }).notNull(),
   patterns: text('patterns').notNull().default('[]'), // JSON array of strings
   sort: integer('sort').notNull().default(0),
   // seeded sources: cannot be deleted, automation is keyed on the id
   builtin: boolean('builtin').notNull().default(false),
 });
 
-export const CHART_KINDS = ['line', 'column', 'area', 'donut', 'ranking', 'radar'] as const;
-export const CHART_RANGES = ['3m', '6m', '12m', '24m', '3y', '5y'] as const;
-export const CHART_BREAKDOWNS = [
-  'expense-categories',
-  'income-categories',
-  'income-sources',
-] as const;
-export const CHART_METRICS = ['income', 'expense', 'net'] as const;
-
 // sql.raw, not a parameter: drizzle-kit serialises a check into DDL, where a
-// bound $1 is not a thing. The values are this file's own literals.
+// bound $1 is not a thing. The values are the wire module's `as const` tuples, nothing
+// a caller sends.
 const inList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
 
 /** The list is replaced whole, so `sort` is assigned 0..n-1 on every write. */

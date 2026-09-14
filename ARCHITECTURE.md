@@ -52,6 +52,7 @@ previous one.
 | Module | What it owns |
 |---|---|
 | `app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `index.ts` so the whole route table is testable over real HTTP |
+| `wire/index.ts` | The declared answer of every route, as zod schemas the backend's types are inferred from; the vocabularies and bounds the client composes against. Imports nothing but zod |
 | `index.ts` | Process start: the lock (`lock.ts`), the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
 | `lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the takeover of a stale one under a marker the process never clears for another, and a release that removes only its own pid |
 | `config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |

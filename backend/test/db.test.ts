@@ -222,7 +222,7 @@ describe('a negative fee is refused by the column', () => {
  *
  * Both directions, because the door and the column are generated from one array and
  * applied at different times: the second case is what fails when a member is added
- * to schema.ts and the migration is not regenerated.
+ * to the wire's tuple in src/wire and the migration is not regenerated.
  */
 describe('the chart vocabularies are the column and not only the door', () => {
   const chart = (over: Partial<Chart>): Chart => ({
@@ -260,7 +260,7 @@ describe('the chart vocabularies are the column and not only the door', () => {
 
   // iterated rather than listed, so a member added tomorrow is written the day it
   // appears - which is the drift this case exists for: the door and the type move
-  // with the array in schema.ts, the applied CHECK only with db:generate
+  // with the tuple in src/wire, the applied CHECK only with db:generate
   it('and every member of the three lists is admitted', async () => {
     const replace = async (charts: Chart[]): Promise<ChartsWrite> =>
       replaceCharts((await listCharts()).version, charts);
