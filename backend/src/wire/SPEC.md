@@ -51,11 +51,13 @@ and refuses any specifier that is not `zod` or a relative path inside this direc
 **The file is compiled by two compilers, and the second is the client's.** `web/src/types.ts`
 re-exports this module's types, so the client's `tsc` — `ESNext` modules, `bundler` resolution,
 `isolatedModules`, `noUnusedLocals`, `noUnusedParameters` — compiles this file beside this package's
-own `commonjs` one. An edit only the client's refuses — a `const enum`, an `export =`, a type
-re-export without `export type`, an unused local — is green in both backend jobs and red in the
-`web` job, and that coupling is what holds the file to ESM-style imports, `export type` on every
-type-only re-export, no `require` and no `__dirname`; the specifier walk holds the half about what
-the file names.
+own `commonjs` one. An edit only the client's refuses — an `import x = require()`, a type re-export
+without `export type`, an unused local — is green in both backend jobs and red in the `web` job,
+and that coupling is what holds the file to ESM-style imports, `export type` on every type-only
+re-export and nothing left unused. An `export =` is refused by both, because the module has other
+exports; a `require()` of anything but zod or a file in this directory is refused by the specifier
+walk whichever compiler runs; a `const enum`, a `__dirname` and a `require('zod')` are refused by
+neither.
 
 ## What a declaration says, and how it is read
 
@@ -153,10 +155,11 @@ landed. The next move re-reads them; age is not evidence.
 
 **What the client builds on.** The client reaches this module by type only and through one door,
 `web/src/types.ts`: the shapes and the union types under this module's own names — the chart
-vocabularies' and the goal modes' among them, which its picker records are keyed by — and `typeof`
-of the six constants its runtime copies are pinned to: the four chart bounds, the id charset's
-string source and `ERROR_DETAIL_MAX`. It never names the tuples and imports no value, so it carries
-no runtime dependency it would have to bundle;
-`web/src/types.test.ts` refuses a value import and a second door. Its typecheck resolves `zod`
-through this package's dependencies, so the `web` job in `.github/workflows/ci.yml` installs this
-package's dependencies before its own, and `npm run setup` installs this package first.
+vocabularies', the goal modes' and the income source kinds' among them, which its picker records are
+keyed by — and `typeof` of the constants its runtime copies are pinned to: `CHARTS_MAX`,
+`CHART_TITLE_MAX`, `CHART_ID_MAX`, `CHART_ACCOUNT_ID_MAX`, `CHART_ID_SHAPE_SOURCE` and
+`ERROR_DETAIL_MAX`. It never names the tuples and imports no value, so it carries no runtime
+dependency it would have to bundle; `web/src/types.test.ts` refuses a value import and a second
+door. Its typecheck resolves `zod` through this package's dependencies, so the `web` job in
+`.github/workflows/ci.yml` installs this package's dependencies before its own, and `npm run setup`
+installs this package first.

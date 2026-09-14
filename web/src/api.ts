@@ -46,7 +46,7 @@ export const apiLabel = (): string => window.location.origin;
  * The backend composes a refusal to exactly this budget (`ERROR_DETAIL_MAX`, on the
  * wire) and orders the clauses of the long ones on the premise that all of it is read.
  * Cutting it shorter here drops the clause it put last and ends the sentence
- * mid-token; pinned to the budget by type, so the two cannot differ.
+ * mid-token.
  */
 export const MAX_ERROR_CHARS = 500 satisfies typeof ERROR_DETAIL_MAX;
 

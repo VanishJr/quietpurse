@@ -261,18 +261,22 @@ generated migration, so a member added to the wire's tuple without `npm run db:g
 door and leaves the column where it was — and `backend/test/db.test.ts`, which inserts every
 `CHART_KINDS` member and expects `23514` on a value outside the list, is what reds.
 
-They are in the database and not only at the door because **the client substitutes rather than
-refuses**: `web/src/analytics.ts` falls back to the first kind, so a restored value it does not know
-would draw as a different chart under the reader's own title. Length bounds get no constraint,
-because an over-long title substitutes nothing.
+They are in the database and not only at the door because **a list the client cannot fully read is
+one it re-saves verbatim, unknown rows included**: `parseChart` in `web/src/analytics.ts` refuses
+a row whose kind it does not know, `chartEntry` keeps it as unreadable, `entryWire` sends it back
+verbatim, and the screen names it rather than drawing it. A value outside the vocabulary that
+reached the table through a restore would therefore come back on every read and be refused by the
+door on every save, with the reader's whole list behind it. Length bounds get no constraint,
+because an over-long title is a row the client can read: `normaliseForSave` cuts it to the bound on
+the way back out and the screen says what was cut.
 
-**The chart id's charset is one the client composes against and cannot import as a value**, since
-a value import would bundle this package into the client. It is declared beside the other bounds on
-a chart in `backend/src/wire`, as a string source beside the `RegExp` built from it, and
-re-exported through this module; the client builds its own `RegExp` from a string pinned to
-`CHART_ID_SHAPE_SOURCE` by type. A narrowing there that the client does not follow is therefore a
-compile error in `web/` rather than what it would otherwise be — the client keeps sending an id the
-route now refuses, and the route refuses the whole list over it.
+**The chart id's charset is one the client composes against and cannot import as a value**, since a
+value import would bundle this package into the client. It is declared beside the other bounds on a
+chart in `backend/src/wire`, as a string source beside the `RegExp` built from it; the `RegExp` is
+what this module re-exports, and the client builds its own `RegExp` from a string pinned to the
+wire's `CHART_ID_SHAPE_SOURCE` by type. A narrowing there that the client does not follow is
+therefore a compile error in `web/` rather than what it would otherwise be — the client keeps
+sending an id the route now refuses, and the route refuses the whole list over it.
 
 ## The invariants no type and no test holds
 

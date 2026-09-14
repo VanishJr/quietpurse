@@ -64,7 +64,7 @@ const mount = () => renderThemed(<TransactionsScreen />);
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
 /**
- * The four booleans default to `false`, what the server sends for a row nobody touched,
+ * The booleans default to `false`, what the server sends for a row nobody touched,
  * and `categoryManual` is the one that matters: `false` hides the "back to
  * auto-detection" control, so no case sees it unless it says `categoryManual: true`,
  * and an assertion about either state is never green by construction. Each case that

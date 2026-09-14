@@ -60,7 +60,6 @@ export type ChartShape = 'series' | 'share';
 /** A tick is a calendar month or a calendar year; nothing here plots days. */
 export type Grain = 'month' | 'year';
 
-/** The list a picker renders, off a record keyed by the wire's vocabulary. */
 export const defs = <K extends string, D>(record: Record<K, D>): ({ key: K } & D)[] =>
   // the key last: the record's key wins over one a hoisted value might carry
   (Object.entries(record) as [K, D][]).map(([key, def]) => ({ ...def, key }));

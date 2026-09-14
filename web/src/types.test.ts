@@ -1,5 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, expectTypeOf, it } from 'vitest';
@@ -15,6 +14,7 @@ import type {
   RANGE_DEFS,
 } from './analytics';
 import type { MAX_ERROR_CHARS } from './api';
+import type { KIND_DEFS as INCOME_SOURCE_KIND_DEFS } from './components/IncomeSourcesBlock';
 import type { GOAL_MODE_DEFS } from './screens/IndependenceScreen';
 import type {
   CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
@@ -28,6 +28,7 @@ import type {
   ChartRange,
   ERROR_DETAIL_MAX,
   GoalMode,
+  IncomeSourceKind,
 } from './types';
 
 /**
@@ -38,32 +39,49 @@ import type {
  * erased by nothing, and bundles zod and the wire module into the built client with
  * both suites green. And it is reached through one door: `types.ts` is the only file
  * that names the backend path, so a rename on the server is one edit here and a `tsc`
- * error everywhere else. Both are read off the source with the compiler API, over
- * every form a specifier can take - the list `backend/test/wire.test.ts` walks.
+ * error everywhere else. Both are read off the program the compiler builds from
+ * `web/tsconfig.json` - every file it compiles, wherever it sits, not a directory -
+ * over every form a specifier can take (the list `backend/test/wire.test.ts` walks),
+ * and each specifier is resolved the way the compiler resolves it, so what is tested
+ * is the file it lands on and not what the text looks like.
  *
  * The pins are `satisfies typeof` the wire's exports and a record keyed by each of its
  * unions, and both assume the export carries a literal type: a wire constant widened
  * to `number`, or a tuple that lost its `as const`, makes every pin silent. The last
  * block holds that premise, and `tsc` is what reds it - at run time it is a no-op.
  *
- * SRC resolves from import.meta.url for the reason copy.test.ts states: the root of
- * this walk IS the directory this file sits in.
+ * WEB resolves from import.meta.url for the reason copy.test.ts states: the root of
+ * this walk IS the package this file sits in.
  */
-const SRC = dirname(fileURLToPath(import.meta.url));
-const BACKEND = resolve(SRC, '..', '..', 'backend');
-const DOOR = 'types.ts';
+const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const BACKEND = resolve(WEB, '..', 'backend');
+const WIRE = resolve(BACKEND, 'src', 'wire');
+const CONFIG = resolve(WEB, 'tsconfig.json');
+const DOOR = 'src/types.ts';
 
-const walk = (dir: string): string[] =>
-  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = join(dir, entry.name);
-    return entry.isDirectory() ? walk(full) : [full];
-  });
+const under = (dir: string, file: string | undefined): boolean => {
+  if (file === undefined) return false;
+  const rel = relative(dir, file);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+};
 
-const FILES = walk(SRC)
-  .filter((full) => /\.tsx?$/.test(full))
-  .map((full) => relative(SRC, full).split(sep).join('/'));
+const parsed = ts.getParsedCommandLineOfConfigFile(CONFIG, undefined, {
+  ...ts.sys,
+  onUnRecoverableConfigFileDiagnostic: (d) => {
+    throw new Error(ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+  },
+});
+if (parsed === undefined) throw new Error(`${CONFIG} did not parse`);
+const OPTIONS = parsed.options;
 
-type Crossing = { form: string; specifier: string; typeOnly: boolean };
+const program = ts.createProgram({ rootNames: parsed.fileNames, options: OPTIONS });
+const SOURCES = program
+  .getSourceFiles()
+  .filter((f) => !f.fileName.split('/').includes('node_modules') && !under(BACKEND, f.fileName));
+const FILES = SOURCES.map((f) => relative(WEB, f.fileName));
+
+type Specifier = { form: string; specifier: string; typeOnly: boolean };
+type Crossing = Specifier & { resolved: string | undefined };
 
 const literal = (node: ts.Node | undefined): string =>
   node && ts.isStringLiteral(node) ? node.text : '(dynamic)';
@@ -75,12 +93,14 @@ const literal = (node: ts.Node | undefined): string =>
  * triple-slash directive. An inline `import { type X }` is not the statement form and
  * reads as a value import here, which is the rule types.ts is held to.
  */
-const specifiersOf = (source: ts.SourceFile): Crossing[] => {
-  const found: Crossing[] = [
-    ...source.referencedFiles,
-    ...source.typeReferenceDirectives,
-    ...source.libReferenceDirectives,
-  ].map((r) => ({ form: 'reference', specifier: r.fileName, typeOnly: false }));
+const specifiersOf = (source: ts.SourceFile): Specifier[] => {
+  const reference = (form: string, refs: readonly ts.FileReference[]): Specifier[] =>
+    refs.map((r) => ({ form, specifier: r.fileName, typeOnly: false }));
+  const found: Specifier[] = [
+    ...reference('reference path', source.referencedFiles),
+    ...reference('reference types', source.typeReferenceDirectives),
+    ...reference('reference lib', source.libReferenceDirectives),
+  ];
   const collect = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node)) {
       found.push({
@@ -126,35 +146,57 @@ const specifiersOf = (source: ts.SourceFile): Crossing[] => {
 };
 
 /**
- * A relative or absolute specifier that lands under backend/, and one the walk could
- * not read as a string: it cannot be shown not to land there, so it is refused.
+ * The file the compiler lands a specifier on, under the client's own options: a
+ * `paths` or `baseUrl` mapping, a `rootDirs` overlay and a relay outside `src/` are
+ * all seen here as the file they reach. A lib directive names a lib and never a file.
  */
-const intoBackend = (file: string, specifier: string): boolean =>
-  specifier === '(dynamic)' ||
-  (!/^[^./]/.test(specifier) &&
-    !relative(BACKEND, resolve(dirname(file), specifier)).startsWith('..'));
+const resolved = (file: string, s: Specifier): string | undefined => {
+  switch (s.form) {
+    case 'reference path':
+      return ts.resolveTripleslashReference(s.specifier, file);
+    case 'reference types':
+      return ts.resolveTypeReferenceDirective(s.specifier, file, OPTIONS, ts.sys)
+        .resolvedTypeReferenceDirective?.resolvedFileName;
+    case 'reference lib':
+      return undefined;
+    default:
+      return ts.resolveModuleName(s.specifier, file, OPTIONS, ts.sys).resolvedModule
+        ?.resolvedFileName;
+  }
+};
 
-const crossingsOf = (file: string, text: string): Crossing[] =>
-  specifiersOf(ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)).filter((c) =>
-    intoBackend(file, c.specifier),
-  );
+/**
+ * A specifier that lands under backend/, and one the walk could not read as a string:
+ * it cannot be shown not to land there, so it is refused.
+ */
+const crossingsOf = (source: ts.SourceFile): Crossing[] =>
+  specifiersOf(source)
+    .map((s) => ({ ...s, resolved: resolved(source.fileName, s) }))
+    .filter((c) => c.specifier === '(dynamic)' || under(BACKEND, c.resolved));
 
 const describeCrossing = (file: string, c: Crossing): string =>
-  `${file}: ${c.form} '${c.specifier}'`;
+  `${file}: ${c.form} '${c.specifier}'` +
+  (c.resolved === undefined ? '' : ` -> backend/${relative(BACKEND, c.resolved)}`);
 
 describe('the wire is reached by type only and through one door', () => {
-  const crossings = FILES.map((file) => ({
-    file,
-    found: crossingsOf(resolve(SRC, file), readFileSync(resolve(SRC, file), 'utf8')),
+  const crossings = SOURCES.map((source) => ({
+    file: relative(WEB, source.fileName),
+    found: crossingsOf(source),
   }));
 
-  it('reads the client source tree, and the door names the wire', () => {
-    expect(FILES).toContain('api.ts');
+  it('reads the client program, and the door names the wire and nothing else under backend/', () => {
+    expect(FILES).toContain('src/api.ts');
+    // the program's files and not src/: the two configs are compiled and walked too
+    expect(FILES).toContain('vite.config.ts');
     expect(FILES).toContain(DOOR);
     const door = crossings.find((c) => c.file === DOOR);
     expect(door?.found.length, 'a door that names no wire is a check over nothing').toBeGreaterThan(
       0,
     );
+    const outsideWire = (door?.found ?? [])
+      .filter((c) => !under(WIRE, c.resolved))
+      .map((c) => describeCrossing(DOOR, c));
+    expect(outsideWire).toEqual([]);
   });
 
   it('every crossing into backend/ is the statement form import type or export type', () => {
@@ -170,27 +212,43 @@ describe('the wire is reached by type only and through one door', () => {
   });
 
   const crafted = (text: string): [string, string, boolean][] =>
-    crossingsOf(resolve(SRC, 'crafted.ts'), text).map((c) => [c.form, c.specifier, c.typeOnly]);
-  const WIRE = '../../backend/src/wire';
+    crossingsOf(
+      ts.createSourceFile(resolve(WEB, 'src', 'crafted.ts'), text, ts.ScriptTarget.Latest, true),
+    ).map((c) => [c.form, c.specifier, c.typeOnly]);
+  const TO_WIRE = '../../backend/src/wire';
 
   it('sees every form a crossing can take, the ones a top-level scan misses included', () => {
-    expect(crafted(`import type { Account } from '${WIRE}';`)).toEqual([['import', WIRE, true]]);
-    expect(crafted(`export type { Account } from '${WIRE}';`)).toEqual([['export', WIRE, true]]);
-    expect(crafted(`import { type Account } from '${WIRE}';`)).toEqual([['import', WIRE, false]]);
-    expect(crafted(`import { CHARTS_MAX } from '${WIRE}';`)).toEqual([['import', WIRE, false]]);
-    expect(crafted(`import '${WIRE}';`)).toEqual([['import', WIRE, false]]);
-    expect(crafted(`export * from '${WIRE}';`)).toEqual([['export', WIRE, false]]);
-    expect(crafted(`import wire = require('${WIRE}');`)).toEqual([['import =', WIRE, false]]);
-    expect(crafted(`const HOLE = { x: require('${WIRE}') };`)).toEqual([
-      ['require()', WIRE, false],
+    expect(crafted(`import type { Account } from '${TO_WIRE}';`)).toEqual([
+      ['import', TO_WIRE, true],
     ]);
-    expect(crafted(`const later = () => import('${WIRE}');`)).toEqual([['import()', WIRE, false]]);
-    expect(crafted(`type T = typeof import('${WIRE}');`)).toEqual([['import() type', WIRE, false]]);
-    expect(crafted(`type U = import('${WIRE}').Account;`)).toEqual([
-      ['import() type', WIRE, false],
+    expect(crafted(`export type { Account } from '${TO_WIRE}';`)).toEqual([
+      ['export', TO_WIRE, true],
     ]);
-    expect(crafted(`/// <reference path="${WIRE}/index.ts" />\nexport {};`)).toEqual([
-      ['reference', `${WIRE}/index.ts`, false],
+    expect(crafted(`import { type Account } from '${TO_WIRE}';`)).toEqual([
+      ['import', TO_WIRE, false],
+    ]);
+    expect(crafted(`import { CHARTS_MAX } from '${TO_WIRE}';`)).toEqual([
+      ['import', TO_WIRE, false],
+    ]);
+    expect(crafted(`import '${TO_WIRE}';`)).toEqual([['import', TO_WIRE, false]]);
+    expect(crafted(`export * from '${TO_WIRE}';`)).toEqual([['export', TO_WIRE, false]]);
+    expect(crafted(`import wire = require('${TO_WIRE}');`)).toEqual([
+      ['import =', TO_WIRE, false],
+    ]);
+    expect(crafted(`const HOLE = { x: require('${TO_WIRE}') };`)).toEqual([
+      ['require()', TO_WIRE, false],
+    ]);
+    expect(crafted(`const later = () => import('${TO_WIRE}');`)).toEqual([
+      ['import()', TO_WIRE, false],
+    ]);
+    expect(crafted(`type T = typeof import('${TO_WIRE}');`)).toEqual([
+      ['import() type', TO_WIRE, false],
+    ]);
+    expect(crafted(`type U = import('${TO_WIRE}').Account;`)).toEqual([
+      ['import() type', TO_WIRE, false],
+    ]);
+    expect(crafted(`/// <reference path="${TO_WIRE}/index.ts" />\nexport {};`)).toEqual([
+      ['reference path', `${TO_WIRE}/index.ts`, false],
     ]);
     expect(crafted('const dyn = require(name);')).toEqual([['require()', '(dynamic)', false]]);
     expect(crafted("import { Account } from './types';")).toEqual([]);
@@ -198,20 +256,17 @@ describe('the wire is reached by type only and through one door', () => {
   });
 
   /**
-   * A bare name is trusted above because the client resolves it from web/node_modules
-   * alone; `paths` or `baseUrl` in the client's tsconfig would let one reach backend/
-   * and make the one-file rule blind. Read through the compiler, never JSON.parse: a
-   * comment added to the file must not red this for the wrong reason, and `extends`
-   * is followed.
+   * A belt beside the resolution above, which would see a crossing through either
+   * option anyway: `paths` or `baseUrl` would let a bare name reach backend/, so the
+   * door's own text would stop saying where it goes, and the row refuses a `paths`
+   * mapping to a second copy of zod outright. Read through the compiler, never
+   * JSON.parse: a comment added to the file must not red this for the wrong reason,
+   * and `extends` is followed.
    */
   it('the client resolves a bare name from web/node_modules alone: no paths, no baseUrl', () => {
-    const file = resolve(SRC, '..', 'tsconfig.json');
-    const read = ts.readConfigFile(file, ts.sys.readFile);
-    expect(read.error).toBeUndefined();
-    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(file));
     expect(parsed.errors).toEqual([]);
-    expect(parsed.options.paths).toBeUndefined();
-    expect(parsed.options.baseUrl).toBeUndefined();
+    expect(OPTIONS.paths).toBeUndefined();
+    expect(OPTIONS.baseUrl).toBeUndefined();
   });
 });
 
@@ -231,5 +286,6 @@ describe('the pins stand on literal types, and tsc is what holds this block', ()
     expectTypeOf<ChartBreakdown>().toEqualTypeOf<keyof typeof BREAKDOWN_DEFS>();
     expectTypeOf<ChartRange>().toEqualTypeOf<keyof typeof RANGE_DEFS>();
     expectTypeOf<GoalMode>().toEqualTypeOf<keyof typeof GOAL_MODE_DEFS>();
+    expectTypeOf<IncomeSourceKind>().toEqualTypeOf<keyof typeof INCOME_SOURCE_KIND_DEFS>();
   });
 });
