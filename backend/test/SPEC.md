@@ -22,8 +22,11 @@ carry their own reasoning in their headers. Nothing below repeats them.
   to run after the test file's own, which `sequence.hooks` pinned to `'stack'` in
   `backend/vitest.config.ts` is what provides.
 - **The checks that read another file as text** instead of importing it. They exist where an
-  invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
-  to agree with one in a package that shares no build with this one.
+  invariant spans something no type can carry: a rule about the *shape* of code. A value that has
+  to agree with one in the other package is no longer that kind of invariant: the client derives
+  its wire types from `backend/src/wire` by type-only import and pins its runtime copies to the
+  module's exports by type, so the two numbers and the vocabularies meet in the client's `tsc`
+  rather than in a file here that reads the client's source.
 - **The coverage reading.** `npm run coverage` in either package runs its suite under the v8
   provider and prints a per-file table. The include is declared in `backend/vitest.config.ts` and
   `web/vitest.config.ts`: everything under `backend/src/` and `backend/scripts/` here, everything
@@ -45,12 +48,7 @@ two idioms disagree on purpose; do not fix them into agreement.
 
 The checks that read source as text: `backend/test/refusal-set.test.ts` reads the PDF importer and
 requires every refusal it can throw to be composed where the budget case can measure it;
-`backend/test/error-budget.test.ts` reads the client's own cap, because the packages share no build
-and that file is the only place the two numbers meet; `backend/test/charts-door.test.ts` reads the
-client's chart model for the same reason and holds it EQUAL to the charts route's four vocabularies,
-four length bounds and id charset rather than merely within them, because the route refuses a whole
-list and a client narrower than the door substitutes a chart the reader did not ask for while one
-wider than it composes a list nobody can save; `backend/test/summary.test.ts` reads the data
+`backend/test/summary.test.ts` reads the data
 layer's summary block and refuses a further summary query written with the scoping helper's filters
 rather than through it; `backend/test/http-body.test.ts` reads the HTTP door and refuses a route
 that reads `req.body` by any shape but the four it names — a zod parse, the JSON-body helper's own
@@ -75,11 +73,14 @@ entry point beside it would spawn servers to reach one predicate;
 `backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
 the core to name `typescript` alone and run nothing at its top level and the entry to be the
 opposite of both, because a purity check that has only ever been shown a pure file cannot
-demonstrate it can tell the two apart; and `web/src/copy.test.ts` and
-`web/src/tokens.test.ts` do the same thing from the other package, the second reading
+demonstrate it can tell the two apart; and `web/src/copy.test.ts`, `web/src/tokens.test.ts` and
+`web/src/types.test.ts` do the same thing from the other package, the second reading
 `web/src/styles/tokens.css` for declarations and the whole package for the `var()` that reaches
 them, because a custom property nothing names costs nothing at run time and so cannot be found any
-other way. **Nothing holds that list** —
+other way, and the third reading every source file there for a specifier that reaches `backend/`,
+requiring each to be the statement form `import type` or `export type` and `web/src/types.ts` to be
+the only file carrying one, because a value import of the wire compiles, is erased by nothing and
+bundles the module into the client with every suite green. **Nothing holds that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 

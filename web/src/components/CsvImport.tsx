@@ -5,10 +5,10 @@ import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
 import {
   Account,
   BalancesNotShown,
-  CsvImportResult,
   ImportConfirmed,
   ImportSourceType,
   ImportSummary,
+  StatementImportResult,
 } from '../types';
 import { Chips } from './Chips';
 
@@ -152,7 +152,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<CsvImportResult | null>(null);
+  const [result, setResult] = useState<StatementImportResult | null>(null);
   /** what landed once the summary was accepted — the backend's counts, not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
   const [discarded, setDiscarded] = useState(false);

@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest';
 import { ACCOUNTS, INCOME_SOURCES, TRANSFER_RULES } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
-import { IncomeSourceDef, Transaction, TransferRule } from '../types';
+import { IncomeSourceDef, Transaction, TransferRuleWithMatches } from '../types';
 import { TransactionsScreen } from './TransactionsScreen';
 
 /**
@@ -24,9 +24,13 @@ const ROWS: Transaction[] = [
     date: '2026-07-14',
     description: 'REWE Berlin',
     category: 'food',
+    categoryManual: false,
     transfer: false,
     transferManual: null,
     refund: false,
+    incomeSourceManual: false,
+    recurring: false,
+    oneOff: false,
   },
   {
     id: 'tx-2',
@@ -37,9 +41,13 @@ const ROWS: Transaction[] = [
     date: '2026-07-15',
     description: 'BVG Ticket',
     category: 'transport',
+    categoryManual: false,
     transfer: false,
     transferManual: null,
     refund: false,
+    incomeSourceManual: false,
+    recurring: false,
+    oneOff: false,
   },
 ];
 
@@ -56,10 +64,11 @@ const mount = () => renderThemed(<TransactionsScreen />);
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
 /**
- * `categoryManual` is deliberately not defaulted: it is optional on the mirror, so a
- * row that omits it hides the "back to auto-detection" control and every assertion
- * about the two states would then be green by construction. Each case that cares says
- * which state it means.
+ * The four booleans default to `false`, what the server sends for a row nobody touched,
+ * and `categoryManual` is the one that matters: `false` hides the "back to
+ * auto-detection" control, so no case sees it unless it says `categoryManual: true`,
+ * and an assertion about either state is never green by construction. Each case that
+ * cares still says which state it means.
  */
 const row = (patch: Partial<Transaction> & { id: string }): Transaction => ({
   accountId: 'acc-1',
@@ -69,9 +78,13 @@ const row = (patch: Partial<Transaction> & { id: string }): Transaction => ({
   date: '2026-07-14',
   description: 'a row',
   category: 'other',
+  categoryManual: false,
   transfer: false,
   transferManual: null,
   refund: false,
+  incomeSourceManual: false,
+  recurring: false,
+  oneOff: false,
   ...patch,
 });
 
@@ -529,7 +542,7 @@ const SOURCES: IncomeSourceDef[] = [
   { id: 'family', label: 'Support', kind: 'external', patterns: [], sort: 1, builtin: true },
 ];
 
-const RULE: TransferRule = {
+const RULE: TransferRuleWithMatches = {
   id: 7,
   description: 'REWE Berlin',
   accountId: 'acc-1',

@@ -23,28 +23,23 @@
  * Editing is the same dialog
  *
  * An existing chart opens straight at step two with its own values in it, and "Change
- * shape" walks back to step one without losing them. Which is why `ChartSpec` carries
+ * shape" walks back to step one without losing them. Which is why `Chart` carries
  * both `metrics` and `breakdown` at all times: switching a donut to a line and back
  * must not quietly discard the half that was not being read.
  */
 import { useEffect, useState } from 'react';
 import {
   BREAKDOWNS,
-  Breakdown,
-  ChartKind,
   CHART_KINDS,
   CHART_TITLE_MAX,
-  ChartSpec,
   blankChart,
   chartKind,
-  Metric,
   METRICS,
   RANGES,
-  RangeKey,
   suggestedTitle,
 } from '../analytics';
 import { useChartData } from '../chartData';
-import { Account } from '../types';
+import { Account, Chart, ChartBreakdown, ChartKind, ChartMetric, ChartRange } from '../types';
 import { ChartGlyph } from './ChartGlyphs';
 import { ChartPlot } from './ChartPlot';
 import { Sheet } from './Sheet';
@@ -60,18 +55,18 @@ const PREVIEW_HEIGHT = 190;
  * SAVING it: the state is reachable, it is named in red under the chips, and "Create
  * chart" stays disabled until it is out of it.
  */
-const incomplete = (spec: ChartSpec): boolean =>
+const incomplete = (spec: Chart): boolean =>
   chartKind(spec.kind).shape === 'series' && spec.metrics.length === 0;
 
 interface Props {
   open: boolean;
   /** The chart being changed, or null to build a new one. */
-  editing: ChartSpec | null;
+  editing: Chart | null;
   accounts: Account[] | null;
   /** Why the list is null, when it is null because the read failed. */
   accountsError: string | null;
   onClose: () => void;
-  onSave: (spec: ChartSpec) => void;
+  onSave: (spec: Chart) => void;
 }
 
 export function ChartWizard({
@@ -82,7 +77,7 @@ export function ChartWizard({
   onClose,
   onSave,
 }: Props) {
-  const [draft, setDraft] = useState<ChartSpec | null>(null);
+  const [draft, setDraft] = useState<Chart | null>(null);
   const [step, setStep] = useState<'kind' | 'detail'>('kind');
   /**
    * Whether the reader has typed a name of their own. Until they have, the box
@@ -115,7 +110,7 @@ export function ChartWizard({
   const nameOf = (id: string | null): string | null =>
     id ? (accounts?.find((a) => a.id === id)?.name ?? null) : null;
 
-  const suggest = (spec: ChartSpec): string => suggestedTitle(spec, nameOf(spec.accountId));
+  const suggest = (spec: Chart): string => suggestedTitle(spec, nameOf(spec.accountId));
 
   const pickKind = (kind: ChartKind) => {
     const next = draft ? { ...draft, kind } : blankChart(kind);
@@ -123,7 +118,7 @@ export function ChartWizard({
     setStep('detail');
   };
 
-  const patch = (change: Partial<ChartSpec>) =>
+  const patch = (change: Partial<Chart>) =>
     setDraft((d) => {
       if (!d) return d;
       const next = { ...d, ...change };
@@ -229,10 +224,10 @@ function DetailStep({
   onSave,
   editing,
 }: {
-  draft: ChartSpec;
+  draft: Chart;
   accounts: Account[] | null;
   accountsError: string | null;
-  patch: (change: Partial<ChartSpec>) => void;
+  patch: (change: Partial<Chart>) => void;
   onName: (title: string) => void;
   onBack: () => void;
   onCancel: () => void;
@@ -263,7 +258,7 @@ function DetailStep({
    * Adding one walks `METRICS` rather than appending, so the series keep the palette's
    * order however they were clicked: Income is always the green one and always first.
    */
-  const toggleMetric = (m: Metric) => {
+  const toggleMetric = (m: ChartMetric) => {
     const has = draft.metrics.includes(m);
     patch({
       metrics: has
@@ -277,7 +272,7 @@ function DetailStep({
     // "by source" is not offered for one account — a product decision left open, not a
     // limit of the API; see BREAKDOWNS. Moving the reader off it here rather than
     // leaving the question lit on a choice the chips no longer carry.
-    const breakdown: Breakdown =
+    const breakdown: ChartBreakdown =
       id !== null && stillOffered?.allAccountsOnly ? 'expense-categories' : draft.breakdown;
     patch({ accountId: id, breakdown });
   };
@@ -349,7 +344,7 @@ function DetailStep({
                   key={r.key}
                   label={r.label}
                   on={draft.range === r.key}
-                  onPick={() => patch({ range: r.key as RangeKey })}
+                  onPick={() => patch({ range: r.key as ChartRange })}
                 />
               ))}
             </div>
@@ -402,7 +397,7 @@ function Preview({
   accounts,
   accountsError,
 }: {
-  draft: ChartSpec;
+  draft: Chart;
   accounts: Account[] | null;
   accountsError: string | null;
 }) {

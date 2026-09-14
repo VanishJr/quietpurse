@@ -10,11 +10,9 @@ import {
   shareFromSummary,
   suggestedTitle,
   ticksOf,
-  ChartSpec,
-  RangeKey,
   SummarySplits,
 } from './analytics';
-import { AccountMonthTotals, MonthTotals } from './types';
+import { AccountMonthTotals, Chart, ChartRange, MonthTotals } from './types';
 
 /**
  * The workspace's arithmetic, which is the half of it a screen test cannot reach:
@@ -143,7 +141,7 @@ describe('a series across ticks', () => {
  */
 describe('the name a tick goes on the axis under', () => {
   const labels = (range: string): string[] =>
-    seriesFromMonths([], ticksOf(rangeDef(range as RangeKey), AUG), 'month').map((p) => p.label);
+    seriesFromMonths([], ticksOf(rangeDef(range as ChartRange), AUG), 'month').map((p) => p.label);
 
   it('leaves the year off a window that is inside one', () => {
     expect(labels('3m')).toEqual(['Jun', 'Jul', 'Aug']);
@@ -235,7 +233,7 @@ describe('the parts of one period', () => {
 });
 
 describe('what a chart is called', () => {
-  const spec: ChartSpec = {
+  const spec: Chart = {
     id: 'c1',
     kind: 'line',
     title: '',

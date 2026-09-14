@@ -1,5 +1,5 @@
 /**
- * One `ChartSpec` and its data, drawn.
+ * One `Chart` and its data, drawn.
  *
  * Six kinds, one component, because everything around a plot is the same whichever it
  * is: the axis colours, the tooltip, the "animation off" rule, the legend of swatches
@@ -54,12 +54,13 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { ChartSpec, drawnShares, METRICS, rankingSeriesName, SharePoint } from '../analytics';
+import { drawnShares, METRICS, rankingSeriesName, SharePoint } from '../analytics';
 import { ChartData } from '../chartData';
 import { CATEGORY_LABELS } from '../categories';
 import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
+import { Chart } from '../types';
 
 /** The gutter the value axis takes, the same on every plot that has one. */
 const Y_AXIS_WIDTH = 52;
@@ -93,7 +94,7 @@ const RAMP = [
 ];
 
 interface Props {
-  spec: ChartSpec;
+  spec: Chart;
   data: ChartData;
   height: number;
 }

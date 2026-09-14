@@ -81,7 +81,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            backend/package-lock.json
+            web/package-lock.json
+      # the client's typecheck compiles backend/src/wire, which imports zod from
+      # backend/node_modules: green wherever `npm run setup` ran, TS2307 here without this
+      - run: npm ci
+        working-directory: backend
       - run: npm ci
       # `npm run build` type-checks too, but as its first half: a type error would
       # report as a build failure. Split so the checklist says which one broke.

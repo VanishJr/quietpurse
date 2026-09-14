@@ -3,7 +3,7 @@ import { api } from '../api';
 import { CATEGORIES, categoryLabel } from '../categories';
 import { fmtMoney } from '../format';
 import { useTheme } from '../theme';
-import { Budget } from '../types';
+import { BudgetProgress } from '../types';
 import { Sheet } from './Sheet';
 
 /**
@@ -19,7 +19,7 @@ export function BudgetsBlock() {
    * save() clears the error before its own request resolves, so a boolean beside the
    * gate below is not a holder.
    */
-  const [budgets, setBudgets] = useState<Budget[] | null>(null);
+  const [budgets, setBudgets] = useState<BudgetProgress[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** category the editor is open for; '' = picking a category for a new budget */
   const [editing, setEditing] = useState<string | null>(null);

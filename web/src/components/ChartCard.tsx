@@ -35,16 +35,16 @@
  * SVG is not readable, and in jsdom it is not even measurable — recharts sizes itself
  * against a 0x0 box. It is what a screen reader gets, and what a test asserts on.
  */
-import { ChartSpec, drawnShares, METRICS, suggestedTitle } from '../analytics';
+import { drawnShares, METRICS, suggestedTitle } from '../analytics';
 import { ChartData, useChartData } from '../chartData';
 import { fmtMoney } from '../format';
-import { Account } from '../types';
+import { Account, Chart } from '../types';
 import { ChartPlot } from './ChartPlot';
 
 const CHART_HEIGHT = 300;
 
 interface Props {
-  spec: ChartSpec;
+  spec: Chart;
   /** null while the list is still being read — see `useChartData`. */
   accounts: Account[] | null;
   /** ...and why, when it is null because the read failed rather than not finished. */
@@ -89,7 +89,7 @@ export function ChartCard({ spec, accounts, accountsError }: Props) {
  * is the total and the largest part of it, which is the sentence somebody reads a
  * donut to arrive at anyway.
  */
-function Figures({ spec, data }: { spec: ChartSpec; data: ChartData }) {
+function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
 
   if (data.shape === 'series') {
     const drawn = METRICS.filter((m) => spec.metrics.includes(m.key));
@@ -161,7 +161,7 @@ function DataTable({
   data,
   title,
 }: {
-  spec: ChartSpec;
+  spec: Chart;
   data: ChartData;
   /** The card's own, so the caption and the heading above it cannot disagree. */
   title: string;

@@ -4,7 +4,7 @@
  * The screen used to be one analysis, wired straight into the two endpoints that
  * answer it — a period pager, two total cards, a donut and twelve bars, in that order,
  * for everybody. It is a workspace now: the reader builds the charts they want, each
- * one a `ChartSpec`, and the screen draws whatever specs exist. So the questions the
+ * one a `Chart`, and the screen draws whatever specs exist. So the questions the
  * old screen answered by being shaped that way — which measure, over which window, for
  * which account — are values in an object here, and the arithmetic that answers them
  * is a pure function of data the caller already fetched.
@@ -33,27 +33,37 @@
 import { monthOf, toCents } from './accounts';
 import { categoryLabel } from './categories';
 import { isoDay, MONTHS_SHORT } from './format';
-import { CategorySummary, IncomeSourceTotal } from './types';
+import {
+  CategorySummary,
+  Chart,
+  ChartBreakdown,
+  ChartKind,
+  ChartMetric,
+  ChartRange,
+  IncomeSourceTotal,
+} from './types';
+import type {
+  CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
+  CHART_ID_MAX as WIRE_CHART_ID_MAX,
+  CHART_ID_SHAPE_SOURCE as WIRE_CHART_ID_SHAPE_SOURCE,
+  CHART_TITLE_MAX as WIRE_CHART_TITLE_MAX,
+  CHARTS_MAX as WIRE_CHARTS_MAX,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // the vocabulary
 // ---------------------------------------------------------------------------
 
-export type ChartKind = 'line' | 'column' | 'area' | 'donut' | 'ranking' | 'radar';
-
 /** Measures across ticks, or the parts of one period. See the header. */
 export type ChartShape = 'series' | 'share';
 
-/** What a series chart plots. `net` is income minus expenses — the bottom line. */
-export type Metric = 'income' | 'expense' | 'net';
-
-/** What a share chart splits a period by. */
-export type Breakdown = 'expense-categories' | 'income-categories' | 'income-sources';
-
-export type RangeKey = '3m' | '6m' | '12m' | '24m' | '3y' | '5y';
-
 /** A tick is a calendar month or a calendar year; nothing here plots days. */
 export type Grain = 'month' | 'year';
+
+/** The list a picker renders, off a record keyed by the wire's vocabulary. */
+export const defs = <K extends string, D>(record: Record<K, D>): ({ key: K } & D)[] =>
+  // the key last: the record's key wins over one a hoisted value might carry
+  (Object.entries(record) as [K, D][]).map(([key, def]) => ({ ...def, key }));
 
 export interface ChartKindDef {
   key: ChartKind;
@@ -69,51 +79,47 @@ export interface ChartKindDef {
   comparative?: true;
 }
 
-export const CHART_KINDS: ChartKindDef[] = [
-  {
-    key: 'line',
+export const KIND_DEFS = {
+  line: {
     name: 'Line',
     shape: 'series',
     blurb: 'A measure over time. The shape of the trend, read at a glance.',
   },
-  {
-    key: 'column',
+  column: {
     name: 'Column',
     shape: 'series',
     blurb: 'One bar per tick. For reading single months off against each other.',
   },
-  {
-    key: 'area',
+  area: {
     name: 'Area',
     shape: 'series',
     blurb: 'The line with the ground filled in — volume rather than direction.',
   },
-  {
-    key: 'donut',
+  donut: {
     name: 'Donut',
     shape: 'share',
     blurb: 'What a period is made of, as shares of one total.',
   },
-  {
-    key: 'ranking',
+  ranking: {
     name: 'Ranking',
     shape: 'share',
     blurb: 'The same parts as bars, biggest first — the easiest to read exactly.',
   },
-  {
-    key: 'radar',
+  radar: {
     name: 'Radar',
     shape: 'share',
     comparative: true,
     blurb: 'The shape of a period laid over the one before it. For what changed.',
   },
-];
+} satisfies Record<ChartKind, Omit<ChartKindDef, 'key'>>;
+
+export const CHART_KINDS: ChartKindDef[] = defs(KIND_DEFS);
 
 export const chartKind = (key: ChartKind): ChartKindDef =>
   CHART_KINDS.find((k) => k.key === key) ?? CHART_KINDS[0];
 
 export interface MetricDef {
-  key: Metric;
+  key: ChartMetric;
   label: string;
   /**
    * The palette key its stroke and its swatch both read. A key rather than a colour
@@ -123,14 +129,16 @@ export interface MetricDef {
   ink: 'good' | 'accent' | 'net';
 }
 
-export const METRICS: MetricDef[] = [
-  { key: 'income', label: 'Income', ink: 'good' },
-  { key: 'expense', label: 'Expenses', ink: 'accent' },
-  { key: 'net', label: 'Net', ink: 'net' },
-];
+export const METRIC_DEFS = {
+  income: { label: 'Income', ink: 'good' },
+  expense: { label: 'Expenses', ink: 'accent' },
+  net: { label: 'Net', ink: 'net' },
+} satisfies Record<ChartMetric, Omit<MetricDef, 'key'>>;
+
+export const METRICS: MetricDef[] = defs(METRIC_DEFS);
 
 export interface BreakdownDef {
-  key: Breakdown;
+  key: ChartBreakdown;
   label: string;
   /**
    * Whether the wizard offers it for one account. Not a limit of the API: `/api/summary`
@@ -143,57 +151,35 @@ export interface BreakdownDef {
   allAccountsOnly?: true;
 }
 
-export const BREAKDOWNS: BreakdownDef[] = [
-  { key: 'expense-categories', label: 'Expenses by category' },
-  { key: 'income-categories', label: 'Income by category' },
-  { key: 'income-sources', label: 'Income by source', allAccountsOnly: true },
-];
+export const BREAKDOWN_DEFS = {
+  'expense-categories': { label: 'Expenses by category' },
+  'income-categories': { label: 'Income by category' },
+  'income-sources': { label: 'Income by source', allAccountsOnly: true },
+} satisfies Record<ChartBreakdown, Omit<BreakdownDef, 'key'>>;
+
+export const BREAKDOWNS: BreakdownDef[] = defs(BREAKDOWN_DEFS);
 
 export interface RangeDef {
-  key: RangeKey;
+  key: ChartRange;
   label: string;
   grain: Grain;
   /** How many ticks, ending at the one `today` is in. */
   count: number;
 }
 
-export const RANGES: RangeDef[] = [
-  { key: '3m', label: '3 months', grain: 'month', count: 3 },
-  { key: '6m', label: '6 months', grain: 'month', count: 6 },
-  { key: '12m', label: '12 months', grain: 'month', count: 12 },
-  { key: '24m', label: '24 months', grain: 'month', count: 24 },
-  { key: '3y', label: '3 years', grain: 'year', count: 3 },
-  { key: '5y', label: '5 years', grain: 'year', count: 5 },
-];
+export const RANGE_DEFS = {
+  '3m': { label: '3 months', grain: 'month', count: 3 },
+  '6m': { label: '6 months', grain: 'month', count: 6 },
+  '12m': { label: '12 months', grain: 'month', count: 12 },
+  '24m': { label: '24 months', grain: 'month', count: 24 },
+  '3y': { label: '3 years', grain: 'year', count: 3 },
+  '5y': { label: '5 years', grain: 'year', count: 5 },
+} satisfies Record<ChartRange, Omit<RangeDef, 'key'>>;
 
-export const rangeDef = (key: RangeKey): RangeDef =>
+export const RANGES: RangeDef[] = defs(RANGE_DEFS);
+
+export const rangeDef = (key: ChartRange): RangeDef =>
   RANGES.find((r) => r.key === key) ?? RANGES[2];
-
-/**
- * One chart on the screen, and the whole of what is remembered about it.
- *
- * `metrics` and `breakdown` are both present whatever the kind is, and only one of
- * them is read. That is deliberate: switching a chart from a donut to a line in the
- * wizard keeps the measures it had, so a reader who picked the wrong shape does not
- * lose the rest of the answer on the way back.
- */
-export interface ChartSpec {
-  id: string;
-  kind: ChartKind;
-  /** What the tab says. The reader's, and never rewritten under them. */
-  title: string;
-  /** null — every account together, which is what the summary endpoints answer. */
-  accountId: string | null;
-  /**
-   * Series charts. May be empty while the reader is between two choices in the wizard —
-   * the chips enforce no minimum — and a spec in that state cannot be saved. Anything
-   * that draws one says so; see `ChartPlot`.
-   */
-  metrics: Metric[];
-  /** Share charts. */
-  breakdown: Breakdown;
-  range: RangeKey;
-}
 
 // ---------------------------------------------------------------------------
 // ticks and bounds
@@ -420,7 +406,7 @@ export interface SummarySplits {
   incomeBySource: IncomeSourceTotal[];
 }
 
-export function shareFromSummary(summary: SummarySplits, breakdown: Breakdown): SharePoint[] {
+export function shareFromSummary(summary: SummarySplits, breakdown: ChartBreakdown): SharePoint[] {
   if (breakdown === 'income-sources') {
     return summary.incomeBySource
       .map((s) => ({ key: s.source, label: s.label, value: s.total }))
@@ -465,9 +451,9 @@ export function compareShares(now: SharePoint[], before: SharePoint[]): Compared
 // naming a chart
 // ---------------------------------------------------------------------------
 
-const metricLabel = (m: Metric): string => METRICS.find((d) => d.key === m)?.label ?? m;
+const metricLabel = (m: ChartMetric): string => METRICS.find((d) => d.key === m)?.label ?? m;
 
-const breakdownLabel = (b: Breakdown): string =>
+const breakdownLabel = (b: ChartBreakdown): string =>
   BREAKDOWNS.find((d) => d.key === b)?.label ?? b;
 
 /**
@@ -476,7 +462,7 @@ const breakdownLabel = (b: Breakdown): string =>
  * out of the same `METRICS` vocabulary every other series in this file is named from.
  * Without a name recharts prints the series' `dataKey` instead: `value : 1,082 EUR`.
  */
-export const rankingSeriesName = (b: Breakdown): string =>
+export const rankingSeriesName = (b: ChartBreakdown): string =>
   metricLabel(b === 'expense-categories' ? 'expense' : 'income');
 
 /** A list a person reads: "Income", "Income and Expenses", "Income, Expenses and Net". */
@@ -503,7 +489,7 @@ export function joinWords(words: string[]): string {
  * account list.
  */
 export function suggestedTitle(
-  spec: Omit<ChartSpec, 'id' | 'title'>,
+  spec: Omit<Chart, 'id' | 'title'>,
   accountName?: string | null,
 ): string {
   const what =
@@ -534,19 +520,12 @@ export function suggestedTitle(
  */
 const LEGACY_KEY = 'finto.analytics.charts';
 
-/**
- * The four lengths the charts route refuses past.
- *
- * EQUAL to the server's own (`backend/src/db/index.ts`), never merely under them: a
- * client bound below the server's silently truncates what the server would have
- * taken, and one above it composes a list the server refuses whole — and the refusal
- * is of the WHOLE list, so one over-long title is a workspace that never saves again.
- * `backend/test/charts-door.test.ts` reads this file as source and holds the pair.
- */
-export const CHARTS_MAX = 100;
-export const CHART_TITLE_MAX = 120;
-export const CHART_ID_MAX = 64;
-export const CHART_ACCOUNT_ID_MAX = 64;
+export const CHARTS_MAX = 100 satisfies typeof WIRE_CHARTS_MAX;
+export const CHART_TITLE_MAX = 120 satisfies typeof WIRE_CHART_TITLE_MAX;
+export const CHART_ID_MAX = 64 satisfies typeof WIRE_CHART_ID_MAX;
+export const CHART_ACCOUNT_ID_MAX = 64 satisfies typeof WIRE_CHART_ACCOUNT_ID_MAX;
+export const CHART_ID_SHAPE_SOURCE =
+  '^[A-Za-z0-9._~-]+$' satisfies typeof WIRE_CHART_ID_SHAPE_SOURCE;
 
 const KINDS = new Set<string>(CHART_KINDS.map((k) => k.key));
 const METRIC_KEYS = new Set<string>(METRICS.map((m) => m.key));
@@ -556,14 +535,14 @@ const RANGE_KEYS = new Set<string>(RANGES.map((r) => r.key));
 /**
  * One stored object, checked field by field, or null.
  *
- * Nothing that arrives here can be trusted into a `ChartSpec` on the strength of
+ * Nothing that arrives here can be trusted into a `Chart` on the strength of
  * having parsed: it was written by an older version of this file, by a hand-edited
  * backup, or by a version of the app whose vocabulary is wider than this one's. A
  * throw would take the whole screen down on first paint, so a shape this version does
  * not recognise answers null — and `chartEntry` below is what decides what happens to
  * it, which is no longer "it is dropped".
  */
-function parseChart(raw: unknown): ChartSpec | null {
+function parseChart(raw: unknown): Chart | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   /*
@@ -581,11 +560,11 @@ function parseChart(raw: unknown): ChartSpec | null {
   if (typeof o.title !== 'string') return null;
   if (o.accountId !== null && typeof o.accountId !== 'string') return null;
   const metrics = Array.isArray(o.metrics)
-    ? o.metrics.filter((m): m is Metric => typeof m === 'string' && METRIC_KEYS.has(m))
+    ? o.metrics.filter((m): m is ChartMetric => typeof m === 'string' && METRIC_KEYS.has(m))
     : [];
   const breakdown =
     typeof o.breakdown === 'string' && BREAKDOWN_KEYS.has(o.breakdown)
-      ? (o.breakdown as Breakdown)
+      ? (o.breakdown as ChartBreakdown)
       : 'expense-categories';
   return {
     id: o.id,
@@ -602,7 +581,7 @@ function parseChart(raw: unknown): ChartSpec | null {
      */
     metrics,
     breakdown,
-    range: o.range as RangeKey,
+    range: o.range as ChartRange,
   };
 }
 
@@ -616,7 +595,7 @@ function parseChart(raw: unknown): ChartSpec | null {
  * showed it to anybody. It is kept where it was, sent back verbatim, and named on
  * screen instead.
  */
-export type ChartEntry = { known: true; spec: ChartSpec } | { known: false; raw: unknown };
+export type ChartEntry = { known: true; spec: Chart } | { known: false; raw: unknown };
 
 export const chartEntry = (raw: unknown): ChartEntry => {
   const spec = parseChart(raw);
@@ -627,11 +606,10 @@ export const chartEntry = (raw: unknown): ChartEntry => {
 export const entryWire = (entry: ChartEntry): unknown => (entry.known ? entry.spec : entry.raw);
 
 /** The charts that can be drawn, in list order. The dock is built from these. */
-export const entrySpecs = (entries: ChartEntry[]): ChartSpec[] =>
+export const entrySpecs = (entries: ChartEntry[]): Chart[] =>
   entries.flatMap((e) => (e.known ? [e.spec] : []));
 
-/** The id `chartSchema` accepts: the URL names a chart by it, unescaped. */
-const ID_SHAPE = /^[A-Za-z0-9._~-]+$/;
+const ID_SHAPE = new RegExp(CHART_ID_SHAPE_SOURCE);
 
 /** What `normaliseForSave` had to change, so the screen can say so. */
 export interface Normalised {
@@ -728,7 +706,7 @@ export function normaliseForSave(entries: ChartEntry[]): Normalised {
  * What this browser saved back when the charts were this browser's. Read once, by the
  * migration, and only for a workspace that has never saved — see `AnalyticsScreen`.
  */
-export function readLegacyCharts(): ChartSpec[] {
+export function readLegacyCharts(): Chart[] {
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(LEGACY_KEY);
@@ -740,7 +718,7 @@ export function readLegacyCharts(): ChartSpec[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(parseChart).filter((c): c is ChartSpec => c !== null);
+    return parsed.map(parseChart).filter((c): c is Chart => c !== null);
   } catch {
     return [];
   }
@@ -764,13 +742,13 @@ export const newChartId = (): string =>
   `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 /** The chart the wizard starts from once a shape has been picked. */
-export function blankChart(kind: ChartKind): ChartSpec {
+export function blankChart(kind: ChartKind): Chart {
   const draft = {
     kind,
     accountId: null,
-    metrics: ['expense'] as Metric[],
-    breakdown: 'expense-categories' as Breakdown,
-    range: '12m' as RangeKey,
+    metrics: ['expense'] as ChartMetric[],
+    breakdown: 'expense-categories' as ChartBreakdown,
+    range: '12m' as ChartRange,
   };
   return { id: newChartId(), title: suggestedTitle(draft), ...draft };
 }

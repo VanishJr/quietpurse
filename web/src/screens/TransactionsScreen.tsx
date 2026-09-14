@@ -10,7 +10,7 @@ import {
   IncomeSource,
   IncomeSourceDef,
   Transaction,
-  TransferRule,
+  TransferRuleWithMatches,
   TxFocus,
 } from '../types';
 
@@ -50,7 +50,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
-  const [rules, setRules] = useState<TransferRule[]>([]);
+  const [rules, setRules] = useState<TransferRuleWithMatches[]>([]);
   /** income source catalog — chips in the sheet and badges in the list */
   const [sources, setSources] = useState<IncomeSourceDef[]>([]);
   /** category picker open in the sheet */
@@ -524,7 +524,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                   id="tx-oneoff"
                   type="checkbox"
                   className="switch"
-                  checked={selected.oneOff ?? false}
+                  checked={selected.oneOff}
                   disabled={saving}
                   onChange={(e) => applyOneOff(selected, e.target.checked)}
                 />

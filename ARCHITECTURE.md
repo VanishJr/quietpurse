@@ -52,7 +52,7 @@ previous one.
 | Module | What it owns |
 |---|---|
 | `app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `index.ts` so the whole route table is testable over real HTTP |
-| `wire/index.ts` | The declared answer of every route, as zod schemas the backend's types are inferred from; the vocabularies and bounds the client composes against. Imports nothing but zod |
+| `wire/index.ts` | The declared answer of every route, as zod schemas the backend's types are inferred from and the client's are derived from by type-only import; the vocabularies and bounds the client composes against, which it pins its own copies to by type. Imports nothing but zod |
 | `index.ts` | Process start: the lock (`lock.ts`), the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
 | `lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the takeover of a stale one under a marker the process never clears for another, and a release that removes only its own pid |
 | `config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |
@@ -76,7 +76,9 @@ previous one.
 
 `web/src/screens/` holds Overview, Transactions, Analytics, Independence and Settings;
 `web/src/api.ts` is the only place that talks to the API, and it also owns how a failed request
-becomes a sentence.
+becomes a sentence. `web/src/types.ts` is the client's one door to `backend/src/wire`: every wire
+type the client reads is a type-only re-export of the server's declaration, so a field renamed
+on the server is a `tsc` error in `web/` and never an `undefined` on a screen.
 
 ## One person, one folder
 

@@ -48,8 +48,15 @@ const BASE: Routes = {
  * ACCOUNTS itself carries a hidden row, so it is not what this endpoint returns.
  */
 const PICKABLE: Account[] = [
-  { id: 'acc-1', provider: 'upload', name: 'Sparkasse Giro', currency: 'EUR', balance: 1234.5 },
-  { id: 'acc-3', provider: 'upload', name: 'N26', currency: 'EUR', balance: 40 },
+  {
+    id: 'acc-1',
+    provider: 'upload',
+    name: 'Sparkasse Giro',
+    currency: 'EUR',
+    balance: 1234.5,
+    hidden: false,
+  },
+  { id: 'acc-3', provider: 'upload', name: 'N26', currency: 'EUR', balance: 40, hidden: false },
 ];
 
 const ACCOUNT_ROUTES: Routes = { ...BASE, 'GET /api/accounts': () => ok(PICKABLE) };
