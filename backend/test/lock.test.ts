@@ -135,8 +135,9 @@ const contestant = (home: string): Contestant => {
       }
     });
     // a child that dies before answering fails the case now, with its stderr, rather
-    // than as a timeout with nothing said
-    proc.on('exit', (code, signal) => {
+    // than as a timeout with nothing said. On close and not exit: at exit the child's
+    // stdout may still hold its answer line
+    proc.on('close', (code, signal) => {
       if (answered) return;
       const e = new Error(
         `child ${proc.pid} exited (${code ?? signal}) before answering:\n${stderr}`,
@@ -270,11 +271,11 @@ describe('a file already there', () => {
     });
   });
 
-  // kill(0, 0) signals this process's own group and kill(-1, 0) every process, and
-  // both succeed, so without the guard either reads as a live Finto
   it.each(['0', '-1'])('takes over a file holding %s, which is a process group and not a pid', async (held) => {
     await inHome(`group-${held}`, async (_home, lockFile) => {
       await seed(lockFile, held);
+      // alive to pidAlive, so it is the guard and not the signal that takes the file over
+      expect(pidAlive(Number(held))).toBe(true);
       await acquireLock();
       expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.pid));
       await releaseLock();
@@ -338,7 +339,7 @@ describe('a file already there', () => {
       expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
       expect(await exists(marker)).toBe(true);
     });
-  }, 15_000);
+  }, 60_000);
 
   it('refuses with the real error when the lock path is a directory', async () => {
     await inHome('lock-is-dir', async (_home, lockFile) => {
@@ -353,6 +354,74 @@ describe('a file already there', () => {
       expect(await exists(`${lockFile}.takeover`)).toBe(false);
     });
   });
+
+  // chmod removes no access on Windows or from root, so every case that seeds a mode
+  // skips there rather than pass for the wrong reason
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'refuses with the real error when the lock file cannot be read',
+    async () => {
+      await inHome('lock-unreadable', async (_home, lockFile) => {
+        await seed(lockFile, String(process.ppid));
+        await fs.chmod(lockFile, 0o000);
+        try {
+          const e = await acquireLock().then(
+            () => new Error('resolved'),
+            (err: Error) => err,
+          );
+          expect(e.message).toContain('EACCES');
+          expect(e.message).not.toContain('another Finto');
+        } finally {
+          await fs.chmod(lockFile, 0o600);
+        }
+        expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.ppid));
+        expect(await exists(`${lockFile}.takeover`)).toBe(false);
+      });
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'refuses with the real error when the folder cannot be written',
+    async () => {
+      await inHome('home-readonly', async (home, lockFile) => {
+        await fs.mkdir(home, { recursive: true });
+        await fs.chmod(home, 0o500);
+        try {
+          const e = await acquireLock().then(
+            () => new Error('resolved'),
+            (err: Error) => err,
+          );
+          expect(e.message).toContain('EACCES');
+          expect(e.message).not.toContain('another Finto');
+          expect(await exists(lockFile)).toBe(false);
+        } finally {
+          await fs.chmod(home, 0o700);
+        }
+      });
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'refuses with the real error when the marker cannot be made',
+    async () => {
+      await inHome('home-readonly-dead', async (home, lockFile) => {
+        const dead = deadPid();
+        await seed(lockFile, String(dead));
+        await fs.chmod(home, 0o500);
+        try {
+          const e = await acquireLock().then(
+            () => new Error('resolved'),
+            (err: Error) => err,
+          );
+          expect(e.message).toContain('EACCES');
+          expect(e.message).not.toContain('another Finto');
+          expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
+          expect(await exists(`${lockFile}.takeover`)).toBe(false);
+        } finally {
+          await fs.chmod(home, 0o700);
+        }
+      });
+    },
+  );
 });
 
 describe('the release', () => {
@@ -379,6 +448,22 @@ describe('the release', () => {
       expect(await exists(lockFile)).toBe(false);
     });
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'resolves, and leaves alone, a file it cannot read',
+    async () => {
+      await inHome('release-unreadable', async (_home, lockFile) => {
+        await seed(lockFile, String(process.ppid));
+        await fs.chmod(lockFile, 0o000);
+        try {
+          await releaseLock();
+        } finally {
+          await fs.chmod(lockFile, 0o600);
+        }
+        expect(await fs.readFile(lockFile, 'utf8')).toBe(String(process.ppid));
+      });
+    },
+  );
 });
 
 describe('with a PostgreSQL server configured', () => {

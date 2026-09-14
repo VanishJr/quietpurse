@@ -14,8 +14,7 @@ const MARKER_WAIT_STEPS = 300;
 const MARKER_WAIT_MS = 10;
 
 const NO_FILE = Symbol('no file');
-const UNREADABLE = Symbol('unreadable');
-type Holder = string | typeof NO_FILE | typeof UNREADABLE;
+type Holder = string | typeof NO_FILE;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -33,10 +32,11 @@ export const pidAlive = (pid: number): boolean => {
   }
 };
 
+// only ENOENT is an answer; a file this process cannot read may hold a live pid
 const readText = (lockFile: string): Promise<Holder> =>
   fs.readFile(lockFile, 'utf8').catch((e: NodeJS.ErrnoException) => {
     if (e.code === 'ENOENT') return NO_FILE;
-    return UNREADABLE;
+    throw e;
   });
 
 async function readHolder(lockFile: string): Promise<Holder> {
@@ -54,7 +54,7 @@ async function readHolder(lockFile: string): Promise<Holder> {
  * cannot each remove the other's fresh claim. EEXIST on the marker alone means another
  * taker is inside; anything else is a disk that refused and is thrown.
  */
-async function takeOver(lockFile: string, seen: Holder): Promise<void> {
+async function takeOver(lockFile: string, seen: string): Promise<void> {
   const marker = markerPath(lockFile);
   for (let i = 0; ; i += 1) {
     try {
@@ -90,7 +90,7 @@ export async function acquireLock(): Promise<void> {
     }
     const held = await readHolder(lockFile);
     if (held === NO_FILE) continue;
-    const pid = typeof held === 'string' ? parseInt(held, 10) : NaN;
+    const pid = parseInt(held, 10);
     // 0 and a negative number are a process group to kill(), never a Finto
     if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && pidAlive(pid)) {
       throw new Error(
@@ -108,6 +108,7 @@ export async function acquireLock(): Promise<void> {
 export async function releaseLock(): Promise<void> {
   if (config.databaseUrl) return;
   const lockFile = lockPath();
-  if ((await readText(lockFile)) !== String(process.pid)) return;
+  const held = await readText(lockFile).catch(() => undefined);
+  if (held !== String(process.pid)) return;
   await fs.rm(lockFile, { force: true }).catch(() => undefined);
 }

@@ -112,6 +112,7 @@ database instead and let the app create it again; if you have run the test suite
   db/            the database
   statements/    every statement you uploaded, under a name you can recognise
   finto.lock     the running app's process id, so a second copy refuses to open the same folder
+  finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
 ```
 
 Set `FINTO_HOME` to keep it somewhere else. The whole folder is yours to copy, back up or

@@ -86,6 +86,7 @@ Everything the app keeps is under `FINTO_HOME`, `~/Finto` by default:
   db/            the PGlite data directory
   statements/    <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
   finto.lock     the running process's pid
+  finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
 ```
 
 There is no sign-in and no tenant. Whoever can reach the port owns the data behind it, so
