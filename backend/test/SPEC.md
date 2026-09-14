@@ -17,7 +17,10 @@ carry their own reasoning in their headers. Nothing below repeats them.
   `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
   door records an answer mismatch into and the drain the setup file empties in its after hooks, so
   the case that produced the mismatch is the case that fails with it; the rule it holds is
-  `backend/src/wire`'s.
+  `backend/src/wire`'s. The drain runs in `afterAll` as well as `afterEach`, because an answer a
+  file issues from its own `afterAll` has no case left to fail — and it needs the setup file's hook
+  to run after the test file's own, which `sequence.hooks` pinned to `'stack'` in
+  `backend/vitest.config.ts` is what provides.
 - **The checks that read another file as text** instead of importing it. They exist where an
   invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
   to agree with one in a package that shares no build with this one.

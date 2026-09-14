@@ -18,12 +18,15 @@ current version and list inside it, is declared as its own shape beside the rout
 **The backend's own type for every one of those shapes is the declaration's inference.** There is
 no hand-written wire shape anywhere else in `backend/src`: `backend/src/types.ts`, the data layer,
 the ingestion surface, the settings modules and the independence computation re-export their names
-from here. Two derivations narrow a wire shape without redeclaring it, and both are the whole of
-what is permitted: `NewTransaction` in `backend/src/types.ts` omits from `Transaction` the id and
-every field the data layer assigns after insert, so a parser states what a statement states and
-nothing else; and the ingestion surface's `ImportSummary` puts a compile-time brand on the two
-fields only its reconciliation may fill, over the wire's own `totals` and `balances` types. A third
-copy is a second declaration, and a declaration that exists twice agrees with the route by luck.
+from here. A module may narrow a wire shape — by `Omit`, `Exclude`, `Extract` or a compile-time
+brand — or re-compose one from the wire's own pieces, and put on the derivation what the wire does
+not carry: `NewTransaction` in `backend/src/types.ts` omits from `Transaction` the id and every
+field the data layer assigns after insert, so a parser states what a statement states and nothing
+else, and adds the key a format's own stable reference to an operation plugs into; the ingestion
+surface's `ImportSummary` puts a brand on the two fields only its reconciliation may fill, over the
+wire's own `totals` and `balances` types. What a module may not do is write a wire shape's fields
+out again on its own: a type for a wire shape that no type operator ties back to the declaration
+is a second declaration, and a declaration that exists twice agrees with the route by luck.
 
 **The vocabularies and bounds the client composes against.** The chart kinds, ranges, breakdowns
 and measures, the chart length bounds, the id charset — as a string source beside the
@@ -107,10 +110,10 @@ is caught by Express and answered as `internal error`, with the reason in a sile
 wrapper's own work sits inside a `try` for the same reason, and the original is still called with the
 original body whatever the check found — the case's own assertions see the true answer. The `res.send`
 half exists for one line: a declared JSON route edited to answer `res.type('json').send(...)` would
-otherwise be green with an unparsed body. A string sent on a `json` route with a success status and
-no `json` call behind it is recorded as such; a route writing to the socket through `res.end` or
-`res.write` directly is the residual nothing here sees. What the wrapper cannot see: a route the suite
-never hits.
+otherwise be green with an unparsed body. Anything sent through `send` on a `json` route with a
+success status and no `json` call behind it is recorded as such; a route writing to the socket
+through `res.end` or `res.write` directly is the residual nothing here sees. What the wrapper cannot
+see: a route the suite never hits.
 
 **A walk over the router at import holds registration.** After the last route is registered,
 `assertAnswersDeclared` reads every route off the app's router and requires the set of keys to equal
@@ -120,7 +123,15 @@ every test file that imports the app reds at collection, and the CI job that sta
 reds too. Routes are registered on `app` directly so the declaration walk can see them: a router
 mounted under a prefix carries its routes inside its own stack, where both directions of the
 equality would pass over a route nobody declared, so the walk refuses a mounted router outright
-rather than recursing with a prefix it could compose wrongly.
+rather than recursing with a prefix it could compose wrongly. A handler mounted with `use` rather
+than registered as a route is the sibling form: it answers with no route for the wrapper to key its
+body by, so no declaration could ever cover it, and both directions of the equality pass over it
+too. The walk therefore refuses every non-route layer it does not recognise, and it recognises by
+function name against the door's own middlewares — the answer check, the response headers and
+request log, the origin check, the JSON body parser, the static file server and the error handler —
+so the app's non-route layers are those and nothing else, and an anonymous handler or a foreign one
+throws at import naming itself. A rename inside Express of one of the two it does not own reds the
+boot loud rather than letting anything through.
 
 ## The invariants no type and no test holds
 

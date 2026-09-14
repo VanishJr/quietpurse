@@ -34,6 +34,7 @@ import {
   type Budget,
   CHART_METRICS,
   type CategoryRule,
+  type CategoryRuleCounts,
   type Chart,
   type ChartList,
   type ChartMetric,
@@ -2372,9 +2373,7 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
  * two can never be taken through different filters and matches - overridden go wrong
  * as soon as one account is hidden.
  */
-export async function countCategoryRuleMatches(
-  pattern: string,
-): Promise<{ matches: number; overridden: number }> {
+export async function countCategoryRuleMatches(pattern: string): Promise<CategoryRuleCounts> {
   const rows = await rowsOf<{ matches: string; overridden: string }>(
     sql`SELECT COUNT(*) AS matches,
                COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden

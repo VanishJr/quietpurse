@@ -1,9 +1,10 @@
 /**
  * Two rules about src/wire that no type holds. The module may name no dependency but
- * zod, because the client's own tsc compiles it in row 76b and pulls in whatever it
- * imports - a drizzle-orm reached through db/schema.ts would drag the data layer into
- * that typecheck. And every declared JSON body is strict all the way down: a plain
- * z.object strips the keys it does not know and certifies a body it never saw.
+ * zod, because the client's own tsc will compile it once the client derives its types
+ * from it, and pulls in whatever it imports - a drizzle-orm reached through
+ * db/schema.ts would drag the data layer into that typecheck. And every declared JSON
+ * body is strict all the way down: a plain z.object strips the keys it does not know
+ * and certifies a body it never saw.
  */
 import fs from 'fs';
 import path from 'path';
@@ -89,7 +90,7 @@ describe('src/wire names no dependency but zod', () => {
   const crafted = (text: string): string[] =>
     specifiersOf(ts.createSourceFile('crafted.ts', text, ts.ScriptTarget.Latest, true));
 
-  it('sees every form a dependency can take, including the three 068 did not need', () => {
+  it('sees every form a dependency can take, the ones a top-level scan misses included', () => {
     expect(crafted("import { sql } from 'drizzle-orm';")).toEqual(['drizzle-orm']);
     expect(crafted("export type { Db } from '../db';")).toEqual(['../db']);
     expect(crafted("import fs = require('node:fs');")).toEqual(['node:fs']);
@@ -187,7 +188,7 @@ describe('every declared JSON body is strict all the way down', () => {
    * objects the module's own text declares - every strictObject() and every extend()
    * - which also refuses a declared shape that no route and no refusal reaches.
    */
-  it('reaches every object shape the module declares, and each exactly once', () => {
+  it('reaches every object shape the module declares, and nothing the module does not', () => {
     const text = fs.readFileSync(path.join(WIRE_DIR, 'index.ts'), 'utf8');
     const declaredObjects =
       (text.match(/\.strictObject\(/g) ?? []).length + (text.match(/\.extend\(/g) ?? []).length;

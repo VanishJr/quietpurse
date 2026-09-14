@@ -227,6 +227,36 @@ describe('what the walk refuses at import', () => {
     expect(() => registeredAnswerKeys(t)).toThrow(/a router is mounted on the app/);
   });
 
+  it('an express() app mounted under a prefix, which is a router by another name', () => {
+    const t = withRoutes((t) => {
+      const sub = express();
+      sub.get('/probe', (_req, res) => {
+        res.json({ ok: true });
+      });
+      t.use('/api', sub);
+    });
+    expect(() => registeredAnswerKeys(t)).toThrow(/a router is mounted on the app/);
+  });
+
+  it('a handler mounted with app.use, anonymous or named, which answers with no route to key it', () => {
+    const anonymous = withRoutes((t) => {
+      t.use('/api/probe', (_req, res) => {
+        res.json({ ok: true });
+      });
+    });
+    expect(() => registeredAnswerKeys(anonymous)).toThrow(
+      /a middleware the door does not name is on the app: anonymous - /,
+    );
+    const named = withRoutes((t) => {
+      t.use(function probeMiddleware(_req, res) {
+        res.json({ ok: true });
+      });
+    });
+    expect(() => registeredAnswerKeys(named)).toThrow(
+      /a middleware the door does not name is on the app: probeMiddleware - /,
+    );
+  });
+
   it('keys a route once per method, upper-cased, and a regexp route by its source', () => {
     const t = withRoutes((t) => {
       t.get('/x', (_req, res) => res.end());

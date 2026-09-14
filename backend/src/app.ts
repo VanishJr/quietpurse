@@ -104,7 +104,6 @@ import {
 
 export const app = express();
 
-/** The setting test/setup.ts puts a reporter under; with nothing there the check below is inert. */
 export const ANSWER_CHECK = 'answer check';
 
 export type AnswerReporter = (mismatch: string) => void;
@@ -191,7 +190,7 @@ const answer = <R extends JsonRoute>(res: express.Response, route: R, body: Answ
   res.status(ANSWERS[route].status).json(body);
 };
 
-app.use((req, res, next) => {
+const headersAndLog: express.RequestHandler = (req, res, next) => {
   const startedAt = Date.now();
   // Nothing may frame this app. There is no sign-in, so a page that gets it into an
   // iframe can walk the person through their own Delete with their own session -
@@ -207,7 +206,9 @@ app.use((req, res, next) => {
     logHttp.debug(`${req.method} ${req.originalUrl} -> ${res.statusCode} ${Date.now() - startedAt}ms`);
   });
   next();
-});
+};
+
+app.use(headersAndLog);
 
 /**
  * Where the request came from, which is the whole of the boundary: there is no
@@ -286,7 +287,7 @@ const originIsLocal = (origin: string): boolean => {
   }
 };
 
-app.use('/api', (req, res, next) => {
+const originCheck: express.RequestHandler = (req, res, next) => {
   const host = req.headers.host;
   const origin = req.headers.origin;
   const site = req.headers['sec-fetch-site'];
@@ -307,7 +308,9 @@ app.use('/api', (req, res, next) => {
     return;
   }
   next();
-});
+};
+
+app.use('/api', originCheck);
 
 // the ceiling is raised from the default for one caller: a backup restored as JSON
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
@@ -1948,7 +1951,12 @@ type RouteLayer = {
   handle?: { stack?: unknown; name?: string };
 };
 
-/** Every route registered on the app, keyed as ANSWERS keys them. */
+const DOOR_MIDDLEWARES = new Set<string>([
+  ...[answerCheck, headersAndLog, originCheck, errorHandler].map((fn) => fn.name),
+  'jsonParser',
+  'serveStatic',
+]);
+
 export function registeredAnswerKeys(target: express.Express): string[] {
   const keys: string[] = [];
   for (const layer of target.router.stack as RouteLayer[]) {
@@ -1959,6 +1967,10 @@ export function registeredAnswerKeys(target: express.Express): string[] {
     } else if (Array.isArray(layer.handle?.stack) || layer.handle?.name === 'mounted_app') {
       throw new Error(
         'a router is mounted on the app: routes are registered on app directly so the declaration walk can see them',
+      );
+    } else if (!DOOR_MIDDLEWARES.has(layer.handle?.name ?? '')) {
+      throw new Error(
+        `a middleware the door does not name is on the app: ${layer.handle?.name || 'anonymous'} - the app's non-route layers are the door's named middlewares and nothing else`,
       );
     }
   }

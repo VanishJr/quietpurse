@@ -236,7 +236,8 @@ export const incomeSources = pgTable('income_sources', {
 });
 
 // sql.raw, not a parameter: drizzle-kit serialises a check into DDL, where a
-// bound $1 is not a thing. The values are this file's own literals.
+// bound $1 is not a thing. The values are the wire module's `as const` tuples, nothing
+// a caller sends.
 const inList = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(', ');
 
 /** The list is replaced whole, so `sort` is assigned 0..n-1 on every write. */

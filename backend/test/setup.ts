@@ -48,9 +48,7 @@ initDb(db);
 await seedDefaults();
 
 // Drained in afterAll as well as afterEach: an answer issued from a file's own afterAll
-// would otherwise be dropped when the next file installs a fresh reporter. After hooks
-// run in reverse registration order (sequence.hooks: stack), so both run after the
-// test file's own.
+// would otherwise be dropped when the next file installs a fresh reporter.
 const { app } = await import('../src/app');
 const { installAnswerCheck } = await import('./answers');
 const answers = installAnswerCheck(app);
