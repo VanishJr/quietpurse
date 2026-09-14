@@ -23,6 +23,7 @@ const ACCOUNT: Account = {
   name: 'Sparkasse Giro',
   currency: 'EUR',
   balance: 1234.5,
+  hidden: false,
 };
 
 /**

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { BUDGETS } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
-import { Budget, BudgetsResponse } from '../types';
+import { BudgetProgress, BudgetsResponse } from '../types';
 import { BudgetsBlock } from './BudgetsBlock';
 
 /**
@@ -95,7 +95,7 @@ interface Written {
   monthly: number | null;
 }
 
-const budgetServer = (initial: Budget[]) => {
+const budgetServer = (initial: BudgetProgress[]) => {
   let list = initial;
   const puts: Written[] = [];
   const routes: Routes = {

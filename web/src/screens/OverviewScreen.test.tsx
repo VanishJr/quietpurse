@@ -63,9 +63,13 @@ const txn = (date: string, amount: number, patch: Partial<Transaction> = {}): Tr
   currency: 'EUR',
   description: 'Row',
   category: 'other',
+  categoryManual: false,
   transfer: false,
   transferManual: null,
   refund: false,
+  incomeSourceManual: false,
+  recurring: false,
+  oneOff: false,
   date,
   amount,
   ...patch,
@@ -162,6 +166,7 @@ const account = (patch: Partial<Account>): Account => ({
   name: 'Account',
   currency: 'EUR',
   balance: 0,
+  hidden: false,
   ...patch,
 });
 

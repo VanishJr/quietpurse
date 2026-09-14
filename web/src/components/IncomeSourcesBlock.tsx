@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { defs } from '../analytics';
 import { api } from '../api';
 import { Chips } from './Chips';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
@@ -13,13 +14,14 @@ import { IncomeSourceDef, IncomeSourceKind } from '../types';
  */
 
 /** The two buckets, named by what they do to the figures rather than by the wire's word. */
-const KINDS: { key: IncomeSourceKind; label: string }[] = [
-  { key: 'own', label: 'Your own earnings' },
-  { key: 'external', label: 'Support from outside' },
-];
+export const KIND_DEFS = {
+  own: { label: 'Your own earnings' },
+  external: { label: 'Support from outside' },
+} satisfies Record<IncomeSourceKind, { label: string }>;
 
-const kindLabel = (kind: IncomeSourceKind): string =>
-  KINDS.find((k) => k.key === kind)!.label;
+const KINDS: { key: IncomeSourceKind; label: string }[] = defs(KIND_DEFS);
+
+const kindLabel = (kind: IncomeSourceKind): string => KIND_DEFS[kind].label;
 
 const splitPatterns = (raw: string): string[] =>
   raw

@@ -48,10 +48,18 @@ them back. Held by `backend/test/wire.test.ts`, which walks every import, re-exp
 `import()`, `typeof import()` and triple-slash directive in the module's source over the whole tree
 and refuses any specifier that is not `zod` or a relative path inside this directory.
 
-**The file is written to compile under the client's compiler options as well as this package's.**
-ESM-style imports, `export type` for every type-only re-export, no unused local, no `require`, no
-`__dirname`. Nothing holds that until the client imports it; the specifier walk holds the half it
-can see.
+**The file is compiled by two compilers, and the second is the client's.** `web/src/types.ts`
+re-exports this module's types, so the client's `tsc` — `ESNext` modules, `bundler` resolution,
+`isolatedModules`, `noUnusedLocals`, `noUnusedParameters` — compiles this file beside this package's
+own `commonjs` one. An edit only the client's refuses — a type re-export without `export type`, an
+unused local — is green in both backend jobs and red in the `web` job, and that coupling is what
+holds the file to `export type` on every type-only re-export and nothing left unused. An `export =`
+is refused by both — by this package's compiler because the module has other exports, and by the
+client's because it compiles ES modules; an `import x = require()` is refused by both, because
+`backend/tsconfig.test.json` compiles `backend/test/` and everything it reaches as ES modules; a
+`require()` of anything but zod or a file in this directory is refused by the specifier walk
+whichever compiler runs; a `const enum`, a `__dirname` and a `require('zod')` are refused by
+neither.
 
 ## What a declaration says, and how it is read
 
@@ -147,8 +155,13 @@ server is what holds it; the fix is `Number()` in the route, never a coerced or 
 types it replaced, and each sentence was read against the mapper or the query it describes when it
 landed. The next move re-reads them; age is not evidence.
 
-**What the client will build on.** The client imports this module by type only — the shapes, the
-`typeof` of the tuples for its own pins, the bounds — so it carries no runtime dependency the client
-would have to bundle. Its typecheck resolves `zod` through this package's dependencies, so the CI job
-that typechecks the client needs this package's dependencies installed first; today that job installs
-its own alone.
+**What the client builds on.** The client reaches this module by type only and through one door,
+`web/src/types.ts`: the shapes and the union types under this module's own names — the chart
+vocabularies', the goal modes' and the income source kinds' among them, which its picker records are
+keyed by — and `typeof` of the constants its runtime copies are pinned to: `CHARTS_MAX`,
+`CHART_TITLE_MAX`, `CHART_ID_MAX`, `CHART_ACCOUNT_ID_MAX`, `CHART_ID_SHAPE_SOURCE` and
+`ERROR_DETAIL_MAX`. It never names the tuples and imports no value, so it carries no runtime
+dependency it would have to bundle; `web/src/types.test.ts` refuses a value import and a second
+door. Its typecheck resolves `zod` through this package's dependencies, so the `web` job in
+`.github/workflows/ci.yml` installs this package's dependencies before its own, and `npm run setup`
+installs this package first.

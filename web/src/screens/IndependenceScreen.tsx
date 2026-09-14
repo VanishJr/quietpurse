@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { defs } from '../analytics';
 import { api } from '../api';
 import { categoryLabel } from '../categories';
 import { NO_FIGURE, tooltipPercent, tooltipProps } from '../chartTooltip';
@@ -40,10 +41,12 @@ const WINDOW_OPTIONS = [3, 6, 12];
 /** "what if" scenarios: how many EUR/mo to trim from the threshold base */
 const WHATIF_OPTIONS = [0, 100, 200, 300, 500];
 
-const GOAL_MODES: { key: GoalMode; label: string }[] = [
-  { key: 'baseline', label: 'Bare minimum' },
-  { key: 'lifestyle', label: 'Current lifestyle' },
-];
+export const GOAL_MODE_DEFS = {
+  baseline: { label: 'Bare minimum' },
+  lifestyle: { label: 'Current lifestyle' },
+} satisfies Record<GoalMode, { label: string }>;
+
+const GOAL_MODES: { key: GoalMode; label: string }[] = defs(GOAL_MODE_DEFS);
 
 export function IndependenceScreen() {
   const { ink, categoryColor } = useTheme();

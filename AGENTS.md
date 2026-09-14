@@ -123,10 +123,11 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   Everything a person edits lives in the `settings` table.
 - **A diagnostic is not delivered until it survives every cap between composition and screen.**
   `ERROR_DETAIL_MAX` bounds what reaches `imports.error_detail`, and `web/src/api.ts` shows that
-  whole budget. So ordering decides which clause is *dropped*, not which is read: compose
-  actionable text first and let refinements yield, and include an appended clause whole or not at
-  all — never cut mid-token, since a truncated tail names things that do not exist. Before
-  trusting either number, read them; both have moved once already.
+  whole budget — its `MAX_ERROR_CHARS` is pinned to `ERROR_DETAIL_MAX` by type, so the two cannot
+  differ. So ordering decides which clause is *dropped*, not which is read: compose actionable
+  text first and let refinements yield, and include an appended clause whole or not at all —
+  never cut mid-token, since a truncated tail names things that do not exist. Before trusting
+  the number, read it; it has moved once already.
 - **Silent success is the failure mode that matters.** A crash is recoverable; a 200 answer on
   data the user did not upload, or a partial import reported as complete, is not. Where a choice
   is between refusing loudly and proceeding quietly, refuse.

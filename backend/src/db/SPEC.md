@@ -32,9 +32,10 @@ those files; it is here now. What stayed beside the code is what an edit to its 
   format rather than beside the query that renumbers with them, so the format stays readable in
   one file — a key written one way and read another is a re-import that duplicates a person's
   whole history.
-- **The diagnostic budget** for a failed import. What holds it is
-  `backend/test/error-budget.test.ts`, which reads the client's own cap as source, because the two
-  packages share no build.
+- **The diagnostic budget** for a failed import, `ERROR_DETAIL_MAX`, declared in `backend/src/wire`
+  and re-exported through this module. What holds the client's cap to it is the client's own `tsc`:
+  `MAX_ERROR_CHARS` in `web/src/api.ts` is written `satisfies typeof ERROR_DETAIL_MAX` over a
+  type-only import of the wire, so the two cannot differ.
 
 ## Where the boundary runs
 
@@ -260,17 +261,22 @@ generated migration, so a member added to the wire's tuple without `npm run db:g
 door and leaves the column where it was — and `backend/test/db.test.ts`, which inserts every
 `CHART_KINDS` member and expects `23514` on a value outside the list, is what reds.
 
-They are in the database and not only at the door because **the client substitutes rather than
-refuses**: `web/src/analytics.ts` falls back to the first kind, so a restored value it does not know
-would draw as a different chart under the reader's own title. Length bounds get no constraint,
-because an over-long title substitutes nothing.
+They are in the database and not only at the door because **a list the client cannot fully read is
+one it re-saves verbatim, unknown rows included**: `parseChart` in `web/src/analytics.ts` refuses
+a row whose kind it does not know, `chartEntry` keeps it as unreadable, `entryWire` sends it back
+verbatim, and the screen names it rather than drawing it. A value outside the vocabulary that
+reached the table through a restore would therefore come back on every read and be refused by the
+door on every save, with the reader's whole list behind it. Length bounds get no constraint,
+because an over-long title is a row the client can read: `normaliseForSave` cuts it to the bound on
+the way back out and the screen says what was cut.
 
-**The chart id's charset is one the client composes against and cannot import**, since the two
-packages share no build. It is declared beside the other bounds on a chart in `backend/src/wire`
-and re-exported through this module, which is where `backend/test/charts-door.test.ts` reads it
-until the client derives its own copy from the wire and that test retires. A narrowing there that
-the client does not follow means the client keeps sending an id the route now refuses — and the
-route refuses the whole list over it.
+**The chart id's charset is one the client composes against and cannot import as a value**, since a
+value import would bundle this package into the client. It is declared beside the other bounds on a
+chart in `backend/src/wire`, as a string source beside the `RegExp` built from it; the `RegExp` is
+what this module re-exports, and the client builds its own `RegExp` from a string pinned to the
+wire's `CHART_ID_SHAPE_SOURCE` by type. A narrowing there that the client does not follow is
+therefore a compile error in `web/` rather than what it would otherwise be — the client keeps
+sending an id the route now refuses, and the route refuses the whole list over it.
 
 ## The invariants no type and no test holds
 

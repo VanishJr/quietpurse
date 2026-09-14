@@ -151,6 +151,11 @@ cd web && npm run build       # tsc --noEmit + build, into web/dist
 The dev server proxies `/api` to `http://localhost:4000`, so there is no address to
 configure; set `BACKEND_URL` if the backend runs elsewhere.
 
+`cd web && npm run build` (and `npm run typecheck`) needs `backend/` installed: the client's
+types are the server's own declaration in `backend/src/wire`, and compiling it resolves `zod`
+from `backend/node_modules`. `npm run setup` installs `backend/` before it builds `web/`, and the
+order is load-bearing: reversed, the client's typecheck fails on `zod`.
+
 The database schema lives in `backend/src/db/schema.ts`. SQL migrations are generated from
 it (`npm run db:generate`) into `backend/drizzle/` and applied when the app starts.
 

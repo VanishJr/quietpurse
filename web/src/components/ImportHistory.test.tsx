@@ -398,6 +398,7 @@ describe('one account, filtered by the server', () => {
     name: 'Sparkasse Giro',
     currency: 'EUR',
     balance: 1234.5,
+    hidden: false,
   };
 
   const mountFor = (account?: Account) =>

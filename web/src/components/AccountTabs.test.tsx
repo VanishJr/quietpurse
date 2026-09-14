@@ -19,6 +19,7 @@ const acct = (id: string, name: string): Account => ({
   name,
   currency: 'EUR',
   balance: 0,
+  hidden: false,
 });
 
 /** Four accounts is two pages, which is the smallest list that has a wrong page. */

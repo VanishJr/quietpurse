@@ -1,5 +1,5 @@
 /**
- * A `ChartSpec` turned into requests, and the answers turned into something drawable.
+ * A `Chart` turned into requests, and the answers turned into something drawable.
  *
  * The one place in the workspace that fetches. `analytics.ts` holds the model and the
  * arithmetic and is pure; the components draw; this is the seam, and it is a seam
@@ -23,7 +23,6 @@ import {
   boundsOf,
   ChartShape,
   chartKind,
-  ChartSpec,
   ComparedPoint,
   compareShares,
   positiveShares,
@@ -35,7 +34,7 @@ import {
   SharePoint,
   ticksOf,
 } from './analytics';
-import { Account } from './types';
+import { Account, Chart } from './types';
 
 export type ChartData =
   | {
@@ -72,7 +71,7 @@ export interface ChartLoad {
  * each time. What a kind adds beyond its shape is whether it wants the window before
  * this one, and that is the other half of the key.
  */
-const fetchKey = (spec: ChartSpec): string => {
+const fetchKey = (spec: Chart): string => {
   const kind = chartKind(spec.kind);
   return [
     kind.shape,
@@ -85,7 +84,7 @@ const fetchKey = (spec: ChartSpec): string => {
 };
 
 async function loadSeries(
-  spec: ChartSpec,
+  spec: Chart,
   accountId: string | null,
   today: Date,
 ): Promise<ChartData> {
@@ -111,7 +110,7 @@ async function loadSeries(
 }
 
 async function loadShare(
-  spec: ChartSpec,
+  spec: Chart,
   accountId: string | null,
   today: Date,
 ): Promise<ChartData> {
@@ -196,7 +195,7 @@ async function loadShare(
  * single `data` object was introduced to fix, one range selector further along.
  */
 export function useChartData(
-  spec: ChartSpec,
+  spec: Chart,
   accounts: Account[] | null,
   /** Why the list is null, when it is null because reading it failed. */
   accountsError: string | null = null,

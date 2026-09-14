@@ -4,7 +4,6 @@ import {
   AccountSummary,
   AppSettings,
   BudgetsResponse,
-  CsvImportResult,
   ImportConfirmed,
   ImportList,
   ImportRecord,
@@ -13,15 +12,16 @@ import {
   Independence,
   IncomeSourceDef,
   RecurringSummary,
+  StatementImportResult,
   Summary,
   Transaction,
-  TransferRule,
+  TransferRuleWithMatches,
 } from '../types';
 
 /**
- * Response bodies for the route tables, declared with the client's own types: when
- * types.ts drifts from what the tests assume, tsc fails here rather than a screen
- * quietly rendering a shape the backend no longer sends.
+ * Response bodies for the route tables, declared with the wire's types through
+ * `types.ts`: a field the server renames fails `tsc` here rather than a screen quietly
+ * rendering a shape the server no longer sends.
  */
 
 export const APP_SETTINGS: AppSettings = { baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko'] };
@@ -33,6 +33,7 @@ export const ACCOUNTS: Account[] = [
     name: 'Sparkasse Giro',
     currency: 'EUR',
     balance: 1234.5,
+    hidden: false,
   },
   {
     id: 'acc-2',
@@ -50,7 +51,7 @@ export const RECURRING: RecurringSummary = {
   groups: [],
 };
 
-export const TRANSFER_RULES: TransferRule[] = [];
+export const TRANSFER_RULES: TransferRuleWithMatches[] = [];
 export const INCOME_SOURCES: IncomeSourceDef[] = [];
 export const TRANSACTIONS: Transaction[] = [];
 
@@ -170,7 +171,7 @@ export const PRESETS = {
 /** The fixed import id keeps `POST /api/imports/imp-1/confirm` a literal route key. */
 export const IMPORT_ID = 'imp-1';
 
-export const summaryResult = (patch: Partial<ImportSummary> = {}): CsvImportResult => ({
+export const summaryResult = (patch: Partial<ImportSummary> = {}): StatementImportResult => ({
   outcome: 'awaiting_confirmation',
   summary: {
     importId: IMPORT_ID,
@@ -250,7 +251,7 @@ export const importsResponse = (
 
 export const IMPORTS = importsResponse();
 
-export const DUPLICATE: CsvImportResult = {
+export const DUPLICATE: StatementImportResult = {
   outcome: 'duplicate',
   importId: 'imp-0',
   accountId: 'acc-9',

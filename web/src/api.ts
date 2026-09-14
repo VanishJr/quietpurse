@@ -6,11 +6,16 @@ import {
   AppSettings,
   BaselineResponse,
   BudgetsResponse,
-  CategoryRule,
-  CategoryRuleCounts,
-  CsvImportResult,
+  BudgetsWritten,
+  CategoryRuleCreated,
+  CategoryRuleWithCounts,
+  Deleted,
+  DocumentDeleted,
   ImportConfirmed,
+  ImportDeleted,
+  ImportDiscarded,
   ImportList,
+  ImportPresets,
   Independence,
   IncomeSource,
   IncomeSourceDef,
@@ -18,10 +23,13 @@ import {
   MonthlySummary,
   RecurringSummary,
   Settings,
+  StatementImportResult,
   Summary,
   Transaction,
-  TransferRule,
+  TransferRuleCreated,
+  TransferRuleWithMatches,
 } from './types';
+import type { ERROR_DETAIL_MAX } from './types';
 import { Category } from './categories';
 import { ChartEntry, chartEntry, entryWire } from './analytics';
 
@@ -35,12 +43,12 @@ export const API_BASE = '';
 export const apiLabel = (): string => window.location.origin;
 
 /**
- * The backend composes a refusal to exactly this budget (ERROR_DETAIL_MAX in
- * backend/src/db/index.ts) and orders the clauses of the long ones on the premise
- * that all of it is read. Cutting it shorter here drops the clause it put last and
- * ends the sentence mid-token.
+ * The backend composes a refusal to exactly this budget (`ERROR_DETAIL_MAX`, on the
+ * wire) and orders the clauses of the long ones on the premise that all of it is read.
+ * Cutting it shorter here drops the clause it put last and ends the sentence
+ * mid-token.
  */
-const MAX_ERROR_CHARS = 500;
+export const MAX_ERROR_CHARS = 500 satisfies typeof ERROR_DETAIL_MAX;
 
 /** A proxy's error page is unbounded and is not written for a person to read. */
 export const MAX_RAW_BODY_CHARS = 200;
@@ -264,7 +272,7 @@ export const api = {
       json('PATCH', { transfer }),
     ),
 
-  transferRules: () => request<TransferRule[]>('/api/transfer-rules'),
+  transferRules: () => request<TransferRuleWithMatches[]>('/api/transfer-rules'),
 
   /**
    * "Mark every transaction like this as a transfer" — a rule by the transaction's
@@ -272,13 +280,10 @@ export const api = {
    * transaction from then on.
    */
   addTransferRule: (txId: string) =>
-    request<{ rule: TransferRule; matches: number }>(
-      '/api/transfer-rules',
-      json('POST', { txId }),
-    ),
+    request<TransferRuleCreated>('/api/transfer-rules', json('POST', { txId })),
 
   deleteTransferRule: (id: number) =>
-    request<{ deleted: boolean }>(`/api/transfer-rules/${id}`, json('DELETE')),
+    request<Deleted>(`/api/transfer-rules/${id}`, json('DELETE')),
 
   summary: (from: string, to: string) =>
     allAccountsBody<Summary>(`/api/summary?from=${from}&to=${to}`, 'summary'),
@@ -352,7 +357,7 @@ export const api = {
   setBaselineItem: (label: string, monthly: number | null) =>
     request<BaselineResponse>('/api/baseline', json('PUT', { label, monthly })),
 
-  categoryRules: () => request<(CategoryRule & CategoryRuleCounts)[]>('/api/category-rules'),
+  categoryRules: () => request<CategoryRuleWithCounts[]>('/api/category-rules'),
 
   /**
    * A "description contains … -> category" rule (+ a full recompute on the backend).
@@ -366,22 +371,16 @@ export const api = {
    * row and carries neither.
    */
   addCategoryRule: (target: { txId: string } | { pattern: string }, category: Category) =>
-    request<{ rule: CategoryRule } & CategoryRuleCounts>(
-      '/api/category-rules',
-      json('POST', { ...target, category }),
-    ),
+    request<CategoryRuleCreated>('/api/category-rules', json('POST', { ...target, category })),
 
   deleteCategoryRule: (id: number) =>
-    request<{ deleted: boolean }>(`/api/category-rules/${id}`, json('DELETE')),
+    request<Deleted>(`/api/category-rules/${id}`, json('DELETE')),
 
   budgets: () => request<BudgetsResponse>('/api/budgets'),
 
   /** monthly = null removes the budget from the category. */
   setBudget: (category: string, monthly: number | null) =>
-    request<{ budgets: { category: string; monthly: number }[] }>(
-      '/api/budgets',
-      json('PUT', { category, monthly }),
-    ),
+    request<BudgetsWritten>('/api/budgets', json('PUT', { category, monthly })),
 
   incomeSources: () => request<IncomeSourceDef[]>('/api/income-sources'),
 
@@ -395,7 +394,7 @@ export const api = {
     request<IncomeSourceDef>(`/api/income-sources/${encodeURIComponent(id)}`, json('PUT', patch)),
 
   deleteIncomeSource: (id: string) =>
-    request<{ deleted: boolean }>(`/api/income-sources/${encodeURIComponent(id)}`, json('DELETE')),
+    request<Deleted>(`/api/income-sources/${encodeURIComponent(id)}`, json('DELETE')),
 
   appSettings: () => request<AppSettings>('/api/app-settings'),
   updateAppSettings: (patch: Partial<AppSettings>) =>
@@ -410,7 +409,7 @@ export const api = {
    * below is what makes them part of the user's data.
    */
   importStatement: (form: FormData) =>
-    request<CsvImportResult>('/api/imports', { method: 'POST', body: form }),
+    request<StatementImportResult>('/api/imports', { method: 'POST', body: form }),
 
   /** Accepts a summary: the rows land and the backend answers with what actually did. */
   confirmImport: (importId: string) =>
@@ -420,13 +419,11 @@ export const api = {
 
   /** Rejects it: the staged rows go, and the same file can be uploaded again. */
   discardImport: (importId: string) =>
-    request<{ discarded: boolean; importId: string }>(
-      `/api/imports/${encodeURIComponent(importId)}/discard`,
-      { method: 'POST' },
-    ),
+    request<ImportDiscarded>(`/api/imports/${encodeURIComponent(importId)}/discard`, {
+      method: 'POST',
+    }),
 
-  importPresets: () =>
-    request<{ presets: { key: string; title: string }[] }>('/api/imports/presets'),
+  importPresets: () => request<ImportPresets>('/api/imports/presets'),
 
   /**
    * The import history: one account's when an id is given, every account's otherwise.
@@ -451,19 +448,13 @@ export const api = {
    * actually left.
    */
   deleteImport: (id: string) =>
-    request<{ deleted: boolean; transactions: number }>(
-      `/api/imports/${encodeURIComponent(id)}`,
-      json('DELETE'),
-    ),
+    request<ImportDeleted>(`/api/imports/${encodeURIComponent(id)}`, json('DELETE')),
 
   importDocument: (id: string) => download(`/api/imports/${encodeURIComponent(id)}/document`),
 
   /** bytesRemoved false is not a failure: most rows never had a document. */
   deleteImportDocument: (id: string) =>
-    request<{ deleted: boolean; importId: string; bytesRemoved: boolean }>(
-      `/api/imports/${encodeURIComponent(id)}/document`,
-      json('DELETE'),
-    ),
+    request<DocumentDeleted>(`/api/imports/${encodeURIComponent(id)}/document`, json('DELETE')),
 
   /** The saved charts, and the version they were read at. */
   charts: async (): Promise<ChartList> =>

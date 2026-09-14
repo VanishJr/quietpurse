@@ -8,7 +8,7 @@
  * the shape of the last one" were all outside it, and none of them is exotic.
  *
  * So the screen holds no analysis of its own now. It starts empty, the reader makes the
- * charts they want, and each one is a `ChartSpec` the workspace keeps. Nothing
+ * charts they want, and each one is a `Chart` the workspace keeps. Nothing
  * that the old screen could say has been lost: its yearly bars are a Column of Expenses
  * over 12 months, its donut and legend are a Donut split by category, its income-by-
  * source block is the same donut split by source — all of them reachable, and none of
@@ -80,7 +80,6 @@ import {
   ChartEntry,
   CHART_TITLE_MAX,
   CHARTS_MAX,
-  ChartSpec,
   clearLegacyCharts,
   entrySpecs,
   newChartId,
@@ -95,7 +94,7 @@ import { ChartDock, DockTab } from '../components/ChartDock';
 import { BlankPlotGlyph } from '../components/ChartGlyphs';
 import { ChartWizard } from '../components/ChartWizard';
 import { setUrl, useUrl } from '../url';
-import { Account } from '../types';
+import { Account, Chart } from '../types';
 
 /**
  * The pinned tab's id. A `#` in it so that no chart id can ever collide with it —
@@ -162,7 +161,7 @@ export function AnalyticsScreen() {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   /** open, and on what: a spec to edit, or null to build a new one. */
-  const [wizard, setWizard] = useState<{ editing: ChartSpec | null } | null>(null);
+  const [wizard, setWizard] = useState<{ editing: Chart | null } | null>(null);
   const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
   const [edits, setEdits] = useState<string | null>(null);
   const [capReached, setCapReached] = useState(false);
@@ -395,7 +394,7 @@ export function AnalyticsScreen() {
   /** Where a chart sits on the list, which is not where it sits among the drawable ones. */
   const positionOf = (id: string) => entries.findIndex((e) => e.known && e.spec.id === id);
 
-  const onSave = (spec: ChartSpec) => {
+  const onSave = (spec: Chart) => {
     const at = positionOf(spec.id);
     if (at < 0 && entries.length >= CHARTS_MAX) {
       // refused here rather than by the route, which would refuse the WHOLE list and
@@ -438,7 +437,7 @@ export function AnalyticsScreen() {
     }
     const source = entries[at];
     if (!source.known) return;
-    const copy: ChartSpec = {
+    const copy: Chart = {
       ...source.spec,
       id: newChartId(),
       title: `${source.spec.title} (copy)`,
