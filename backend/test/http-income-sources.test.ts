@@ -4,9 +4,9 @@
  *
  * Driven through supertest, because what is worth asserting here
  * is the wire: the status codes, the sentence each refusal composes, and the id the
- * route mints from a label the client never sees. Until row 041b nothing in web/src
- * called three of these four routes, so every refusal below was unreachable and
- * therefore unwritten; the control on the Goal screen is what makes them a door.
+ * route mints from a label the client never sees. Before the Goal screen had a control for
+ * them nothing in web/src called three of these four routes, so every refusal below was
+ * unreachable and therefore unwritten; that control is what makes them a door.
  */
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -128,8 +128,7 @@ describe('POST /api/income-sources', () => {
 /**
  * Both halves of the bound, at both doors. The refusing half on its own is a message
  * that proves nothing: a client and a server whose numbers moved together read the
- * same as a bound nobody touched, which is what the charts door's own entry in
- * DEBT.md says of itself.
+ * same as a bound nobody touched.
  */
 describe('the income source label bound is one number at both doors that write one', () => {
   // built FROM the constant rather than beside it: a literal 61 here goes on passing
@@ -229,7 +228,7 @@ describe('PUT /api/income-sources/:id', () => {
   });
 
   /**
-   * Q3's "the owner renames theirs" over the wire. The conflict clause in
+   * The owner renaming theirs, over the wire. The conflict clause in
    * upsertIncomeSource does not set `builtin`, so a rename cannot turn a seeded
    * source into a deletable one - which is what makes editing one safe.
    */

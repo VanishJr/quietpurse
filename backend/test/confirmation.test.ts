@@ -1,5 +1,5 @@
 /**
- * The confirmation step (ROADMAP 5.3): an upload no longer makes its rows the
+ * The confirmation step: an upload no longer makes its rows the
  * user's data. It stages them and answers with a summary; Confirm is what writes.
  *
  * The two assertions this file exists for are the first and the fourth. **Nothing
@@ -8,7 +8,7 @@
  * clauses. **Discarding an import cannot take a row another import was told already
  * existed** - a staged row claims no dedup key, so the scenario cannot be built.
  *
- * PGlite is single-connection (CLAUDE.md), so nothing here exercises two confirms
+ * PGlite is single-connection, so nothing here exercises two confirms
  * racing; the sequential case is asserted, and TEST_DATABASE_URL is what runs the
  * rest against a real server.
  */
@@ -237,10 +237,10 @@ describe('discard', () => {
 
 describe('an outstanding import and a second upload of the same bytes', () => {
   /**
-   * The file hash is claimed by `committed` alone (ROADMAP 4.3), so a staged import
-   * must not make its own bytes answer "already imported" - with no imports-history
-   * screen until roadmap item 10, re-uploading is the only way back to an import
-   * whose tab was closed. The new upload supersedes the old one, and says so.
+   * The file hash is claimed by `committed` alone, so a staged import must not make
+   * its own bytes answer "already imported": with no Confirm control on the history
+   * screen, re-uploading is the only way back to an import whose tab was closed. The
+   * new upload supersedes the old one, and says so.
    */
   it('re-uploading is not refused: it supersedes the outstanding import', async () => {
     const csv = csvFile('2026-05-01,-14.00,Closed the tab');
@@ -265,7 +265,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
   /**
    * On a `discarded` row error_detail is what separates the ways it can be reached,
    * and NULL means the person said no. A superseded row left empty would have the
-   * imports screen (roadmap item 10) tell someone they rejected an import they never
+   * imports screen tell someone they rejected an import they never
    * saw, and it is also the only place a copy the user displaced can be told apart
    * from one they refused - which the retention purge will need.
    */
@@ -285,7 +285,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
    * symmetric: A stages, B stages, then A's supersede runs late and matches B while
    * B's has already taken A - both `discarded`, nothing confirmable, and the file
    * needs a third upload. Reproduced by calling the late supersede by hand, because
-   * PGlite is single-connection (CLAUDE.md) and the state is what matters, not the
+   * PGlite is single-connection and the state is what matters, not the
    * timing that produces it.
    */
   it('a late supersede cannot take the import that replaced it', async () => {
@@ -306,7 +306,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
    * `awaiting_confirmation`. The second Confirm then meets imports_file_hash_unique
    * rather than the status check, and its whole transaction rolls back.
    *
-   * Built by hand rather than by racing: PGlite is single-connection (CLAUDE.md), so
+   * Built by hand rather than by racing: PGlite is single-connection, so
    * a real race is not reproducible in the default run, while the state it produces
    * is. What must not happen is a 500 on the one screen whose job is telling the user
    * whether their data landed.
@@ -350,7 +350,7 @@ describe('an outstanding import and a second upload of the same bytes', () => {
 });
 
 /**
- * ROADMAP 5.3's Q1, the scenario the staging table exists to make impossible.
+ * The scenario the staging table exists to make impossible.
  *
  * With unconfirmed rows in `transactions` they would occupy (account, dedup_key):
  * an import uploaded while an unconfirmed one overlapped it would insert nothing for
@@ -451,9 +451,9 @@ describe('the confirm refuses what it cannot honestly complete', () => {
 
   /**
    * account_name is nullable because every import from before this step is, and the
-   * confirm checks it without reading it (row 26b took away the create that consumed
-   * it). Dropping the check would make an import from before this step confirmable,
-   * landing rows against an id with no recorded destination.
+   * confirm checks it without reading it - the create that consumed it went when the
+   * upload stopped taking a name. Dropping the check would make an import from before
+   * this step confirmable, landing rows against an id with no recorded destination.
    *
    * The pair of assertions this used to carry - no account under the staged id, none
    * under the name - guarded "the confirm did not invent one". That guarantee did not
@@ -528,10 +528,10 @@ describe('the confirm refuses what it cannot honestly complete', () => {
 });
 
 /**
- * The second of row 26a's two gates. The upload proved the account was there and not
- * removed; the user removed it while the summary sat on screen. Landing the rows now
- * would answer `inserted: 2` for rows VISIBLE_ACCOUNT() keeps out of every list,
- * every summary and the export - a success nothing displays.
+ * The second of the two gates on the account an upload picked. The upload proved the
+ * account was there and not removed; the user removed it while the summary sat on screen.
+ * Landing the rows now would answer `inserted: 2` for rows VISIBLE_ACCOUNT() keeps out of
+ * every list, every summary and the export - a success nothing displays.
  *
  * The fourth part is what makes the first three evidence. A test asserting only the
  * refusal passes just as well against an implementation that destroyed the import on
@@ -539,7 +539,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
  * promised is the count that lands.
  *
  * Only the sequential half of the window is reachable here: PGlite is
- * single-connection (CLAUDE.md), so nothing can hold this confirm's transaction open
+ * single-connection, so nothing can hold this confirm's transaction open
  * while a PATCH /api/accounts/:id {hidden:true} commits. The FOR UPDATE that closes
  * that race is uncovered by the default suite and by TEST_DATABASE_URL alike.
  */
@@ -581,10 +581,10 @@ describe('an account removed between the upload and the confirm', () => {
 });
 
 /**
- * The window DEBT.md recorded on 2026-08-08: the account is deleted while the upload
- * is still parsing, so the destination was proved before the delete and the staging
- * happens after it. Until row 26b the confirm's upsert simply created the account
- * again - a deleted account came back, holding rows, at 200.
+ * The window: the account is deleted while the upload is still parsing, so the
+ * destination was proved before the delete and the staging happens after it. While the
+ * confirm could still create an account, its upsert simply created this one again - a
+ * deleted account came back, holding rows, at 200.
  *
  * It cannot be set up through the product API, and that is not a gap in the test:
  * deleteAccount refuses while the account holds staged rows (HOLDS_STAGED_ROWS), and
@@ -635,11 +635,11 @@ describe('an account deleted between the upload and the confirm', () => {
 });
 
 /**
- * A throw *after* the stage committed - the supersede, a read, anything between there
- * and the response - leaves a `failed` import. `failed` is neither confirmable nor
- * discardable, so its staged rows would sit unreachable until deleteImport, which has
- * no button until roadmap item 10. The sweep is in failImport rather than the caller's
- * catch so that no future caller has to remember it.
+ * A throw *after* the stage committed - the supersede, a read, anything between there and
+ * the response - leaves a `failed` import. `failed` is neither confirmable nor
+ * discardable, so its staged rows would sit unreachable until deleteImport. The sweep is
+ * in failImport rather than the caller's catch so that no future caller has to remember
+ * it.
  */
 describe('a failed import leaves no staged rows behind', () => {
   it('failImport takes them with the status', async () => {
@@ -655,7 +655,7 @@ describe('a failed import leaves no staged rows behind', () => {
   });
 
   /**
-   * The last cut between a composed refusal and the screen (ROADMAP 21). It was a
+   * The last cut between a composed refusal and the screen. It was a
    * bare slice, so what error_detail kept ended wherever 500 characters ran out and
    * read as a finished sentence - the client renders the whole of it and adds no
    * cut of its own. Both messages are built from ERROR_DETAIL_MAX and not from a
@@ -678,7 +678,7 @@ describe('a failed import leaves no staged rows behind', () => {
 
 /**
  * A fee the parser read must not be lost between the summary the user accepts and
- * the row the database keeps (ROADMAP 37a, I3). The READ side of that is held by
+ * the row the database keeps. The READ side of that is held by
  * `tsc` - stagedToNew returns NewTransaction and fee is required on it - but the
  * write side is not: omitting fee_cents from stageImport's values is legal
  * TypeScript against a nullable column, and the confirmation screen would then show
@@ -687,9 +687,9 @@ describe('a failed import leaves no staged rows behind', () => {
 describe('a stated fee survives staging', () => {
   it('reaches staged_transactions, and then the row the confirm writes', async () => {
     // the Balance column chains through the movements rather than reading 0 on both
-    // rows: 100.00 - 63.62 - 10.00, which is what the bank prints and what row 54's
-    // gate now reads. Two rows are cheap, and they buy the assertion below that a
-    // derived pair survives to the summary the confirm path shows
+    // rows: 100.00 - 63.62 - 10.00, which is what the bank prints and what the
+    // reconciliation gate reads. Two rows are cheap, and they buy the assertion below
+    // that a derived pair survives to the summary the confirm path shows
     const file = [
       'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance',
       'CARD_PAYMENT,Current,2026-10-01 09:00:00,2026-10-01 10:00:00,Staged With Fee,-63.18,0.44,EUR,COMPLETED,36.38',
@@ -756,7 +756,7 @@ describe('backup and restore', () => {
     });
 
     // the other direction, so the user-discard side cannot quietly start writing
-    // something here later: item 10's screen reads error_detail === null as "the
+    // something here later: the history screen reads error_detail === null as "the
     // person said no"
     expect(await importRow(declined.importId)).toMatchObject({
       status: 'discarded',

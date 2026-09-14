@@ -185,7 +185,7 @@ describe('GET /api/summary/months', () => {
 });
 
 /**
- * Trap 7. `date` is a full ISO stamp, so `to` only means the whole of its day
+ * `date` is a full ISO stamp, so `to` only means the whole of its day
  * because each route pads it: without that padding every row dated on the last day
  * of the window disappears from all four bodies, and nothing else here notices -
  * every other window in this file ends nine months from the nearest row.
@@ -207,7 +207,7 @@ describe('the last day of the window is inside it', () => {
 });
 
 /**
- * I1 and I8, and the only place in this file where a right implementation and a
+ * The only place in this file where a right implementation and a
  * wrong one disagree about these two fields. Every other account here is EUR, which
  * is also BASE_CURRENCY, so a route answering baseCurrency where it promises the
  * account's currency reads identically - and an otherCurrencies hard-coded to []
@@ -230,7 +230,7 @@ describe('an account whose currency is not the base currency', () => {
   });
 
   /**
-   * D1 and D2 end to end: the account arm sums its own rows whatever currency they
+   * Both arms end to end: the account arm sums its own rows whatever currency they
    * are in, and the arm over every account sums the converted ones in the base
    * currency. A row with no rate is a real movement of that account's money and a
    * number the other arm may not add to euros - so it is in one figure and not the
@@ -256,7 +256,7 @@ describe('an account whose currency is not the base currency', () => {
 });
 
 /**
- * I7. q() maps both '' and a repeated parameter to undefined, and undefined means
+ * q() maps both '' and a repeated parameter to undefined, and undefined means
  * every account - so a caller building `?accountId=${account?.id ?? ''}` would be
  * handed every account's money labelled as one account's. Neither route may route
  * this through q(), and the two causes get their own sentences: `?accountId=` was
@@ -302,7 +302,7 @@ describe('a malformed accountId never means every account', () => {
 });
 
 /**
- * I3 and I10. A body about an account has to state a currency, and there is no
+ * A body about an account has to state a currency, and there is no
  * currency without an account - so an id that resolves to nothing is a refusal and
  * not a 200 of zeroes.
  */
@@ -315,7 +315,7 @@ describe('an accountId that resolves to nothing', () => {
 });
 
 /**
- * D4. Hiding an account keeps it out of the totals over every account - that is
+ * Hiding an account keeps it out of the totals over every account - that is
  * what VISIBLE_ACCOUNT() is for. Asked about by id it answers its real numbers: the
  * caller named it, and a removed account whose figures read as zero is
  * indistinguishable from an empty one.

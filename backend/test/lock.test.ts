@@ -1,5 +1,5 @@
 /**
- * The one-process-per-folder lock (ROADMAP row 75), off the process that boots the
+ * The one-process-per-folder lock, off the process that boots the
  * app so a case can red it: what is claimed, what a file already there means, what is
  * removed and by whom. backend/src/SPEC.md carries the reasoning; this file holds
  * every arm of it that the suite can reach.

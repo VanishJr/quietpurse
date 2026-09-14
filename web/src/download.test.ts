@@ -4,8 +4,8 @@ import { safeFilename } from './download';
 /**
  * originalFilename is a string the user chose, and it becomes a `download`
  * attribute — which React escapes as an attribute, not as a name the browser is
- * about to write to disk. Item 10's D28/D29 also mean this string is now the one
- * the user actually typed, so it is worth keeping.
+ * about to write to disk. This string is now the one the user actually typed, so it is
+ * worth keeping.
  *
  * saveBlob is not here: it needs a DOM, and its object URL is asserted where it
  * matters, in ImportHistory.test.tsx.

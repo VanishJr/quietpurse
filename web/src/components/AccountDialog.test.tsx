@@ -132,9 +132,9 @@ describe('the delete itself', () => {
   };
 
   /**
-   * Settled decision 2, first sentence: while the counts are unread the panel says so
-   * and offers nothing. Rendered rather than disabled — nothing on screen would
-   * explain a dead control here, and the counts are what the decision is made on.
+   * While the counts are unread the panel says so and offers nothing. Rendered rather
+   * than disabled — nothing on screen would explain a dead control here, and the counts
+   * are what the decision is made on.
    */
   it('offers nothing to click while the counts are still being read', async () => {
     mount(ACCOUNT, { 'GET /api/imports': () => new Promise<Response>(() => {}) });

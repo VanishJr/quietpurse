@@ -1,11 +1,11 @@
 /**
- * The issuer scan (ROADMAP 5.2, row 30), at the seam it is unit-testable on: page-
+ * The issuer scan, at the seam it is unit-testable on: page-
  * grouped text in, a name or nothing out. No PDF is built here - what a PDF costs this
  * rule is one page boundary, and pdf.test.ts pins that end.
  *
  * Every IBAN below is invented and its check digits worked out by hand. None of them
  * is derived from ISSUERS, which is not tidiness: a fixture composed from the rule's
- * own literal goes on passing under every narrowing of that rule (row 034, D4). What
+ * own literal goes on passing under every narrowing of that rule. What
  * the bank identifiers ARE is public routing data - the same eight digits the
  * directory's own source comment prints - and the ten that follow are zeroes.
  */
@@ -34,11 +34,12 @@ const page = (...printed: string[]): string[] => [
 
 describe('issuerName: what appears on every page', () => {
   /**
-   * The measured shape of the owner's own N26 statement, and the whole of D-A's
-   * evidence: the account's IBAN once per page across six pages, a counterparty's
-   * twice a page across four. The counterparty is the more frequent by two to one and
-   * it is at a bank this directory also knows, so a rule that ranked by occurrences
-   * would name it - confidently, to someone holding the other bank's statement.
+   * The measured shape of the owner's own N26 statement, and the whole of the evidence
+   * the ranking rule rests on: the account's IBAN once per page across six pages, a
+   * counterparty's twice a page across four. The counterparty is the more frequent by two
+   * to one and it is at a bank this directory also knows, so a rule that ranked by
+   * occurrences would name it - confidently, to someone holding the other bank's
+   * statement.
    */
   it("names the account's bank and not the louder counterparty", () => {
     const pages = [1, 2, 3, 4, 5, 6].map((n) =>
@@ -61,7 +62,7 @@ describe('issuerName: what appears on every page', () => {
    * The third directory entry, which nothing else in this suite reaches. Without it the
    * key or the name could be retyped wrong and the whole suite would stay green - the
    * entry would simply never fire, and a Revolut statement whose layout has moved would
-   * fall back to the unnamed sentence with nothing red anywhere (trap 10).
+   * fall back to the unnamed sentence with nothing red anywhere.
    */
   it('names the third bank the directory carries', () => {
     expect(issuerName([1, 2].map(() => page(`IBAN: ${REVOLUT}`)))).toBe('Revolut Bank, Berlin');
@@ -166,7 +167,7 @@ describe('issuerName: where it must not guess', () => {
 
 /**
  * It decides how a refusal is worded and never whether one happens, so a throw here
- * would replace an actionable sentence with a stack trace in error_detail (trap 8).
+ * would replace an actionable sentence with a stack trace in error_detail.
  * Totality is by construction - no parse, no BigInt, no unchecked index - and this is
  * what watches the construction.
  */

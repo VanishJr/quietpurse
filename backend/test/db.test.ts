@@ -53,7 +53,7 @@ describe('insertTransactions', () => {
       0,
     );
     // ...and the row already there keeps the description it was stored with: a
-    // duplicate is skipped, never merged (correcting facts belongs to ROADMAP 4.4)
+    // duplicate is skipped, never merged (correcting a fact is not dedup's job)
     const stored = await getTransaction(await idOf('ROSSMANN'));
     expect(stored!.description).toBe('ROSSMANN');
   });
@@ -168,9 +168,9 @@ const violated = async (write: Promise<unknown>): Promise<unknown> => {
 };
 
 /**
- * The column is the guard, and it was taken for a producer that does not exist yet:
- * 37b reads a fee off a PDF and never goes through readFee, so nothing else stands
- * between it and a negative fee (ROADMAP 37a, D2). The CHECK is declared in
+ * The column is the guard, and it was taken for a producer that did not exist yet:
+ * the PDF path reads a fee off a document and never goes through readFee, so nothing
+ * else stands between it and a negative fee. The CHECK is declared in
  * schema.ts and emitted by drizzle-kit - a toolchain that stopped emitting it would
  * leave the migration without it, the guarantee gone, and every other test green.
  *

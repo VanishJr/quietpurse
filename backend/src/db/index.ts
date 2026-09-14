@@ -1140,7 +1140,7 @@ export async function listImports(
   const first = rows[0];
   // no row at all is an empty filtered set, not a page that fell off the end: there
   // is no offset and no cursor here, so the first page is the only page there is to
-  // miss. Whatever adds one has to take the totals from somewhere other than row 0.
+  // miss. Whatever adds one has to take the totals from somewhere other than the first row.
   const totals: ImportTotals = first
     ? {
         imports: Number(first.totalImports),

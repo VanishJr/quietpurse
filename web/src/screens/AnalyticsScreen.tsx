@@ -29,7 +29,7 @@
  * ---------------------------------------------------------------------------
  * The list is the workspace's, and the server is where it is
  *
- * It was this browser's localStorage until row 052, which meant a chart did not follow
+ * It was this browser's localStorage once, which meant a chart did not follow
  * the reader to their phone and `AGENTS.md`'s "no state that lives only in the browser"
  * was crossed by the screen a reader spends the longest on. It is `GET`/`PUT
  * /api/analytics/charts` now, and three states came with the move that a browser store
@@ -293,7 +293,7 @@ export function AnalyticsScreen() {
    * while this PUT was out, its version is no longer 0, and both halves of the
    * condition above are needed. The browser's copy is left where it is, unread from
    * here ever again — the alternative is re-applying it over a list another device
-   * wrote, which is S4 and resurrects charts that were deliberately deleted.
+   * wrote, which resurrects charts that were deliberately deleted.
    */
   const migrate = useCallback(
     (loaded: ChartList) => {

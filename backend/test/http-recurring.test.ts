@@ -1,5 +1,5 @@
 /**
- * Hiding a recurring group over HTTP (ROADMAP row 75). The detector and the data
+ * Hiding a recurring group over HTTP. The detector and the data
  * layer's hide are held in db.test.ts; what is worth asserting here is the payload
  * the route answers with - the group still listed once hidden, and the monthly total
  * that stops counting it - because the Goal screen reads that total and nothing on it

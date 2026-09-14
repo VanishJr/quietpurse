@@ -48,7 +48,7 @@ const TEMPLATE: PdfTemplate = {
     opening: [300, 420],
     closing: [420, 540],
     // The Total line below prints two cells and not four, so this is what the
-    // fixture does rather than what its author could not find (row 035's Q1).
+    // fixture does rather than what its author could not find.
     gross: { kind: 'not-printed' },
   },
 };
@@ -97,13 +97,13 @@ export interface CanvasAbsentParse {
    * The reader's own type rather than a copy of its fields: `parsed.balances` is
    * assigned here whole, so a hand-written shape beside it goes stale the moment the
    * reader gains a field and `tsc` says nothing, because this is an assignment and not
-   * an object literal. Row 035 added `gross` and that is exactly what happened.
+   * an object literal. `gross` was added to the reader and that is exactly what happened.
    */
   balances: StatementBalances;
   scan: string;
   encrypted: string;
   unrecognised: string;
-  /** invariant 3: the render path is a crash, in this process too */
+  /** the render path is a crash, in this process too */
   path2dThrows: boolean;
   domMatrixWithInitThrows: boolean;
 }

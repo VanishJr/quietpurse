@@ -53,6 +53,11 @@ import type {
  *
  * WEB resolves from import.meta.url for the reason copy.test.ts states: the root of
  * this walk IS the package this file sits in.
+ *
+ * The third block walks the same program narrowed to product files - not the tests,
+ * not the harness, not the config - for what reaches browser storage, and holds the
+ * ruling `web/src/SPEC.md` states: the theme is the one deliberate exception, one
+ * legacy read is on its way out, and every operation each file may use is named.
  */
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND = resolve(WEB, '..', 'backend');
@@ -269,6 +274,101 @@ describe('the wire is reached by type only and through one door', () => {
     expect(parsed.errors).toEqual([]);
     expect(OPTIONS.paths).toBeUndefined();
     expect(OPTIONS.baseUrl).toBeUndefined();
+  });
+});
+
+/**
+ * The package's own statement of product source, written out rather than read off the
+ * coverage block in vitest.config.ts: that block is a reading and not a gate by its own
+ * comment, and a gate that imported it would couple two unrelated rules.
+ */
+const PRODUCT = SOURCES.filter(
+  (f) =>
+    under(resolve(WEB, 'src'), f.fileName) &&
+    !/\.test\.tsx?$/.test(f.fileName) &&
+    !under(resolve(WEB, 'src', 'test'), f.fileName),
+);
+
+/** Closed, and the spec says what it cannot see. */
+const STORAGE = ['localStorage', 'sessionStorage', 'indexedDB'];
+
+/**
+ * Each hit as the operation it feeds - `localStorage.getItem` - or the bare name when it
+ * feeds none, which nothing in the allowlist is. `window.localStorage.getItem` and the
+ * bare form both land on the identifier, so the walk reads through one enclosing
+ * access to reach the operation.
+ */
+const storageUsesOf = (source: ts.SourceFile): string[] => {
+  const found = new Set<string>();
+  // the program's files carry no parent pointers - the binder sets those - so the walk hands them down
+  const operationOf = (id: ts.Identifier, parent: ts.Node, grand: ts.Node | undefined): string => {
+    if (ts.isPropertyAccessExpression(parent) && parent.expression === id) {
+      return `${id.text}.${parent.name.text}`;
+    }
+    if (ts.isPropertyAccessExpression(parent) && parent.name === id && grand !== undefined) {
+      if (ts.isPropertyAccessExpression(grand) && grand.expression === parent) {
+        return `${id.text}.${grand.name.text}`;
+      }
+    }
+    return id.text;
+  };
+  const visit = (node: ts.Node, parent: ts.Node, grand: ts.Node | undefined): void => {
+    if (ts.isIdentifier(node) && STORAGE.includes(node.text)) {
+      found.add(operationOf(node, parent, grand));
+    }
+    if (ts.isPropertyAccessExpression(node) && node.name.text === 'cookie') found.add('document.cookie');
+    ts.forEachChild(node, (child) => visit(child, node, parent));
+  };
+  visit(source, source, undefined);
+  return [...found].sort();
+};
+
+const storageByFile = (files: readonly ts.SourceFile[]): Record<string, string[]> =>
+  Object.fromEntries(
+    files
+      .map((f) => [relative(WEB, f.fileName), storageUsesOf(f)] as const)
+      .filter(([, uses]) => uses.length > 0)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+
+/** The ruling itself, EQUAL in both directions: a file added, an operation added and an entry nothing uses all red. */
+const BROWSER: Record<string, string[]> = {
+  'src/analytics.ts': ['localStorage.getItem', 'localStorage.removeItem'],
+  'src/theme.tsx': ['localStorage.getItem', 'localStorage.setItem'],
+};
+
+describe('what reaches browser storage in product source', () => {
+  it('reads the product files and not the tests, the harness or the config', () => {
+    const files = PRODUCT.map((f) => relative(WEB, f.fileName));
+    for (const anchor of ['src/main.tsx', 'src/theme.tsx', 'src/analytics.ts']) {
+      expect(files).toContain(anchor);
+    }
+    for (const outside of ['src/types.test.ts', 'src/test/setup.ts', 'vitest.config.ts']) {
+      expect(files).not.toContain(outside);
+    }
+  });
+
+  it('the browser is written by theme.tsx alone and read by one migration besides', () => {
+    expect(storageByFile(PRODUCT)).toEqual(BROWSER);
+  });
+
+  const crafted = (text: string): string[] =>
+    storageUsesOf(
+      ts.createSourceFile(resolve(WEB, 'src', 'crafted.ts'), text, ts.ScriptTarget.Latest, true),
+    );
+
+  it('sees each way a file can reach storage, and names the two it cannot', () => {
+    expect(crafted("window.localStorage.setItem('k', 'v');")).toEqual(['localStorage.setItem']);
+    expect(crafted('const s = localStorage;')).toEqual(['localStorage']);
+    expect(crafted("document.cookie = 'a=b';")).toEqual(['document.cookie']);
+    expect(crafted("indexedDB.open('db');")).toEqual(['indexedDB.open']);
+    expect(crafted('globalThis.sessionStorage.clear();')).toEqual(['sessionStorage.clear']);
+    expect(crafted("localStorage.getItem('a'); localStorage.getItem('b');")).toEqual([
+      'localStorage.getItem',
+    ]);
+    // the limit, asserted as a limit: a string-keyed access carries no identifier to see
+    expect(crafted("window['localStorage'].setItem('k', 'v');")).toEqual([]);
+    expect(crafted("const persist = usePersistedStore('k');")).toEqual([]);
   });
 });
 

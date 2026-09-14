@@ -19,7 +19,7 @@ import { AnalyticsScreen } from './AnalyticsScreen';
 
 /**
  * The workspace: it starts with nothing on it, the wizard is what puts something there,
- * and what it put there survives a remount — on the SERVER, since row 052, which is
+ * and what it put there survives a remount — on the SERVER, which is
  * why `seed` below puts a list on a fake charts route rather than into localStorage.
  *
  * Nothing below asserts anything about a plot — not a sector, not a bar, not an axis.
@@ -525,8 +525,8 @@ describe('a chart that was already there', () => {
  * that is a total of nothing on screen.
  *
  * Every case here and in the ranking describe below waits on a figure rather than on
- * the card's heading: the card prints its name while it is still reading, and since row
- * 052 it is only mounted once the chart list has arrived from the server.
+ * the card's heading: the card prints its name while it is still reading, and it is
+ * only mounted once the chart list has arrived from the server.
  */
 describe('a period one category has gone negative in', () => {
   const DONUT = {
@@ -789,7 +789,7 @@ describe('a chart about one account', () => {
    * A body of the right shape about the wrong account. `scoped` in api.ts throws on it,
    * which is the one thing between a query-builder edit that drops the `accountId` and
    * one account's card printing another account's money — and until this case nothing
-   * anywhere looked at that throw (DEBT.md, 2026-08-11).
+   * anywhere looked at that throw.
    *
    * A donut and not the radar: one kind, one request, one message, so the assertion
    * cannot become order-dependent through `Promise.all`.
@@ -814,8 +814,8 @@ describe('a chart about one account', () => {
 
   /*
    * "By source" on one account used to fall through to income by category — one thing
-   * drawn under a title naming another. The endpoint has answered it per account since
-   * row 48, filtered through `scopeSql` to that account's own rows. The wizard still
+   * drawn under a title naming another. The endpoint answers it per account,
+   * filtered through `scopeSql` to that account's own rows. The wizard still
    * does not offer the choice (a product decision — see BREAKDOWNS), so a spec saved
    * before an account was picked is how the path is reached.
    */
@@ -1139,7 +1139,7 @@ describe('moving along a strip too long for the row', () => {
  * The three states a list that lives on a server has and a list in localStorage never
  * had: it has not arrived, it could not be read, and the last change was not saved.
  *
- * The first two are row 14's defect waiting to happen again — `OverviewScreen` gated
+ * The first two are the Overview's old defect waiting to happen again — it gated
  * its empty state on `length === 0 && !loading` and told the reader their accounts did
  * not exist whenever the load failed. "Nothing plotted yet" is a claim about the
  * reader's workspace, and it may only be made about a list somebody actually read.
@@ -1204,7 +1204,8 @@ describe('a workspace that has not been read yet', () => {
     mount();
     await screen.findByText(/the charts could not be read/);
 
-    // rendering no dock at all would hold to S9 and take a whole feature away with it
+    // rendering no dock at all would keep every mutation unreachable and take a whole
+    // feature away with it
     fireEvent.click(screen.getByRole('button', { name: 'Budgets' }));
 
     expect(await screen.findByRole('heading', { name: 'Monthly budgets' })).toBeInTheDocument();
@@ -1591,7 +1592,7 @@ describe('a browser copy the route would refuse', () => {
 /**
  * Two reads of the same list in flight at once, which is not hypothetical: `main.tsx`
  * wraps the app in `React.StrictMode`, and StrictMode double-invokes every effect in
- * development. Measured in a real browser on 052b's own check stack before it was held
+ * development. Measured in a real browser on a check stack before it was held
  * here — the migration ran twice and the workspace took two writes for one move.
  *
  * The cost of the second one is not the extra request. It is that a later answer to an

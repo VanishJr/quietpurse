@@ -145,8 +145,8 @@ export function buildPdf(pages: PlacedText[][], options: Options = {}): Buffer {
 
 /**
  * The same document inside a signed container: a bank's own export can be a CMS
- * envelope carrying the statement, so `%PDF-` sits at an offset rather than at 0
- * (row 33). It is not valid CMS and does not need to be - what a fixture has to
+ * envelope carrying the statement, so `%PDF-` sits at an offset rather than at 0. It
+ * is not valid CMS and does not need to be - what a fixture has to
  * carry is the shape the sniffer classifies on and the bytes it used to be refused
  * for.
  *

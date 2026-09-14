@@ -11,7 +11,7 @@ import { defineConfig } from 'vitest/config';
  *
  * jsdom is not a browser: no layout, nothing from styles.css, no real navigation or
  * download, no chart rendering (recharts measures a 0x0 box). Those checks stay
- * manual - see "Verification has a hole" in CLAUDE.md.
+ * manual - see "Verification has a hole" in AGENTS.md.
  */
 export default defineConfig({
   test: {

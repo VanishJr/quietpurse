@@ -72,7 +72,7 @@ const ownedClause = (n: number): string =>
  * The order always holds, so it is always stated. What this page left out is
  * appended to it only when it left something out, from the server's own count: a
  * withheld count printed unconditionally is one the reader learns to skip, and
- * after row 66 it would be false on most histories.
+ * it would be false on most histories.
  */
 const orderingLine = (list: ImportList): string => {
   const n = list.totals.imports - list.imports.length;
@@ -83,11 +83,11 @@ const orderingLine = (list: ImportList): string => {
 
 /**
  * What has been uploaded, and the two things that can be removed: the statement file
- * on its own, or the import and the rows it wrote (ROADMAP 4.5, 5.1, 6.1).
+ * on its own, or the import and the rows it wrote.
  *
  * No Confirm control anywhere, for any status: there is no way to read a staged
  * summary back, and confirming numbers nobody read is what the confirmation step
- * exists to prevent (007 D5).
+ * exists to prevent.
  */
 export function ImportHistory({ onBack, onChanged, account }: Props) {
   /**
@@ -133,7 +133,7 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
     setNotice(null);
     setRowError(null);
     try {
-      // a Blob or a throw: the refusal cannot become a file (010 D23)
+      // a Blob or a throw: the refusal cannot become a file
       const blob = await api.importDocument(r.id);
       saveBlob(blob, safeFilename(r.originalFilename, r.id, r.sourceType));
     } catch (e) {
@@ -305,7 +305,7 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
                     Download
                   </button>
                 )}
-                {/* ungated on purpose (010 D15): documentAvailable is READABLE, not
+                {/* ungated on purpose: documentAvailable is READABLE, not
                     "bytes exist", and a row whose pointer was stripped is the likeliest
                     of all to still have a statement on disk. Hiding this button leaves
                     Delete import as the only way to reach it. */}

@@ -1,7 +1,7 @@
 /**
- * What leaves the server that is not the answer itself (row 72, FIXES findings 8, 13
- * and 14): the cache rule on the built client, the shape of a path that gets the app,
- * and the two headers that stop a copy being kept or a page being framed.
+ * What leaves the server that is not the answer itself: the cache rule on the built
+ * client, the shape of a path that gets the app, and the two headers that stop a copy
+ * being kept or a page being framed.
  *
  * The two decisions about the client are pure functions here rather than requests,
  * and that is not a shortcut: the backend CI jobs never run `npm run build`, so a

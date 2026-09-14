@@ -72,8 +72,9 @@ describe('the list', () => {
   });
 
   /**
-   * I4 at the call site rather than at the helper: `rowCount` having a singular arm and
-   * this line not calling it renders "1 rows accepted", which is the defect itself.
+   * The plural at the call site rather than at the helper: `rowCount` having a singular
+   * arm and this line not calling it renders "1 rows accepted", which is the defect
+   * itself.
    */
   it('says one row rather than 1 rows in the counts line', async () => {
     mockFetch({
@@ -156,7 +157,7 @@ describe('the list', () => {
     mount();
 
     expect(await screen.findByText(/Upload the same file again/)).toBeInTheDocument();
-    // 007 D5: there is no route to read the staged summary back, so there is nothing
+    // there is no route to read the staged summary back, so there is nothing
     // to confirm here that the user would have read first
     expect(screen.queryByRole('button', { name: /confirm/i })).not.toBeInTheDocument();
   });
@@ -190,7 +191,7 @@ describe('the list', () => {
     expect(
       screen.queryByRole('button', { name: /Download the file/ }),
     ).not.toBeInTheDocument();
-    // 010 D15: these are the rows likeliest to still have bytes, and the route was
+    // these are the rows likeliest to still have bytes, and the route was
     // built to reach them. Hidden, the only way left is Delete import — which takes
     // the transactions too, and no purge exists behind it.
     expect(
@@ -254,7 +255,8 @@ describe('downloading the stored statement', () => {
       await screen.findByRole('button', { name: 'Download the file for second.csv' }),
     );
 
-    // the panel lists up to a hundred rows: a refusal about row 38 rendered above row 1
+    // the panel lists up to a hundred rows: a refusal about the thirty-eighth row
+    // rendered above the first
     // is a refusal the reader does not see, and from their seat the button did nothing
     const message = await screen.findByText(new RegExp(refusal));
     expect(screen.getByText('second.csv').closest('.row')).toContainElement(message);
@@ -373,7 +375,7 @@ describe('deleting the stored statement', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete the file for statement.csv' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Delete file' }));
 
-    // 010 D5: false is not a failure, and it is not "your file was deleted" either
+    // false is not a failure, and it is not "your file was deleted" either
     expect(
       await screen.findByText(
         'This import no longer claims a stored file, and there were no bytes to remove.',
@@ -386,7 +388,7 @@ describe('deleting the stored statement', () => {
 });
 
 /**
- * ROADMAP row 66: the server filters and totals, and this screen prints what it was
+ * The server filters and totals, and this screen prints what it was
  * sent. Two of the three cases below are about code that is NOT here any more — the
  * client-side filter, and a caveat that used to be unconditional — and both would
  * pass silently if they were written after the change rather than before it.
@@ -474,8 +476,8 @@ describe('one account, filtered by the server', () => {
     // on the clause and not on the paragraph: the line prints on both arms, so
     // asserting the paragraph is absent would pass on any wording at all
     expect(screen.getByText('Newest first.')).toBeInTheDocument();
-    // the withheld count is what this arm may not carry, and the sentence row 66
-    // replaced said it unconditionally
+    // the withheld count is what this arm may not carry, and the sentence this
+    // one replaced said it unconditionally
     expect(screen.queryByText(/not listed/)).toBeNull();
     expect(screen.queryByText(/older ones may not be listed/)).toBeNull();
   });

@@ -40,10 +40,16 @@ partial import they do not notice.
 
 A bank's own export can be a signed container — the statement inside a CMS envelope, with `%PDF-`
 at byte 71 rather than byte 0. A CSV whose first cell is a date starts with an ASCII digit that is
-also a valid ASN.1 tag. The comments inside `sniff` in `providers/statement.ts` carry the full
-reasoning, including which byte parts the two cases and why the rule is narrow on purpose. Read
-them before touching that function; every clause in it was paid for by a document that broke the
-previous one.
+also a valid ASN.1 tag. The reasoning is in two places, and `AGENTS.md`'s *Conventions* is what puts
+it there: a reason an edit to its own line would break stays beside that line, and a reason broken
+from another file goes to the module's spec. The policy — the bytes decide, never the filename the
+bank chose or the type the browser declared, and a file whose document starts at an offset is still
+one buffer — is stated in `backend/src/providers/SPEC.md`, under what the module owns. The
+byte-level reasoning — which byte parts the two cases, why the second byte's range is as wide as it
+is and no narrower, and why the header is searched whole rather than within a window — stays as the
+comment directly above the container test inside `sniff` in `providers/statement.ts`, because the
+edit that would break it is an edit to that line. Read that comment before touching the function;
+every clause in it was paid for by a document that broke the previous one.
 
 ## Modules
 

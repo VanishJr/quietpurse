@@ -1,5 +1,5 @@
 /**
- * The one thing the suite can hold about ROADMAP row 28: that the parser still parses
+ * The one thing the suite can hold about the optional canvas: that the parser still parses
  * where `@napi-rs/canvas` is not installed. pdfjs-dist lists it as optional, so npm
  * skips it on any machine no prebuilt binary matches - which this one may or may not
  * be, so the child below makes the package unresolvable rather than asking.
@@ -7,7 +7,8 @@
  * It has to be a child process. vitest runs one process with one module cache
  * (vitest.config.ts: `isolate: false`), so a hook installed in a test file would only
  * take effect if that file happened to be collected before pdf.test.ts - which is the
- * file-ordering version of the import-ordering defect this row exists to remove.
+ * file-ordering version of the import-ordering defect the stubs' placement exists to
+ * remove.
  *
  * Two assertions, and the second is the one nothing else in the tree can make: the
  * parse is unchanged, and pdfjs printed the ONE warning it prints when the package is

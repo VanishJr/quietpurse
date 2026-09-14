@@ -119,7 +119,7 @@ afterAll(clearWorkspaceRows);
 
 describe('backfillBaseAmounts', () => {
   it('a resolved fractional rate reaches the rows, and the base-currency rows keep their own cents', async () => {
-    // I2: at k = 1 the unfixed statement passes and writes the raw foreign-currency
+    // At k = 1 the unfixed statement passes and writes the raw foreign-currency
     // amount as base cents, so a rate without a fractional part disarms this file.
     expect(Number.isInteger(K)).toBe(false);
 
@@ -135,7 +135,7 @@ describe('backfillBaseAmounts', () => {
 
     const lines: string[] = [];
     const converted = await backfillBaseAmounts((s) => lines.push(s));
-    // I5 from the other side, and the reason it is asserted before the count: a
+    // The refusal from the other side, and the reason it is asserted before the count: a
     // write that threw arrives here with its SQLSTATE, where the count alone would
     // only say a number was short.
     expect(lines.join('\n')).not.toContain('not written');

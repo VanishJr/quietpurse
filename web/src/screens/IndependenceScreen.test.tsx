@@ -547,14 +547,14 @@ describe('the Goal screen', () => {
 });
 
 /**
- * The write path (ROADMAP row 75). Everything the screen shows arrives in one body,
+ * The write path. Everything the screen shows arrives in one body,
  * GET /api/independence, so the presence anchor for every save is that body answering
  * differently on the second read: the handler serves what the PATCH and PUT handlers
  * last wrote. A handler answering the fixture twice would make each reload assertion
  * below vacuous.
  *
  * Garbage typed into a line item's amount is deliberately not pinned in either
- * direction; DEBT.md carries what the code does with it today.
+ * direction: what the code does with it today is not a rule.
  */
 interface ItemWrite {
   label: string;

@@ -1,5 +1,5 @@
 /**
- * The two per-transaction marks no HTTP case reached until ROADMAP row 75: the income
+ * The two per-transaction marks that had no HTTP case: the income
  * source and the one-off flag. The transfer flag's route is held in
  * http-transfer-rules.test.ts and the category's in category-override.test.ts; the
  * no-body refusal every JSON route shares is http-body.test.ts's and is not re-pinned.

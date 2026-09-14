@@ -1,5 +1,5 @@
 /**
- * Deleting a category rule over HTTP (ROADMAP row 75). The rule's creation door and
+ * Deleting a category rule over HTTP. The rule's creation door and
  * the data layer's delete are held elsewhere (category-override.test.ts); what this
  * route adds to the delete is the recompute after it, and that is the arm worth the
  * file: a rule deleted without one leaves every row it re-tagged wearing a category

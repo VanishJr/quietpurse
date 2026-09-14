@@ -41,10 +41,11 @@ function resolveKey(key: string): string {
 
 /**
  * Nobody but this user. The statements are bank statements and the database beside
- * them is every transaction in them, and row 72 removed the encryption that used to
- * stand between them and a second account on the machine - so the only thing left is
- * the mode: set where a file is created, and re-checked on every boot for a folder
- * that was not.
+ * them is every transaction in them, and the sealing under a server key went with the
+ * hosted product, because on a personal machine that key would have sat beside the
+ * files it guarded - so the only thing left between them and a second account on the
+ * machine is the mode: set where a file is created, and re-checked on every boot for a
+ * folder that was not.
  *
  * 0700 on a directory is the load-bearing half: PGlite writes its own files inside
  * the database folder under its own modes, and a folder nobody else may traverse

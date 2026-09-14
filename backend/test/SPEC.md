@@ -62,7 +62,22 @@ route written any of those ways; the shape rule's one instrument is the token `r
 spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
 `req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
 and none is closed here;
-`backend/test/specs.test.ts` reads every `SPEC.md` this repository declares;
+`backend/test/specs.test.ts` reads every `SPEC.md` this repository declares, and every comment in
+every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
+included, and an untracked probe dropped under either package included — enumerated through
+`commentsOf` in the comment tool's pure core rather than by a walk of its own or a scan of lines,
+and refuses in a comment what it refuses in a spec: a path `.gitignore` keeps out of the tree, a
+line citation, a commit sha, and any reference to the plan that carries no path — the plan's name, a
+row, an item, a task id, a decision, finding, invariant, question or trap number, a pull request, a
+round of review — because a reader who clones the repository cannot open what those point at, while
+the same words inside a string literal are the product's and are not read; the price of the
+letter-and-digit family is that a hash algorithm's or a cloud bucket's name spelled that way in a
+comment reds and is one word to rephrase, which is the tie-break the file already states; a
+reference that names no number, one wrapped across a line break inside a block comment, a row of the
+plan written out in words, a row id written with its stage letter and no padding, a bare hash sign
+and a number, *pull request* in words, the pipeline's own vocabulary and *this row* in the plan's
+sense are not seen, and none is closed here; and the path half is bounded by the extensions the
+citation clause reads, so a dotfile a reader creates for themselves is unseen, rightly;
 `backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
 name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
 `import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
@@ -80,7 +95,11 @@ them, because a custom property nothing names costs nothing at run time and so c
 other way, and the third reading every source file there for a specifier that reaches `backend/`,
 requiring each to be the statement form `import type` or `export type` and `web/src/types.ts` to be
 the only file carrying one, because a value import of the wire compiles, is erased by nothing and
-bundles the module into the client with every suite green. **Nothing holds that list** —
+bundles the module into the client with every suite green, and requiring every reference to browser
+storage in the package's product files — its tests and its harness set aside — to sit in the two
+files `web/src/SPEC.md` names and to be the operations it names for each, because *Platforms* says
+no state lives only in the browser and the theme is its one deliberate exception. **Nothing holds
+that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 

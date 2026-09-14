@@ -210,7 +210,7 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
       // hidden ones too: without them there is no way to bring one back
       setAccounts(await api.accounts(true));
       // read for one thing — the currency a new account is created in. See the row in
-      // REDESIGN-BACK-DEBT.md: the endpoint requires one and "Add more" does not ask.
+      // the endpoint requires one and "Add more" does not ask.
       api
         .appSettings()
         .then((s) => setBaseCurrency(s.baseCurrency))

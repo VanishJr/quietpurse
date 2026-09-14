@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
-import { censusOf, compareSources, tokensOf } from '../scripts/comment-tokens';
+import { censusOf, commentsOf, compareSources, tokensOf } from '../scripts/comment-tokens';
 
 /**
  * The control table. A comparator that has only ever agreed is worth nothing, and the
@@ -189,6 +189,41 @@ describe('the census', () => {
       nonBlank: 1,
       blocks: 1,
     });
+  });
+});
+
+/**
+ * The list the census folds over, and the one walk specs.test.ts reads comments through:
+ * a holder built on a second walk would drift from this one in its control table first.
+ */
+describe('the comment list the census folds over', () => {
+  const spans = (fileName: string, text: string): [number, number, string][] =>
+    commentsOf(fileName, text).map((c) => [c.line, c.lineEnd, c.text]);
+
+  it('commentsOf lists a docblock, a whole-line comment and a trailing one once each, with the lines they start and end on', () => {
+    expect(spans('fixture.ts', TS_BASE)).toEqual([
+      [1, 3, '/**\n * A docblock carrying a digit: row 65.\n */'],
+      [6, 6, '// a whole comment line'],
+      [8, 8, '// and a trailing one'],
+    ]);
+  });
+
+  it('commentsOf reads a bare JSX comment inside braces', () => {
+    expect(spans('fixture.tsx', TSX_BASE)).toEqual([
+      [3, 3, '// a line comment above the component'],
+      [7, 7, '/* the figure and its unit are one sentence */'],
+    ]);
+  });
+
+  it('commentsOf reads nothing out of a string or a template that looks like one', () => {
+    const text = ['const a = "http://x";', 'const b = `y // z`;', ''].join('\n');
+    expect(commentsOf('fixture.ts', text)).toEqual([]);
+  });
+
+  it('commentsOf reads a comment after the last statement', () => {
+    expect(spans('fixture.ts', 'const a = 1;\n// after everything\n')).toEqual([
+      [2, 2, '// after everything'],
+    ]);
   });
 });
 

@@ -141,11 +141,11 @@ export interface BreakdownDef {
   label: string;
   /**
    * Whether the wizard offers it for one account. Not a limit of the API: `/api/summary`
-   * has taken an `accountId` since row 48 and answers that account's own income by
-   * source, off the same `scopeSql` every other figure is filtered through. This is a
-   * product decision left open — whether a split by income source is a
-   * question worth asking of one account — and until it is answered the wizard drops
-   * the choice when an account is picked rather than offering what nobody has ruled on.
+   * takes an `accountId` and answers that account's own income by source, off the same
+   * `scopeSql` every other figure is filtered through. This is a product decision left
+   * open — whether a split by income source is a question worth asking of one account —
+   * and until it is answered the wizard drops the choice when an account is picked rather
+   * than offering what nobody has ruled on.
    */
   allAccountsOnly?: true;
 }
@@ -509,9 +509,10 @@ export function suggestedTitle(
  * the tab strip is still the saved state — there is no save button, every change to
  * the list is a write.
  *
- * They lived in localStorage and nowhere else until row 052. The key is read once
- * more, by the migration in `AnalyticsScreen`, and written by nothing: after that
- * read it is removed, and the only copy of a chart is the one the server holds.
+ * Before the server held them they lived in this browser's localStorage and nowhere else.
+ * The key is read once more, by the migration in `AnalyticsScreen`, and written by
+ * nothing: after that read it is removed, and the only copy of a chart is the one the
+ * server holds.
  *
  * What is here rather than in `api.ts` is what the route's door is made of — the
  * bounds it refuses past and the shape a stored object has to have — because both

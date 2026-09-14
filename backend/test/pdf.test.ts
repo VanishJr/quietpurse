@@ -1550,10 +1550,11 @@ describe('pdf: the third layout', () => {
   /**
    * The transaction table's own windows, and deliberately NOT the balance box's.
    *
-   * The box is a row of a different table: revolut-ru's `balances.opening` [250, 330) sits
-   * INSIDE its own description window [120, 330) and its `closing` [500, 596) past its last
-   * column, which pdf.ts:1105-1112 explains in its own words. Folding them in would redden
-   * this guard on the day it was written, about a layout nobody has measured wrong.
+   * The box is a row of a different table: revolut-ru's `balances.opening` [250, 330)
+   * sits INSIDE its own description window [120, 330) and its `closing` [500, 596) past
+   * its last column, which the `revolut-ru` template says in its own words beside its
+   * `gross` spans. Folding them in would redden this guard on the day it was written,
+   * about a layout nobody has measured wrong.
    */
   const transactionWindows = (
     t: PdfTemplate,
@@ -1563,10 +1564,10 @@ describe('pdf: the third layout', () => {
   };
 
   /**
-   * I2, and the only holder of it that a template added tomorrow inherits. An overlapping
+   * The only holder of this that a template added tomorrow inherits. An overlapping
    * description/MCC pair would put a bank's own identifier into the column the categoriser,
-   * the transfer detector and the export all read - row 38's defect, arriving from a data
-   * literal instead of from a drop list.
+   * the transfer detector and the export all read - the account-number defect, arriving
+   * from a data literal instead of from a drop list.
    *
    * The three counts under it are the non-vacuity literals, canvasabsent's idiom: a
    * refactor that empties the iteration reddens them rather than passing over nothing.
@@ -1811,7 +1812,7 @@ describe('pdf: the third layout', () => {
     const rows = await uaImported('Universal Mcc Left', pages);
     expect(rows.map((r) => r.mcc)).toEqual([undefined, undefined, undefined]);
     // and the control that the tokens were drawn at all: the description column is where
-    // an item 0.5 left of the window belongs, and it says so
+    // a glyph half a unit left of the window belongs, and it says so
     expect(rows.map((r) => r.description)).toEqual([
       `Кавʼярня ${UA_MCC.coffee} на Хрещатику`,
       `Зарахування ${UA_MCC.topUp}`,

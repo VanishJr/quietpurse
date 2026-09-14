@@ -191,7 +191,7 @@ describe('the parts of one period', () => {
       { key: 'salary', label: 'Salary', value: 900 },
     ]);
     // named out of the server's own catalogue rather than a category dictionary — and
-    // answered for one account as readily as for the workspace since row 48
+    // answered for one account as readily as for every account together
     expect(shareFromSummary(summary, 'income-sources')).toEqual([
       { key: 'src-1', label: 'Acme GmbH', value: 900 },
     ]);

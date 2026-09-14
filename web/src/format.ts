@@ -88,9 +88,9 @@ export const fmtMonthTick = (month: string): string =>
  * A long name cut in the middle, keeping both ends, with the cut marked.
  *
  * End-truncation is the usual answer and it is the wrong one here. An account's
- * default name is the statement's filename, extension and all — the real ones look
- * like `report_03-09-2026_11-22-33.pdf`, and everything that distinguishes two of them
- * is at the end. Cut from the right, every account a bank exports is called
+ * default name is the statement's filename, extension and all — the real ones are a
+ * `report_` prefix, a date and a time, and everything that distinguishes two of them is
+ * at the end. Cut from the right, every account a bank exports is called
  * `report_03-09-…`, which names none of them.
  *
  * `budget` is the whole result including the ellipsis, so the caller states the width
