@@ -193,10 +193,12 @@ describe('readAsSentence', () => {
 
   /**
    * The union is the server's declaration by type, so an arm this build does not name
-   * cannot compile here — and can still arrive at runtime from an older server, a
-   * foreign restore or a proxy. There is no error boundary in this app and Discard
-   * lives inside the card this sentence renders in, so a throw would leave the staged
-   * import neither confirmable nor discardable. It says so instead.
+   * cannot compile here — and a body can still come from a server of another version
+   * than the one this client was built from — `web/dist` is whatever was last built,
+   * the backend runs from source — or through a proxy. There is no error boundary in
+   * this app and Discard lives inside the card this sentence renders in, so a throw
+   * would leave the staged import neither confirmable nor discardable. It says so
+   * instead.
    */
   it('describes an arm it has never heard of rather than taking the card down', () => {
     const unknown = { kind: 'ocr-guess', columns: RU } as unknown as ReadAs;

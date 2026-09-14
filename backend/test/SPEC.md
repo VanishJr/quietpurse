@@ -25,7 +25,7 @@ carry their own reasoning in their headers. Nothing below repeats them.
   invariant spans something no type can carry: a rule about the *shape* of code. A value that has
   to agree with one in the other package is no longer that kind of invariant: the client derives
   its wire types from `backend/src/wire` by type-only import and pins its runtime copies to the
-  module's exports by type, so the two numbers and the vocabularies meet in the client's `tsc`
+  module's exports by type, so the pinned constants and the vocabularies meet in the client's `tsc`
   rather than in a file here that reads the client's source.
 - **The coverage reading.** `npm run coverage` in either package runs its suite under the v8
   provider and prints a per-file table. The include is declared in `backend/vitest.config.ts` and

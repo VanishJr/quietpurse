@@ -40,10 +40,11 @@ import type {
  * both suites green. And it is reached through one door: `types.ts` is the only file
  * that names the backend path, so a rename on the server is one edit here and a `tsc`
  * error everywhere else. Both are read off the program the compiler builds from
- * `web/tsconfig.json` - every file it compiles, wherever it sits, not a directory -
- * over every form a specifier can take (the list `backend/test/wire.test.ts` walks),
- * and each specifier is resolved the way the compiler resolves it, so what is tested
- * is the file it lands on and not what the text looks like.
+ * `web/tsconfig.json` - every file it compiles outside `node_modules` and `backend/`,
+ * not a directory - over every form the compiler resolves (the list
+ * `backend/test/wire.test.ts` walks), and each specifier is resolved the way the
+ * compiler resolves it, so what is tested is the file it lands on and not what the
+ * text looks like.
  *
  * The pins are `satisfies typeof` the wire's exports and a record keyed by each of its
  * unions, and both assume the export carries a literal type: a wire constant widened
@@ -186,8 +187,9 @@ describe('the wire is reached by type only and through one door', () => {
 
   it('reads the client program, and the door names the wire and nothing else under backend/', () => {
     expect(FILES).toContain('src/api.ts');
-    // the program's files and not src/: the two configs are compiled and walked too
+    // the program's files and not src/
     expect(FILES).toContain('vite.config.ts');
+    expect(FILES).toContain('vitest.config.ts');
     expect(FILES).toContain(DOOR);
     const door = crossings.find((c) => c.file === DOOR);
     expect(door?.found.length, 'a door that names no wire is a check over nothing').toBeGreaterThan(

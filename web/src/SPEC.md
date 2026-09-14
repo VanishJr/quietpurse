@@ -79,15 +79,18 @@ type` / `export type` and never a value: a value import compiles, is erased by n
 zod and the wire module into the built client with both suites green. No other file under `web/src`
 names the backend path; everything imports from `types.ts`. Both rules are held by
 `web/src/types.test.ts`, which walks the program the compiler builds from `web/tsconfig.json` —
-every file it compiles, the two config files and anything pulled in by resolution included, not a
-directory — for every form a specifier can take, and resolves each specifier the way the compiler
-does, so what is tested is the file a specifier lands on: a `paths` or `baseUrl` mapping, a
-`rootDirs` overlay, a relay outside `web/src/` and a file whose extension a directory filter would
-miss are all seen as the file they reach. The tsconfig case beside it is a belt: it refuses `paths`
-and `baseUrl` outright, because either would let a bare name reach `backend/` and the door's own
-text would stop saying where it goes, and the row refuses a `paths` mapping to a second copy of zod.
-`web/vite.config.ts`'s `resolve.alias` is not a door on its own: a value import through an alias
-`tsc` cannot resolve is `TS2307` before it is anything else. The client's typecheck compiles the
+every file it compiles outside `node_modules` and `backend/`, the config files `include` names and
+anything pulled in by resolution included, not a directory — for every form the compiler resolves,
+and resolves each specifier the way the compiler does, so what is tested is the file a specifier
+lands on: a `paths` or `baseUrl` mapping, a `rootDirs` overlay, a relay outside `web/src/` and a
+file whose extension a directory filter would miss are all seen as the file they reach. Vite's
+module graph is wider than the compiler's, and what only vite resolves is not walked here. The
+tsconfig case beside it is a belt: it refuses `paths` and `baseUrl` outright, because either would
+let a bare name reach `backend/` and the door's own text would stop saying where it goes, and the
+row refuses a `paths` mapping to a second copy of zod. A `resolve.alias` in `web/vite.config.ts` is
+not a door on its own — a value import through an alias `tsc` cannot resolve is `TS2307` before it
+is anything else — and is one with an ambient `declare module` beside it, which is what lets `tsc`
+resolve the name and which the walk does not see. The client's typecheck compiles the
 wire module and resolves `zod` from `backend/node_modules`; `npm run setup` installs `backend/`
 before it builds `web/`, and the order is load-bearing — reversed, the client's typecheck fails on
 `zod` — which is also why the `web` job in `.github/workflows/ci.yml` installs it before its
@@ -146,7 +149,8 @@ check compares them — so either half can drift and every test in both packages
 who has renamed theirs reads their own word instead, which is what the delete confirmation looks up
 rather than writes out.
 
-**The account delete's three counts are what the delete destroyed, which for a hidden account is
-legitimately not what the panel previewed.** The preview counts a hidden account by the server's
-total over its imports, because the transactions endpoint answers nothing for one; the delete
-counts the rows carrying the account id. Transfer rules go too and are not in the answer.
+**The account delete's counts — transactions, imports, documents — are what the delete destroyed,
+which for a hidden account is legitimately not what the panel previewed.** The preview counts a
+hidden account by the server's total over its imports, because the transactions endpoint answers
+nothing for one; the delete counts the rows carrying the account id. Transfer rules go too and are
+not in the answer.

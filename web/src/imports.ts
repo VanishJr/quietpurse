@@ -143,10 +143,12 @@ export function balanceClaim(series: SeriesCounts | undefined): { lead: string; 
  *
  * The default arm still returns a sentence rather than throwing, and the difference is
  * the whole summary card: the union is the server's declaration by type, so a build of
- * this app cannot name an arm the server does not — but a body can still come from an
- * older server, a foreign restore or a proxy; there is no error boundary in this app,
- * and Discard lives inside this card and nowhere else — so a throw here would leave a
- * staged import that can be neither confirmed nor discarded from the UI at all.
+ * this app cannot name an arm the server does not — but a body can still come from a
+ * server of another version than the one this client was built from — `web/dist` is
+ * whatever was last built, the backend runs from source — or through a proxy; there is
+ * no error boundary in this app, and Discard lives inside this card and nowhere else —
+ * so a throw here would leave a staged import that can be neither confirmed nor
+ * discarded from the UI at all.
  */
 export function readAsSentence(readAs: ReadAs): string {
   // Ahead of the switch, because `readAs.kind` on an absent field throws before the

@@ -51,12 +51,14 @@ and refuses any specifier that is not `zod` or a relative path inside this direc
 **The file is compiled by two compilers, and the second is the client's.** `web/src/types.ts`
 re-exports this module's types, so the client's `tsc` — `ESNext` modules, `bundler` resolution,
 `isolatedModules`, `noUnusedLocals`, `noUnusedParameters` — compiles this file beside this package's
-own `commonjs` one. An edit only the client's refuses — an `import x = require()`, a type re-export
-without `export type`, an unused local — is green in both backend jobs and red in the `web` job,
-and that coupling is what holds the file to ESM-style imports, `export type` on every type-only
-re-export and nothing left unused. An `export =` is refused by both, because the module has other
-exports; a `require()` of anything but zod or a file in this directory is refused by the specifier
-walk whichever compiler runs; a `const enum`, a `__dirname` and a `require('zod')` are refused by
+own `commonjs` one. An edit only the client's refuses — a type re-export without `export type`, an
+unused local — is green in both backend jobs and red in the `web` job, and that coupling is what
+holds the file to `export type` on every type-only re-export and nothing left unused. An `export =`
+is refused by both — by this package's compiler because the module has other exports, and by the
+client's because it compiles ES modules; an `import x = require()` is refused by both, because
+`backend/tsconfig.test.json` compiles `backend/test/` and everything it reaches as ES modules; a
+`require()` of anything but zod or a file in this directory is refused by the specifier walk
+whichever compiler runs; a `const enum`, a `__dirname` and a `require('zod')` are refused by
 neither.
 
 ## What a declaration says, and how it is read
