@@ -789,8 +789,6 @@ const chartSchema = z.strictObject({
     .string({ error: 'chart id must be text' })
     .min(1, { error: 'chart id must not be empty' })
     .max(CHART_ID_MAX, { error: `chart id must be at most ${CHART_ID_MAX} characters` })
-    // the shape is beside the four bounds in db/, where the client's copy of it is
-    // held against this one
     .regex(CHART_ID_SHAPE, {
       error: 'chart id may contain only letters, digits, and . _ ~ -',
     }),
@@ -1978,6 +1976,12 @@ export function registeredAnswerKeys(target: express.Express): string[] {
 }
 
 export function assertAnswersDeclared(target: express.Express): void {
+  const [first] = target.router.stack as RouteLayer[];
+  if (first?.handle !== answerCheck) {
+    throw new Error(
+      `the answer check is not the first layer on the app (${first?.handle?.name || 'anonymous'} is): every route and every refusing middleware sits behind it or its answer goes unparsed`,
+    );
+  }
   const registered = new Set(registeredAnswerKeys(target));
   const declared = new Set(Object.keys(ANSWERS));
   const undeclared = [...registered].filter((k) => !declared.has(k));

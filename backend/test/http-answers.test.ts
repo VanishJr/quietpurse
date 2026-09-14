@@ -194,9 +194,19 @@ describe('what the wrapper records', () => {
 describe('what the walk refuses at import', () => {
   const withRoutes = (...register: ((t: express.Express) => void)[]) => {
     const t = express();
+    t.use(answerCheck);
     for (const r of register) r(t);
     return t;
   };
+
+  it('a route registered ahead of the answer check, whose answer it would never see', () => {
+    const t = express();
+    t.get('/api/health', (_req, res) => {
+      res.json({ ok: true });
+    });
+    t.use(answerCheck);
+    expect(() => assertAnswersDeclared(t)).toThrow(/^the answer check is not the first layer on the app \(/);
+  });
 
   it('a route no declaration carries, by key', () => {
     const t = withRoutes((t) => {

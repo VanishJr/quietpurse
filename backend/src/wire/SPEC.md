@@ -131,7 +131,10 @@ function name against the door's own middlewares — the answer check, the respo
 request log, the origin check, the JSON body parser, the static file server and the error handler —
 so the app's non-route layers are those and nothing else, and an anonymous handler or a foreign one
 throws at import naming itself. A rename inside Express of one of the two it does not own reds the
-boot loud rather than letting anything through.
+boot loud rather than letting anything through. Of the layers it recognises, the answer check is
+required to be the router's first, by identity and not by name — a reorder that puts any layer
+ahead of it, or a deletion of it, reds at import wherever the app is imported, because the wrapper
+sees only what sits behind it, and a layer ahead of it that answers, answers unparsed.
 
 ## The invariants no type and no test holds
 
