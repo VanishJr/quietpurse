@@ -53,11 +53,13 @@ From `backend/` unless stated otherwise:
 ```
 npm run typecheck     tsc --noEmit          both packages; backend runs it twice
 npm test              vitest run            both packages have this
+npm run coverage      vitest run --coverage the suite plus a per-file reading; not a gate
 npm run dev           tsx watch src/index.ts
 npm run db:generate   drizzle-kit generate
 npm run check:stack   tsx scripts/check-stack.ts   up|status|down: a throwaway stack for a check
 npm run check:comments tsx scripts/comment-check.ts  compare|count: whether a change is comment-only, and how much is comment
 cd web && npm run dev
+cd web && npm run coverage                    the same reading for the client
 ```
 
 Verification means both `npm run typecheck` and `npm test` green in `backend/`. A change is not
@@ -85,8 +87,8 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   (`~/Finto` by default): the embedded database in `db/`, the uploaded statements in
   `statements/`, and a lock file holding the running process's pid. PGlite does not refuse a
   second opener, so the lock is the only thing between two `npm start`s and a corrupted
-  database; `src/index.ts` takes it before opening anything and refuses while a live pid holds
-  it.
+  database; `src/lock.ts` claims it, `src/index.ts` calls the claim before opening anything, and
+  it refuses while a live pid holds it.
 - **No sign-in, so the port is the boundary.** Whoever can reach the port owns the data behind
   it. The server binds the loopback interface unless `FINTO_HOST` says otherwise, and nothing in a
   route asks who is calling. A feature that needs to know who is acting has nowhere to read it
@@ -161,6 +163,13 @@ each one — measured, three files, three runs. What is shared between files is 
 the module registry, not the rows. A file whose figures are exact repeats that pair in its own
 `beforeAll` anyway, because its exactness then rests on a line in the file rather than on a setup
 file the file does not name.
+
+`npm run coverage` in either package prints a per-file reading of what the suite reached —
+`src/**` and `scripts/**` in `backend/`, `src/**` less the test files and the harness in `web/` —
+with the entry points (`src/index.ts`, `src/main.tsx`) left in and reading nothing, because they
+boot on import, so no case imports them — `backend/src/index.ts` is exercised by the `app` job in
+CI, `web/src/main.tsx` is built by it and runs only in a browser. It is a reading and not a gate:
+no threshold, and no CI step reads it.
 
 One backend test never runs on Windows or as root: `test/documents.test.ts` skips there, so a green
 local run on either is one short of the total. It is the boot check that a statements folder which

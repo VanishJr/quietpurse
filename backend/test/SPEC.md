@@ -18,6 +18,15 @@ carry their own reasoning in their headers. Nothing below repeats them.
 - **The checks that read another file as text** instead of importing it. They exist where an
   invariant spans something no type can carry: a rule about the *shape* of code, or a value that has
   to agree with one in a package that shares no build with this one.
+- **The coverage reading.** `npm run coverage` in either package runs its suite under the v8
+  provider and prints a per-file table. The include is declared in `backend/vitest.config.ts` and
+  `web/vitest.config.ts`: everything under `backend/src/` and `backend/scripts/` here, everything
+  under `web/src/` less the test files and the harness in `web/src/test/` there — the harness is not
+  product, and vitest excludes only the root setup files by itself, which the `dom` project's is
+  not. The entry points, `backend/src/index.ts` and `web/src/main.tsx`, stay in and read nothing:
+  they boot on import, so no case imports them — `backend/src/index.ts` is exercised by the `app`
+  job in `.github/workflows/ci.yml`, `web/src/main.tsx` is built by it and runs only in a browser.
+  It is a reading and not a gate: no threshold, and no CI step reads it.
 
 ## Where the boundary runs
 

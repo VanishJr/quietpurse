@@ -17,5 +17,12 @@ export default defineConfig({
     server: {
       deps: { external: [/@electric-sql\/pglite/] },
     },
+    // A reading, not a gate: no threshold, and CI does not run it. What the include
+    // means is in test/SPEC.md.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text'],
+      include: ['src/**', 'scripts/**'],
+    },
   },
 });

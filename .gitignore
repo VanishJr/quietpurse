@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# `npm run coverage` prints to the terminal; the html reporter, when asked for, writes here
+coverage/
 
 # secrets and local configuration
 .env

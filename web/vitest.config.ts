@@ -15,6 +15,17 @@ import { defineConfig } from 'vitest/config';
  */
 export default defineConfig({
   test: {
+    // A reading, not a gate: no threshold, and CI does not run it. Coverage is a
+    // root option and not a project's. The harness under src/test/ is excluded by
+    // name: vitest excludes the ROOT setup files by itself, and the dom project's
+    // setup file is not one of those. What the include means is in
+    // backend/test/SPEC.md, beside the backend's.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text'],
+      include: ['src/**'],
+      exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test/**'],
+    },
     // TZ is set per project, not once at the top: a project does not inherit the
     // root test block. fmtDate reads a UTC instant with local getters, so its
     // output depends on the machine's zone - pinning it keeps the suite
