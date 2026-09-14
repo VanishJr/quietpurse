@@ -18,6 +18,16 @@ import { putDocument } from '../documents';
 import { logImport } from '../logger';
 import { fromCents, toCents } from '../money';
 import { NewTransaction } from '../types';
+import type {
+  BalancesNotShown,
+  ImportSummary as WireImportSummary,
+  ReadAs,
+  ReadColumns,
+  SeriesCounts,
+  StatementBalances as WireBalances,
+  StatementImportResult as WireImportResult,
+  StatementTotal,
+} from '../wire';
 import {
   CSV_PARSER_VERSION,
   CSV_PRESETS,
@@ -203,96 +213,28 @@ export const ACCOUNT_NOT_FOUND =
 export const ACCOUNT_REMOVED =
   'this account has been removed from the app - restore it, then upload the file again';
 
+export type { BalancesNotShown, ReadAs, ReadColumns, SeriesCounts } from '../wire';
+
 declare const checked: unique symbol;
 
-export type CheckedTotals = readonly { currency: string; net: number }[] & {
-  readonly [checked]: true;
-};
+export type CheckedTotals = readonly StatementTotal[] & { readonly [checked]: true };
 
-export type SeriesCounts = { summed: number; checked: number };
+export type CheckedBalances = WireBalances & { readonly [checked]: true };
 
-export type CheckedBalances = {
-  opening: number;
-  closing: number;
-  currency: string;
-  series?: SeriesCounts;
-} & { readonly [checked]: true };
-
-/**
- * Why no opening/closing pair is shown for a file that DOES state a running balance.
- * Absent together with `balances` means the format states none, and the two must not
- * spell the same: after this row a third state exists - a preset
- * declared a balance column, it resolved, and the check could not be completed.
- *
- * A slug over the wire with the sentence in the client dictionary, which is this
- * codebase's own idiom for a value a screen renders as prose.
- */
-export type BalancesNotShown =
-  | 'rows-outside-the-balance'
-  | 'rows-without-a-balance'
-  | 'balance-closes-on-itself'
-  | 'more-than-one-currency';
-
-/** date, amount and description: the three slots every reader fills, and no others. */
-export interface ReadColumns {
-  date: string;
-  amount: string;
-  description: string[];
-}
-
-export type SheetReadAs =
-  | { kind: 'preset'; preset: string; title: string; columns: ReadColumns }
-  | { kind: 'auto-detected'; columns: ReadColumns }
-  | { kind: 'request-mapping'; columns: ReadColumns };
-
-export type ReadAs = SheetReadAs | { kind: 'pdf-template'; title: string };
+export type SheetReadAs = Exclude<ReadAs, { kind: 'pdf-template' }>;
 
 /** The one place either brand is applied, and it is private to this module. */
 const check = <T>(value: T): T & { readonly [checked]: true } =>
   value as T & { readonly [checked]: true };
 
-export interface ImportSummary {
-  importId: string;
-  accountId: string;
-  accountName: string;
-  total: number;
-  accepted: number;
-  /** dropped rows, the sum of the three below, and what imports.rows_rejected stores */
-  skipped: number;
-  /** of those, the ones this importer failed on - an unreadable fee, or no date or amount */
-  unreadable: number;
-  /** read fine, and dropped by a rule: the statement's own status column says so */
-  filtered: number;
-  /** read fine, and moving no money once the fee is taken - nothing to insert */
-  noMovement: number;
-  problems: string[];
-  /**
-   * Of `accepted`, how many are not already in the database - the number the user
-   * reads before deciding. A snapshot: another import committing between now and
-   * Confirm can take one of these slots, and the confirm reports what landed.
-   */
-  newRows: number;
-  alreadyPresent: number;
-  from: string;
-  to: string;
+/** The wire's summary with the brand on the two fields only reconcile may fill. */
+export type ImportSummary = Omit<WireImportSummary, 'totals' | 'balances'> & {
   totals: CheckedTotals;
-  readAs: ReadAs;
   balances?: CheckedBalances;
-  /** set only when the file states a running balance and no pair came out of it */
-  balancesNotShown?: BalancesNotShown;
-  supersededImportId?: string;
-}
+};
 
 export type StatementImportResult =
-  | {
-      outcome: 'duplicate';
-      importId: string;
-      accountId: string;
-      accountIds: string[];
-      uploadedAt: string;
-      skipped: number;
-      total: number;
-    }
+  | Extract<WireImportResult, { outcome: 'duplicate' }>
   | { outcome: 'awaiting_confirmation'; summary: ImportSummary };
 
 export function sniff(bytes: Buffer): ImportSourceType {

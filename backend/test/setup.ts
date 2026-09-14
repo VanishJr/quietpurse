@@ -10,6 +10,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { afterAll, afterEach, expect } from 'vitest';
 
 process.env.BASE_CURRENCY = 'EUR';
 process.env.OWNER_NAMES = 'Yurii Kalvenko, Yuriy Kalvenko';
@@ -45,3 +46,19 @@ const db = await freshTestDb();
 const { initDb, seedDefaults } = await import('../src/db');
 initDb(db);
 await seedDefaults();
+
+// Drained in afterAll as well as afterEach: an answer issued from a file's own afterAll
+// would otherwise be dropped when the next file installs a fresh reporter. After hooks
+// run in reverse registration order (sequence.hooks: stack), so both run after the
+// test file's own.
+const { app } = await import('../src/app');
+const { installAnswerCheck } = await import('./answers');
+const answers = installAnswerCheck(app);
+const noMismatch = (): void => {
+  expect(
+    answers.drain(),
+    'an answer disagreed with its declaration in src/wire - the route, the status and the zod issue path are in the list below',
+  ).toEqual([]);
+};
+afterEach(noMismatch);
+afterAll(noMismatch);

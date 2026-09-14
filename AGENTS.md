@@ -28,6 +28,7 @@ files you are missing. Nothing here depends on them.
 backend/    Express 5 + TypeScript, Drizzle ORM over Postgres (PGlite in the process, or a server), Zod, pino
   src/db/       the schema, every query, and the one function that opens the database
   src/providers/ the one ingestion surface and the per-format parsers behind it
+  src/wire/     every route's answer declared once; the backend's types are inferred from it
   drizzle/      generated migrations
   test/         vitest + pglite + supertest; helpers.ts and pglite.ts are the harness
 web/        React 19 + Vite + Recharts

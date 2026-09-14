@@ -24,6 +24,7 @@ const SPEC_DIRS = [
   'backend/src',
   'backend/src/db',
   'backend/src/providers',
+  'backend/src/wire',
   'backend/test',
   'web/src',
 ];

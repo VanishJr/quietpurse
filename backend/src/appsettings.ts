@@ -1,11 +1,8 @@
 /** Not settings.ts, which holds the Goal screen's settings and stores them elsewhere. */
 import { currentBaseCurrency, getSetting, setSetting } from './db';
+import type { AppSettings } from './wire';
 
-export interface AppSettings {
-  /** base currency of all totals; changing it requires recomputing base_amount */
-  baseCurrency: string;
-  ownerNames: string[];
-}
+export type { AppSettings } from './wire';
 
 export async function getAppSettings(): Promise<AppSettings> {
   // No env fallback: OWNER_NAMES is the operator's own household, so falling back to

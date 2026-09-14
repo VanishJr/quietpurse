@@ -19,7 +19,18 @@ const tx = (over: Partial<NewTransaction>): NewTransaction => ({
 });
 
 /** canPair works on stored rows, which have an id; it never looks at the value. */
-const pairable = (over: Partial<NewTransaction>): Transaction => ({ id: 'unused', ...tx(over) });
+const pairable = (over: Partial<NewTransaction>): Transaction => ({
+  id: 'unused',
+  ...tx(over),
+  fee: undefined,
+  categoryManual: false,
+  transfer: false,
+  transferManual: null,
+  refund: false,
+  incomeSourceManual: false,
+  recurring: false,
+  oneOff: false,
+});
 
 /**
  * Ids are assigned by the database now, so the assertions below find each row by
