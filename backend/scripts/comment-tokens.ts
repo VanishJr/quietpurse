@@ -1,10 +1,9 @@
 /**
  * Two readings of one parse of one source text: the leaf-token stream that says
  * whether a change was comment-only, and the comment list that the census folds into
- * how much of a file is comment and that the holder in specs.test.ts reads for what a
- * comment may not say. Separate from comment-check.ts because a test that imported the
- * entry would drag in argv, the filesystem and `git show` to reach one walk: nothing
- * here may run at import time or reach a module but `typescript`, and
+ * how much of a file is comment. Separate from comment-check.ts because a test that
+ * imported the entry would drag in argv, the filesystem and `git show` to reach one
+ * walk: nothing here may run at import time or reach a module but `typescript`, and
  * comment-tokens.test.ts holds both.
  */
 import ts from 'typescript';
@@ -104,6 +103,7 @@ export function compareSources(fileName: string, base: string, work: string): Ve
 export function commentsOf(fileName: string, text: string): Comment[] {
   const source = parseSource(fileName, text);
   const found = new Map<number, Comment>();
+  const jsxText: [number, number][] = [];
   const add = (range: ts.CommentRange): void => {
     if (found.has(range.pos)) return;
     found.set(range.pos, {
@@ -114,7 +114,13 @@ export function commentsOf(fileName: string, text: string): Comment[] {
       text: text.slice(range.pos, range.end),
     });
   };
+  const jsDoc = (node: ts.Node): boolean =>
+    node.kind === ts.SyntaxKind.JSDoc ||
+    (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode);
   const walk = (node: ts.Node): void => {
+    /** The block is a leading range of what it documents; inside it a `//` is prose. */
+    if (jsDoc(node)) return;
+    if (node.kind === ts.SyntaxKind.JsxText) jsxText.push([node.pos, node.end]);
     if (node.kind !== ts.SyntaxKind.SourceFile) {
       for (const range of ts.getLeadingCommentRanges(text, node.pos) ?? []) add(range);
       /** A comment sharing a line with the code before it is a leading range of nothing. */
@@ -123,7 +129,16 @@ export function commentsOf(fileName: string, text: string): Comment[] {
     for (const child of node.getChildren(source)) walk(child);
   };
   walk(source);
-  return [...found.values()].sort((a, b) => a.pos - b.pos);
+  /**
+   * Started inside rendered text, a scanner reads a `//` there as a comment - as the
+   * text's own leading range or as the trailing range of the brace before it - where
+   * tokensOf reads the same characters as the JsxText they are.
+   */
+  const inJsxText = (c: Comment): boolean =>
+    jsxText.some(([pos, end]) => c.pos >= pos && c.pos < end);
+  return [...found.values()]
+    .filter((c) => !inJsxText(c))
+    .sort((a, b) => a.pos - b.pos);
 }
 
 /**

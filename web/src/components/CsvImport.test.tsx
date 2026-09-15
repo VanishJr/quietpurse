@@ -144,8 +144,8 @@ describe('the formats the screen offers', () => {
     mount();
     await settle();
 
-    // the format name and not the sentence: stage 8 rewrites this prose, and a
-    // pinned sentence would then fail for a reason that is not this one
+    // the format name and not the sentence: the sentence is copy that is expected to
+    // change, and a pinned sentence would then fail for a reason that is not this one
     const dropzone = await screen.findByRole('button', { name: /pdf/i });
     expect(dropzone).toHaveTextContent(/\.pdf/);
   });

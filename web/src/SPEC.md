@@ -36,12 +36,13 @@ the `unit` project installs no stub at all.
 `AGENTS.md`'s *Platforms* states that no state lives only in the browser, because the REST API and
 not this app is the contract a mobile client has to reach. The theme is the one deliberate exception:
 a reader who pins dark on a phone and light on a desk has expressed two preferences, not one that
-failed to sync, so `theme.tsx` writes it to `localStorage` and is the only module that writes browser
-storage. The screen, the account, the open panel and the selected chart live in the query string and
-are read back through `url.ts`, and that is not a crossing: the URL is where the reader *is*, not
-something a second client needs to reach — a native client has its own screens and its own Back, and
-a server that has had no user since the product became single-user would be minting per-user
-interface state to hold it. Why it is the query and never the path is stated in `url.ts`'s header.
+failed to sync, so `theme.tsx` writes it to `localStorage` and is the only module that stores
+anything in the browser. The screen, the account, the open panel and the selected chart live in the
+query string and are read back through `url.ts`, and that is not a crossing: the URL is where the
+reader *is*, not something a second client needs to reach — a native client has its own screens and
+its own Back, and a server that has had no user since the product became single-user would be minting
+per-user interface state to hold it. Why it is the query and never the path is stated in `url.ts`'s
+header.
 The rule is held by `web/src/types.test.ts`, which walks the program the compiler builds narrowed to
 the product files — the tests and the harness in `web/src/test/` set aside, by the same cut the
 coverage reading makes — and requires every reference to `localStorage`, `sessionStorage`,

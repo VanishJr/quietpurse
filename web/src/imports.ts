@@ -79,7 +79,8 @@ const columnClause = (columns: ReadColumns): string =>
  * Four arms:
  *
  * - no counts at all: the document printed the pair, and every row between them adds
- *   up to it. That is the PDF, and the single-row blindness never applied to it.
+ *   up to it. That is the PDF, and the gate's blindness to a row lost from either end
+ *   never applied to it.
  * - every run checked: the pair is derived and the rows read run unbroken through it.
  * - some checked: the pair is still true and still shown, and the part of it that
  *   rests on a run of one row is named. On the owner's real export that is one of two.

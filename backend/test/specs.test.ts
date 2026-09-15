@@ -104,23 +104,23 @@ const extractBackticked = (text: string): string[] =>
 
 /**
  * Every way prose in this tree names the plan without a path: the plan by name; a
- * row, item, finding, decision, trap or question by number; an invariant by number or
- * lettered; a pull request; a round of reviewing or of fixing; a decision, invariant,
- * review finding, question or settled item by its letter and number, and a lettered
- * decision; a section; a zero-padded task id with an optional stage letter. No boundary can be
- * loosened to dodge a real hit, and a false positive is one word to rephrase.
+ * row, item, finding, decision, trap, question or stage by number; an invariant by
+ * number or lettered; a pull request; a round of reviewing or of fixing; a decision,
+ * invariant, review finding, question or settled item by its letter and number, and a
+ * lettered decision; a section; a zero-padded task id with an optional stage letter. No
+ * boundary can be loosened to dodge a real hit, and a false positive is one word to
+ * rephrase.
  *
  * The lookbehinds are what let a stored value written in quotes, a decimal, a grouped
  * thousand and a figure with a thin space through, and the stage-letter range is what
  * keeps a word that begins with a capital and digits from reading as a reference.
  * Case-sensitive on the letters: a lower-case letter and a digit is a variable, not a
- * reference. A reference that carries no number, one wrapped across a line break, and
- * a row of the plan written out in words are not seen, and none is closed here.
+ * reference. What the pattern cannot see is stated in backend/test/SPEC.md.
  */
 const PLAN = new RegExp(
   [
     String.raw`\b(?:ROADMAP|[Rr]oadmap)\b`,
-    String.raw`\b(?:[Rr]ows?|[Ii]tems?|[Ff]indings?|[Dd]ecisions?|[Tt]raps?|[Qq]uestions?)\s+\d+[a-e]?`,
+    String.raw`\b(?:[Rr]ows?|[Ii]tems?|[Ff]indings?|[Dd]ecisions?|[Tt]raps?|[Qq]uestions?|[Ss]tages?)\s+\d+[a-e]?`,
     String.raw`\b[Ii]nvariants?\s+(?:\d+|\([a-z]\))`,
     String.raw`\bPR\s?#\d+`,
     String.raw`\b(?:review|fix) rounds?\b`,
@@ -622,6 +622,8 @@ describe('the rules those clauses are built from', () => {
     'Trap 9',
     'trap 3',
     'question 4',
+    'stage 8',
+    'Stages 2, 3 and 8',
     'invariant 3',
     'invariant (a)',
     'PR #75',
@@ -652,6 +654,8 @@ describe('the rules those clauses are built from', () => {
     'the first row',
     'the header row',
     "Excel's last row",
+    'the capture stage',
+    'stages the upload before the read',
     'the invariant a test holds',
     'UTF-16',
     'N26',

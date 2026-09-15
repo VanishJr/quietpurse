@@ -225,6 +225,26 @@ describe('the comment list the census folds over', () => {
       [2, 2, '// after everything'],
     ]);
   });
+
+  /**
+   * JSX text is rendered copy, and a scanner started inside it reads a `//` there as a
+   * comment: once as the text's own leading range, once as the trailing range of the
+   * brace before it. Either way it is what tokensOf calls a JsxText token.
+   */
+  it('commentsOf reads nothing out of JSX text that opens with //, on its own or after a brace', () => {
+    const text = [
+      'export const x = <p>// row 54 is text</p>;',
+      'export const y = <p>{a}// row 54 is text too</p>;',
+      '',
+    ].join('\n');
+    expect(commentsOf('fixture.tsx', text)).toEqual([]);
+  });
+
+  it('commentsOf reads a docblock once, and nothing nested out of a // inside it', () => {
+    expect(spans('fixture.ts', '/** @deprecated // row 57 */\nexport const a = 1;\n')).toEqual([
+      [1, 1, '/** @deprecated // row 57 */'],
+    ]);
+  });
 });
 
 /**

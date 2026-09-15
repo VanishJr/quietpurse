@@ -1021,9 +1021,9 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * The single-row case's other end: a file every run of which is one row. Nothing was
-   * compared anywhere in it - two links, neither of them next to another - and the pair
-   * is still true and still shown. Withholding it would take a correct pair off the
+   * The one-row series taken to its end: a file every run of which is one row. Nothing
+   * was compared anywhere in it - two links, neither of them next to another - and the
+   * pair is still true and still shown. Withholding it would take a correct pair off the
    * fallback path's confirmation screen, which is refusing over uncertainty with a new
    * cause; `balancesNotShown` is why no pair could be DERIVED and one was.
    */
@@ -1350,7 +1350,7 @@ describe("the statement's own running balance, on the sheet path", () => {
     const message = await refusalOf('Balance Date Unread', CARD, { ...IN, date: '' }, RENT);
     expect(message).toContain('100.00 EUR is unaccounted for between them');
     // stops before the hard-coded `are`, which reads "the 1 transaction line ... are" and
-    // is DEBT's to fix: a third assertion pinning it raises the price of that one word
+    // is a known gap: a third assertion pinning it raises the price of that one word
     expect(message).toContain('the 1 transaction line this importer could not read');
   });
 

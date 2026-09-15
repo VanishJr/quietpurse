@@ -316,7 +316,9 @@ const storageUsesOf = (source: ts.SourceFile): string[] => {
     if (ts.isIdentifier(node) && STORAGE.includes(node.text)) {
       found.add(operationOf(node, parent, grand));
     }
-    if (ts.isPropertyAccessExpression(node) && node.name.text === 'cookie') found.add('document.cookie');
+    if (ts.isPropertyAccessExpression(node) && node.name.text === 'cookie') {
+      found.add(node.getText(source));
+    }
     ts.forEachChild(node, (child) => visit(child, node, parent));
   };
   visit(source, source, undefined);
@@ -331,7 +333,7 @@ const storageByFile = (files: readonly ts.SourceFile[]): Record<string, string[]
       .sort(([a], [b]) => a.localeCompare(b)),
   );
 
-/** The ruling itself, EQUAL in both directions: a file added, an operation added and an entry nothing uses all red. */
+/** The ruling itself. */
 const BROWSER: Record<string, string[]> = {
   'src/analytics.ts': ['localStorage.getItem', 'localStorage.removeItem'],
   'src/theme.tsx': ['localStorage.getItem', 'localStorage.setItem'],
@@ -348,7 +350,7 @@ describe('what reaches browser storage in product source', () => {
     }
   });
 
-  it('the browser is written by theme.tsx alone and read by one migration besides', () => {
+  it('theme.tsx alone stores anything in the browser; one migration reads and removes', () => {
     expect(storageByFile(PRODUCT)).toEqual(BROWSER);
   });
 
