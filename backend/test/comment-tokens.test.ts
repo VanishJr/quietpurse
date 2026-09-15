@@ -229,15 +229,35 @@ describe('the comment list the census folds over', () => {
   /**
    * JSX text is rendered copy, and a scanner started inside it reads a `//` there as a
    * comment: once as the text's own leading range, once as the trailing range of the
-   * brace before it. Either way it is what tokensOf calls a JsxText token.
+   * brace before it. Either way it is what tokensOf calls a JsxText token. The third
+   * shape puts the closing tag on a line of its own, so the range a scanner mints there
+   * carries no `</` — a filter reading the text for one keeps it, and only a filter
+   * reading the node's span drops it. The case after this one is the other half of
+   * that pair.
    */
   it('commentsOf reads nothing out of JSX text that opens with //, on its own or after a brace', () => {
     const text = [
       'export const x = <p>// row 54 is text</p>;',
       'export const y = <p>{a}// row 54 is text too</p>;',
+      'export const z = (',
+      '  <p>',
+      '    // row 54 is text',
+      '  </p>',
+      ');',
       '',
     ].join('\n');
     expect(commentsOf('fixture.tsx', text)).toEqual([]);
+  });
+
+  it('commentsOf keeps a real comment whose text carries a closing tag', () => {
+    const text = [
+      'export const x = (',
+      '  // the element below closes with </p>',
+      '  <p>{a}</p>',
+      ');',
+      '',
+    ].join('\n');
+    expect(spans('fixture.tsx', text)).toEqual([[2, 2, '// the element below closes with </p>']]);
   });
 
   it('commentsOf reads a docblock once, and nothing nested out of a // inside it', () => {

@@ -68,17 +68,18 @@ included, and an untracked probe dropped under either package included — enume
 `commentsOf` in the comment tool's pure core rather than by a walk of its own or a scan of lines,
 and refuses in a comment what it refuses in a spec: a path `.gitignore` keeps out of the tree, a
 line citation, a commit sha, and any reference to the plan that carries no path — the plan's name, a
-row, an item, a task id, a decision, finding, invariant, question, trap or stage number, a pull
-request, a round of review — because a reader who clones the repository cannot open what those point
-at, while the same words inside a string literal or rendered as JSX text are the product's and are
-not read; the price of the letter-and-digit family is that a hash algorithm's or a cloud bucket's
-name spelled that way in a comment reds and is one word to rephrase, which is the tie-break the file
-already states; a reference that names no number, one wrapped across a line break, a row of the plan
-written out in words, a row id written with its stage letter and no padding, a bare hash sign and a
-number, *pull request* in words, the pipeline's own vocabulary, *this row* in the plan's sense, a sha
-not in backticks, an absolute path and an unpublished file named by its stem are not seen, and none
-is closed here; and the path half is bounded by the extensions the citation clause reads, so a
-dotfile a reader creates for themselves is unseen, rightly;
+row, an item, a task id, a decision, finding, invariant, question, trap or stage number, a lettered
+invariant, a section mark, a decision by letter, a settled item by its letter and number, a pull
+request, a round of review or of fixing — because a reader who clones the repository cannot open what
+those point at, while the same words inside a string literal or rendered as JSX text are the
+product's and are not read; the price of the letter-and-digit family is that a hash algorithm's or a
+cloud bucket's name spelled that way in a comment reds and is one word to rephrase, which is the
+tie-break the file already states; a reference that names no number, one wrapped across a line break,
+a row of the plan written out in words, a row id written with its stage letter and no padding, a bare
+hash sign and a number, *pull request* in words, the pipeline's own vocabulary, *this row* in the
+plan's sense, a sha not in backticks, an absolute path and an unpublished file named by its stem are
+not seen, and none is closed here; and the path half is bounded by the extensions the citation clause
+reads, so a dotfile a reader creates for themselves is unseen, rightly;
 `backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
 name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
 `import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
