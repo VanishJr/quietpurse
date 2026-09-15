@@ -27,8 +27,8 @@ describe('no client copy names a rate source', () => {
    * The page shell sits beside src/ and carries copy of its own. Derived rather than
    * listed so that a second page added to vite.config.ts's build input is covered the
    * day it appears. Only the files beside src/, never a walk of the package: the build
-   * output beside it still holds the old caption, so the guard would redden on a directory
-   * nobody edited.
+   * output beside it is whatever was last built and can carry a caption the source no
+   * longer does, so the guard would redden on a directory nobody edited.
    */
   const SHELLS = readdirSync(resolve(SRC, '..'), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.html'))

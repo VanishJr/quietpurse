@@ -106,10 +106,10 @@ const extractBackticked = (text: string): string[] =>
  * Every way prose in this tree names the plan without a path: the plan by name; a
  * row, item, finding, decision, trap, question or stage by number; an invariant by
  * number or lettered; a pull request; a round of reviewing or of fixing; a decision,
- * invariant, review finding, question or settled item by its letter and number, and a
- * lettered decision; a section; a zero-padded task id with an optional stage letter. No
- * boundary can be loosened to dodge a real hit, and a false positive is one word to
- * rephrase.
+ * invariant, review finding, question, settled item or memo finding by its letter and
+ * number, and a lettered decision; a section; a zero-padded task id with an optional
+ * stage letter. No boundary can be loosened to dodge a real hit, and a false positive
+ * is one word to rephrase.
  *
  * The lookbehinds are what let a stored value written in quotes, a decimal, a grouped
  * thousand and a figure with a thin space through, and the stage-letter range is what
@@ -124,7 +124,7 @@ const PLAN = new RegExp(
     String.raw`\b[Ii]nvariants?\s+(?:\d+|\([a-z]\))`,
     String.raw`\bPR\s?#\d+`,
     String.raw`\b(?:review|fix) rounds?\b`,
-    String.raw`(?<!#)\b(?:D|I|R|Q|S|MD)-?\d+[a-e]?\b`,
+    String.raw`(?<!#)\b(?:D|I|R|Q|S|MD|M)-?\d+[a-e]?\b`,
     String.raw`\bD-[A-Z]\b`,
     String.raw`§\s?\d+`,
     String.raw`(?<![\w.,'"])(?<!\d\s)0\d\d[a-e]?\b`,
@@ -638,6 +638,8 @@ describe('the rules those clauses are built from', () => {
     'R10',
     'S3',
     'MD8',
+    'M6',
+    "the memo's M3",
     "D-A's evidence",
     "row 25's §20",
     'see §7',
