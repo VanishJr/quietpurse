@@ -93,9 +93,9 @@ export function windowMonths(
 }
 
 /**
- * The month the three headline figures are about: the newest one the account has
- * anything in. null when it has nothing at all, which is a state the screen has to
- * render rather than a zero it can print.
+ * The month the headline figures are about: the newest one the account has anything
+ * in. null when it has nothing at all, which is a state the screen has to render rather
+ * than a zero it can print.
  */
 export const latestMonth = (months: AccountMonthTotals[]): AccountMonthTotals | null =>
   months.length > 0 ? months[months.length - 1] : null;

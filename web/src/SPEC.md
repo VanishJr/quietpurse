@@ -6,14 +6,13 @@ What this package's source is for, where it stops, and the rules about it that n
 holds. `AGENTS.md`'s *Platforms*, *Invariants* and *Verification has a hole* carry the contract, the
 slug rule, the error budget and what a green run does not cover, and nothing below repeats them.
 The reasoning behind the modules at the root of `web/src` lives in this document, `App.tsx` and
-`Shell.tsx` excepted. Their code keeps only what `AGENTS.md`'s *Conventions* names as a keep — why a
-clause is absent, which of two readings is meant, a rejected alternative, a coupling an edit to that
-line would break — and the two month rules kept whole beside their functions are named below by
-symbol. The components and the screens under this directory, and the two files excepted above, are
-described here only where a rule above the root reaches into one; their own reasoning is beside
-their code. The test files under `web/src`, `web/src/test/setup.ts` among them, keep their reasoning
-beside their code as well. The sections after *The invariants no type and no test holds* open each
-paragraph on the symbol it is about, so a rule is found by the symbol it governs.
+`Shell.tsx` excepted. Their code keeps only what `AGENTS.md`'s *Conventions* names as a keep, and the
+two month rules kept whole beside their functions are named below by symbol. The components and the
+screens under this directory, and the two files excepted above, are described here only where a rule
+above the root reaches into one; their own reasoning is beside their code. The test files under
+`web/src`, `web/src/test/setup.ts` among them, keep their reasoning beside their code as well. The
+sections after *The invariants no type and no test holds* open each paragraph on the symbol it is
+about, so a rule is found by the symbol it governs.
 
 ## What this module owns
 
@@ -50,21 +49,21 @@ query string and are read back through `url.ts`, and that is not a crossing: the
 reader *is*, not something a second client needs to reach — a native client has its own screens and
 its own Back, and a server that has had no user since the product became single-user would be minting
 per-user interface state to hold it. It is the query and never the path because the fallback in
-`backend/src/app.ts` answers the app for any path that is not `/api` and not file-shaped — a last
-segment carrying no extension, asked for by a request that accepts HTML — so a path scheme would rest
-on that shape rule, two places agreeing on what a file looks like, where a query string rests on
-nothing: the path stays whatever served the app, and `web/index.html` answers every URL `url.ts`
-writes. The rule is held by `web/src/types.test.ts`, which walks the program the compiler builds
-narrowed to the product files — the tests and the harness in `web/src/test/` set aside, by the same
-cut the coverage reading makes — and requires every reference to `localStorage`, `sessionStorage`,
-`indexedDB` or `document.cookie` to sit in one of two files and to be the operations it names for
-each: `theme.tsx` may read and write its key, `analytics.ts` may read and remove the legacy one, and
-nothing else may reach storage at all. The list is EQUAL in both directions, so an entry nothing uses
-reds as an added file does. What the walk cannot see, stated rather than closed: a string-keyed
-access (`window['localStorage']`), the Cache API, `navigator.storage`, a service worker, a script in
-`web/index.html`, which the compiler does not read, and a dependency that reaches storage on the
-product's behalf — a persist middleware, a storage hook, a query-cache persister — where the
-identifier never appears in product source.
+`backend/src/app.ts` answers the app to any GET for a path that is not `/api` and not file-shaped —
+a last segment carrying no extension, asked for by a request that accepts HTML — so a path scheme
+would rest on that shape rule, two places agreeing on what a file looks like, where a query string
+rests on nothing: the path stays whatever served the app, and `web/index.html` answers every URL
+`url.ts` writes. The rule is held by `web/src/types.test.ts`, which walks the program the compiler
+builds narrowed to the product files — the tests and the harness in `web/src/test/` set aside, by
+the same cut the coverage reading makes — and requires every reference to `localStorage`,
+`sessionStorage`, `indexedDB` or `document.cookie` to sit in one of two files and to be the
+operations it names for each: `theme.tsx` may read and write its key, `analytics.ts` may read and
+remove the legacy one, and nothing else may reach storage at all. The list is EQUAL in both
+directions, so an entry nothing uses reds as an added file does. What the walk cannot see, stated
+rather than closed: a string-keyed access (`window['localStorage']`), the Cache API,
+`navigator.storage`, a service worker, a script in `web/index.html`, which the compiler does not
+read, and a dependency that reaches storage on the product's behalf — a persist middleware, a
+storage hook, a query-cache persister — where the identifier never appears in product source.
 
 **The chart list was a crossing too and is not one any more.** It is read and written through
 `api.ts` against the routes `backend/src/app.ts` serves over the table in `backend/src/db/schema.ts`,
@@ -190,15 +189,15 @@ not in the answer.
 
 ## The arithmetic a screen does on the server's figures
 
-Money goes through `toCents` before it is added or subtracted — the rule, and nothing enforces it —
-and `toCents` is exported because the rule does not stop at the module that declares it. Every
-amount the server answers came off an integer number of cents and was divided by a hundred on the
-way out, so it arrives as a double near the figure and not equal to it, and adding a few hundred of
-them keeps the residue: a base that is zero to the last cent is a tiny residue instead, and a
-percentage taken against it is a number whose size means nothing. So every comparison in
-`accounts.ts` is made in cents, every sum in `analytics.ts` is accumulated as an integer and divided
-once at the end, and `web/src/components/SpendingByCategory.tsx`, which takes a remainder off the
-same doubles, goes through `toCents` rather than keeping a copy of it.
+`toCents` is where money goes before it is added or subtracted — the rule, and nothing enforces it —
+and it is exported because the rule does not stop at the module that declares it. Every amount the
+server answers came off an integer number of cents and was divided by a hundred on the way out, so
+it arrives as a double near the figure and not equal to it, and adding a few hundred of them keeps
+the residue: a base that is zero to the last cent is a tiny residue instead, and a percentage taken
+against it is a number whose size means nothing. So every comparison in `accounts.ts` is made in
+cents, every sum in `analytics.ts` is accumulated as an integer and divided once at the end, and
+`web/src/components/SpendingByCategory.tsx`, which takes a remainder off the same doubles, goes
+through `toCents` rather than keeping a copy of it.
 
 `monthOf`, `fmtDay` and `fmtMonthKey` split a calendar key on the string and never turn it into an
 instant, because the server buckets a month with `SUBSTR` over the stored ISO date in
@@ -239,18 +238,19 @@ questions. `chartKind` is the one answer the wizard and the loader both read, so
 list of names.
 
 `useChartData` is the one seam between a chart and the server: `analytics.ts` holds the model and
-the arithmetic and is pure — nothing in it fetches, reads the clock or touches React, and `today` is
-always an argument, so every series it builds can be asserted against a fixed date — the components
-draw, and `chartData.ts` turns a `Chart` into requests and the answers into something drawable. A
-field the reader sets in the wizard decides which shape of body the same two endpoints come back
-with. Every account together is `/api/summary` and `/api/summary/months` with no account named: the
-whole, converted into the base currency. One account is the same two with an `accountId` on them:
-that account's own rows, in that account's own currency, with nothing converted. Both arms are
-summed by the server with one rule — the queries in `backend/src/db/index.ts` keep a transfer
-between the reader's own accounts out of income and out of expenses on both, through `scopeSql`'s
-filter or inside the sums, and a refund subtracts from the expenses of the period it landed in — so
-what differs is the unit, and a card must print the one it was given: `currency` rides with the
-data, taken off the body that answered and never off the accounts list.
+the arithmetic — nothing in it fetches or touches React, and the series arithmetic takes `today` as
+an argument rather than reading a clock, so every series it builds can be asserted against a fixed
+date — the components draw, and `chartData.ts` turns a `Chart` into requests and the answers into
+something drawable. A field the reader sets in the wizard decides which shape of body the same two
+endpoints come back with. Every account together is `/api/summary` and `/api/summary/months` with no
+account named: the whole, converted into the base currency. One account is the same two with an
+`accountId` on them: that account's own rows, in that account's own currency, with nothing
+converted. Both arms are summed by the server with one rule — the queries in
+`backend/src/db/index.ts` keep a transfer between the reader's own accounts out of income and out of
+expenses on both, through `scopeSql`'s filter or inside the sums, and a refund subtracts from the
+expenses of the period it landed in — so what differs is the unit, and a card must print the one it
+was given: `currency` rides with the data, taken off the body that answered and never off the
+accounts list.
 
 `useChartData` distinguishes three states of the account list the screen hands it, and the screen
 is what decides which one it is in. `accounts` is null while `web/src/screens/AnalyticsScreen.tsx`
@@ -292,15 +292,15 @@ from it.
 recognise, because a throw would take the whole screen down on first paint, and a row can have been
 written by an older version of the client, by a hand-edited backup or by a version whose vocabulary
 is wider than this one's; `chartEntry` then keeps the row as unreadable rather than dropping it, for
-the reason *Where the boundary runs* gives. The one field `parseChart` reads rather than refuses is
-an empty `id`. In `backend/src/db/schema.ts` a chart's `id` is a primary key with no check on its
-content, and `restoreBackup` in `backend/src/db/index.ts` type-checks each column against the table
-and sees no zod schema, so a restore lets an empty id — or a title longer than the wire's cap — into
-the table, and the next GET carries it out while the PUT route still refuses to take it back. The
-door is wider on the way in than on the way out, which is why `normaliseForSave` cuts the list to
-what the route will take on every save and not only in the migration: a row sent back as it came
-would fail the route's bounds on the way out and refuse the reader's whole list, for ever, over
-content they never typed.
+the reason *Where the boundary runs* gives. `parseChart` reads an empty `id` rather than refusing
+it. In `backend/src/db/schema.ts` a chart's `id` is a primary key with no check on its content, and
+`restoreBackup` in `backend/src/db/index.ts` type-checks each column against the table and sees no
+zod schema, so a restore lets an empty id — or a title longer than the wire's cap — into the table,
+and the next GET carries it out while the PUT route still refuses to take it back. The door is wider
+on the way in than on the way out, which is why `normaliseForSave` cuts the list to what the route
+will take on every save and not only in the migration: a row sent back as it came would fail the
+route's bounds on the way out and refuse the reader's whole list, for ever, over content they never
+typed.
 
 `parseChartList` in `api.ts` is one parser for both bodies the charts route answers with, because
 in `backend/src/app.ts` the 200 and the 409 carry the same `version` and `charts` pair. That is what

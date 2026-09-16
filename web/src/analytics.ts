@@ -1,8 +1,9 @@
 /**
- * What a chart IS and what its numbers are, as a pure function of data the caller
- * already fetched. Nothing here fetches, reads the clock or touches React: `today` is
- * always an argument, so every series below can be asserted against a fixed date. Every
- * sum below is accumulated in cents and divided once at the end.
+ * What a chart IS and what its numbers are, as a function of data the caller already
+ * fetched. Nothing here fetches or touches React, and the series arithmetic takes
+ * `today` as an argument rather than reading a clock, so every series below can be
+ * asserted against a fixed date. Every sum below is accumulated in cents and divided
+ * once at the end.
  */
 import { monthOf, toCents } from './accounts';
 import { categoryLabel } from './categories';
@@ -441,10 +442,10 @@ function parseChart(raw: unknown): Chart | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   /*
-   * An empty id is READ rather than refused, unlike every other field here. Refused, it
-   * would be unreadable, therefore never re-minted, therefore sent back as it came and
-   * refused with the WHOLE list: a list that never saves again. Read, it fails
-   * `ID_SHAPE` in `normaliseForSave` exactly as `a b/c` does and is re-minted.
+   * An empty id is READ rather than refused. Refused, it would be unreadable, therefore
+   * never re-minted, therefore sent back as it came and refused with the WHOLE list: a
+   * list that never saves again. Read, it fails `ID_SHAPE` in `normaliseForSave` exactly
+   * as `a b/c` does and is re-minted.
    */
   if (typeof o.id !== 'string') return null;
   if (typeof o.kind !== 'string' || !KINDS.has(o.kind)) return null;

@@ -376,11 +376,11 @@ export const api = {
     parseChartList(await request<unknown>('/api/analytics/charts')),
 
   /**
-   * Not through `request<T>`, which is the one call here that could not be: `refuse`
-   * reads `{ error }` and throws the rest of the body away, and the rest of a 409 on
-   * this route is the current version and the current list — put there by the route
-   * so that a stale client does not have to ask again. Everything else still goes
-   * through `refuse`, so any other refusal reads as every other call's does.
+   * Not through `request<T>`: `refuse` reads `{ error }` and throws the rest of the body
+   * away, and the rest of a 409 on this route is the current version and the current
+   * list — put there by the route so that a stale client does not have to ask again.
+   * Everything else still goes through `refuse`, so any other refusal reads as every
+   * other call's does.
    */
   putCharts: async (version: ChartsVersion, entries: ChartEntry[]): Promise<ChartList> => {
     const res = await fetch(
