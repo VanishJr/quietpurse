@@ -91,34 +91,22 @@ const BACKTICKED = /`([^`\n]+)`/g;
 const SHA = /^[0-9a-f]{7,40}$/;
 
 /**
- * Every key the tool that indexes this tree reads, and the only keys a spec here may
- * carry: a key outside the list is filled in, read by nothing, and then trusted. A
- * file is a spec to that tool when the block carries an id and a type.
+ * The only keys a spec here may carry: a key outside the list is filled in, read by
+ * nothing, and then trusted. A file is a spec to the tool that indexes this tree when
+ * the block carries an id and a type.
  */
-const FIELDS = [
-  'id',
-  'type',
-  'status',
-  'title',
-  'parent',
-  'depends-on',
-  'references',
-  'implements',
-  'covers',
-  'tags',
-] as const;
+const FIELDS = ['id', 'type', 'status', 'title', 'parent', 'depends-on', 'references', 'implements'] as const;
 type Field = (typeof FIELDS)[number];
 const REQUIRED: readonly Field[] = ['id', 'type', 'status', 'title'];
-const LIST_FIELDS: readonly Field[] = ['depends-on', 'references', 'implements', 'covers', 'tags'];
+const LIST_FIELDS: readonly Field[] = ['depends-on', 'references', 'implements'];
 const LINK_LISTS: readonly Field[] = ['depends-on', 'references', 'implements'];
 /**
  * The durable kinds. A task-spec is a working file the tool keeps under a directory
- * .gitignore keeps out of the tree, and a document in the tree typed as one is a
- * document the tree claims and the tool hides.
+ * .gitignore keeps out of the tree.
  */
 const TYPES = ['goal-and-requirements', 'architecture-design', 'module-design', 'submodule-design'];
 const ROOT_TYPE = 'goal-and-requirements';
-/** Two values: a new or edited spec is draft, and the flip is the owner's review. */
+/** A new or edited spec is draft, and the flip is the owner's review. */
 const STATUSES = ['draft', 'active'];
 
 const abs = (p: string): string => path.resolve(ROOT, p);
@@ -140,17 +128,19 @@ const splitFrontmatter = (text: string): Block | undefined => {
 };
 
 /**
- * What makes a file a spec to the tool: a fenced block carrying an id and a type. Read
- * off the lines rather than off a YAML parse, and the one direction that opens is the
- * safe one - a block YAML would refuse but that carries both lines reads as a spec here
- * and not there, and the grammar below then refuses it by name.
+ * What makes a file a spec to the tool that indexes this tree: a fenced block carrying
+ * an id and a type. Read off the lines rather than off a YAML parse, and read wide on
+ * purpose - a line naming the key indented, quoted, spaced before its colon or with its
+ * value on the line below is a candidate - so a spec written and not declared is found
+ * here first and refused by the grammar by name second. Where this can still disagree
+ * with the tool, the direction that stays open is a form YAML reads as an identity and
+ * this pattern does not; the other, a candidate the tool would not read, costs a
+ * refusal by name and never a silence.
  */
+const IDENTITY = (key: string): RegExp => new RegExp(`^\\s*["']?${key}["']?\\s*:`);
 const hasIdentity = (text: string): boolean => {
   const block = splitFrontmatter(text);
-  return (
-    block !== undefined &&
-    ['id', 'type'].every((key) => block.lines.some((line) => new RegExp(`^${key}:[ \\t]*\\S`).test(line)))
-  );
+  return block !== undefined && ['id', 'type'].every((key) => block.lines.some((line) => IDENTITY(key).test(line)));
 };
 
 type Frontmatter = Partial<Record<Field, string | string[]>>;
@@ -158,17 +148,22 @@ type Parsed = { fm: Frontmatter; faults: string[] };
 
 const isField = (key: string): key is Field => (FIELDS as readonly string[]).includes(key);
 /** What YAML reads as something other than the text written: an indicator in front, a
- * mapping or a comment inside, a bare word or a figure it types for you. */
+ * mapping or a comment inside, a bare word, a figure or a special float it types for you.
+ * A colon is a mapping before whitespace or at the end, a hash a comment after
+ * whitespace - a tab and a line end count, not the space alone. */
 const INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
+const MAPPING = /:(?:\s|$)/;
+const COMMENT = /\s#/;
 const TYPED_WORD = /^(?:true|false|null|~|yes|no|on|off)$/i;
-const TYPED_NUMBER = /^[+-]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$|^0[xo][\da-fA-F_]+$/;
+const TYPED_NUMBER =
+  /^[+-]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$|^0[xo][\da-fA-F_]+$|^[+-]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$/;
 
 const scalarFault = (value: string): string | undefined => {
   if (value === '' || value !== value.trim()) return 'is empty or carries whitespace at an end - a value is written whole';
-  if (INDICATOR.test(value) || /[[\]{}]/.test(value) || value.includes(': ') || value.includes(' #'))
-    return 'a colon-space inside a value is a mapping and a space-hash is a comment to YAML, and a leading quote, bracket or indicator is a form this holder does not read; rephrase';
+  if (INDICATOR.test(value) || /[[\]{}]/.test(value) || MAPPING.test(value) || COMMENT.test(value))
+    return 'a colon before whitespace or at the end of a value is a mapping and a hash after whitespace is a comment to YAML, and a leading quote, bracket or indicator is a form this holder does not read; rephrase';
   if (TYPED_WORD.test(value) || TYPED_NUMBER.test(value))
-    return 'is what YAML reads as a number or a boolean and the spec tools then spell back as text - write a word';
+    return 'is what YAML reads as a number, a boolean or a null and the spec tools then spell back as text or drop, or what a YAML 1.1 reader would - the spec tools read YAML 1.2, which leaves yes and no as the words written, and a reader on 1.1 does not; write a word';
   return undefined;
 };
 
@@ -200,7 +195,7 @@ const parseFrontmatter = (file: string, block: Block): Parsed => {
     }
     const [, key, value] = m;
     if (!isField(key)) {
-      faults.push(`${where} names ${key}, which no spec tool reads - a field nothing reads is filled in and then trusted`);
+      faults.push(`${where} names ${key}, which nothing in this tree reads - a field nothing reads is filled in and then trusted`);
       return;
     }
     if (key in fm) {
@@ -275,7 +270,7 @@ const fieldFaults = (file: string, fm: Frontmatter): string[] => {
       : []),
     ...(type !== undefined && !TYPES.includes(type)
       ? [
-          `${file} reads type "${type}" - the durable types are the reading; a task-spec is a working file the spec tools keep in a directory .gitignore keeps out of the tree, and a durable document typed as one is a document the tree claims and the tool hides`,
+          `${file} reads type "${type}" - the durable types are the reading; a task-spec is a working file the spec tools keep in a directory .gitignore keeps out of the tree`,
         ]
       : []),
   ];
@@ -343,12 +338,13 @@ const linkFaults = (nodes: readonly Node[]): string[] => {
   );
 };
 
-/** A heading or a Status line in the body is a second copy of what the frontmatter holds. */
+/** An H1 or a Status line in the body, however markdown lets either be dressed, is a
+ * second copy of what the frontmatter holds; a setext underline is an H1 unread here. */
 const bodyCopies = (file: string, block: Block): string[] =>
   block.body
     .split('\n')
     .flatMap((line, i) =>
-      /^(?:# |Status:)/.test(line)
+      /^(?:\s{0,3}#[ \t]|\W*[Ss]tatus\s*:)/.test(line)
         ? [`${file}:${i + block.bodyLine} reads "${line}" - the title and the status live in the frontmatter, once; a heading or a Status line in the body is a second copy that drifts`]
         : [],
     );
@@ -521,12 +517,14 @@ const KNOWN_UNPUBLISHED = [
  * comments are read below. It skips what isIgnored denies rather than a second skip
  * list by hand - an unpublished file is out of scope by the rule the rest of this file
  * already uses, and a file the walk visits and a path a comment names are judged by
- * the same derivation - and skips .git, which is not the tree git tracks, and
- * node_modules by name even if the rule that ignores it were to go.
+ * the same derivation - and skips .git, which is not the tree git tracks, node_modules
+ * by name even if the rule that ignores it were to go, and a symlink, which a read
+ * would follow to wherever it points.
  */
 const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isSymbolicLink()) return [];
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === '.git') return [];
       return isIgnored(`${rel}/`, RULES) ? [] : findFiles(path.join(dir, entry.name), keep, rel);
@@ -930,34 +928,59 @@ describe('the rules those clauses are built from', () => {
    * One row per form the tool reads differently from this file or not at all, each run
    * on its own. The reason a row is here is the tool's own behaviour on it: a block
    * list is read, a null is dropped, a duplicate key or a stray indent refuses the file
-   * whole, a bare word or a figure comes back typed, a space-hash is a comment, a
-   * colon-space is a mapping, and a scalar in a list field is a list of one.
+   * whole, a bare word, a figure or a special float comes back typed, a hash after
+   * whitespace is a comment, a colon before whitespace or at the end is a mapping, a
+   * scalar in a list field is a list of one, and a key the
+   * tool reads and nothing here does is filled in and then trusted.
    */
   const REFUSED: ReadonlyArray<readonly [string, string, string]> = [
-    ['a block list', fenced([...HEAD, 'tags:', '  - x']), 'nothing after the colon'],
+    ['a block list', fenced([...HEAD, 'depends-on:', '  - x']), 'nothing after the colon'],
     ['a null', fenced([...HEAD, 'parent:']), 'nothing after the colon'],
-    ['a nested map', fenced([...HEAD, 'tags:', '  b: c']), 'a frontmatter line is a key'],
+    ['a nested map', fenced([...HEAD, 'depends-on:', '  b: c']), 'a frontmatter line is a key'],
     ['no space after the colon', fenced(['id:a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
     ['an indented key', fenced([' id: a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
     ['a blank line inside the block', fenced([...HEAD, '']), 'a frontmatter line is a key'],
     ['a key written twice', fenced([...HEAD, 'id: b']), 'a second time'],
-    ['a key the tool does not read', fenced([...HEAD, 'depends_on: [x]']), 'no spec tool reads'],
+    ['a key nothing reads', fenced([...HEAD, 'depends_on: [x]']), 'nothing in this tree reads'],
     ['a colon-space inside a value', fenced([...HEAD.slice(0, 3), 'title: foo: bar']), 'rephrase'],
     ['a space-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo #bar']), 'rephrase'],
     ['a quoted value', fenced([...HEAD.slice(0, 3), 'title: "quoted"']), 'rephrase'],
     ['a figure', fenced([...HEAD.slice(0, 3), 'title: 2026']), 'write a word'],
-    ['a bare word YAML types', fenced([...HEAD.slice(0, 2), 'status: yes', 'title: t']), 'write a word'],
-    ['an empty list', fenced([...HEAD, 'tags: []']), 'an empty list'],
-    ['a list with no space after the comma', fenced([...HEAD, 'tags: [a,b]']), 'a comma'],
-    ['a list field written as one value', fenced([...HEAD, 'tags: a']), 'as one value'],
+    ['a bare word YAML types', fenced([...HEAD.slice(0, 2), 'status: True', 'title: t']), 'write a word'],
+    ['a bare word a YAML 1.1 reader types', fenced([...HEAD.slice(0, 2), 'status: yes', 'title: t']), 'write a word'],
+    ['an empty list', fenced([...HEAD, 'depends-on: []']), 'an empty list'],
+    ['a list with no space after the comma', fenced([...HEAD, 'depends-on: [a,b]']), 'a comma'],
+    ['a list field written as one value', fenced([...HEAD, 'depends-on: a']), 'as one value'],
     ['a scalar field written as a list', fenced([...HEAD.slice(0, 3), 'title: [t]']), 'as a list'],
     ['whitespace at the end of a value', fenced([...HEAD.slice(0, 3), 'title: t ']), 'at an end'],
     ['no closing fence', ['---', ...HEAD, '', '## body'].join('\n'), 'a fence on the first line'],
     ['a fence not on the first line', ['', ...fenced(HEAD).split('\n')].join('\n'), 'a fence on the first line'],
+    ['a trailing colon', fenced([...HEAD.slice(0, 3), 'title: foo:']), 'rephrase'],
+    ['a colon-tab inside a value', fenced([...HEAD.slice(0, 3), 'title: foo:\tbar']), 'rephrase'],
+    ['a tab-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo\t#bar']), 'rephrase'],
+    ['a trailing colon inside a list item', fenced([...HEAD, 'depends-on: [a, b:]']), 'rephrase'],
+    ['a special float', fenced([...HEAD.slice(0, 3), 'title: .inf']), 'write a word'],
+    ['a field the spec tools read and nothing here does', fenced([...HEAD, 'tags: [a]']), 'nothing in this tree reads'],
+  ];
+
+  /**
+   * The forms beside each refusal that both parsers read to the same text, so a
+   * refusal cannot widen to the whole character: an interior colon or hash, and a
+   * leading dot that spells a word rather than a float.
+   */
+  const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
+    ['an interior colon', fenced([...HEAD.slice(0, 3), 'title: http://x/y'])],
+    ['a clock', fenced([...HEAD.slice(0, 3), 'title: 1:30'])],
+    ['an interior hash', fenced([...HEAD.slice(0, 3), 'title: foo#bar'])],
+    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 3), 'title: .agents'])],
   ];
 
   it('refuses every frontmatter shape the spec tools read differently, or not at all', () => {
     expect(parseSpec('crafted.md', fenced(HEAD)).faults).toEqual([]);
+    const refused = ACCEPTED.filter(([, text]) => parseSpec('crafted.md', text).faults.length > 0).map(
+      ([label, text]) => `${label}: ${parseSpec('crafted.md', text).faults.join(' | ')}`,
+    );
+    expect(refused, 'a form both parsers read to the same text, refused for nothing').toEqual([]);
     const missed = REFUSED.filter(
       ([, text, fragment]) => !parseSpec('crafted.md', text).faults.some((f) => f.includes(fragment)),
     ).map(([label, text]) => `${label}: ${parseSpec('crafted.md', text).faults.join(' | ') || 'no fault at all'}`);
@@ -971,12 +994,31 @@ describe('the rules those clauses are built from', () => {
     for (const [label, text] of [
       ['an id alone', fenced(['id: a'])],
       ['a type alone', fenced(['type: module-design'])],
-      ['an id with nothing after it', fenced(['id:', 'type: module-design'])],
       ['an id after the closing fence', ['---', 'type: module-design', '---', 'id: a'].join('\n')],
       ['no fence at all', ['# a', '', 'id: a', 'type: module-design'].join('\n')],
     ] as const) {
       expect(hasIdentity(text), label).toBe(false);
     }
+  });
+
+  it('finds an identity however YAML lets one be written, and the grammar then refuses the form by name', () => {
+    // each is a spec to the spec tools and outside the grammar: found by the walk
+    // first, refused by name second, never passed over
+    for (const [label, text, fragment] of [
+      ['the whole block indented', fenced(HEAD.map((line) => ` ${line}`)), 'a frontmatter line is a key'],
+      ['a space before the colon', fenced(['id : a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['a key in double quotes', fenced(['"id": a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['a key in single quotes', fenced(["'id': a", ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['the value on the next line', fenced(['id:', '  a', ...HEAD.slice(1)]), 'nothing after the colon'],
+    ] as const) {
+      expect(hasIdentity(text), label).toBe(true);
+      expect(parseSpec('crafted.md', text).faults.join(), label).toContain(fragment);
+    }
+    // what over-reading costs: a candidate the spec tools do not read, and the
+    // grammar refuses it by name rather than the walk passing over it
+    const nothing = fenced(['id:', ...HEAD.slice(1)]);
+    expect(hasIdentity(nothing)).toBe(true);
+    expect(parseSpec('crafted.md', nothing).faults.join()).toContain('nothing after the colon');
   });
 
   it('refuses a task-spec, a type it has no reading for, a third status and a missing field', () => {
@@ -1014,10 +1056,43 @@ describe('the rules those clauses are built from', () => {
   });
 
   it('finds a title or a status written again in the body', () => {
-    const block = splitFrontmatter(['---', ...HEAD, '---', '', '# a', '', 'Status: draft', '', '## body', ''].join('\n'));
+    const block = splitFrontmatter(
+      [
+        '---',
+        ...HEAD,
+        '---',
+        '',
+        '# a',
+        '',
+        'Status: draft',
+        '',
+        '#\ta',
+        '',
+        '   # a',
+        '',
+        '**Status:** draft',
+        '',
+        'Status : draft',
+        '',
+        ' Status: draft',
+        '',
+        'status: draft',
+        '',
+        '## body',
+        '',
+        'The status: draft',
+        '',
+      ].join('\n'),
+    );
     expect(block && bodyCopies('c.md', block).map((f) => f.split(' - ')[0])).toEqual([
       'c.md:8 reads "# a"',
       'c.md:10 reads "Status: draft"',
+      'c.md:12 reads "#\ta"',
+      'c.md:14 reads "   # a"',
+      'c.md:16 reads "**Status:** draft"',
+      'c.md:18 reads "Status : draft"',
+      'c.md:20 reads " Status: draft"',
+      'c.md:22 reads "status: draft"',
     ]);
   });
 

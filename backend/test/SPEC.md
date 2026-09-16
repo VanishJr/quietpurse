@@ -86,15 +86,19 @@ path and an unpublished file named by its stem are not seen, and none is closed 
 half is bounded by the extensions the citation clause reads, so a dotfile a reader creates for
 themselves is unseen, rightly; it reads each spec's frontmatter under a grammar of its own — a line
 is a key, a colon, one space and a value, or an inline list, and nothing else — because the tool
-that indexes these files reads YAML whole, and a form that tool reads and this holder does not is a
-field filled in and then trusted; it holds the identity a file declares to be one the literal
-declares, the id unique, the type one of the durable ones, the status one of two, every parent a
-declared spec and the parents one tree with the goal as its only root, and a link, where one is
-written, resolving; a markdown file whose frontmatter carries an id and a type is a spec to that
-tool whether or not anything here declares it, so the walk finds those and requires the set to
-equal the literal; what it cannot see, stated: a spec under a directory `.gitignore` keeps out of
-the tree, which the tool indexes and this holder does not, and a key written quoted, which the tool
-reads and this grammar does not;
+that indexes these files reads YAML whole, and a form that tool reads differently from this holder,
+or drops in silence, is a field filled in and then trusted; it holds the identity a file declares
+to be one the literal declares, the id unique, the type one of the durable ones, the status one of
+two, every parent a declared spec and the parents one tree with the goal as its only root, and a
+link, where one is written, resolving; a markdown file whose frontmatter carries an id and a type
+is a spec to that tool whether or not anything here declares it, so the walk reads an identity wide
+on purpose — a key indented, quoted, spaced before its colon or with its value on the line below is
+a candidate — finds those, requires the set to equal the literal, and leaves a candidate outside
+the grammar to be refused by name; what it cannot see, stated as a direction rather than a list: a
+spec under a directory `.gitignore` keeps out of the tree, which the tool indexes and this holder
+does not, and an identity written in a form YAML reads and the walk's pattern does not — the
+direction the over-reading closes is the other one, a candidate the tool would not read, which
+costs a refusal and never a silence;
 `backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
 name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
 `import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
