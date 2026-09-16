@@ -1,13 +1,17 @@
-# backend/src/wire
-
-Status: draft
+---
+id: submodule-backend-wire
+type: submodule-design
+status: draft
+title: wire — the declared answer of every route
+parent: module-backend
+---
 
 What this module owns, what it may depend on, and the rules about the API's answers that no type
 and no test holds. `backend/src/SPEC.md` answers for the door the requests come through — the
 request schemas, the refusal sentences, the status split — and stops here; this document answers
 for what goes *out*.
 
-## What this module owns
+## Responsibility
 
 **The declared answer of every route.** Every 2xx JSON body the API gives is declared once, here,
 as a zod schema, and `ANSWERS` keys each declaration by the method and the path exactly as Express
@@ -37,7 +41,7 @@ its column options and its check constraints and never the reverse; the request 
 `backend/src/app.ts` compose over the same tuples with their own refusal sentences and never meet
 the answer schemas.
 
-## Where the boundary runs
+## Boundary
 
 **This module imports zod and its own files, and nothing else.** No node builtin, no `express`,
 no `drizzle-orm`, nothing from `backend/src/db` or `backend/src/providers` — not even as a type.
@@ -144,7 +148,7 @@ required to be the router's first, by identity and not by name — a reorder tha
 ahead of it, or a deletion of it, reds at import wherever the app is imported, because the wrapper
 sees only what sits behind it, and a layer ahead of it that answers, answers unparsed.
 
-## The invariants no type and no test holds
+## Invariants
 
 **A count in a body is a number.** The embedded engine answers an aggregate as a number and a
 PostgreSQL server answers it as a string, so a `z.number()` over a figure that comes out of a raw

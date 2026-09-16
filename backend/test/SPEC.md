@@ -1,13 +1,17 @@
-# backend/test
-
-Status: reviewed
+---
+id: submodule-backend-test
+type: submodule-design
+status: draft
+title: test — the backend suite, its harness, and the checks that read a file as text
+parent: module-backend
+---
 
 What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
 `AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
 database it runs against, what jsdom cannot see, what skips on this platform — and the harness files
 carry their own reasoning in their headers. Nothing below repeats them.
 
-## What this module owns
+## Responsibility
 
 - **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
   that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
@@ -37,7 +41,7 @@ carry their own reasoning in their headers. Nothing below repeats them.
   job in `.github/workflows/ci.yml`, `web/src/main.tsx` is built by it and runs only in a browser.
   It is a reading and not a gate: no threshold, and no CI step reads it.
 
-## Where the boundary runs
+## Boundary
 
 A check here may read any file in the repository, and some do. Every one of them resolves its root
 from `process.cwd()`, which is this package's root — locally, and in CI, where the backend jobs run
@@ -106,7 +110,7 @@ that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 
-## The invariants no type and no test holds
+## Invariants
 
 **A green default run does not prove a raw `sql` aggregate is read correctly.** PGlite answers a
 `COUNT` as a number and node-postgres answers it as a string, so an aggregate that reaches a caller

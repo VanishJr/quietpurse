@@ -1,6 +1,10 @@
-# web/src
-
-Status: draft
+---
+id: module-web
+type: module-design
+status: draft
+title: web — the client's requests, month arithmetic, sentences and entry point
+parent: architecture
+---
 
 What this package's source is for, where it stops, and the rules about it that no type and no test
 holds. `AGENTS.md`'s *Platforms*, *Invariants* and *Verification has a hole* carry the contract, the
@@ -11,10 +15,10 @@ two month rules kept whole beside their functions are named below by symbol. The
 screens under this directory, and the two files excepted above, are described here only where a rule
 above the root reaches into one; their own reasoning is beside their code. The test files under
 `web/src`, `web/src/test/setup.ts` among them, keep their reasoning beside their code as well. The
-sections after *The invariants no type and no test holds* open each paragraph on the symbol it is
+sections after *Invariants* open each paragraph on the symbol it is
 about, so a rule is found by the symbol it governs.
 
-## What this module owns
+## Responsibility
 
 - **Every request the product makes**, composed in one module, `api.ts`, through one raw fetch
   rather than through an SDK.
@@ -30,7 +34,7 @@ about, so a rule is found by the symbol it governs.
   into something a person reads, an unknown slug included.
 - **The entry point.** The app is `web/index.html`, and it is the only page this package builds.
 
-## Where the boundary runs
+## Boundary
 
 **One module talks to the server.** `api.ts` is the only file in this package that calls `fetch`,
 and no other transport appears anywhere in it — no `XMLHttpRequest`, no `EventSource`, no
@@ -170,7 +174,7 @@ only; its own header says which and why the other needs three declaration source
 backend itself, so nothing in this package configures an address and no request it makes is
 cross-origin.
 
-## The invariants no type and no test holds
+## Invariants
 
 **The word for money somebody else gives you is written twice, in two packages, and nothing holds
 the two to each other.** This package says *support* in the Goal screen's hero, in the income
@@ -292,7 +296,7 @@ from it.
 recognise, because a throw would take the whole screen down on first paint, and a row can have been
 written by an older version of the client, by a hand-edited backup or by a version whose vocabulary
 is wider than this one's; `chartEntry` then keeps the row as unreadable rather than dropping it, for
-the reason *Where the boundary runs* gives. `parseChart` reads an empty `id` rather than refusing
+the reason *Boundary* gives. `parseChart` reads an empty `id` rather than refusing
 it. In `backend/src/db/schema.ts` a chart's `id` is a primary key with no check on its content, and
 `restoreBackup` in `backend/src/db/index.ts` type-checks each column against the table and sees no
 zod schema, so a restore lets an empty id — or a title longer than the wire's cap — into the table,
@@ -378,7 +382,7 @@ attributes and not as a boundary.
 
 `ink` is the palette published a second time: the custom properties `ThemeProvider` sets on the
 document root are the styling truth, and `ink` exists because recharts wants real colour strings.
-Where the theme is kept is *Where the boundary runs*' ruling and is not restated here.
+Where the theme is kept is *Boundary*'s ruling and is not restated here.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value, because the ground decides the tooltip's colours and one shared object is what keeps the
@@ -406,7 +410,7 @@ object URL this package creates, and nothing enforces that.
 `safeFilename` is the server's `attachmentDisposition` done client-side — the reader's own name,
 then the id-derived one, then a constant — and `MAX_FILENAME_CHARS` is a copy of the cap `cleanName`
 in `backend/src/app.ts` slices at, so a name is not cut differently at the two ends. Unlike the
-copies *Where the boundary runs* describes, it is pinned to the server by neither a type nor a test.
+copies *Boundary* describes, it is pinned to the server by neither a type nor a test.
 The client's cleaning is not the server's `cleanName` for a reason: nothing here is percent-encoded,
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.

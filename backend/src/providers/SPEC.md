@@ -1,6 +1,10 @@
-# backend/src/providers
-
-Status: draft
+---
+id: submodule-backend-providers
+type: submodule-design
+status: draft
+title: providers — the one ingestion surface and the per-format parsers behind it
+parent: module-backend
+---
 
 What this module is for, where it stops, and the rules about it that no type and no test holds.
 Everything already enforced beside the code it governs stays there: `AGENTS.md`'s *Invariants* carry
@@ -13,7 +17,7 @@ belongs here rather than in a comment — **and nothing holds that**: no check c
 was moved from one that was dropped, so a block deleted from a source file without arriving here is
 green.
 
-## What this module owns
+## Responsibility
 
 - **The one ingestion surface.** Raw bytes in, a staged import out. `POST /api/imports` hands the
   bytes to `statement.ts`, which decides what they are, picks a parser, and stages the rows behind a
@@ -72,7 +76,7 @@ one. What makes that acceptable is who can upload. On the default loopback bind 
 the machine, so what the deadline bounds is a bad file of their own; a wider bind puts everyone on
 the network on the port, and `SECURITY.md` says so beside the setting that opens it.
 
-## Where the boundary runs
+## Boundary
 
 **The only file in `backend/src` outside this directory that imports it is `backend/src/app.ts`.**
 It takes the ingestion entry point from `statement.ts`, and it also reaches **past** that surface
@@ -274,7 +278,7 @@ the importer read badly evicts the row reasons that say why. Re-uploading the fi
 not offered — once an import is confirmed the same bytes answer "already imported" without being
 parsed, so the only exit that works is saving the other sheets as files of their own.
 
-## The invariants no type and no test holds
+## Invariants
 
 **A parser version is not its own file's alone, and only one direction of that is written down.**
 Each of the constants keyed by import source type in `statement.ts` has its current value pinned by

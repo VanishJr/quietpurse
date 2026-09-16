@@ -1,6 +1,10 @@
-# backend/src/db
-
-Status: draft
+---
+id: submodule-backend-db
+type: submodule-design
+status: draft
+title: db — the schema, every query, and the one function that opens the database
+parent: module-backend
+---
 
 What this module is for, where it stops, and the rules about it that no type and no test holds.
 Everything already enforced beside the code it governs stays there: `AGENTS.md`'s *Invariants*
@@ -8,7 +12,7 @@ carry transaction identity, import provenance and the migration-squash rule, and
 repeats them. The reasoning behind the constraints the schema declares used to sit in the headers of
 those files; it is here now. What stayed beside the code is what an edit to its own line would break.
 
-## What this module owns
+## Responsibility
 
 - **The schema, and through it the migrations.** `drizzle-kit generate` diffs
   `backend/src/db/schema.ts` into the migration directory; this module applies what is there when
@@ -37,7 +41,7 @@ those files; it is here now. What stayed beside the code is what an edit to its 
   `MAX_ERROR_CHARS` in `web/src/api.ts` is written `satisfies typeof ERROR_DETAIL_MAX` over a
   type-only import of the wire, so the two cannot differ.
 
-## Where the boundary runs
+## Boundary
 
 Nothing in `backend/src` outside this directory imports the ORM. That is the boundary as measured,
 and **nothing enforces it** — no check refuses the next file that imports it, so the sentence is
@@ -55,7 +59,7 @@ and closing the database. What a caller writes through the exported handle is ou
 PostgreSQL hands an aggregate over as text, and which aggregate does so depends on the driver, so
 a query written without the conversion is green against one and red against the other. The
 difference between the two drivers, which of them the suite runs on and which CI job reds, is
-written once, in `backend/test/SPEC.md` under *The invariants no type and no test holds*; it is not
+written once, in `backend/test/SPEC.md` under *Invariants*; it is not
 restated here. The conversions themselves sit on the lines that read the columns, because the edit
 that drops one is an edit to that line — and the same is true of the two other things the SQL
 dialect makes a caller's problem rather than a type's: an alias whose case must survive, and money
@@ -278,7 +282,7 @@ wire's `CHART_ID_SHAPE_SOURCE` by type. A narrowing there that the client does n
 therefore a compile error in `web/` rather than what it would otherwise be — the client keeps
 sending an id the route now refuses, and the route refuses the whole list over it.
 
-## The invariants no type and no test holds
+## Invariants
 
 **Adding a table means editing lists by hand, and nothing connects any of them to
 `backend/src/db/schema.ts`.** They are `BACKUP_TABLES` in `backend/src/db/index.ts`, which decides

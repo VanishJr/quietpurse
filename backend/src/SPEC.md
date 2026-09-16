@@ -1,6 +1,10 @@
-# backend/src
-
-Status: draft
+---
+id: module-backend
+type: module-design
+status: draft
+title: backend — the HTTP door, the process that opens it, and the service modules between them
+parent: architecture
+---
 
 This document answers for the code that sits directly in `backend/src`: the HTTP door every request
 comes through, the process that opens it, and the service modules between that door and the
@@ -15,7 +19,7 @@ the files in this directory. What stayed beside the code is what an edit to its 
 ordering the shape of the chain enforces, a sentinel's meaning, why a clause is absent from one
 expression, a rejected alternative a reader will otherwise re-attempt there.
 
-## What this surface owns
+## Responsibility
 
 The door owns what crosses it and nothing behind it.
 
@@ -98,7 +102,7 @@ request that is not multipart before the route reads a field, with the sentence 
 already answers a body the multipart parser could not read at all, because a person who sent JSON
 to the upload door needs to hear *multipart*, not *JSON*.
 
-## Where the boundary runs
+## Boundary
 
 **The application is separable from the process that starts it.** `backend/src/app.ts` exports an
 app that has connected to nothing; `backend/src/index.ts` takes the lock through
@@ -254,7 +258,7 @@ the port closed on a third party's availability.
 and the lock goes with it, so the next start does not meet a live-looking lock from a process that
 was told to stop.
 
-## The invariants no type and no test holds
+## Invariants
 
 **Nothing is committed on upload.** The upload route parses the file, stages the rows and answers
 with a summary to accept; nothing on any screen moves until the confirm route is called. A file
