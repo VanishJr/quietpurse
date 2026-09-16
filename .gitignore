@@ -34,6 +34,10 @@ REDESIGN-BACK-DEBT.md
 # CLAUDE.md carries the half that rots - test counts, what a green run covered on which
 # tip. AGENTS.md carries the durable half and is published.
 CLAUDE.md
+# the spec tool's working files: the task-specs it writes under context/ and whatever else
+# it keeps per checkout. It seeds a nested .gitignore there, which specs.test.ts's walk
+# never reads; this root line is what keeps that walk out.
+.thinkrail/
 
 # personal data: database, backups, bank statements
 backend/data/

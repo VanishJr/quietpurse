@@ -1,4 +1,10 @@
-# Architecture
+---
+id: architecture
+type: architecture-design
+status: draft
+title: Finto — the module map and the path one statement takes through it
+parent: goal-and-requirements
+---
 
 Finto is an Express API over Postgres with a React client, and one person runs the whole of it on
 their own machine: the database is PGlite, Postgres compiled to run inside the Node process, and it
@@ -17,9 +23,9 @@ A statement enters through a single door, whatever format it is in:
 ```
 POST /api/imports  ──▶  sniff(bytes)  ──▶  importStatement(...)  ──▶  a staged import
                             │                      │
-                            │                      ├─ csv.ts     decodeCsv → parseCsv
-                            │                      ├─ xlsx.ts    readXlsx  ─┐
-                            │                      └─ pdf.ts     readPdf   ─┴─ sheet.ts (cell reads)
+                            │                      ├─ backend/src/providers/csv.ts    decodeCsv → parseCsv
+                            │                      ├─ backend/src/providers/xlsx.ts   readXlsx  ─┐
+                            │                      └─ backend/src/providers/pdf.ts    readPdf   ─┴─ backend/src/providers/sheet.ts (cell reads)
                             │
                             └─ decides the format from the bytes, never from the filename
 
@@ -27,7 +33,7 @@ POST /api/imports/:id/confirm  ──▶  rows land in `transactions`
 POST /api/imports/:id/discard  ──▶  the staged import is dropped
 ```
 
-`providers/statement.ts` is the surface. Callers do not choose a parser and cannot: `sniff()` reads
+`backend/src/providers/statement.ts` is the surface. Callers do not choose a parser and cannot: `sniff()` reads
 the bytes and returns an `ImportSourceType`, and everything after it — size caps, page caps, the
 reconciliation gate, the refusal wording — is keyed off that one value.
 
@@ -44,41 +50,39 @@ also a valid ASN.1 tag. The reasoning is in two places, and `AGENTS.md`'s *Conve
 it there: a reason an edit to its own line would break stays beside that line, and a reason broken
 from another file goes to the module's spec. The policy — the bytes decide, never the filename the
 bank chose or the type the browser declared, and a file whose document starts at an offset is still
-one buffer — is stated in `backend/src/providers/SPEC.md`, under what the module owns. The
+one buffer — is stated in `backend/src/providers/SPEC.md`, under *Responsibility*. The
 byte-level reasoning — which byte parts the two cases, why the second byte's range is as wide as it
 is and no narrower, and why the header is searched whole rather than within a window — stays as the
-comment directly above the container test inside `sniff` in `providers/statement.ts`, because the
+comment directly above the container test inside `sniff` in `backend/src/providers/statement.ts`, because the
 edit that would break it is an edit to that line. Read that comment before touching the function;
 every clause in it was paid for by a document that broke the previous one.
 
 ## Modules
 
-`backend/src/`
-
 | Module | What it owns |
 |---|---|
-| `app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `index.ts` so the whole route table is testable over real HTTP |
-| `wire/index.ts` | The declared answer of every route, as zod schemas the backend's types are inferred from and the client's are derived from by type-only import; the vocabularies and bounds the client composes against, which it pins its own copies to by type. Imports nothing but zod |
-| `index.ts` | Process start: the lock (`lock.ts`), the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
-| `lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the takeover of a stale one under a marker the process never clears for another, and a release that removes only its own pid |
-| `config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |
-| `db/schema.ts` | Drizzle table definitions. The source the migrations are generated from |
-| `db/index.ts` | Opening the database — PGlite in the folder, or a PostgreSQL server — and every query. Raw `sql` templates, not the Drizzle query builder — so renaming a column in `schema.ts` breaks at runtime, not at build. Known, and deliberate for now: the SQL arrived written, from the SQLite era |
-| `db/dedup.ts` | The computed dedup key and its per-group ordinal — distinct from `transactions.id` |
-| `providers/statement.ts` | The ingestion surface: `sniff`, `importStatement`, `readSheet`, `reconcile` |
-| `providers/csv.ts` | Delimiter detection, encoding, column matching, the bank presets |
-| `providers/xlsx.ts` | Workbook reading through exceljs |
-| `providers/pdf.ts` | Layout templates and text-layer extraction |
-| `providers/pdfjsloader.ts` | Installs `DOMMatrix`/`Path2D` stubs before pdfjs loads — without them `pdf.mjs` does not evaluate at all under Node |
-| `providers/sheet.ts` | Cell-level reads shared by the xlsx and pdf paths (`cellDate`, `cellAmount`, …) |
-| `categorizer.ts` | MCC and description rules → a category slug; refund and recurrence detection |
-| `classify.ts` | Transfer pairing between the user's own accounts, and re-classification when rules change |
-| `independence.ts` | The self-sufficiency computation |
-| `fxrates.ts` / `rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
-| `money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
-| `documents.ts` | Uploaded statements as plain files in the statements folder: the name a file gets, `putDocument`/`getDocument`/`deleteDocument`, and the hash check on read |
-| `storage.ts` | The object store underneath `documents.ts`: an atomic write, and a key shape that refuses rather than cleans |
-| `settings.ts` / `appsettings.ts` | The person's settings in the database |
+| `backend/src/app.ts` | The Express app: every route, the body parsers, and the built client served below them. Separate from `backend/src/index.ts` so the whole route table is testable over real HTTP |
+| `backend/src/wire/index.ts` | The declared answer of every route, as zod schemas the backend's types are inferred from and the client's are derived from by type-only import; the vocabularies and bounds the client composes against, which it pins its own copies to by type. Imports nothing but zod |
+| `backend/src/index.ts` | Process start: the lock (`backend/src/lock.ts`), the writable-folder check, open and migrate, seed, listen on loopback, close on Ctrl+C |
+| `backend/src/lock.ts` | The one-process-per-folder lock: the claim by exclusive create, what a file already there means, the takeover of a stale one under a marker the process never clears for another, and a release that removes only its own pid |
+| `backend/src/config.ts` | `.env` reading with a working default for everything — the folder, the port, the host — and the one setting that swaps the engine, `DATABASE_URL` |
+| `backend/src/db/schema.ts` | Drizzle table definitions. The source the migrations are generated from |
+| `backend/src/db/index.ts` | Opening the database — PGlite in the folder, or a PostgreSQL server — and every query. Raw `sql` templates, not the Drizzle query builder — so renaming a column in `backend/src/db/schema.ts` breaks at runtime, not at build. Known, and deliberate for now: the SQL arrived written, from the SQLite era |
+| `backend/src/db/dedup.ts` | The computed dedup key and its per-group ordinal — distinct from `transactions.id` |
+| `backend/src/providers/statement.ts` | The ingestion surface: `sniff`, `importStatement`, `readSheet`, `reconcile` |
+| `backend/src/providers/csv.ts` | Delimiter detection, encoding, column matching, the bank presets |
+| `backend/src/providers/xlsx.ts` | Workbook reading through exceljs |
+| `backend/src/providers/pdf.ts` | Layout templates and text-layer extraction |
+| `backend/src/providers/pdfjsloader.ts` | Installs `DOMMatrix`/`Path2D` stubs before pdfjs loads — without them `pdf.mjs` does not evaluate at all under Node |
+| `backend/src/providers/sheet.ts` | Cell-level reads shared by the xlsx and pdf paths (`cellDate`, `cellAmount`, …) |
+| `backend/src/categorizer.ts` | MCC and description rules → a category slug; refund and recurrence detection |
+| `backend/src/classify.ts` | Transfer pairing between the user's own accounts, and re-classification when rules change |
+| `backend/src/independence.ts` | The self-sufficiency computation |
+| `backend/src/fxrates.ts` / `backend/src/rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
+| `backend/src/money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
+| `backend/src/documents.ts` | Uploaded statements as plain files in the statements folder: the name a file gets, `putDocument`/`getDocument`/`deleteDocument`, and the hash check on read |
+| `backend/src/storage.ts` | The object store underneath `backend/src/documents.ts`: an atomic write, and a key shape that refuses rather than cleans |
+| `backend/src/settings.ts` / `backend/src/appsettings.ts` | The person's settings in the database |
 
 `web/src/screens/` holds Overview, Transactions, Analytics, Independence and Settings;
 `web/src/api.ts` is the only place that talks to the API, and it also owns how a failed request
@@ -91,15 +95,14 @@ on the server is a `tsc` error in `web/` and never an `undefined` on a screen.
 Everything the app keeps is under `FINTO_HOME`, `~/Finto` by default:
 
 ```
-~/Finto/
-  db/            the PGlite data directory
-  statements/    <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
-  finto.lock     the running process's pid
-  finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
+~/Finto/db/                   the PGlite data directory
+~/Finto/statements/           <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
+~/Finto/finto.lock            the running process's pid
+~/Finto/finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
 ```
 
 There is no sign-in and no tenant. Whoever can reach the port owns the data behind it, so
-`index.ts` binds the loopback interface unless told otherwise, and no query carries an owner: the
+`backend/src/index.ts` binds the loopback interface unless told otherwise, and no query carries an owner: the
 whole table is the person's. What that deleted from the data layer was one column on every table, a
 composite key over it, and the request context that carried it; what it left is a database any
 query reads whole.
@@ -114,7 +117,7 @@ pid holds it, taken over from a dead one, removed on the way out. A PostgreSQL s
 ## Two keys that are not the same key
 
 - `transactions.id` — a surrogate UUID. Identity for the API and for foreign keys.
-- The **computed dedup key** (`db/dedup.ts`) — derived from the statement row's own content, with a
+- The **computed dedup key** (`backend/src/db/dedup.ts`) — derived from the statement row's own content, with a
   per-group ordinal so that a statement legitimately containing the same charge twice keeps both.
   Ordinals stay dense across a delete.
 
@@ -129,24 +132,26 @@ the database.
 
 ## Migrations
 
-`db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
+`backend/src/db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
 `backend/drizzle/` and applied when the database is opened. Until the first release the history is
-squashed into a single `0000_initial.sql` on every schema change — the history has no databases to
+squashed into a single `backend/drizzle/0000_initial.sql` on every schema change — the history has no databases to
 upgrade. **A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
 one, because the regenerated file carries a later journal timestamp and drizzle re-applies it. From
 the first release on, migrations are append-only and an applied one is never edited.
 
 ## Adding a statement format
 
-1. Write the parser in `providers/`, returning rows through the shared `sheet.ts` cell readers if
+1. Write the parser in `backend/src/providers/`, returning rows through the shared
+   `backend/src/providers/sheet.ts` cell readers if
    it is grid-shaped.
 2. Add the type to `ImportSourceType` and teach `sniff()` to recognise it **from bytes**. Recognise
    on evidence the format is present, never on the absence of other formats.
-3. Give it an entry in `PARSER_VERSION`, `SIZE_CAP` and `FORMAT_NAME` in `statement.ts` — the last
+3. Give it an entry in `PARSER_VERSION`, `SIZE_CAP` and `FORMAT_NAME` in
+   `backend/src/providers/statement.ts` — the last
    one feeds the refusal text that lists what the app accepts, so a format the user cannot be told
    about is a format they cannot be refused clearly for. The type's name is also the extension a
    stored statement gets, so it has to be one a file can carry.
-4. Add fixtures. PDF fixtures are built in code (`test/pdffixture.ts`) rather than committed, since
+4. Add fixtures. PDF fixtures are built in code (`backend/test/pdffixture.ts`) rather than committed, since
    `.gitignore` refuses `*.pdf` and `*.csv` outright.
 
 ## Testing
@@ -154,11 +159,11 @@ the first release on, migrations are append-only and an applied one is never edi
 `backend/` runs vitest against an embedded PGlite in memory by default — the engine the product
 itself runs on — and against a real Postgres when `TEST_DATABASE_URL` is set; CI does both. PGlite
 is single-connection, so the default run proves nothing about concurrency — a unique index losing a
-race is not exercised there. `test/setup.ts` runs once per test file, so every table is truncated
+race is not exercised there. `backend/test/setup.ts` runs once per test file, so every table is truncated
 before each one; it refuses a database not named `*_test`, and it points the statements folder at
 a temporary directory so nothing a test uploads reaches `~/Finto`.
 
-`web/` runs two vitest projects split by filename so the environment cannot be got wrong: `unit`
-(`*.test.ts`, node) and `dom` (`*.test.tsx`, jsdom). What jsdom structurally cannot check — layout,
+`web/` runs two vitest projects split by filename so the environment cannot be got wrong, `unit`
+(node) and `dom` (jsdom); the patterns are in `web/vitest.config.ts`. What jsdom structurally cannot check — layout,
 downloads, chart rendering — is listed in `AGENTS.md` under "Verification has a hole", along with
 what is done about it.

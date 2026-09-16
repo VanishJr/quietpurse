@@ -197,6 +197,19 @@ everywhere.
     of one with nobody owning the sum, and both premises of one part were false while its number
     stayed right. The spec says such a chain exists, where it is written whole, and what it
     crosses.
+- **A spec is a markdown file whose frontmatter carries an `id` and a `type`, and that
+  frontmatter is the one copy of its title and its status.** The two root documents are
+  `goal-and-requirements.md` and `ARCHITECTURE.md`; every other spec sits beside its module as
+  `SPEC.md` and names its parent by id. The fields are `id`, `type`, `status`, `title`, `parent`,
+  and — only where the code shows the edge — `depends-on`, `references`, `implements`; a line is
+  `key: value` or `key: [a, b]` and nothing else. A status is `draft` or `active`: a new or edited
+  spec is `draft` until the owner has read it, and the flip is the owner's. A module spec opens
+  with `## Responsibility` and carries `## Boundary` and `## Invariants` for the rules no type and
+  no test holds; its topical sections are its own, and the root documents keep theirs. A spec
+  carries no line citation, no commit sha, no reference to the plan and no path a reader of the
+  public tree cannot open — `backend/test/specs.test.ts` refuses each, refuses a frontmatter
+  written in any other form, and holds the parents to one tree. It carries no count either, and
+  that one is held by review.
 - **A comment may not state a fact that something else could check.** Nothing tests prose, so a
   comment carrying a number, a count, a measurement, a reachability claim or an inventory of what
   exists is believed long after it stopped being true — comments in this tree have been found

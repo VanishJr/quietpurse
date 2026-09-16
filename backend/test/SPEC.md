@@ -1,13 +1,17 @@
-# backend/test
-
-Status: reviewed
+---
+id: submodule-backend-test
+type: submodule-design
+status: draft
+title: test — the backend suite, its harness, and the checks that read a file as text
+parent: module-backend
+---
 
 What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
 `AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
 database it runs against, what jsdom cannot see, what skips on this platform — and the harness files
 carry their own reasoning in their headers. Nothing below repeats them.
 
-## What this module owns
+## Responsibility
 
 - **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
   that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
@@ -37,7 +41,7 @@ carry their own reasoning in their headers. Nothing below repeats them.
   job in `.github/workflows/ci.yml`, `web/src/main.tsx` is built by it and runs only in a browser.
   It is a reading and not a gate: no threshold, and no CI step reads it.
 
-## Where the boundary runs
+## Boundary
 
 A check here may read any file in the repository, and some do. Every one of them resolves its root
 from `process.cwd()`, which is this package's root — locally, and in CI, where the backend jobs run
@@ -62,8 +66,8 @@ route written any of those ways; the shape rule's one instrument is the token `r
 spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
 `req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
 and none is closed here;
-`backend/test/specs.test.ts` reads every `SPEC.md` this repository declares, and every comment in
-every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
+`backend/test/specs.test.ts` reads every spec this repository declares — the documents at the root
+and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
 included, and an untracked probe dropped under either package included — enumerated through
 `commentsOf` in the comment tool's pure core rather than by a walk of its own or a scan of lines,
 and refuses in a comment what it refuses in a spec: a path `.gitignore` keeps out of the tree, a
@@ -80,7 +84,21 @@ written with its stage letter and no padding, a bare hash sign and a number, *pu
 the pipeline's own vocabulary, *this row* in the plan's sense, a sha not in backticks, an absolute
 path and an unpublished file named by its stem are not seen, and none is closed here; and the path
 half is bounded by the extensions the citation clause reads, so a dotfile a reader creates for
-themselves is unseen, rightly;
+themselves is unseen, rightly; it reads each spec's frontmatter under a grammar of its own — a line
+is a key, a colon, one space and a value, or an inline list, and nothing else — because the tool
+that indexes these files reads YAML whole, and a form that tool reads differently from this holder,
+or drops in silence, is a field filled in and then trusted; it holds the identity a file declares
+to be one the literal declares, the id unique, the type one of the durable ones, the status one of
+two, every parent a declared spec and the parents one tree with the goal as its only root, and a
+link, where one is written, resolving; a markdown file whose frontmatter carries an id and a type
+is a spec to that tool whether or not anything here declares it, so the walk reads an identity wide
+on purpose — a key indented, quoted, spaced before its colon or with its value on the line below is
+a candidate — finds those, requires the set to equal the literal, and leaves a candidate outside
+the grammar to be refused by name; what it cannot see, stated as a direction rather than a list: a
+spec under a directory `.gitignore` keeps out of the tree, which the tool indexes and this holder
+does not, and an identity written in a form YAML reads and the walk's pattern does not — the
+direction the over-reading closes is the other one, a candidate the tool would not read, which
+costs a refusal and never a silence;
 `backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
 name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
 `import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
@@ -106,7 +124,7 @@ that list** —
 a check added and not named here is named nowhere, which is the failure the hand-written lists below
 describe in another module.
 
-## The invariants no type and no test holds
+## Invariants
 
 **A green default run does not prove a raw `sql` aggregate is read correctly.** PGlite answers a
 `COUNT` as a number and node-postgres answers it as a string, so an aggregate that reaches a caller
@@ -125,5 +143,5 @@ are named and explained once, in `backend/src/db/SPEC.md`, rather than twice.
 
 **`backend/test/specs.test.ts` holds that a spec declares one of two statuses, and holds nothing
 about which one is true.** The flip out of draft follows the owner's review, and no check can tell
-whose hand typed the line: an agent writing the reviewed value is refused by nobody, so a status is
+whose hand typed the line: an agent writing `active` is refused by nobody, so a status is
 evidence only to the extent that the person reading it knows where it came from.

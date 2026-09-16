@@ -4,12 +4,18 @@ import path from 'path';
 import { commentsOf, type Comment } from '../scripts/comment-tokens';
 
 /**
- * A SPEC.md sits beside the module it describes, so nothing imports it and nothing
- * typechecks it. What rots in one is a coordinate that has moved, a path somebody
- * renamed, a pointer to a file only this machine has, and a status a reader cannot
- * see - and prose that has rotted is read as settled. A comment in source is prose
- * too, and the same four things rot in it, so the clauses that can run over a
- * comment run over every one the tree carries.
+ * A spec sits beside the module it describes, or at the root when it describes the
+ * whole, and nothing imports it and nothing typechecks it. What rots in one is a
+ * coordinate that has moved, a path somebody renamed, a pointer to a file only this
+ * machine has, and a status a reader cannot see - and prose that has rotted is read as
+ * settled. A comment in source is prose too, and the same four things rot in it, so
+ * the clauses that can run over a comment run over every one the tree carries.
+ *
+ * The frontmatter is what the tool that indexes this tree reads a spec by, and it is
+ * read here under a grammar of this file's own rather than a YAML parser: the tool
+ * reads YAML whole, and every form it reads differently from this file - or drops in
+ * silence - is a field filled in and then trusted. The grammar is the subset both read
+ * one way, and everything outside it is refused by name.
  *
  * The unpublished set is DERIVED from .gitignore, never listed here. The rule is
  * "ignored by .gitignore" and never "is a root-level .md": AGENTS.md is a root-level
@@ -21,15 +27,18 @@ const ROOT = path.resolve(process.cwd(), '..');
 
 /**
  * Literal, not a glob: a glob asserts nothing about a spec that was deleted, which is
- * the one edit this whole file is powerless against if it enumerates by looking.
+ * the one edit this whole file is powerless against if it enumerates by looking. The
+ * ones at the root describe the whole and are the top of the tree the parents form.
  */
-const SPEC_DIRS = [
-  'backend/src',
-  'backend/src/db',
-  'backend/src/providers',
-  'backend/src/wire',
-  'backend/test',
-  'web/src',
+const SPEC_FILES = [
+  'goal-and-requirements.md',
+  'ARCHITECTURE.md',
+  'backend/src/SPEC.md',
+  'backend/src/db/SPEC.md',
+  'backend/src/providers/SPEC.md',
+  'backend/src/wire/SPEC.md',
+  'backend/test/SPEC.md',
+  'web/src/SPEC.md',
 ];
 
 /** One list, because a path is a path: the citation clause and the existence clause read it. */
@@ -81,10 +90,264 @@ const BACKTICKED = /`([^`\n]+)`/g;
  * letters would let a real citation through, and a false positive here is one word to rephrase. */
 const SHA = /^[0-9a-f]{7,40}$/;
 
-const STATUSES = ['Status: draft', 'Status: reviewed'];
+/**
+ * The only keys a spec here may carry: a key outside the list is filled in, read by
+ * nothing, and then trusted. A file is a spec to the tool that indexes this tree when
+ * the block carries an id and a type.
+ */
+const FIELDS = ['id', 'type', 'status', 'title', 'parent', 'depends-on', 'references', 'implements'] as const;
+type Field = (typeof FIELDS)[number];
+const REQUIRED: readonly Field[] = ['id', 'type', 'status', 'title'];
+const LIST_FIELDS: readonly Field[] = ['depends-on', 'references', 'implements'];
+const LINK_LISTS: readonly Field[] = ['depends-on', 'references', 'implements'];
+/**
+ * The durable kinds. A task-spec is a working file the tool keeps under a directory
+ * .gitignore keeps out of the tree.
+ */
+const TYPES = ['goal-and-requirements', 'architecture-design', 'module-design', 'submodule-design'];
+const ROOT_TYPE = 'goal-and-requirements';
+/** A new or edited spec is draft, and the flip is the owner's review. */
+const STATUSES = ['draft', 'active'];
 
 const abs = (p: string): string => path.resolve(ROOT, p);
 const read = (p: string): string => fs.readFileSync(abs(p), 'utf8');
+
+type Block = { lines: string[]; body: string; bodyLine: number };
+
+/**
+ * The tool's own reading of where the block is, in one function for the detector and
+ * the grammar so the two cannot disagree: a fence is a line that trims to three dashes,
+ * the first line has to be one, and the first later one closes.
+ */
+const splitFrontmatter = (text: string): Block | undefined => {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  if (lines[0]?.trim() !== '---') return undefined;
+  const close = lines.findIndex((line, i) => i > 0 && line.trim() === '---');
+  if (close < 0) return undefined;
+  return { lines: lines.slice(1, close), body: lines.slice(close + 1).join('\n'), bodyLine: close + 2 };
+};
+
+/**
+ * What makes a file a spec to the tool that indexes this tree: a fenced block carrying
+ * an id and a type. Read off the lines rather than off a YAML parse, and read wide on
+ * purpose - a line naming the key indented, quoted, spaced before its colon or with its
+ * value on the line below is a candidate - so a spec written and not declared is found
+ * here first and refused by the grammar by name second. Where this can still disagree
+ * with the tool, the direction that stays open is a form YAML reads as an identity and
+ * this pattern does not; the other, a candidate the tool would not read, costs a
+ * refusal by name and never a silence.
+ */
+const IDENTITY = (key: string): RegExp => new RegExp(`^\\s*["']?${key}["']?\\s*:`);
+const hasIdentity = (text: string): boolean => {
+  const block = splitFrontmatter(text);
+  return block !== undefined && ['id', 'type'].every((key) => block.lines.some((line) => IDENTITY(key).test(line)));
+};
+
+type Frontmatter = Partial<Record<Field, string | string[]>>;
+type Parsed = { fm: Frontmatter; faults: string[] };
+
+const isField = (key: string): key is Field => (FIELDS as readonly string[]).includes(key);
+/** What YAML reads as something other than the text written: an indicator in front, a
+ * mapping or a comment inside, a bare word, a figure or a special float it types for you.
+ * A colon is a mapping before whitespace or at the end, a hash a comment after
+ * whitespace - a tab and a line end count, not the space alone. */
+const INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
+const MAPPING = /:(?:\s|$)/;
+const COMMENT = /\s#/;
+const TYPED_WORD = /^(?:true|false|null|~|yes|no|on|off)$/i;
+const TYPED_NUMBER =
+  /^[+-]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$|^0[xo][\da-fA-F_]+$|^[+-]?\.(?:inf|Inf|INF)$|^\.(?:nan|NaN|NAN)$/;
+
+const scalarFault = (value: string): string | undefined => {
+  if (value === '' || value !== value.trim()) return 'is empty or carries whitespace at an end - a value is written whole';
+  if (INDICATOR.test(value) || /[[\]{}]/.test(value) || MAPPING.test(value) || COMMENT.test(value))
+    return 'a colon before whitespace or at the end of a value is a mapping and a hash after whitespace is a comment to YAML, and a leading quote, bracket or indicator is a form this holder does not read; rephrase';
+  if (TYPED_WORD.test(value) || TYPED_NUMBER.test(value))
+    return 'is what YAML reads as a number, a boolean or a null and the spec tools then spell back as text or drop, or what a YAML 1.1 reader would - the spec tools read YAML 1.2, which leaves yes and no as the words written, and a reader on 1.1 does not; write a word';
+  return undefined;
+};
+
+/**
+ * The grammar: a key at column zero, a colon, one space, a value; a value is one
+ * scalar or an inline list of them; each key once and from FIELDS; a list field is
+ * written as a list and a scalar field as a scalar. A line outside it is named, never
+ * skipped, because the tool skips a null and refuses a file whole on a duplicate key
+ * or a stray indent, and both leave the index in silence.
+ */
+const parseFrontmatter = (file: string, block: Block): Parsed => {
+  const fm: Frontmatter = {};
+  const faults: string[] = [];
+  block.lines.forEach((raw, i) => {
+    const where = `${file}:${i + 2}`;
+    const bare = /^([\w-]+):\s*$/.exec(raw);
+    if (bare) {
+      faults.push(
+        `${where} writes ${bare[1]} with nothing after the colon - a block list below it or a null, and the spec tools read the first their own way and drop the second in silence; write it inline, [a, b], or delete the key`,
+      );
+      return;
+    }
+    const m = /^([\w-]+): (.*)$/.exec(raw);
+    if (!m) {
+      faults.push(
+        `${where} reads "${raw}" - a frontmatter line is a key, a colon, one space and a value, and nothing else; anything else is YAML the spec tools read their own way or not at all`,
+      );
+      return;
+    }
+    const [, key, value] = m;
+    if (!isField(key)) {
+      faults.push(`${where} names ${key}, which nothing in this tree reads - a field nothing reads is filled in and then trusted`);
+      return;
+    }
+    if (key in fm) {
+      faults.push(`${where} names ${key} a second time - YAML refuses the file whole, and the spec drops out of the index in silence`);
+      return;
+    }
+    const list = /^\[(.*)\]$/.exec(value);
+    if (LIST_FIELDS.includes(key) && !list) {
+      faults.push(`${where} writes ${key} as one value - the spec tools read a list of one there; write it inline, [a, b], so one written form is what both read`);
+      return;
+    }
+    if (!LIST_FIELDS.includes(key) && list) {
+      faults.push(`${where} writes ${key} as a list - the spec tools read no value there at all`);
+      return;
+    }
+    if (list) {
+      if (list[1] === '') {
+        faults.push(`${where} writes ${key} as an empty list - a field with nothing in it is a field to delete`);
+        return;
+      }
+      const items = list[1].split(', ');
+      const bad = items.map((item) => (item.includes(',') ? 'an item carries a comma - items are parted by a comma and a space' : scalarFault(item))).find((f) => f !== undefined);
+      if (bad) {
+        faults.push(`${where} reads "${value}" for ${key} - ${bad}`);
+        return;
+      }
+      fm[key] = items;
+      return;
+    }
+    const bad = scalarFault(value);
+    if (bad) {
+      faults.push(`${where} reads "${value}" for ${key} - ${bad}`);
+      return;
+    }
+    fm[key] = value;
+  });
+  return { fm, faults };
+};
+
+const parseSpec = (file: string, text: string): Parsed & { block: Block | undefined } => {
+  const block = splitFrontmatter(text);
+  if (block === undefined) {
+    return {
+      fm: {},
+      block,
+      faults: [
+        `${file} does not open with a frontmatter block, a fence on the first line and a second to close it - the title and the status live there now, and a document without one is one the spec tools do not index and this holder does not read`,
+      ],
+    };
+  }
+  return { ...parseFrontmatter(file, block), block };
+};
+
+const scalarOf = (fm: Frontmatter, key: Field): string | undefined => {
+  const value = fm[key];
+  return typeof value === 'string' ? value : undefined;
+};
+const listOf = (fm: Frontmatter, key: Field): readonly string[] => {
+  const value = fm[key];
+  return Array.isArray(value) ? value : [];
+};
+
+const fieldFaults = (file: string, fm: Frontmatter): string[] => {
+  const status = scalarOf(fm, 'status');
+  const type = scalarOf(fm, 'type');
+  return [
+    ...REQUIRED.filter((key) => scalarOf(fm, key) === undefined).map(
+      (key) => `${file} declares no ${key} - every spec here carries an id, a type, a status and a title`,
+    ),
+    ...(status !== undefined && !STATUSES.includes(status)
+      ? [`${file} reads status "${status}" - the flip out of draft is the owner's review and there is no third value to hide it behind`]
+      : []),
+    ...(type !== undefined && !TYPES.includes(type)
+      ? [
+          `${file} reads type "${type}" - the durable types are the reading; a task-spec is a working file the spec tools keep in a directory .gitignore keeps out of the tree`,
+        ]
+      : []),
+  ];
+};
+
+type Node = { file: string; fm: Frontmatter };
+
+/** Pure over a list, so the crafted trees below run through the same function the tree does. */
+const idFaults = (nodes: readonly Node[]): string[] => {
+  const seen = new Map<string, string>();
+  return nodes.flatMap(({ file, fm }) => {
+    const id = scalarOf(fm, 'id');
+    if (id === undefined) return [];
+    const other = seen.get(id);
+    if (other !== undefined) return [`${file} carries id "${id}", which ${other} carries too - an id names one document`];
+    seen.set(id, file);
+    return [];
+  });
+};
+
+const parentFaults = (nodes: readonly Node[]): string[] => {
+  const ids = new Set(nodes.map((n) => scalarOf(n.fm, 'id')));
+  const byId = new Map(nodes.map((n) => [scalarOf(n.fm, 'id'), n]));
+  const isRoot = (n: Node): boolean => scalarOf(n.fm, 'type') === ROOT_TYPE;
+  const roots = nodes.filter(isRoot);
+  const faults =
+    roots.length === 1 ? [] : [`the tree has ${roots.length} goals: ${roots.map((r) => r.file).join(', ') || 'none'} - one root`];
+  for (const n of nodes) {
+    const parent = scalarOf(n.fm, 'parent');
+    if (isRoot(n) && parent !== undefined) faults.push(`${n.file} declares a parent and is the goal - the goal is the root and the only root`);
+    if (!isRoot(n) && parent === undefined) faults.push(`${n.file} declares no parent - every spec but the goal hangs off one`);
+    if (parent !== undefined && !ids.has(parent)) faults.push(`${n.file} hangs off "${parent}", which no declared spec carries - a branch in the air`);
+  }
+  // a cycle never reaches the root and never dangles, so neither line above sees it
+  for (const n of nodes) {
+    const chain = [n.file];
+    const visited = new Set(chain);
+    let cur: Node | undefined = n;
+    while (cur !== undefined && !isRoot(cur)) {
+      const parent = scalarOf(cur.fm, 'parent');
+      cur = parent === undefined ? undefined : byId.get(parent);
+      if (cur === undefined) break;
+      if (visited.has(cur.file)) {
+        faults.push(`${n.file}'s parent chain never reaches the goal: ${[...chain, cur.file].join(' -> ')} - a cycle is a tree with no root`);
+        break;
+      }
+      visited.add(cur.file);
+      chain.push(cur.file);
+    }
+  }
+  return faults;
+};
+
+const linkFaults = (nodes: readonly Node[]): string[] => {
+  const ids = new Set(nodes.map((n) => scalarOf(n.fm, 'id')));
+  return nodes.flatMap(({ file, fm }) =>
+    LINK_LISTS.flatMap((kind) =>
+      listOf(fm, kind)
+        .filter((target) => !ids.has(target))
+        .map(
+          (target) =>
+            `${file} ${kind} "${target}", which no declared spec carries - a link to nothing is what the tool's own validator reports and this holder refuses`,
+        ),
+    ),
+  );
+};
+
+/** An H1 or a Status line in the body, however markdown lets either be dressed, is a
+ * second copy of what the frontmatter holds; a setext underline is an H1 unread here. */
+const bodyCopies = (file: string, block: Block): string[] =>
+  block.body
+    .split('\n')
+    .flatMap((line, i) =>
+      /^(?:\s{0,3}#[ \t]|\W*[Ss]tatus\s*:)/.test(line)
+        ? [`${file}:${i + block.bodyLine} reads "${line}" - the title and the status live in the frontmatter, once; a heading or a Status line in the body is a second copy that drifts`]
+        : [],
+    );
 
 /**
  * Every path-shaped token, wherever it stands. Requiring backticks would exempt a
@@ -254,12 +517,14 @@ const KNOWN_UNPUBLISHED = [
  * comments are read below. It skips what isIgnored denies rather than a second skip
  * list by hand - an unpublished file is out of scope by the rule the rest of this file
  * already uses, and a file the walk visits and a path a comment names are judged by
- * the same derivation - and skips .git, which is not the tree git tracks, and
- * node_modules by name even if the rule that ignores it were to go.
+ * the same derivation - and skips .git, which is not the tree git tracks, node_modules
+ * by name even if the rule that ignores it were to go, and a symlink, which a read
+ * would follow to wherever it points.
  */
 const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isSymbolicLink()) return [];
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === '.git') return [];
       return isIgnored(`${rel}/`, RULES) ? [] : findFiles(path.join(dir, entry.name), keep, rel);
@@ -268,11 +533,14 @@ const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): s
   });
 
 /**
- * SPEC_DIRS holds one direction and only one: a spec that was deleted. The other is a
+ * SPEC_FILES holds one direction and only one: a spec that was deleted. The other is a
  * spec that was written and not declared, which no clause here reads and which
- * therefore rots with the suite green.
+ * therefore rots with the suite green - and the tool that indexes this tree takes any
+ * markdown file whose frontmatter carries an id and a type, wherever it sits and
+ * whatever it is called, so that is what the walk looks for.
  */
-const findSpecs = (dir: string): string[] => findFiles(dir, (name) => name === 'SPEC.md');
+const findSpecs = (dir: string): string[] =>
+  findFiles(dir, (name) => name.endsWith('.md')).filter((file) => hasIdentity(read(file)));
 
 type Source = { file: string; comments: readonly Comment[] };
 
@@ -329,13 +597,16 @@ const coordinatesIn = ({ file, comments }: Source): string[] =>
 const resolvesTo = (target: string, token: string): boolean =>
   fs.existsSync(target) && (!token.endsWith('/') || fs.statSync(target).isDirectory());
 
-const declared = SPEC_DIRS.map((dir) => ({ dir, file: `${dir}/SPEC.md` }));
+const declared = SPEC_FILES.map((file) => ({ file, dir: path.posix.dirname(file) }));
 const missing = declared.filter((s) => !fs.existsSync(abs(s.file))).map((s) => s.file);
 const specs = declared
   .filter((s) => fs.existsSync(abs(s.file)))
-  .map((s) => ({ ...s, text: read(s.file) }));
+  .map((s) => {
+    const text = read(s.file);
+    return { ...s, text, ...parseSpec(s.file, text) };
+  });
 
-describe('every SPEC.md this repository declares', () => {
+describe('every spec this repository declares', () => {
   it('reads the repository root it means to read', () => {
     for (const anchor of ['AGENTS.md', '.gitignore']) {
       expect(
@@ -348,7 +619,7 @@ describe('every SPEC.md this repository declares', () => {
   it('exists', () => {
     expect(
       missing,
-      'a declared spec is not on disk - write it, or take its directory out of SPEC_DIRS in the same edit that deletes it',
+      'a declared spec is not on disk - write it, or take its path out of SPEC_FILES in the same edit that deletes it',
     ).toEqual([]);
   });
 
@@ -358,7 +629,7 @@ describe('every SPEC.md this repository declares', () => {
     const undeclared = found.filter((f) => !declaredFiles.includes(f));
     expect(
       found,
-      `SPEC_DIRS and the tree disagree, undeclared: ${undeclared.join(', ') || 'none'} - a spec no clause above reads is a document nothing has checked, and it reports success by being invisible`,
+      `SPEC_FILES and the tree disagree, undeclared: ${undeclared.join(', ') || 'none'} - a document whose frontmatter carries an id and a type is a spec to the tool that indexes this tree whether or not anything here declares it, and a spec no clause here reads reports success by being invisible`,
     ).toEqual(declaredFiles);
   });
 
@@ -429,24 +700,28 @@ describe('every SPEC.md this repository declares', () => {
     expect(dead).toEqual([]);
   });
 
-  it('declares a status above its first section, and it is one of two values', () => {
-    for (const spec of specs) {
-      const cut = spec.text.search(/^##/m);
-      const header = cut < 0 ? spec.text : spec.text.slice(0, cut);
-      const lines = header
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.startsWith('Status:'));
+  it('opens with frontmatter this holder reads whole, and the spec tools read the same way', () => {
+    expect(specs.flatMap((spec) => spec.faults)).toEqual([]);
+  });
 
-      expect(
-        lines,
-        `${spec.file} states its status ${lines.length} times above its first heading - without exactly one, a reader takes a draft for a settled document`,
-      ).toHaveLength(1);
-      expect(
-        STATUSES,
-        `${spec.file} reads "${lines[0]}" - the flip out of draft is the owner's review and there is no third value to hide it behind`,
-      ).toContain(lines[0]);
-    }
+  it('declares an id, a type, a status and a title, and the type and the status are values this tree has a reading for', () => {
+    expect(specs.flatMap((spec) => fieldFaults(spec.file, spec.fm))).toEqual([]);
+  });
+
+  it('carries an id no other spec carries', () => {
+    expect(idFaults(specs)).toEqual([]);
+  });
+
+  it('hangs off one parent that is a declared spec, and the goal hangs off nothing and is the only root', () => {
+    expect(parentFaults(specs)).toEqual([]);
+  });
+
+  it('links, where it links at all, to a declared spec', () => {
+    expect(linkFaults(specs)).toEqual([]);
+  });
+
+  it('states its title and its status once, in the frontmatter, and not again in the body', () => {
+    expect(specs.flatMap((spec) => (spec.block === undefined ? [] : bodyCopies(spec.file, spec.block)))).toEqual([]);
   });
 });
 
@@ -512,6 +787,7 @@ describe('the rules those clauses are built from', () => {
       ...KNOWN_UNPUBLISHED,
       '.agents/tasks/048-summary-per-account/decisions.md',
       '.claude/settings.local.json',
+      '.thinkrail/context/TASK-x.md',
       'backend/data/report_03-09-2026_11-22-33.pdf',
     ].filter((p) => !isIgnored(p, RULES));
     expect(permitted).toEqual([]);
@@ -531,9 +807,13 @@ describe('the rules those clauses are built from', () => {
   });
 
   const CRAFTED = [
-    '# crafted',
-    '',
-    'Status: draft',
+    '---',
+    'id: crafted',
+    'type: module-design',
+    'status: draft',
+    'title: crafted',
+    'parent: architecture',
+    '---',
     '',
     '## body',
     '',
@@ -603,6 +883,217 @@ describe('the rules those clauses are built from', () => {
       permitted,
       'a dirOnly pattern declines to look at a path whose last level it reads as a file, so without the trailing slash a directory citation ships the dead pointer this clause exists to stop',
     ).toEqual([]);
+  });
+
+  const CANON = [
+    '---',
+    'id: module-x',
+    'type: module-design',
+    'status: draft',
+    'title: x — what it is, and what it is not',
+    'parent: architecture',
+    'depends-on: [module-y, module-z]',
+    '---',
+    '',
+    '## Responsibility',
+    '',
+  ].join('\n');
+
+  it('reads the frontmatter this tree writes, and the same one under CRLF and a BOM', () => {
+    for (const [label, text] of [
+      ['LF', CANON],
+      ['CRLF', CANON.replace(/\n/g, '\r\n')],
+      ['BOM', `\uFEFF${CANON}`],
+    ] as const) {
+      expect(hasIdentity(text), label).toBe(true);
+      const { fm, faults, block } = parseSpec('crafted.md', text);
+      expect(faults, label).toEqual([]);
+      expect(fm, label).toEqual({
+        id: 'module-x',
+        type: 'module-design',
+        status: 'draft',
+        title: 'x — what it is, and what it is not',
+        parent: 'architecture',
+        'depends-on': ['module-y', 'module-z'],
+      });
+      expect(block?.body.split('\n')[1], label).toBe('## Responsibility');
+      expect(block?.bodyLine, label).toBe(9);
+    }
+  });
+
+  const fenced = (lines: string[]): string => ['---', ...lines, '---', '', '## body', ''].join('\n');
+  const HEAD = ['id: a', 'type: module-design', 'status: draft', 'title: t'];
+
+  /**
+   * One row per form the tool reads differently from this file or not at all, each run
+   * on its own. The reason a row is here is the tool's own behaviour on it: a block
+   * list is read, a null is dropped, a duplicate key or a stray indent refuses the file
+   * whole, a bare word, a figure or a special float comes back typed, a hash after
+   * whitespace is a comment, a colon before whitespace or at the end is a mapping, a
+   * scalar in a list field is a list of one, and a key the
+   * tool reads and nothing here does is filled in and then trusted.
+   */
+  const REFUSED: ReadonlyArray<readonly [string, string, string]> = [
+    ['a block list', fenced([...HEAD, 'depends-on:', '  - x']), 'nothing after the colon'],
+    ['a null', fenced([...HEAD, 'parent:']), 'nothing after the colon'],
+    ['a nested map', fenced([...HEAD, 'depends-on:', '  b: c']), 'a frontmatter line is a key'],
+    ['no space after the colon', fenced(['id:a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+    ['an indented key', fenced([' id: a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+    ['a blank line inside the block', fenced([...HEAD, '']), 'a frontmatter line is a key'],
+    ['a key written twice', fenced([...HEAD, 'id: b']), 'a second time'],
+    ['a key nothing reads', fenced([...HEAD, 'depends_on: [x]']), 'nothing in this tree reads'],
+    ['a colon-space inside a value', fenced([...HEAD.slice(0, 3), 'title: foo: bar']), 'rephrase'],
+    ['a space-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo #bar']), 'rephrase'],
+    ['a quoted value', fenced([...HEAD.slice(0, 3), 'title: "quoted"']), 'rephrase'],
+    ['a figure', fenced([...HEAD.slice(0, 3), 'title: 2026']), 'write a word'],
+    ['a bare word YAML types', fenced([...HEAD.slice(0, 2), 'status: True', 'title: t']), 'write a word'],
+    ['a bare word a YAML 1.1 reader types', fenced([...HEAD.slice(0, 2), 'status: yes', 'title: t']), 'write a word'],
+    ['an empty list', fenced([...HEAD, 'depends-on: []']), 'an empty list'],
+    ['a list with no space after the comma', fenced([...HEAD, 'depends-on: [a,b]']), 'a comma'],
+    ['a list field written as one value', fenced([...HEAD, 'depends-on: a']), 'as one value'],
+    ['a scalar field written as a list', fenced([...HEAD.slice(0, 3), 'title: [t]']), 'as a list'],
+    ['whitespace at the end of a value', fenced([...HEAD.slice(0, 3), 'title: t ']), 'at an end'],
+    ['no closing fence', ['---', ...HEAD, '', '## body'].join('\n'), 'a fence on the first line'],
+    ['a fence not on the first line', ['', ...fenced(HEAD).split('\n')].join('\n'), 'a fence on the first line'],
+    ['a trailing colon', fenced([...HEAD.slice(0, 3), 'title: foo:']), 'rephrase'],
+    ['a colon-tab inside a value', fenced([...HEAD.slice(0, 3), 'title: foo:\tbar']), 'rephrase'],
+    ['a tab-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo\t#bar']), 'rephrase'],
+    ['a trailing colon inside a list item', fenced([...HEAD, 'depends-on: [a, b:]']), 'rephrase'],
+    ['a special float', fenced([...HEAD.slice(0, 3), 'title: .inf']), 'write a word'],
+    ['a field the spec tools read and nothing here does', fenced([...HEAD, 'tags: [a]']), 'nothing in this tree reads'],
+  ];
+
+  /**
+   * The forms beside each refusal that both parsers read to the same text, so a
+   * refusal cannot widen to the whole character: an interior colon or hash, and a
+   * leading dot that spells a word rather than a float.
+   */
+  const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
+    ['an interior colon', fenced([...HEAD.slice(0, 3), 'title: http://x/y'])],
+    ['a clock', fenced([...HEAD.slice(0, 3), 'title: 1:30'])],
+    ['an interior hash', fenced([...HEAD.slice(0, 3), 'title: foo#bar'])],
+    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 3), 'title: .agents'])],
+  ];
+
+  it('refuses every frontmatter shape the spec tools read differently, or not at all', () => {
+    expect(parseSpec('crafted.md', fenced(HEAD)).faults).toEqual([]);
+    const refused = ACCEPTED.filter(([, text]) => parseSpec('crafted.md', text).faults.length > 0).map(
+      ([label, text]) => `${label}: ${parseSpec('crafted.md', text).faults.join(' | ')}`,
+    );
+    expect(refused, 'a form both parsers read to the same text, refused for nothing').toEqual([]);
+    const missed = REFUSED.filter(
+      ([, text, fragment]) => !parseSpec('crafted.md', text).faults.some((f) => f.includes(fragment)),
+    ).map(([label, text]) => `${label}: ${parseSpec('crafted.md', text).faults.join(' | ') || 'no fault at all'}`);
+    expect(missed, 'a form the grammar has stopped refusing').toEqual([]);
+  });
+
+  it('tells a spec from a document that merely opens with frontmatter', () => {
+    // a real frontmatter with keys of its own, read off disk: the agent definitions
+    expect(hasIdentity(read('.claude/agents/reviewer.md'))).toBe(false);
+    expect(hasIdentity(fenced(HEAD))).toBe(true);
+    for (const [label, text] of [
+      ['an id alone', fenced(['id: a'])],
+      ['a type alone', fenced(['type: module-design'])],
+      ['an id after the closing fence', ['---', 'type: module-design', '---', 'id: a'].join('\n')],
+      ['no fence at all', ['# a', '', 'id: a', 'type: module-design'].join('\n')],
+    ] as const) {
+      expect(hasIdentity(text), label).toBe(false);
+    }
+  });
+
+  it('finds an identity however YAML lets one be written, and the grammar then refuses the form by name', () => {
+    // each is a spec to the spec tools and outside the grammar: found by the walk
+    // first, refused by name second, never passed over
+    for (const [label, text, fragment] of [
+      ['the whole block indented', fenced(HEAD.map((line) => ` ${line}`)), 'a frontmatter line is a key'],
+      ['a space before the colon', fenced(['id : a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['a key in double quotes', fenced(['"id": a', ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['a key in single quotes', fenced(["'id': a", ...HEAD.slice(1)]), 'a frontmatter line is a key'],
+      ['the value on the next line', fenced(['id:', '  a', ...HEAD.slice(1)]), 'nothing after the colon'],
+    ] as const) {
+      expect(hasIdentity(text), label).toBe(true);
+      expect(parseSpec('crafted.md', text).faults.join(), label).toContain(fragment);
+    }
+    // what over-reading costs: a candidate the spec tools do not read, and the
+    // grammar refuses it by name rather than the walk passing over it
+    const nothing = fenced(['id:', ...HEAD.slice(1)]);
+    expect(hasIdentity(nothing)).toBe(true);
+    expect(parseSpec('crafted.md', nothing).faults.join()).toContain('nothing after the colon');
+  });
+
+  it('refuses a task-spec, a type it has no reading for, a third status and a missing field', () => {
+    const full = { id: 'a', type: 'module-design', status: 'draft', title: 't' } as const;
+    expect(fieldFaults('c.md', full)).toEqual([]);
+    expect(fieldFaults('c.md', { ...full, type: 'task-spec' }).join()).toContain('working file');
+    expect(fieldFaults('c.md', { ...full, type: 'banana' }).join()).toContain('reads type "banana"');
+    expect(fieldFaults('c.md', { ...full, status: 'reviewed' }).join()).toContain('no third value');
+    expect(fieldFaults('c.md', { id: 'a', type: 'module-design' })).toHaveLength(2);
+  });
+
+  const node = (file: string, fm: Frontmatter): Node => ({ file, fm });
+  const goal = node('goal.md', { id: 'goal', type: 'goal-and-requirements', status: 'draft', title: 'g' });
+  const under = (id: string, parent: string, more: Frontmatter = {}): Node =>
+    node(`${id}.md`, { id, type: 'module-design', status: 'draft', title: id, parent, ...more });
+
+  it('refuses a dangling parent, a second root, a goal with a parent, a cycle and a dangling link', () => {
+    const clean = [goal, under('a', 'goal'), under('b', 'a', { 'depends-on': ['a'] })];
+    expect([...idFaults(clean), ...parentFaults(clean), ...linkFaults(clean)]).toEqual([]);
+
+    const shapes: ReadonlyArray<readonly [string, readonly Node[], (n: readonly Node[]) => string[], string]> = [
+      ['a dangling parent', [goal, under('a', 'nope')], parentFaults, 'a branch in the air'],
+      ['no parent', [goal, node('a.md', { id: 'a', type: 'module-design' })], parentFaults, 'declares no parent'],
+      ['a goal with a parent', [node('goal.md', { ...goal.fm, parent: 'a' }), under('a', 'goal')], parentFaults, 'is the goal'],
+      ['two goals', [goal, node('goal2.md', { ...goal.fm, id: 'goal2' })], parentFaults, 'goals:'],
+      ['no goal', [under('a', 'b'), under('b', 'a')], parentFaults, 'goals: none'],
+      ['a cycle', [goal, under('a', 'b'), under('b', 'a')], parentFaults, 'never reaches the goal'],
+      ['a dangling link', [goal, under('a', 'goal', { references: ['zz'] })], linkFaults, 'a link to nothing'],
+      ['an id twice', [goal, under('a', 'goal'), node('a2.md', { ...under('a', 'goal').fm })], idFaults, 'an id names one document'],
+    ];
+    const missed = shapes
+      .filter(([, nodes, check, fragment]) => !check(nodes).some((f) => f.includes(fragment)))
+      .map(([label, nodes, check]) => `${label}: ${check(nodes).join(' | ') || 'no fault at all'}`);
+    expect(missed).toEqual([]);
+  });
+
+  it('finds a title or a status written again in the body', () => {
+    const block = splitFrontmatter(
+      [
+        '---',
+        ...HEAD,
+        '---',
+        '',
+        '# a',
+        '',
+        'Status: draft',
+        '',
+        '#\ta',
+        '',
+        '   # a',
+        '',
+        '**Status:** draft',
+        '',
+        'Status : draft',
+        '',
+        ' Status: draft',
+        '',
+        'status: draft',
+        '',
+        '## body',
+        '',
+        'The status: draft',
+        '',
+      ].join('\n'),
+    );
+    expect(block && bodyCopies('c.md', block).map((f) => f.split(' - ')[0])).toEqual([
+      'c.md:8 reads "# a"',
+      'c.md:10 reads "Status: draft"',
+      'c.md:12 reads "#\ta"',
+      'c.md:14 reads "   # a"',
+      'c.md:16 reads "**Status:** draft"',
+      'c.md:18 reads "Status : draft"',
+      'c.md:20 reads " Status: draft"',
+      'c.md:22 reads "status: draft"',
+    ]);
   });
 
   /**
