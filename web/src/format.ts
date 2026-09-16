@@ -1,8 +1,6 @@
 /**
- * Money and date formatting.
- *
  * Hand-rolled rather than Intl: the output is deliberately locale-independent, so
- * amounts and dates read the same everywhere (grouping with commas, dd.mm.yyyy).
+ * amounts and dates read the same everywhere.
  */
 
 export function fmtMoney(n: number, currency?: string): string {
@@ -13,14 +11,9 @@ export function fmtMoney(n: number, currency?: string): string {
   return `${sign}${grouped}${fracPart}${currency ? ' ' + currency : ''}`;
 }
 
-/**
- * "1 row" / "2 rows". The backend solves the same problem in `statement.ts`, on the
- * other side of a wire neither side can import across, and this is that helper's shape
- * verbatim so the two sentences read alike.
- */
+/** The importer's helper of the same name, written again on this side so the two sentences read alike. */
 export const rowCount = (n: number): string => `${n} row${n === 1 ? '' : 's'}`;
 
-/** Compact, for chart axes: 950 → "950", 1,200 → "1.2k", 30,500 → "31k", 1,200,000 → "1.2M". */
 export function fmtShort(n: number): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? '−' : '';
@@ -33,7 +26,7 @@ export function fmtShort(n: number): string {
 /**
  * A chart's Y-axis upper bound: the smallest round number that is not below the
  * data's maximum. Here beside `fmtShort` because it is the same job — the axis — and
- * because two screens now draw bars and a second copy of it would drift.
+ * a second copy of it in a screen would drift.
  */
 export function niceMax(max: number): number {
   if (max <= 0) return 1;
@@ -46,7 +39,6 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-/** Short month names — X-axis labels in the yearly chart. */
 export const MONTHS_SHORT = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -61,37 +53,29 @@ const DAYS = [
 ];
 
 /**
- * "Friday, 7 Aug 2026" — the line over the greeting.
- *
  * A real instant and not a calendar day, so `getDay`/`getDate` are the local ones on
- * purpose: this is today where the reader is, not a date off a statement. Everything
- * that formats a YYYY-MM-DD goes through `fmtDay` instead, for the reason written
- * there.
+ * purpose: this is today where the reader is, not a date off a statement, which goes
+ * through `fmtDay` instead.
  */
 export function fmtWeekday(d: Date): string {
   return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-/**
- * A YYYY-MM as "Jul 2026". Split on the string, never through `new Date('2026-07')`,
- * for the reason `fmtDay` gives: that is UTC midnight, and it reads back as June for
- * anybody west of UTC.
- */
+/** Split on the string, never through `new Date('2026-07')`, for the reason `fmtDay` gives. */
 export const fmtMonthKey = (month: string): string =>
   `${MONTHS_SHORT[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7)} ${month.slice(0, 4)}`;
 
-/** Just the month, for a chart axis where the range is stated above it. */
 export const fmtMonthTick = (month: string): string =>
   MONTHS_SHORT[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7);
 
 /**
  * A long name cut in the middle, keeping both ends, with the cut marked.
  *
- * End-truncation is the usual answer and it is the wrong one here. An account's
- * default name is the statement's filename, extension and all — the real ones are a
- * `report_` prefix, a date and a time, and everything that distinguishes two of them is
- * at the end. Cut from the right, every account a bank exports is called
- * `report_03-09-…`, which names none of them.
+ * End-truncation is the usual answer and it is the wrong one here. An account named
+ * after the statement it came from carries the filename, extension and all, and a
+ * bank's export names are a `report_` prefix, a date and a time — everything that
+ * distinguishes two of them is at the end. Cut from the right, every such account is
+ * called `report_03-09-…`, which names none of them.
  *
  * `budget` is the whole result including the ellipsis, so the caller states the width
  * it has rather than a head and a tail it would have to add up itself. The head keeps

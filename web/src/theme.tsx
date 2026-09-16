@@ -1,15 +1,3 @@
-/**
- * App theme: light and dark. By default it follows the system
- * (prefers-color-scheme); the user can pin one, and the choice is remembered in
- * localStorage.
- *
- * The palette is published twice: as CSS custom properties on <html>, and as the `ink`
- * object for the few places that need a colour in JS. The CSS variables are the source
- * of truth for styling; `ink` exists because Recharts wants real colour strings.
- *
- * A category always gets the same colour; in dark mode it is a lightened variant of
- * the same hue, so the contrast against the dark background survives.
- */
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 export interface Ink {
@@ -25,10 +13,10 @@ export interface Ink {
   bad: string;
   onAccent: string;
   /**
-   * Text on a `bad` fill - the destructive button, which is the only one. White clears
-   * light mode's red and does not clear dark mode's, so the two schemes need different
-   * foregrounds and a borrowed `onAccent` would be right only by the coincidence that
-   * both palettes put their saturated colours on the same side of the surface.
+   * Text on a `bad` fill - the destructive button. White clears light mode's red and
+   * does not clear dark mode's, so the two schemes need different foregrounds and a
+   * borrowed `onAccent` would be right only by the coincidence that both palettes put
+   * their saturated colours on the same side of the surface.
    */
   onBad: string;
   backdrop: string;
@@ -41,34 +29,26 @@ export interface Ink {
   brand: string;
   onBrand: string;
   /**
-   * The Overview's one filled card - the ground the spending donut is drawn on. A navy
-   * in both schemes the way `brand` is, and a different navy from it.
-   *
-   * It is a palette entry rather than a `styles.css` custom property because the donut's
-   * sector separators have to be the card's own fill and Recharts is handed that as a
-   * string. Published as `--ink-panel` like every other key here, so the card's own
-   * `background` reads the same value rather than a second copy of it.
+   * The ground the Overview's spending donut is drawn on: a navy in both schemes the
+   * way `brand` is, and a different navy from it. A palette entry rather than a
+   * stylesheet custom property because the donut's sector separators have to be the
+   * card's own fill and Recharts is handed that as a string; published as `--ink-panel`
+   * like every other key here, so the card's own `background` reads the same value
+   * rather than a second copy of it.
    */
   panel: string;
   /**
-   * The third chart series.
-   *
-   * Income is `good` and expenses are `accent` on every screen in this app, and the
-   * Analytics workspace draws a third measure beside them — Net, which is one minus
-   * the other and therefore neither of those two colours. It cannot borrow one of
-   * the pair without saying something false, it cannot be `brand` (in light mode
-   * that is the same navy as `accent`, and two series would be one line), and it
-   * cannot be `primary` for the same reason one step further: #010710 beside
-   * #0a213f is a difference nobody reads off a 2px stroke.
-   *
-   * So: a hue neither of the other two uses, measured against both grounds a series
-   * can be drawn on. Light is 6.5:1 on `surface` and 5.9:1 on `page`; dark is 7.4:1
-   * and 8.1:1 — well past the 3:1 a graphical object needs, because the same value
-   * also draws this series' name in the legend beside it.
-   *
-   * It overlaps the Health category's violet, and that is not a collision: a series
-   * chart plots measures over time and a share chart plots categories, and no canvas
-   * in the app draws both.
+   * The third chart series. Income is `good` and expenses are `accent`, and Net is one
+   * minus the other and therefore neither of those two colours: it cannot borrow one of
+   * the pair without saying something false, it cannot be `brand` (in light mode that
+   * is the same navy as `accent`, and two series would be one line), and it cannot be
+   * `primary` for the same reason one step further, a near-black beside a navy being a
+   * difference nobody reads off a thin stroke. So a hue neither of the other two uses,
+   * clearing both grounds a series can be drawn on at the contrast text needs, because
+   * the same value also draws this series' name in the legend beside it. It overlaps
+   * the Health category's violet, and that is not a collision: a series chart plots
+   * measures over time and a share chart plots categories, and no canvas in the app
+   * draws both.
    */
   net: string;
 }
@@ -120,7 +100,8 @@ export const darkInk: Ink = {
   net: '#b59cf0',
 };
 
-// Category palettes — keyed by backend slugs (labels live in categories.ts)
+// keyed by the backend's slugs; the dark palette is the same hue per category, lightened
+// so its contrast against the dark ground survives
 const LIGHT_CATEGORY_COLORS: Record<string, string> = {
   housing: '#8c5a2b',
   food: '#2a78d6',
@@ -152,7 +133,6 @@ const DARK_CATEGORY_COLORS: Record<string, string> = {
 };
 
 export type Scheme = 'light' | 'dark';
-/** 'system' — follow the OS theme. */
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 interface ThemeValue {

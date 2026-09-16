@@ -1,10 +1,3 @@
-/**
- * Saving bytes the API already handed over. Split out from the components so the one
- * call to URL.createObjectURL takes a Blob and nothing else — no Response, no path,
- * so a body nobody checked cannot become a file.
- */
-
-/** The server's own cap, so a name is not cut differently at the two ends. */
 const MAX_FILENAME_CHARS = 100;
 
 const UNSAFE = /[\x00-\x1f\x7f\\/]/g;
@@ -21,10 +14,8 @@ const clean = (name: string): string =>
     .trim();
 
 /**
- * The `download` attribute for a name the user chose — attachmentDisposition's three
- * steps client-side: their own name, the id-derived one, a constant. Not the
- * server's cleanName: nothing here is percent-encoded, so its lone-surrogate rule
- * has nothing to protect, and a `download` attribute is UTF-8 with no ASCII half.
+ * Not the server's cleanName: nothing here is percent-encoded, so its lone-surrogate
+ * rule has nothing to protect, and a `download` attribute is UTF-8 with no ASCII half.
  */
 export function safeFilename(
   name: string | null,
@@ -34,7 +25,6 @@ export function safeFilename(
   return clean(name ?? '') || clean(`import-${importId}.${sourceType}`) || 'statement';
 }
 
-/** Object URL, detached anchor, revoke. The only URL.createObjectURL in web/src. */
 export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -1,34 +1,9 @@
 /**
- * The Analytics workspace's model: what a chart IS, and what its numbers are.
- *
- * The screen used to be one analysis, wired straight into the two endpoints that
- * answer it — a period pager, two total cards, a donut and twelve bars, in that order,
- * for everybody. It is a workspace now: the reader builds the charts they want, each
- * one a `Chart`, and the screen draws whatever specs exist. So the questions the
- * old screen answered by being shaped that way — which measure, over which window, for
- * which account — are values in an object here, and the arithmetic that answers them
- * is a pure function of data the caller already fetched.
- *
- * Pure on purpose. Nothing in this file fetches, reads the clock or touches React:
- * `today` is always an argument, so every series below can be asserted against a fixed
- * date, and `chartData.ts` is the one place that turns a spec into requests.
- *
- * ---------------------------------------------------------------------------
- * Two shapes, and the difference is not cosmetic
- *
- * A `series` chart plots measures ACROSS ticks — income over twelve months. A `share`
- * chart plots one period's parts AGAINST each other — where the money went. They take
- * different data, ask different endpoints and are configured by different questions,
- * and `CHART_KINDS` is what says which a kind is, so the wizard and the loader read one
- * answer rather than each keeping a list of names.
- *
- * ---------------------------------------------------------------------------
- * Cents, everywhere
- *
- * Every amount here came off `*_cents` on the server and was divided by a hundred on
- * the way out, so summing the doubles back up accumulates the residue — see `toCents`
- * in accounts.ts, which is imported rather than copied for exactly that reason. Every
- * sum below is accumulated as an integer and divided once at the end.
+ * What a chart IS and what its numbers are, as a function of data the caller already
+ * fetched. Nothing here fetches or touches React, and the series arithmetic takes
+ * `today` as an argument rather than reading a clock, so every series below can be
+ * asserted against a fixed date. Every sum below is accumulated in cents and divided
+ * once at the end.
  */
 import { monthOf, toCents } from './accounts';
 import { categoryLabel } from './categories';
@@ -50,14 +25,8 @@ import type {
   CHARTS_MAX as WIRE_CHARTS_MAX,
 } from './types';
 
-// ---------------------------------------------------------------------------
-// the vocabulary
-// ---------------------------------------------------------------------------
-
-/** Measures across ticks, or the parts of one period. See the header. */
 export type ChartShape = 'series' | 'share';
 
-/** A tick is a calendar month or a calendar year; nothing here plots days. */
 export type Grain = 'month' | 'year';
 
 export const defs = <K extends string, D>(record: Record<K, D>): ({ key: K } & D)[] =>
@@ -71,9 +40,9 @@ export interface ChartKindDef {
   blurb: string;
   shape: ChartShape;
   /**
-   * The kind draws the chosen period beside the one before it, so its loader has to
-   * fetch both. Only the radar does, and it is the whole of why that kind exists —
-   * a single polygon says no more than the ranking beside it in the picker does.
+   * The kind draws the chosen period beside the one before it, so its loader fetches
+   * both. Only the radar does, and it is the whole of why that kind exists: a single
+   * polygon says no more than the ranking beside it in the picker.
    */
   comparative?: true;
 }
@@ -180,10 +149,6 @@ export const RANGES: RangeDef[] = defs(RANGE_DEFS);
 export const rangeDef = (key: ChartRange): RangeDef =>
   RANGES.find((r) => r.key === key) ?? RANGES[2];
 
-// ---------------------------------------------------------------------------
-// ticks and bounds
-// ---------------------------------------------------------------------------
-
 /**
  * The ticks a range asks for, oldest first — `YYYY-MM` on a month grain, `YYYY` on a
  * year one.
@@ -210,32 +175,24 @@ export function ticksOf(range: RangeDef, today: Date): string[] {
 }
 
 /**
- * Whether an axis of these ticks has to name the year — see `tickLabel`.
- *
  * A property of the WINDOW and not of any tick in it, which is why the whole list is
- * the argument. Year ticks carry their year already and answer true here harmlessly.
+ * the argument — see `tickLabel`. Year ticks carry their year already and answer true
+ * here harmlessly.
  */
 const spansYears = (ticks: string[]): boolean =>
   new Set(ticks.map((t) => t.slice(0, 4))).size > 1;
 
 /**
- * What a tick is called on the axis: "Aug" for a month, "2026" for a year — and
- * "Aug 25" for a month in a window that crosses one.
+ * "Aug" for a month, "2026" for a year — and "Aug 25" for a month in a window that
+ * crosses one. A 24-month window holds every month name twice, and nearly every
+ * 12-month one crosses a year — only one ending in December does not — so labelled by
+ * the name alone the axis either repeats a word or does not say which year a month is
+ * in, and the tooltip, where recharts echoes whatever `XAxis dataKey` names, does the
+ * same.
  *
- * 24 months is two Augusts, and so is nearly every 12-month window, the default among
- * them: only one ending in December does not cross a year. Labelled by the month name
- * alone they were the same word twice on the axis and again in the tooltip, which is
- * where recharts echoes whatever `XAxis dataKey` names — and there is nothing else on
- * the card to tell them apart, since the subtitle spelling the range out was taken off
- * it deliberately.
- *
- * Two digits of year and not four. It is the form that fits: at eleven pixels "Sep 2025"
- * is most of the width one of twelve ticks has, and recharts answers a label too wide to
- * place by dropping it. Read as a column of them in date order the suffix cannot be
- * anything but a year.
- *
- * The hidden table under the plot is unaffected either way — it prints `tick` itself,
- * which has always been the whole `YYYY-MM`.
+ * Two digits of year and not four: the form that fits one of twelve ticks, and read as
+ * a column of them in date order the suffix cannot be anything but a year. The hidden
+ * table under the plot prints `tick` itself and is unaffected either way.
  */
 export const tickLabel = (tick: string, grain: Grain, withYear = false): string => {
   if (grain === 'year') return tick;
@@ -283,22 +240,16 @@ export function priorBoundsOf(range: RangeDef, today: Date): Bounds {
   return boundsOf(range, shifted);
 }
 
-// ---------------------------------------------------------------------------
-// series: measures across ticks
-// ---------------------------------------------------------------------------
-
 export interface SeriesPoint {
-  /** `YYYY-MM` or `YYYY` — the identity, which is what a key is taken from. */
   tick: string;
-  /** What the axis prints. */
   label: string;
   income: number;
   expense: number;
   /**
-   * Income minus expenses, and NOT the `net` the summary endpoints answer with. That
-   * one sums every row including transfers, because it exists to be compared against a
-   * balance; this is the bottom line of a period, and a transfer between two of your
-   * own accounts must not move it.
+   * Income minus expenses, and NOT the per-account summary's `net`. That one sums every
+   * row including transfers, because it exists to be compared against a balance; this
+   * is the bottom line of a period, and a transfer between two of your own accounts
+   * must not move it.
    */
   net: number;
 }
@@ -306,7 +257,6 @@ export interface SeriesPoint {
 const point = (
   tick: string,
   grain: Grain,
-  /** Whether the window this tick belongs to crosses a year — see `tickLabel`. */
   withYear: boolean,
   incomeCents: number,
   expenseCents: number,
@@ -319,25 +269,20 @@ const point = (
 });
 
 /**
- * What a series is built from: one month's income and its expenses, and nothing else.
- *
- * Deliberately not `MonthTotals`, and deliberately without `net`. Both summary
- * endpoints answer a month shape and only one of the two carries a `net` — the account
- * arm's, which is every row of the month summed, transfers included, so that the months
- * add up to the balance beside them. It is not this chart's net, and this type is what
- * stops it being read: the field is not in scope inside the function.
+ * Deliberately not `MonthTotals`, and deliberately without `net`: only the account
+ * arm's month shape carries one, and it is every row of the month summed, transfers
+ * included — not this chart's net — and this type is what stops it being read, because
+ * the field is not in scope inside the function.
  */
 export interface MonthFlows {
-  /** YYYY-MM */
   month: string;
   income: number;
   expense: number;
 }
 
 /**
- * `/api/summary/months` folded onto the ticks, whichever arm answered it. A month the
- * endpoint did not answer is a tick at zero, which is the true statement here — see
- * `ticksOf`.
+ * Folded onto the ticks, whichever arm answered. A month the endpoint did not answer is
+ * a tick at zero, which is the true statement here — see `ticksOf`.
  */
 export function seriesFromMonths(
   months: MonthFlows[],
@@ -355,12 +300,7 @@ export function seriesFromMonths(
   return ticks.map((t) => point(t, grain, withYear, income.get(t) ?? 0, expense.get(t) ?? 0));
 }
 
-// ---------------------------------------------------------------------------
-// share: the parts of one period
-// ---------------------------------------------------------------------------
-
 export interface SharePoint {
-  /** The backend slug (or source id) — the colour and the React key are taken from it. */
   key: string;
   label: string;
   value: number;
@@ -368,21 +308,16 @@ export interface SharePoint {
 
 /**
  * A refund can push a category negative — the purchase was in an earlier period, the
- * refund landed in this one — and that is the honest figure. It is kept out of the
- * shares a donut or a radar draws, because a negative sector is not a thing, and the
- * ranking prints it: a bar chart has a baseline and can show one.
+ * refund landed in this one — and that is the honest figure. Kept out of the shares a
+ * donut or a radar draws, because a negative sector is not a thing; the ranking prints
+ * it, because a bar chart has a baseline and can.
  */
 export const positiveShares = (shares: SharePoint[]): SharePoint[] =>
   shares.filter((s) => s.value > 0);
 
 /**
- * The parts a kind actually draws.
- *
- * The rule above, read from the kind's side, and in one place because three different
- * files were answering "what is this chart of" and were free to disagree. They did: a
- * card summed every slice for its "Total" while the donut in the middle of it summed
- * only the positive ones, so one refunded category put two different totals on the same
- * card — and divided the largest part by the smaller of them, which printed 1000%.
+ * The rule above, read from the kind's side, and in one place: the files drawing a
+ * chart were each answering "what is this chart of" and were free to disagree.
  */
 export const drawnShares = (kind: ChartKind, shares: SharePoint[]): SharePoint[] =>
   kind === 'ranking' ? shares : positiveShares(shares);
@@ -393,11 +328,9 @@ const fromCategories = (rows: { category: string; total: number }[]): SharePoint
     .sort((a, b) => b.value - a.value);
 
 /**
- * The three splits both summary bodies answer, and the only ones a share chart reads.
- *
- * A minimum both arms meet rather than either body's own type: `/api/summary` answers
- * the whole workspace in the base currency and one account in its own, and a share is
- * the same arithmetic over either.
+ * The three splits both summary bodies answer, and the only ones a share chart reads —
+ * a minimum both arms meet rather than either body's own type: every account together
+ * in the base currency and one account in its own are the same arithmetic here.
  */
 export interface SummarySplits {
   byCategory: CategorySummary[];
@@ -446,46 +379,30 @@ export function compareShares(now: SharePoint[], before: SharePoint[]): Compared
   return rows;
 }
 
-// ---------------------------------------------------------------------------
-// naming a chart
-// ---------------------------------------------------------------------------
-
 const metricLabel = (m: ChartMetric): string => METRICS.find((d) => d.key === m)?.label ?? m;
 
 const breakdownLabel = (b: ChartBreakdown): string =>
   BREAKDOWNS.find((d) => d.key === b)?.label ?? b;
 
 /**
- * What a ranking's bars are called when a reader points at one. A ranking has no
- * single `metric` — it is one breakdown's rows — so the word comes from the breakdown,
- * out of the same `METRICS` vocabulary every other series in this file is named from.
- * Without a name recharts prints the series' `dataKey` instead: `value : 1,082 EUR`.
+ * A ranking has no single `metric` — it is one breakdown's rows — so the word comes
+ * from the breakdown, out of the same `METRICS` vocabulary every other series here is
+ * named from. Without a name recharts prints the series' `dataKey` instead.
  */
 export const rankingSeriesName = (b: ChartBreakdown): string =>
   metricLabel(b === 'expense-categories' ? 'expense' : 'income');
 
-/** A list a person reads: "Income", "Income and Expenses", "Income, Expenses and Net". */
 export function joinWords(words: string[]): string {
   if (words.length <= 1) return words[0] ?? '';
   return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
 /**
- * What a chart is called when the reader has not named it.
- *
  * A suggestion and not a binding: the wizard puts it in the name box, the reader is
- * free to type over it, and nothing recomputes it afterwards. A title that rewrote
+ * free to type over it, and nothing recomputes it afterwards — a title that rewrote
  * itself when the range changed would take away the one part of the tab strip the
- * reader owns.
- *
- * `accountName` is here because the card no longer carries a line spelling the spec out
- * underneath it — that was a sentence restating what the title, the figures and the
- * legend already showed. Which account a chart is about was the one fact none of those
- * three held, so it goes into the name instead: a chart of everything is
- * "Expenses · 12 months" and a chart of one account says so first.
- *
- * The name and not the id, so it is handed in: this module knows nothing about the
- * account list.
+ * reader owns. Which account a chart is about goes into the name, and it is the name
+ * and not the id that is handed in: this module knows nothing about the account list.
  */
 export function suggestedTitle(
   spec: Omit<Chart, 'id' | 'title'>,
@@ -499,27 +416,10 @@ export function suggestedTitle(
   return `${where}${what} · ${rangeDef(spec.range).label}`;
 }
 
-// ---------------------------------------------------------------------------
-// what is remembered
-// ---------------------------------------------------------------------------
-
-/**
- * The charts are the workspace's, kept on the server and read back through
- * `GET`/`PUT /api/analytics/charts`. They follow the reader to a second device, and
- * the tab strip is still the saved state — there is no save button, every change to
- * the list is a write.
- *
- * Before the server held them they lived in this browser's localStorage and nowhere else.
- * The key is read once more, by the migration in `AnalyticsScreen`, and written by
- * nothing: after that read it is removed, and the only copy of a chart is the one the
- * server holds.
- *
- * What is here rather than in `api.ts` is what the route's door is made of — the
- * bounds it refuses past and the shape a stored object has to have — because both
- * are facts about a chart rather than about a request.
- */
+/** The key this browser used before the server held the list: read by the migration, written by nothing. */
 const LEGACY_KEY = 'finto.analytics.charts';
 
+// here and not in `api.ts`: bounds on a chart, not on a request
 export const CHARTS_MAX = 100 satisfies typeof WIRE_CHARTS_MAX;
 export const CHART_TITLE_MAX = 120 satisfies typeof WIRE_CHART_TITLE_MAX;
 export const CHART_ID_MAX = 64 satisfies typeof WIRE_CHART_ID_MAX;
@@ -533,26 +433,19 @@ const BREAKDOWN_KEYS = new Set<string>(BREAKDOWNS.map((b) => b.key));
 const RANGE_KEYS = new Set<string>(RANGES.map((r) => r.key));
 
 /**
- * One stored object, checked field by field, or null.
- *
- * Nothing that arrives here can be trusted into a `Chart` on the strength of
- * having parsed: it was written by an older version of this file, by a hand-edited
- * backup, or by a version of the app whose vocabulary is wider than this one's. A
- * throw would take the whole screen down on first paint, so a shape this version does
- * not recognise answers null — and `chartEntry` below is what decides what happens to
- * it, which is no longer "it is dropped".
+ * One stored object, checked field by field, or null. Nothing that arrives here can be
+ * trusted into a `Chart` on the strength of having parsed, and a throw would take the
+ * whole screen down on first paint, so a shape this version does not recognise answers
+ * null — and `chartEntry` below decides what happens to it, which is not "it is dropped".
  */
 function parseChart(raw: unknown): Chart | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   /*
-   * An empty id is READ rather than refused, unlike every other field here. `id` is
-   * `notNull` text with no CHECK behind it, so `restoreBackup` lets `''` into the table
-   * and the next GET carries it out — and it is the only shape a stored row can take
-   * that this parser could refuse while the route still refuses to take it back. Refused
-   * here it would be unreadable, therefore never re-minted, therefore sent back as it
-   * came and refused with the WHOLE list: a workspace that never saves again. Read, it
-   * fails `ID_SHAPE` in `normaliseForSave` exactly as `a b/c` does and is re-minted.
+   * An empty id is READ rather than refused. Refused, it would be unreadable, therefore
+   * never re-minted, therefore sent back as it came and refused with the WHOLE list: a
+   * list that never saves again. Read, it fails `ID_SHAPE` in `normaliseForSave` exactly
+   * as `a b/c` does and is re-minted.
    */
   if (typeof o.id !== 'string') return null;
   if (typeof o.kind !== 'string' || !KINDS.has(o.kind)) return null;
@@ -572,12 +465,10 @@ function parseChart(raw: unknown): Chart | null {
     title: o.title,
     accountId: o.accountId as string | null,
     /*
-     * An empty list is kept empty. It used to fall back to `['expense']`, which was a
-     * silent substitution of one chart for another — and it stopped being defensible
-     * the moment the wizard let a reader clear every measure: "no measure is picked" is
-     * now a state the app has words for, on the plot and under the chips, and the
-     * chart is not saveable until it is out of it. A stored row arrives at the same
-     * sentence rather than at a chart nobody asked for.
+     * An empty list is kept empty rather than falling back to `['expense']`: that is a
+     * silent substitution of one chart for another, and "no measure is picked" is a
+     * state the app has words for, on the plot and under the chips, with the chart not
+     * saveable until it is out of it.
      */
     metrics,
     breakdown,
@@ -586,14 +477,8 @@ function parseChart(raw: unknown): Chart | null {
 }
 
 /**
- * One position on the saved list: a chart this client can draw, or one it cannot.
- *
- * The second arm is not a defensive nicety. `parseChart`'s "drop the row" policy was
- * right while the list was one browser's — the loss was that browser's. The list is
- * the workspace's now, so a row this version cannot read, dropped here, is carried
- * out of the next PUT and **deleted from every device**, by a client that never
- * showed it to anybody. It is kept where it was, sent back verbatim, and named on
- * screen instead.
+ * A chart this client can draw, or one it cannot — kept and sent back verbatim rather
+ * than dropped, which would delete it from every device the next time anything is saved.
  */
 export type ChartEntry = { known: true; spec: Chart } | { known: false; raw: unknown };
 
@@ -602,19 +487,16 @@ export const chartEntry = (raw: unknown): ChartEntry => {
   return spec === null ? { known: false, raw } : { known: true, spec };
 };
 
-/** What goes on the wire for one position — the spec, or the row as it arrived. */
 export const entryWire = (entry: ChartEntry): unknown => (entry.known ? entry.spec : entry.raw);
 
-/** The charts that can be drawn, in list order. The dock is built from these. */
 export const entrySpecs = (entries: ChartEntry[]): Chart[] =>
   entries.flatMap((e) => (e.known ? [e.spec] : []));
 
 const ID_SHAPE = new RegExp(CHART_ID_SHAPE_SOURCE);
 
-/** What `normaliseForSave` had to change, so the screen can say so. */
 export interface Normalised {
   entries: ChartEntry[];
-  /** Past `CHARTS_MAX`, so not sent at all — the one place a chart is lost. */
+  /** Not sent at all — the one place a chart is lost. */
   droppedOverCap: number;
   titlesShortened: number;
   idsReminted: number;
@@ -627,25 +509,20 @@ const rawId = (raw: unknown): string | null => {
 };
 
 /**
- * The list, cut to what the route will take.
+ * Every save goes through this and not only the migration: a row a restore let in past
+ * the route's bounds would otherwise refuse the reader's WHOLE list on the way back
+ * out, for ever, and cutting it is the smaller harm — which is why the caller says out
+ * loud what was cut.
  *
- * Every save goes through this and not only the migration, because the door is wider
- * on the way in than on the way out: `restoreBackup` type-checks a column and cannot
- * see a zod schema, so a 5 000-character title reaches the table, comes back on the
- * next GET, and — untouched — fails `CHART_TITLE_MAX` on the way back out. That
- * refuses the reader's WHOLE list, for ever, over a title they never typed. Cutting
- * it is an edit to their content and is the smaller harm, which is why the caller
- * says out loud what was cut.
+ * Nothing is dropped except past the cap. An id that is illegal, over-long or repeated
+ * is re-minted rather than deleted: the id is opaque, only `?chart=` reads it, and the
+ * URL already falls back when it names a chart that is not there. An over-long
+ * `accountId` is truncated rather than nulled: over the cap it names no account either
+ * way and the card says so, where nulling it would turn one account's chart into every
+ * account's under its old title.
  *
- * Nothing is dropped except past the cap. An id that is illegal, over-long or
- * repeated is re-minted rather than deleted: the id is opaque, only `?chart=` reads
- * it, and the URL already falls back when it names a chart that is not there. An
- * over-long `accountId` is truncated rather than nulled — over 64 characters it names
- * no account either way and the card says so, where nulling it would turn one
- * account's chart into the whole workspace's under its old title.
- *
- * The cut counts unreadable rows too. The server counts them, so a client that
- * trimmed only what it can read would compose a list of 101 and be refused whole.
+ * The cut counts unreadable rows too: the server counts them, so a client that trimmed
+ * only what it can read would compose a list one over the cap and be refused whole.
  */
 export function normaliseForSave(entries: ChartEntry[]): Normalised {
   const kept = entries.slice(0, CHARTS_MAX);
@@ -704,7 +581,7 @@ export function normaliseForSave(entries: ChartEntry[]): Normalised {
 
 /**
  * What this browser saved back when the charts were this browser's. Read once, by the
- * migration, and only for a workspace that has never saved — see `AnalyticsScreen`.
+ * migration, and only for a list that has never saved.
  */
 export function readLegacyCharts(): Chart[] {
   let raw: string | null = null;
@@ -724,7 +601,6 @@ export function readLegacyCharts(): Chart[] {
   }
 }
 
-/** Called only after the migration's PUT came back 200. */
 export function clearLegacyCharts(): void {
   try {
     localStorage.removeItem(LEGACY_KEY);
@@ -734,14 +610,13 @@ export function clearLegacyCharts(): void {
 }
 
 /**
- * A fresh id. Not `crypto.randomUUID`, which is not everywhere this app runs, and not
- * an index — an index is reused the moment a chart is deleted, and the URL remembers
- * which tab was open.
+ * Not `crypto.randomUUID`, which is absent outside a secure context and this app can be
+ * served over plain http on a LAN address; and not an index, which is reused the moment
+ * a chart is deleted while the URL remembers which tab was open.
  */
 export const newChartId = (): string =>
   `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
-/** The chart the wizard starts from once a shape has been picked. */
 export function blankChart(kind: ChartKind): Chart {
   const draft = {
     kind,

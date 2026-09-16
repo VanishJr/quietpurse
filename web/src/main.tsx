@@ -7,8 +7,6 @@ import '@fontsource/inter/400.css';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
-// the palette, radii and durations; the app's own colours are the theme's
-// (theme.tsx) and are unaffected
 import './styles/tokens.css';
 import './styles.css';
 

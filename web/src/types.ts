@@ -63,15 +63,12 @@ export type {
 } from '../../backend/src/wire';
 
 /**
- * "All transactions" on the Overview, asking the Transactions screen for one account.
- *
  * The nonce is what makes it an event rather than a setting: the screens all stay
  * mounted and keep their own filters, so a second click on the same account would
  * otherwise carry the same value and change nothing — after the user had narrowed the
- * filter by hand in between, which is exactly when they would click it again.
- *
- * Here rather than in Shell.tsx so that the screen reading it does not have to
- * import the module that renders it.
+ * filter by hand in between, which is exactly when they would click it again. Here
+ * rather than beside the shell that renders it, so the screen reading it does not
+ * import that module.
  */
 export interface TxFocus {
   accountId: string;

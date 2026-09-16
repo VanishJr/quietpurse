@@ -1,10 +1,5 @@
 import { CategoryRuleCounts, CategorySummary } from './types';
 
-/**
- * Category dictionary: the API returns stable slugs, the human-readable names
- * live here only. For i18n this dictionary becomes translation keys and the API
- * doesn't have to change.
- */
 export const CATEGORY_LABELS: Record<string, string> = {
   housing: 'Housing',
   food: 'Food',
@@ -22,7 +17,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   'one-off-avg': 'One-off (avg)',
 };
 
-/** App categories (slugs, order = order in the picker). */
+/** In the picker's order. */
 export const CATEGORIES = [
   'housing',
   'food',
@@ -44,21 +39,17 @@ export const CATEGORIES = [
  */
 export type Category = (typeof CATEGORIES)[number];
 
-/** Category label; an unknown slug (or a free-form item label) is returned as-is. */
 export const categoryLabel = (slug: string): string => CATEGORY_LABELS[slug] ?? slug;
 
-/** A category as the Overview's ring draws it: the summary, plus the name a person reads. */
 export interface SpendSector extends CategorySummary {
   label: string;
 }
 
 /**
- * The sectors of the Overview's ring.
- *
  * Only the positive categories: a refund can push one below zero — the purchase it
  * reverses was in an earlier month — and there is no such thing as a negative sector.
- * That is also why the figure in the hole is the month's expense total and not the sum
- * of these; `SpendingByCategory.tsx`'s header is where that is settled.
+ * That is also why the figure in the hole `SpendingByCategory` draws is the month's
+ * expense total and not the sum of these.
  *
  * The labelling is here rather than in the component because recharts looks `nameKey`
  * up on the datum and never checks it: a ring whose sectors carry only the slug prints
@@ -75,15 +66,7 @@ const quote = (pattern: string): string =>
   `"${pattern.length > PATTERN_DISPLAY_MAX ? `${pattern.slice(0, PATTERN_DISPLAY_MAX)}…` : pattern}"`;
 
 /**
- * What a category rule just did, from the pair of counts the backend answers with, and
- * the only reader of either of them.
- *
- * It states the rule and counts transactions, and never the category a row ended up
- * in. Two things make that claim false: `overridden` counts a hand-set row whatever
- * the hand-set value was, so a row already set to this rule's category is in it; and a
- * newer overlapping rule keeps rows this one matched, because the classifier takes the
- * first match over rules ordered newest-first and an upsert leaves createdAt alone.
- *
+ * States the rule and counts transactions, and never the category a row ended up in.
  * The pattern is quoted because the sentence outlives the sheet that holds the input.
  */
 export function categoryRuleCaption(
