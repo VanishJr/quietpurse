@@ -40,7 +40,7 @@ const NAVY: TooltipChip = { fill: 'brand', label: 'quietOnDark', item: 'onBrand'
  * For the one card that is itself a dark navy in both schemes. A `surface` fill clears
  * it at 19.31:1 in light and 1.36:1 in dark — the same separation `brand` on `surface`
  * has shipped with since the flows card was drawn — and the text inverts with the fill,
- * because both of `NAVY`'s whites are 1.00:1 on it in light mode.
+ * because both of `NAVY`'s whites vanish on a white fill.
  */
 const LIGHT: TooltipChip = { fill: 'surface', label: 'secondary', item: 'primary' };
 

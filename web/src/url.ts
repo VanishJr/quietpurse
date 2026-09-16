@@ -1,11 +1,11 @@
 /**
  * Where the reader is, kept in the URL — as query parameters, and the path is never
  * touched: `?screen=transactions`, not `/transactions`, because a path this module
- * invented is one the server's fallback would have to be told to rewrite, and a query
- * string needs nothing from anybody. The keys below were `useState`s in two components
- * before, which meant the app had no answer to Back, to Reload, or to "send me the
- * link". Anything already in the query survives a write: only the keys in `KEYS` are
- * set or removed, so a `?ref=` somebody arrived on is still there afterwards.
+ * invented would rest on the shape rule of the server's fallback — two places agreeing
+ * on what a file looks like — and a query string rests on nothing: the path stays
+ * whatever served the app. Anything already in the query survives a write: only the
+ * keys in `KEYS` are set or removed, so a `?ref=` somebody arrived on is still there
+ * afterwards.
  */
 import { useSyncExternalStore } from 'react';
 

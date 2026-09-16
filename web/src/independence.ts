@@ -8,11 +8,12 @@ import { IndependenceMonth } from './types';
 const DRAWN_MAX_PCT = 150;
 
 export interface SelfSufficiencyBar {
+  /** the bar's height, %, capped at `DRAWN_MAX_PCT` */
   drawn: number;
   /**
    * the same month's true ratio, %, uncapped — and the only one of the two that may be
-   * printed. Clamping a height is a chart convention; a tooltip saying 150% of a month
-   * that was 340% is a number the reader takes away and is wrong.
+   * printed. Clamping a height is a chart convention; a tooltip saying the cap of a
+   * month that was far over it is a number the reader takes away and is wrong.
    */
   actual: number;
   label: string;

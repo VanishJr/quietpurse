@@ -8,7 +8,7 @@ slug rule, the error budget and what a green run does not cover, and nothing bel
 The reasoning behind the modules at the root of `web/src` lives in this document, `App.tsx` and
 `Shell.tsx` excepted. Their code keeps only what `AGENTS.md`'s *Conventions* names as a keep — why a
 clause is absent, which of two readings is meant, a rejected alternative, a coupling an edit to that
-line would break — and where a whole rule is kept beside a function, this document says so by
+line would break — and the two month rules kept whole beside their functions are named below by
 symbol. The components and the screens under this directory, and the two files excepted above, are
 described here only where a rule above the root reaches into one; their own reasoning is beside
 their code. The test files under `web/src`, `web/src/test/setup.ts` among them, keep their reasoning
@@ -49,14 +49,14 @@ anything in the browser. The screen, the account, the open panel and the selecte
 query string and are read back through `url.ts`, and that is not a crossing: the URL is where the
 reader *is*, not something a second client needs to reach — a native client has its own screens and
 its own Back, and a server that has had no user since the product became single-user would be minting
-per-user interface state to hold it. It is the query and never the path because a path this package
-invented would be a path the SPA fallback in `backend/src/app.ts` has to be told to rewrite back to
-`web/index.html` — a rule two places would have to agree on, where the fallback cannot see this
-package's list — and a query string needs nothing from anybody: the path stays whatever served the
-app, and the same file answers every URL `url.ts` writes.
-The rule is held by `web/src/types.test.ts`, which walks the program the compiler builds narrowed to
-the product files — the tests and the harness in `web/src/test/` set aside, by the same cut the
-coverage reading makes — and requires every reference to `localStorage`, `sessionStorage`,
+per-user interface state to hold it. It is the query and never the path because the fallback in
+`backend/src/app.ts` answers the app for any path that is not `/api` and not file-shaped — a last
+segment carrying no extension, asked for by a request that accepts HTML — so a path scheme would rest
+on that shape rule, two places agreeing on what a file looks like, where a query string rests on
+nothing: the path stays whatever served the app, and `web/index.html` answers every URL `url.ts`
+writes. The rule is held by `web/src/types.test.ts`, which walks the program the compiler builds
+narrowed to the product files — the tests and the harness in `web/src/test/` set aside, by the same
+cut the coverage reading makes — and requires every reference to `localStorage`, `sessionStorage`,
 `indexedDB` or `document.cookie` to sit in one of two files and to be the operations it names for
 each: `theme.tsx` may read and write its key, `analytics.ts` may read and remove the legacy one, and
 nothing else may reach storage at all. The list is EQUAL in both directions, so an entry nothing uses
@@ -190,22 +190,22 @@ not in the answer.
 
 ## The arithmetic a screen does on the server's figures
 
-`toCents` is the one door money goes through before it is added or subtracted, and it is exported
-because the rule does not stop at the module that declares it. Every amount the server answers came
-off an integer number of cents and was divided by a hundred on the way out, so it arrives as a
-double near the figure and not equal to it, and adding a few hundred of them keeps the residue: a
-base that is zero to the last cent is a tiny residue instead, and a percentage taken against it is a
-number whose size means nothing. So every comparison in `accounts.ts` is made in cents, every sum in
-`analytics.ts` is accumulated as an integer and divided once at the end, and
-`web/src/components/SpendingByCategory.tsx`, which takes a remainder off the same doubles, goes
-through `toCents` rather than keeping a copy of it.
+Money goes through `toCents` before it is added or subtracted — the rule, and nothing enforces it —
+and `toCents` is exported because the rule does not stop at the module that declares it. Every
+amount the server answers came off an integer number of cents and was divided by a hundred on the
+way out, so it arrives as a double near the figure and not equal to it, and adding a few hundred of
+them keeps the residue: a base that is zero to the last cent is a tiny residue instead, and a
+percentage taken against it is a number whose size means nothing. So every comparison in
+`accounts.ts` is made in cents, every sum in `analytics.ts` is accumulated as an integer and divided
+once at the end, and `web/src/components/SpendingByCategory.tsx`, which takes a remainder off the
+same doubles, goes through `toCents` rather than keeping a copy of it.
 
 `monthOf`, `fmtDay` and `fmtMonthKey` split a calendar key on the string and never turn it into an
 instant, because the server buckets a month with `SUBSTR` over the stored ISO date in
 `backend/src/db/index.ts`, and anything that goes through a local `Date` disagrees with that for
 everybody west of UTC — on the first of the month for a month key, and every time for a day off a
-statement, which is a calendar day and not a moment. `fmtWeekday` is the exception on purpose: it
-prints today where the reader is, a real instant, so its getters are the local ones.
+statement, which is a calendar day and not a moment. `fmtWeekday` takes a real instant on purpose —
+today where the reader is — so its getters are the local ones.
 
 `monthEnd` computes a month's last day in UTC from the key, and `accountSummary` and `accountMonths`
 in `api.ts` take a calendar day as their `to`, because the summary routes in `backend/src/app.ts`
@@ -336,8 +336,8 @@ first account.
 ## The sentences a person reads, and what is lifted out of a screen to hold them
 
 `CATEGORY_LABELS`, `PROVIDER_LABELS` and `IMPORT_STATUS_LABELS` are the dictionaries the
-*sentences* bullet above names, and nothing is ever sent back through them: no code path branches on
-a label, so a label can change without a slug moving.
+*sentences* bullet above names, and nothing is ever sent back through them. No code path branches on
+a `PROVIDER_LABELS` or an `IMPORT_STATUS_LABELS` label, so either can change without a slug moving.
 
 `categoryRuleCaption` states the rule and counts transactions, and never says which category a row
 ended up in, because two things one package over make that claim false: `overridden` in
@@ -377,10 +377,8 @@ attributes and not as a boundary.
 ## The palette, and what leaves the page
 
 `ink` is the palette published a second time: the custom properties `ThemeProvider` sets on the
-document root are the styling truth, and `ink` exists because recharts wants real colour strings. A
-category always gets the same colour, and in dark mode a lightened variant of the same hue, so its
-contrast against the dark ground survives. Where the theme is kept is *Where the boundary runs*'
-ruling and is not restated here.
+document root are the styling truth, and `ink` exists because recharts wants real colour strings.
+Where the theme is kept is *Where the boundary runs*' ruling and is not restated here.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value, because the ground decides the tooltip's colours and one shared object is what keeps the

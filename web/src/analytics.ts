@@ -183,10 +183,11 @@ const spansYears = (ticks: string[]): boolean =>
 
 /**
  * "Aug" for a month, "2026" for a year — and "Aug 25" for a month in a window that
- * crosses one. A 24-month window holds every month name twice and so does nearly every
- * 12-month one, since only one ending in December does not cross a year; labelled by
- * the name alone they are the same word twice on the axis and again in the tooltip,
- * where recharts echoes whatever `XAxis dataKey` names.
+ * crosses one. A 24-month window holds every month name twice, and nearly every
+ * 12-month one crosses a year — only one ending in December does not — so labelled by
+ * the name alone the axis either repeats a word or does not say which year a month is
+ * in, and the tooltip, where recharts echoes whatever `XAxis dataKey` names, does the
+ * same.
  *
  * Two digits of year and not four: the form that fits one of twelve ticks, and read as
  * a column of them in date order the suffix cannot be anything but a year. The hidden
@@ -417,7 +418,7 @@ export function suggestedTitle(
 /** The key this browser used before the server held the list: read by the migration, written by nothing. */
 const LEGACY_KEY = 'finto.analytics.charts';
 
-// here and not in api.ts: bounds on a chart, not on a request
+// here and not in `api.ts`: bounds on a chart, not on a request
 export const CHARTS_MAX = 100 satisfies typeof WIRE_CHARTS_MAX;
 export const CHART_TITLE_MAX = 120 satisfies typeof WIRE_CHART_TITLE_MAX;
 export const CHART_ID_MAX = 64 satisfies typeof WIRE_CHART_ID_MAX;

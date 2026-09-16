@@ -13,10 +13,10 @@ export interface Ink {
   bad: string;
   onAccent: string;
   /**
-   * Text on a `bad` fill - the destructive button, which is the only one. White clears
-   * light mode's red and does not clear dark mode's, so the two schemes need different
-   * foregrounds and a borrowed `onAccent` would be right only by the coincidence that
-   * both palettes put their saturated colours on the same side of the surface.
+   * Text on a `bad` fill - the destructive button. White clears light mode's red and
+   * does not clear dark mode's, so the two schemes need different foregrounds and a
+   * borrowed `onAccent` would be right only by the coincidence that both palettes put
+   * their saturated colours on the same side of the surface.
    */
   onBad: string;
   backdrop: string;

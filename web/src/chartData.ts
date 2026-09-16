@@ -1,6 +1,6 @@
 /**
  * A `Chart` turned into requests, and the answers turned into something drawable: the
- * one seam between the Analytics screen and the server, with two arms — every account
+ * one seam between a chart's numbers and the server, with two arms — every account
  * together, or one account.
  *
  * What differs between the two arms is the UNIT, and a card must print the one it was

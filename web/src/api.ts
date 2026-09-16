@@ -48,8 +48,8 @@ const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
 /**
- * Shared by both callers below rather than written twice: a download that skipped it
- * would write the refusal to disk under the name of a statement.
+ * Shared by every caller below rather than written into each: a download that skipped
+ * it would write the refusal to disk under the name of a statement.
  */
 async function refuse(res: Response): Promise<never> {
   // the API reports a failure as { error } and the sentence in it is written for the user
@@ -205,6 +205,10 @@ export const api = {
   accounts: (includeHidden = false) =>
     request<Account[]>(`/api/accounts${includeHidden ? '?all=1' : ''}`),
 
+  /**
+   * No currency here on purpose: the route would take one, and this signature is how
+   * no client guesses.
+   */
   createAccount: (name: string) => request<Account>('/api/accounts', json('POST', { name })),
 
   renameAccount: (id: string, name: string) =>
