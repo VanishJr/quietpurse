@@ -60,7 +60,7 @@ const bounded = (text: string, max: number): string =>
 /**
  * What a non-2xx becomes. Shared by both callers below rather than written twice:
  * a download that skipped it would build an object URL from a body nobody read and
- * write the refusal to disk under the name of a statement (item 10's D23).
+ * write the refusal to disk under the name of a statement.
  */
 async function refuse(res: Response): Promise<never> {
   // the API reports a failure as { error } and the sentence in it is written for
@@ -92,15 +92,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * Both summary endpoints answer a discriminated union: every account together in the
  * base currency, or one account in its own. `scope` is the only thing that says which
  * - `all` for the first, `account` for the second - and an account request answered
- * with the other body would put all the
- * money on screen under one account's name and currency code: right-looking, wrong,
- * and permanent.
+ * with the other body would put all the money on screen under one account's name and
+ * currency code: right-looking, wrong, and permanent.
  *
- * So this throws where a client fallback is normally a sentence (056 D16, and the
- * `series` item in DEBT.md). The difference is what the bad shape means: not a skew
- * between a new client and an old server, but what this repository produces the day a
- * query-builder edit drops the `accountId`. Both arms are called inside a `try` that
- * renders the screen's own refusal, so the throw is a refusal and never a blank.
+ * So this throws where a client fallback is normally a sentence. The difference is what
+ * the bad shape means: not a skew between a new client and an old server, but what this
+ * repository produces the day a query-builder edit drops the `accountId`. Both arms are
+ * called inside a `try` that renders the screen's own refusal, so the throw is a refusal
+ * and never a blank.
  */
 async function scoped<T extends { scope: 'all' | 'account' }>(
   path: string,

@@ -1,11 +1,11 @@
 /**
- * Where a request is allowed to come from (row 72, FIXES finding 4).
+ * Where a request is allowed to come from.
  *
- * This is the whole boundary. Row 72 deleted the sign-in, the session middleware and
- * the CORS allowlist, and after it the only thing between a person's finances and a
- * page they happen to visit is this check - so it is held over real HTTP, header by
- * header, and each header is asserted on its own rather than through a request that
- * would fail three ways at once.
+ * This is the whole boundary. The sign-in, the session middleware and the CORS allowlist
+ * went with the hosted product, and the only thing between a person's finances and a page
+ * they happen to visit is this check - so it is held over real HTTP, header by header,
+ * and each header is asserted on its own rather than through a request that would fail
+ * three ways at once.
  *
  * The three refusals are independent by construction: a bad Host with nothing else
  * wrong, a bad Origin with a good Host, and a cross-site write with both of those

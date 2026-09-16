@@ -22,7 +22,7 @@ export const importStatusLabel = (status: string): string =>
  *
  * `committed` and `failed` get none: for a committed import the counts say it all,
  * and for a failed one a note would have to describe what happened to the rows —
- * which is exactly what no status is allowed to imply (ROADMAP 4.4).
+ * which is exactly what no status is allowed to imply.
  */
 export function importStatusNote(status: string, errorDetail: string | null): string | null {
   switch (status) {
@@ -30,10 +30,10 @@ export function importStatusNote(status: string, errorDetail: string | null): st
       return 'The server stopped part-way through this import and never recorded how it ended.';
     case 'awaiting_confirmation':
       // a re-upload supersedes the outstanding import, which is the only way back to
-      // the summary those numbers would be confirmed against (007 D5)
+      // the summary those numbers would be confirmed against
       return 'The file was read and nothing was imported. Upload the same file again to bring its summary back.';
     case 'discarded':
-      // 007 D4: on a discarded row NULL means the user declined it and anything else
+      // on a discarded row NULL means the user declined it and anything else
       // means the server did — in which case errorDetail is its own explanation
       return errorDetail === null ? 'You discarded this import — nothing was imported.' : null;
     default:
@@ -74,12 +74,13 @@ const columnClause = (columns: ReadColumns): string =>
  * One function for both halves because they are one claim. The lead-in says where the
  * pair came from and the claim says what the check could have caught, and a lead-in
  * that outran its claim — "Checked against" over a pair nothing checked — is the
- * completeness claim row 54 removed, re-acquired through the front of the sentence.
+ * completeness claim the sheet gate removed, re-acquired through the front of the sentence.
  *
- * Four arms, and only two of them existed before row 63:
+ * Four arms:
  *
  * - no counts at all: the document printed the pair, and every row between them adds
- *   up to it. That is the PDF, and row 63's blindness never applied to it.
+ *   up to it. That is the PDF, and the gate's blindness to a row lost from either end
+ *   never applied to it.
  * - every run checked: the pair is derived and the rows read run unbroken through it.
  * - some checked: the pair is still true and still shown, and the part of it that
  *   rests on a run of one row is named. On the owner's real export that is one of two.
@@ -135,7 +136,7 @@ export function balanceClaim(series: SeriesCounts | undefined): { lead: string; 
 /**
  * Which reader produced the numbers on the confirmation card. The one thing the counts
  * cannot say: the generic reader has three times now produced every headline figure a
- * Revolut export was expected to have, and not one correct reason (ROADMAP row 20).
+ * Revolut export was expected to have, and not one correct reason.
  *
  * Total over `kind` with a `never`, not IMPORT_STATUS_LABELS' Record-with-a-fallback:
  * a status arrives from an old database row and may legitimately be unknown, where an

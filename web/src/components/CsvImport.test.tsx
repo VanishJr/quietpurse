@@ -6,12 +6,12 @@ import { Account, BalancesNotShown } from '../types';
 import { CsvImport } from './CsvImport';
 
 /**
- * The import lifecycle, and with it the confirm/discard semantics of ROADMAP 5.3:
+ * The import lifecycle, and with it the confirm/discard semantics:
  * an upload writes nothing, Confirm is what makes the rows data, and Discard must
  * leave the caller's data alone.
  *
- * No rendered date is asserted anywhere here - the summary carries fmtDay(from) and
- * the duplicate card fmtDate(uploadedAt), and ROADMAP 6.5 changes one of those.
+ * No rendered date is asserted anywhere here - the summary carries fmtDay(from) and the
+ * duplicate card fmtDate(uploadedAt), and how a date is rendered is the copy's to change.
  */
 
 /**
@@ -33,8 +33,10 @@ const createdAccount = (init?: RequestInit): Response => {
  * in an account this screen did not create.
  *
  * Which is also why the create route is here and not in the tests that are about it:
- * since row 26b the create arm WRITES, so every one of these makes two requests where
- * it used to make one, and `acc-9` is the id the summary fixture already names.
+ * since the upload stopped taking a name the create arm WRITES - it makes the account
+ * over `POST /api/accounts` and uploads into it - so every one of these makes two
+ * requests where it used to make one, and `acc-9` is the id the summary fixture already
+ * names.
  */
 const BASE: Routes = {
   'GET /api/imports/presets': () => ok(PRESETS),
@@ -142,8 +144,8 @@ describe('the formats the screen offers', () => {
     mount();
     await settle();
 
-    // the format name and not the sentence: stage 8 rewrites this prose, and a
-    // pinned sentence would then fail for a reason that is not this one
+    // the format name and not the sentence: the sentence is copy that is expected to
+    // change, and a pinned sentence would then fail for a reason that is not this one
     const dropzone = await screen.findByRole('button', { name: /pdf/i });
     expect(dropzone).toHaveTextContent(/\.pdf/);
   });
@@ -187,7 +189,7 @@ describe('the summary panel', () => {
       /nothing imported yet/,
     );
     // an upload goes to an account that already exists, so the sentence has one arm:
-    // row 26b retired the other, on the wire as well as here
+    // the name arm is retired, on the wire as well as here
     expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
 
     expect(screen.queryByText(/are already in the database/)).not.toBeInTheDocument();
@@ -219,9 +221,9 @@ describe('the summary panel', () => {
   });
 
   /**
-   * I5, and the whole reason row 22 exists: the card used to print `skipped` under one
-   * cause, above the backend's own line saying those same rows were read perfectly and
-   * dropped by a rule. Every sentence on the card is asserted, in order, so a second
+   * The whole reason the count is split by cause: the card used to print `skipped` under
+   * one cause, above the backend's own line saying those same rows were read perfectly
+   * and dropped by a rule. Every sentence on the card is asserted, in order, so a second
    * count of the filtered rows fails here as loudly as a missing one.
    *
    * Three DIFFERENT values, because a sentence reading the wrong bucket renders
@@ -262,9 +264,9 @@ describe('the summary panel', () => {
   });
 
   /**
-   * I4 at the boundary that made this a row: "1 rows couldn't be read" shipped for a
-   * fortnight. Both client sentences at n = 1, because a correct helper with one call
-   * site not using it is the defect itself.
+   * The plural at the boundary that made this a defect: "1 rows couldn't be read" shipped
+   * for a fortnight. Both client sentences at n = 1, because a correct helper with one
+   * call site not using it is the defect itself.
    */
   it('says one row rather than 1 rows, in every sentence that counts rows', async () => {
     mockFetch({
@@ -280,13 +282,13 @@ describe('the summary panel', () => {
   });
 
   /**
-   * ROADMAP row 56. The card's own claim about which reader produced every number
+   * The card's own claim about which reader produced every number
    * under it, so its POSITION is asserted and not just its presence: below the date
    * range it would qualify nothing.
    *
    * Two arms, not one: the fixture's default is auto-detected, so every other case in
    * this file renders that arm and only that arm. The pdf-template arm is the one a
-   * chip cannot decide (Ruling 3), and the preset arm is where the title on the card
+   * chip cannot decide, and the preset arm is where the title on the card
    * is asserted to be the string the chip itself renders.
    */
   it('names the reader above the numbers it qualifies, for a preset and for a PDF', async () => {
@@ -417,7 +419,7 @@ describe('the summary panel', () => {
   });
 
   /**
-   * Row 63, and the reason the count above was half the truth: a running balance of a
+   * The reason the count above was half the truth: a running balance of a
    * single row is one link, and one link cannot break. The pair is still shown — it is
    * true, and the closing of a one-row run is a cell the user can find — and the claim
    * shrinks to the runs the check could have failed on. On the owner's real export
@@ -533,8 +535,9 @@ describe('the summary panel', () => {
 
 describe('confirm', () => {
   /**
-   * The server's refusal when the account was deleted while this summary sat here —
-   * row 26b's headline failure, and the one whose advice is a button on this card.
+   * The server's refusal when the account was deleted while this summary sat here — the
+   * headline failure of an upload that picks an account, and the one whose advice is a
+   * button on this card.
    */
   const ACCOUNT_MISSING =
     'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
@@ -719,7 +722,7 @@ describe('a file that is already in', () => {
 });
 
 /**
- * The upload picks an account instead of naming one (ROADMAP row 26a). The whole of
+ * The upload picks an account instead of naming one. The whole of
  * the picker's coverage is here, because `BASE` serves an empty list and every test
  * above therefore runs the create arm.
  *
@@ -796,7 +799,7 @@ describe('the account picker', () => {
     await screen.findByText(/Read 12 of 14 rows/);
 
     expect(captured.sent!.get('accountId')).toBe('acc-3');
-    // there is no name arm to be exclusive with any more: since row 26b either field
+    // there is no name arm to be exclusive with any more: either field
     // on its own is a 400, so a client that sent one would be refused outright
     expect(captured.sent!.get('accountName')).toBeNull();
     expect(captured.sent!.get('currency')).toBeNull();
@@ -807,8 +810,8 @@ describe('the account picker', () => {
   /**
    * The list is how a user reaches an account that already exists. A screen that
    * quietly offered only "create a new one" when it failed to load would manufacture
-   * a second account for a bank the user already has — and since row 26b pressing
-   * Import is what writes it, so the duplicate would be real before the file was
+   * a second account for a bank the user already has — and pressing Import is
+   * what writes it, so the duplicate would be real before the file was
    * read. The failure blocks the import instead of falling through to the create arm,
    * held by `accounts === null` and not by a boolean a handler could reset.
    */
@@ -840,7 +843,7 @@ describe('the account picker', () => {
   });
 
   /**
-   * The prefill is gone (ROADMAP 26(d)): it is how a real database acquired an
+   * The prefill is gone: it is how a real database acquired an
    * account called `account-statement_2026-07-01_2026-07-31_ru_a1b2c3 — копия`.
    * Naming an account is a deliberate act, and on the id arm no name is typed at all.
    */
@@ -857,7 +860,7 @@ describe('the account picker', () => {
 });
 
 /**
- * The create arm creates (ROADMAP row 26b). POST /api/accounts is the only way this
+ * The create arm creates. POST /api/accounts is the only way this
  * product makes an account, and every upload this client builds carries an id — so
  * the account exists before the file is read, and a file the backend refuses leaves
  * one standing. What that costs is covered here: the write is announced, it happens
@@ -896,7 +899,7 @@ describe('the account the create arm makes', () => {
     await screen.findByText(/Read 12 of 14 rows/);
 
     // the whole body and not one field of it: this pins the trim and the ABSENCE of a
-    // currency in one assertion, which is all of row 65 as this client sees it
+    // currency in one assertion, which is all this client sees of the currency default
     expect(captured.created).toEqual({ name: 'Third Bank' });
     expect(captured.sent!.get('accountId')).toBe('acc-9');
     // uploadForm lives outside the component, so neither of these is a binding it

@@ -1,5 +1,5 @@
 /**
- * The XLSX parser (ROADMAP 5.2), through the same entry point the endpoint uses.
+ * The XLSX parser, through the same entry point the endpoint uses.
  *
  * Every fixture is built here with exceljs and never committed as a binary: a
  * checked-in .xlsx is a file nobody can read in a diff, and the cases that matter
@@ -79,7 +79,7 @@ describe('xlsx: typed cells', () => {
   });
 
   /**
-   * Trap 5, the partial-rejection case: a sheet where the export typed some dates
+   * The partial-rejection case: a sheet where the export typed some dates
    * and left the rest as text. Rejecting the untyped half would import half a
    * statement and report success.
    */
@@ -225,7 +225,7 @@ describe('xlsx: finding the statement', () => {
   });
 
   /**
-   * Row 56's I3, on the path that runs the column resolver most: readXlsx calls it once
+   * The descriptor on the path that runs the column resolver most: readXlsx calls it once
    * per candidate row, and this file makes most of those calls rejections. None of them
    * builds a descriptor - genericMapping answers null for "Kontoauszug 2026" and for
    * "Datum | irgendwas", so resolveColumns returns ok: false above the site that builds
@@ -793,7 +793,7 @@ describe('the row guard', () => {
 });
 
 /**
- * One sheet is imported and the rest are not (ROADMAP 5.3). The import is a success
+ * One sheet is imported and the rest are not. The import is a success
  * either way, so the only thing standing between the user and a half-loaded history
  * is the sentence the summary carries - and it must not be the one that sends them
  * back to the upload button, because those bytes are claimed once this is confirmed.
@@ -1071,7 +1071,7 @@ describe('the workbook size cap', () => {
 });
 
 /**
- * Where a refusal is cut (ROADMAP 21). The closest-row clause carries a reason
+ * Where a refusal is cut. The closest-row clause carries a reason
  * composed for a budget it does not know about, and the cut used to land wherever
  * the 300 characters ran out: inside a quoted accepted name, inside an unquoted
  * header cell, or through the dump noColumnMatched appends whole or not at all.
@@ -1080,11 +1080,11 @@ describe('the workbook size cap', () => {
  * Swept over the PREFIX rather than sampled over the reason, because the prefix is
  * the variable: ` - the closest row (sheet "…", row …) does not match: ` is 52
  * characters of fixed prose plus the user's sheet name plus up to six digits of row
- * label, and every one of those pushes the cut one character further in. Row 20's
+ * label, and every one of those pushes the cut one character further in. The
  * holder in csv.test.ts - "no preset composes an xlsx refusal that is cut through a
  * column name" - asserts an even quote count over both headers and every preset and
  * was green while all of this was live, because its workbook is named `Statement`
- * with the header at row 1 and so pins the one input the invariant is about. It
+ * with the header at the first row and so pins the one input the invariant is about. It
  * stays exactly as written; this is its generalisation, not its successor.
  */
 describe('a refusal is cut at a boundary or not at all', () => {
@@ -1259,7 +1259,7 @@ describe('a refusal is cut at a boundary or not at all', () => {
               notRefused++;
               continue;
             }
-            // trap 3: the clause is there at all, before anything is said about its
+            // the clause is there at all, before anything is said about its
             // shape, or every assertion under this one passes by vacancy
             if (message === null || !message.includes(REASON)) {
               bad.push(`${where}: no closest-row clause`);
@@ -1369,11 +1369,11 @@ describe('a refusal is cut at a boundary or not at all', () => {
 
   /**
    * A clause whose own prose no longer fits is dropped, not delivered headless.
-   * CLOSEST_CLAUSE_MIN's 60 was measured against one shape of the sentence: the
-   * prefix is 52 characters plus the sheet name plus the row label, so 62 at
-   * `Statement`/row 1 and 85 at Excel's ceiling and row 12, and between those two the
-   * constant guarded nothing at all. Three oversized sheets spend the budget down to
-   * where the difference shows.
+   * CLOSEST_CLAUSE_MIN's 60 was measured against one shape of the sentence: the prefix is
+   * 52 characters plus the sheet name plus the row label, so 62 at `Statement` with a
+   * one-digit row label and 85 at Excel's ceiling with a two-digit one, and between those
+   * two the constant guarded nothing at all. Three oversized sheets spend the budget down
+   * to where the difference shows.
    *
    * The pair is what keeps the numbers honest: the same workbook, the same oversized
    * sheets, the same candidate row, and a candidate sheet named 4 characters instead

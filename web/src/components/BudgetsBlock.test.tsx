@@ -6,12 +6,13 @@ import { BudgetProgress, BudgetsResponse } from '../types';
 import { BudgetsBlock } from './BudgetsBlock';
 
 /**
- * Item 16's third site. Mounted on its own rather than through Analytics: reaching it
- * that way would couple its failure case to Analytics' success case.
+ * The third of the empty-versus-failed states. Mounted on its own rather than through
+ * Analytics: reaching it that way would couple its failure case to Analytics' success
+ * case.
  *
  * PUT /api/budgets is an upsert with no 409, so a budget added over a list that was
  * never read replaces a limit the user was never shown. That is what "+ Add is
- * disabled" is for, and it is the only item in this row that stops data being lost.
+ * disabled" is for, and it is the only one of the three that stops data being lost.
  */
 
 const HINT = /A per-category limit and a forecast/;
@@ -85,7 +86,7 @@ describe('the budgets block', () => {
 });
 
 /**
- * The write path (ROADMAP row 75). The GET handler answers whatever the PUT handler
+ * The write path. The GET handler answers whatever the PUT handler
  * last wrote, so the row that appears after a save is the re-read being used and
  * not the fixture being served again; a handler that always answered the same body
  * would make every reload assertion below vacuous.

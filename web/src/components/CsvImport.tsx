@@ -61,7 +61,7 @@ const chipKey = (id: string): string => `id:${id}`;
 
 /**
  * The upload's body. Outside the component deliberately: the account name is not a
- * binding here, so a client that sends one does not compile. Since row 26b the
+ * binding here, so a client that sends one does not compile. The
  * backend refuses `accountName` and `currency` outright — an account is created at
  * POST /api/accounts and nowhere else — so what this shape buys is that the refusal
  * is never reached: there is no state of this component from which a request the
@@ -90,7 +90,7 @@ const BINARY_SIGNATURES = [
 ];
 
 /**
- * By content, never by the name: a bank that calls its workbook statement.csv is not
+ * By content, never by the name: a bank that gives its workbook a .csv name is not
  * hypothetical, and the backend deliberately ignores the extension. Counting the
  * newlines of a decoded zip puts an invented row count on the screen.
  */
@@ -621,7 +621,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             here. The sentence may claim the run, and may not claim the statement is
             complete. And it may claim only the runs it could have failed on: a series
             of one row is one link, which no verdict can break, so a pair summed over
-            it rests on a check that could not have caught anything (row 63).
+            it rests on a check that could not have caught anything.
           */}
           {balances && balanceLine && (
             <p className="hint" style={{ marginTop: 6 }}>

@@ -1,5 +1,5 @@
 /**
- * How the re-tag reaches the database (row 72, FIXES finding 7).
+ * How the re-tag reaches the database.
  *
  * This used to be one UPDATE per row inside one transaction. That is correct against
  * a connection pool and it is a freeze against the embedded database, which has ONE

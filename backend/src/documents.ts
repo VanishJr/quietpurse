@@ -71,7 +71,7 @@ export function documentStem(originalFilename: string | null): string {
  * `_` is what documentKey puts between the stem and the id, and the stem may contain
  * one. If the id could too, one key would have two readings: a row carrying
  * `original_filename` "a_b" and id "c" and a row carrying "a" and id "b_c" both
- * derive `a_b_c.csv`. A restored backup chooses both fields, so it could aim a row at
+ * derive one key. A restored backup chooses both fields, so it could aim a row at
  * a statement it does not own and have DELETE unlink that one instead.
  *
  * Nothing is given up. Every id this server mints is a crypto.randomUUID(), which is

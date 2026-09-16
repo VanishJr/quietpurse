@@ -1,5 +1,5 @@
 /**
- * An account's identity is its id, not its name (ROADMAP 5.1, row 25).
+ * An account's identity is its id, not its name.
  *
  * Two things are asserted here that nothing else can hold. **No two accounts in one
  * share a name**, and that is the database's job - accounts_name_unique over
@@ -168,11 +168,11 @@ describe('a name is unique, case-insensitively', () => {
 });
 
 /**
- * The id arm (ROADMAP row 26a): the screen offers the accounts that exist and the
+ * The id arm: the screen offers the accounts that exist and the
  * upload carries the id of the one that was picked. There is no name and no currency
  * in the request at all, so neither can be typed wrong - and the two columns the
  * import records come off the account's own row, which is what stops the currency
- * overwrite row 25's §20 accepted as a consequence.
+ * overwrite that was accepted as a consequence when identity moved to the id.
  */
 describe('an upload that picks its account by id', () => {
   it("records the account's own name and currency, never the request's", async () => {
@@ -190,13 +190,13 @@ describe('an upload that picks its account by id', () => {
   });
 
   /**
-   * The case row 25's §20 accepted: there is no currency in the request to overwrite
-   * the account's with, because the column the import records is read off the
-   * account's own row - and since row 26b there is no other arm for one to arrive on.
+   * The case accepted as a consequence when identity moved to the id: there is no
+   * currency in the request to overwrite the account's with, because the column the
+   * import records is read off the account's own row - and since the upload stopped
+   * taking a name there is no other arm for one to arrive on.
    *
-   * Row 65 closed it from the other side as well: `currency` is not in
-   * upsertAccountOn's conflict set, so nothing rewrites an existing account's
-   * currency at confirm either.
+   * It is closed from the other side as well: `currency` is not in upsertAccountOn's
+   * conflict set, so nothing rewrites an existing account's currency at confirm either.
    */
   it("leaves the account's currency alone when the statement states another", async () => {
     const created = await createAccount({ name: 'Savings', currency: 'EUR' });
@@ -218,7 +218,7 @@ describe('an upload that picks its account by id', () => {
   it('refuses an id no account answers to, and stages nothing', async () => {
     const before = await importCount();
     // not a UUID on purpose: nothing validates the shape, because an id restored
-    // from a backup or written before row 25 is not one either
+    // from a backup or written before identity moved to the id is not one either
     await expect(uploadTo('no-such-account', csvFile('2026-04-03,-43.00,Nowhere'))).rejects.toThrow(
       ACCOUNT_NOT_FOUND,
     );
@@ -226,7 +226,7 @@ describe('an upload that picks its account by id', () => {
   });
 
   /**
-   * Row 24's boundary, where row 26a moved it: the upload does not stage against an
+   * The boundary sits at the upload: it does not stage against an
    * account the user removed, because a summary card reading "they'll join your
    * existing X" for an account the confirm is about to refuse is a promise the server
    * breaks one request later.
@@ -245,7 +245,10 @@ describe('an upload that picks its account by id', () => {
     expect((await getAccount(id))!.hidden).toBe(true);
   });
 
-  /** Consequence (b) of row 26b: a rename is no longer reverted by the next upload. */
+  /**
+   * Since the upload stopped taking a name, a rename is no longer reverted by the next
+   * upload.
+   */
   it('a rename survives the next import into the same account', async () => {
     const id = await accountFor('Renamed Bank');
     const first = await uploadTo(id, csvFile('2026-01-09,-14.00,Before'));
@@ -264,7 +267,7 @@ describe('an upload that picks its account by id', () => {
   });
 
   /**
-   * I5: the confirm reads imports.account_id and derives nothing from the other two
+   * The confirm reads imports.account_id and derives nothing from the other two
    * columns. It is asserted by rewriting account_name to a string no account answers
    * to - if anything below the null guard still read it, the rows would land
    * somewhere else or not at all - and on the column rather than on the response,
@@ -309,7 +312,7 @@ describe('an upload that picks its account by id', () => {
 });
 
 /**
- * Row 11a: the delete that is not a hide. Asserted per table with raw counts rather
+ * The delete that is not a hide. Asserted per table with raw counts rather
  * than through the functions that read them - listTransactions and listImports both
  * filter, and a delete that left rows behind an account nothing displays would pass
  * every one of them.
@@ -420,10 +423,10 @@ describe('deleting an account', () => {
    * staged rows carrying its OWN id refuse the delete instead (the case below).
    *
    * What it pins is not only that: the import destroyed here is awaiting_confirmation,
-   * which settled decision 2 says must be refused, and it is destroyed behind ok: true
+   * which the delete is meant to refuse, and it is destroyed behind ok: true
    * because the guard reads staged rows by account_id while the delete removes imports
-   * by attribution. This asserts the cascade, not that outcome - see DEBT.md, "The
-   * account delete's guard and its cascade disagree on a key".
+   * by attribution. This asserts the cascade, not that outcome: the guard and the cascade
+   * disagree on a key, and that is a known gap rather than a rule.
    */
   it('takes the staged rows of every import it destroys', async () => {
     const owner = await newAccount('Staged Owner');
@@ -458,7 +461,7 @@ describe('deleting an account', () => {
     expect(await balanceOf(kept)).toBe(balance);
   });
 
-  /** Trap 7: hiding is what people do before deleting, so the two must compose. */
+  /** Hiding is what people do before deleting, so the two must compose. */
   it('deletes a hidden account, which is what hiding is usually the first half of', async () => {
     const id = await populate('Hidden Then Deleted');
     expect(await updateAccount(id, { hidden: true })).toMatchObject({ ok: true });
@@ -493,14 +496,14 @@ describe('deleting an account', () => {
   });
 
   /**
-   * Settled decision 2. Committed imports do NOT refuse - an account worth deleting
+   * Committed imports do NOT refuse - an account worth deleting
    * is precisely one that holds those, which is the case above - and this state is
    * different in kind: it is momentary and one click from over in either direction.
    *
-   * Without the clause the delete takes the outstanding import too, and the summary
-   * the user is looking at answers "import not found" on Confirm. Measured, not
-   * assumed: with the clause removed this assertion reads
-   * `{ ok: true, deleted: { imports: 3, transactions: 3, ... } }`.
+   * Without the clause the delete takes the outstanding import too, and the summary the
+   * user is looking at answers "import not found" on Confirm. Measured, not assumed: with
+   * the clause removed this assertion reads `{ ok: true, deleted: { imports: 3,
+   * transactions: 3, ... } }`.
    */
   it('refuses while an import for it is awaiting confirmation, and deletes once it is gone', async () => {
     const id = await populate('Awaiting Confirmation');
@@ -524,14 +527,13 @@ describe('deleting an account', () => {
   });
 
   /**
-   * Trap 2's second direction. restoreBackup inserts `imports` and `transactions`
-   * straight from a user-supplied file and sanitizeRow checks column names and types
-   * only, so an import attributed to one account owning another account's rows is
-   * constructible and nothing in the repository refuses it. The rows go with the
-   * provenance being destroyed (deleteImport's semantics), and what is left in the
-   * surviving account is repaired: the ordinals go back to a dense 1..n and the
-   * balance is recomputed. Refusing instead would make an account undeletable over
-   * a state its owner can neither see nor repair.
+   * restoreBackup inserts `imports` and `transactions` straight from a user-supplied file
+   * and sanitizeRow checks column names and types only, so an import attributed to one
+   * account owning another account's rows is constructible and nothing in the repository
+   * refuses it. The rows go with the provenance being destroyed (deleteImport's
+   * semantics), and what is left in the surviving account is repaired: the ordinals go
+   * back to a dense 1..n and the balance is recomputed. Refusing instead would make an
+   * account undeletable over a state its owner can neither see nor repair.
    */
   it("takes rows an import claims for another account, and repairs what is left there", async () => {
     const doomed = await newAccount('Stray Owner');
@@ -563,7 +565,7 @@ describe('deleting an account', () => {
     expect(await balanceOf(victim)).toBe(-1000);
     // the ordinals are dense again, asserted by the property a hole breaks: with the
     // group at {2,3} a re-import of the two rows that are still there claims 1 and 2,
-    // finds 1 free, and inserts a duplicate (ROADMAP 4.4)
+    // finds 1 free, and inserts a duplicate
     expect(await insertTransactions([stagedRow(victim), stagedRow(victim)], ownImport)).toBe(0);
     expect(await rowsOfAccount(victim)).toBe(2);
   });

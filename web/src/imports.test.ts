@@ -55,7 +55,7 @@ describe('balanceClaim', () => {
   /**
    * A derived pair every run of which had an interior. The claim is the run and never
    * the statement: both ends come out of these same rows, so a row lost from an END
-   * moves an end instead of breaking anything (054, D12).
+   * moves an end instead of breaking anything.
    */
   it('claims the run, and not the statement, when every run was checked', () => {
     expect(balanceClaim({ summed: 1, checked: 1 })).toEqual({
@@ -71,8 +71,8 @@ describe('balanceClaim', () => {
   /**
    * The owner's real July export: two products under one balance column, one of them
    * a single row. 315.00 of that opening and 445.00 of that closing were compared with
-   * nothing, and before row 63 the card said the rows ran unbroken from one to the
-   * other without qualification.
+   * nothing, and the card used to say the rows ran unbroken from one to the other
+   * without qualification.
    */
   it('says how many of the runs were checked when only some could be', () => {
     expect(balanceClaim({ summed: 2, checked: 1 })).toEqual({
@@ -90,7 +90,7 @@ describe('balanceClaim', () => {
   /**
    * Nothing ran, so the lead-in may not say it did either. "Checked against" in front
    * of a pair nothing checked makes the completeness claim through the front of the
-   * sentence while the back of it takes it back, which is the whole thing 054's ruling
+   * sentence while the back of it takes it back, which is the whole thing the claim rule
    * stands against.
    */
   it('drops the lead-in as well as the claim when nothing was checked', () => {

@@ -5,7 +5,7 @@ import { resetFetch, takeUnstubbed, unstubbedMessage } from './harness';
 
 /** jsdom implements neither of these, and both are on a mounted screen's path. */
 
-// theme.tsx:139/145 calls it unconditionally and attaches a listener to the result.
+// ThemeProvider calls it unconditionally and attaches a listener to the result.
 window.matchMedia = (query: string): MediaQueryList =>
   ({
     matches: false,

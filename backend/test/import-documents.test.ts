@@ -1,5 +1,5 @@
 /**
- * The document routes (ROADMAP 4.5, 6.1): downloading the uploaded statement back,
+ * The document routes: downloading the uploaded statement back,
  * and deleting it while the import row, its transactions and its provenance stay.
  *
  * Driven over real HTTP, like upload.test.ts: what these routes are about is the
@@ -32,7 +32,10 @@ interface Uploaded {
   bytes: Buffer;
 }
 
-/** An empty account over the door that creates one, which is where every account comes from since row 26b. */
+/**
+ * An empty account over the door that creates one, which is where every account comes
+ * from since the upload stopped taking a name.
+ */
 const makeAccount = async (name: string): Promise<string> => {
   const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -73,8 +76,8 @@ const importRow = async (id: string): Promise<ImportRow | undefined> =>
   (await importRows()).find((i) => i.id === id);
 
 /**
- * Where the file for an upload named `statement.csv` sits - spelled out, not asked
- * for, because the name in the folder is the contract a person reads.
+ * Where the file for the upload sits - spelled out, not asked for, because the name in
+ * the folder is the contract a person reads.
  */
 const blobOf = (importId: string, stem = 'statement'): string =>
   path.join(storageRoot(), `${stem}_${importId}.csv`);
@@ -306,7 +309,7 @@ describe('DELETE /api/imports/:id/document', () => {
 });
 
 /**
- * ROADMAP 6.1: an account delete is the second path that removes stored documents,
+ * An account delete is the second path that removes stored documents,
  * and the only one that removes several at once. The file goes for EVERY import it
  * destroys whatever the pointer said - document_stored records whether a document
  * can be READ, never whether a file is on disk, and the rows most likely to still

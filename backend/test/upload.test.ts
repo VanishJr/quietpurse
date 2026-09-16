@@ -1,5 +1,5 @@
 /**
- * The ingestion surface over real HTTP (ROADMAP 5.1): one multipart endpoint that
+ * The ingestion surface over real HTTP: one multipart endpoint that
  * decides what the file is from its bytes.
  *
  * Driven through supertest, because the parts worth testing only exist in the
@@ -63,7 +63,8 @@ beforeAll(async () => {
 
 /**
  * An empty account over the same door the Accounts screen uses, which is where every
- * account in this file comes from since row 26b: the door is what this file is about.
+ * account in this file comes from since the upload stopped taking a name: the door is
+ * what this file is about.
  */
 const makeAccount = async (name: string, currency = 'EUR'): Promise<string> => {
   const res = await agent.post('/api/accounts').send({ name, currency });
@@ -137,7 +138,7 @@ describe('POST /api/imports', () => {
 
   /**
    * The file type comes from the bytes, never from the name: this workbook is
-   * uploaded as "statement.csv" and still goes to the XLSX parser. A bank that
+   * uploaded under a .csv name and still goes to the XLSX parser. A bank that
    * names its Excel export .csv is not a hypothetical.
    */
   it('takes an XLSX, sniffed by content rather than by its name', async () => {
@@ -215,7 +216,7 @@ describe('POST /api/imports', () => {
   });
 
   /**
-   * The PDF path opens the file now (ROADMAP 6a), so this moved bands: the same
+   * The PDF path opens the file now, so this moved bands: the same
    * bytes that used to be refused by the sniffer with no `imports` row are a
    * `pdf` import that failed, and the row and its stored document are what make
    * the miss diagnosable. What stays pinned is that the message says what to do -
@@ -242,11 +243,11 @@ describe('POST /api/imports', () => {
   });
 
   /**
-   * Row 33, and it is a band change asserted rather than discovered: these bytes used
+   * A band change asserted rather than discovered: these bytes used
    * to be refused inside `sniff`, before createImport, so they left no import row and
    * no stored document. A container is a PDF now, so the file is opened, the document
    * is kept, and the miss is a `failed` import someone can download - which is what
-   * row 31 builds the third template from.
+   * the third PDF template was built from.
    */
   it('a statement inside a signed container fails as a pdf import, naming the layout', async () => {
     const before = (await imports()).length;
@@ -444,17 +445,17 @@ describe('POST /api/imports', () => {
 });
 
 /**
- * The wire half of a destination that has one member (ROADMAP rows 26a, 26b).
- * Multipart fields carry no type, so the `never` keys on StatementDestination hold
- * nothing here - these nine cases are what a mobile client and curl meet, and the
- * REST API is the contract the picker is only one client of. Two of them are the
- * retired fields, refused rather than ignored so that a caller still sending them is
- * told where an account comes from instead of having half its request dropped.
+ * The wire half of a destination that has one member. Multipart fields carry no type, so
+ * the `never` keys on StatementDestination hold nothing here - these nine cases are what
+ * a mobile client and curl meet, and the REST API is the contract the picker is only one
+ * client of. Two of them are the retired fields, refused rather than ignored so that a
+ * caller still sending them is told where an account comes from instead of having half
+ * its request dropped.
  */
 describe('POST /api/imports picks an account by id', () => {
   /**
    * Distinct bytes per case, and not for tidiness: the hash short-circuit sits above
-   * the destination resolution and stays there (024's D1), so bytes a committed
+   * the destination resolution and stays there, so bytes a committed
    * import already holds answer `duplicate` with a 200 before any of these refusals
    * is reached.
    */
@@ -481,7 +482,7 @@ describe('POST /api/imports picks an account by id', () => {
   });
 
   /**
-   * accountName is refused rather than ignored (row 26b). Ignoring it would drop one
+   * accountName is refused rather than ignored. Ignoring it would drop one
    * of the two destinations a request stated, silently, which is the guess the old
    * exclusivity refusal existed to prevent - and the sentence has to say where an
    * account comes from now, because a caller sending this field believes an upload
@@ -514,7 +515,7 @@ describe('POST /api/imports picks an account by id', () => {
   });
 
   /**
-   * An existing account owns its currency (ROADMAP 26(b)). Accepting one here and
+   * An existing account owns its currency. Accepting one here and
    * then reading the account's instead is a field the caller believes in and nothing
    * uses - which is how "Savings" stayed EUR through a USD statement and reported it.
    *
@@ -643,7 +644,7 @@ describe('POST /api/imports/:id/confirm and /discard', () => {
   /**
    * The confirm's guards refuse a broken invariant, which is nothing the user did -
    * so the status stays 5xx, or the operator's alerting would read a failure the
-   * server caused as one the file caused (ROADMAP 6.4). What must not stay is the
+   * server caused as one the file caused. What must not stay is the
    * body: `internal error` on the one screen whose job is saying whether the data
    * landed reads as transient, so the person presses Confirm again forever.
    */
@@ -692,7 +693,7 @@ describe('the routes around it', () => {
 });
 
 /**
- * GET /api/imports over the wire (ROADMAP row 66). The totals matter here rather
+ * GET /api/imports over the wire. The totals matter here rather
  * than at the data layer for one reason: they cross JSON.stringify. SUM() over
  * bigint is numeric and both drivers hand numeric over as a string, so an
  * unconverted total is the number 7 on PGlite and the string "7" in the Postgres CI

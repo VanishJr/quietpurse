@@ -240,7 +240,7 @@ describe('the account arm and the all-accounts arm answer different questions', 
   });
 
   /**
-   * I4(a). A row whose rate has not been fetched has no base_amount_cents, so the
+   * A row whose rate has not been fetched has no base_amount_cents, so the
    * all-accounts arm leaves it out rather than adding hryvnias to euros - and the
    * account arm must count it, because it is a real movement of that account's own
    * money and the balance beside these figures already includes it.
@@ -272,7 +272,7 @@ describe('the account arm and the all-accounts arm answer different questions', 
   });
 
   /**
-   * I4(b). VISIBLE_ACCOUNT() keeps a hidden account out of the all-accounts totals.
+   * VISIBLE_ACCOUNT() keeps a hidden account out of the all-accounts totals.
    * Applied to a query about one named account it is not a filter but a mute
    * switch: the caller asked about that account by id.
    */
@@ -297,7 +297,7 @@ describe('the account arm and the all-accounts arm answer different questions', 
 
 describe('an account’s months', () => {
   /**
-   * I5. The months are only readable next to the balance if they are computed by
+   * The months are only readable next to the balance if they are computed by
    * the same rule, so `net` sums every row of the month - transfers and unconverted
    * rows included - exactly as recalcAccountBalanceFromTransactions does.
    */
@@ -315,7 +315,7 @@ describe('an account’s months', () => {
   });
 
   /**
-   * I6. This is the one query whose GROUP BY can lose a whole bucket, so
+   * This is the one query whose GROUP BY can lose a whole bucket, so
    * NOT_TRANSFER lives inside the income and expense CASEs here and in no other
    * query. A month that vanishes from the chart reads as "nothing happened".
    */
@@ -338,7 +338,7 @@ describe('an account’s months', () => {
   });
 
   /**
-   * I6's mirror, and the defect an over-general reading of the rule above produces:
+   * The mirror of the rule above, and the defect an over-general reading of it produces:
    * NOT_TRANSFER stays in the WHERE of every other query, so moving your own money
    * into savings is not spending in the "savings" category.
    */
@@ -351,7 +351,7 @@ describe('an account’s months', () => {
 });
 
 describe('an account in more than one currency says so', () => {
-  /** I8. The path is reachable: a row's currency comes from the file when it names one. */
+  /** The path is reachable: a row's currency comes from the file when it names one. */
   it('lists the currencies of its rows that are not its own, and [] when there are none', async () => {
     expect(await accountOtherCurrencies(mainScope)).toEqual(['UAH']);
     expect(await accountOtherCurrencies(secondScope)).toEqual([]);
@@ -360,7 +360,7 @@ describe('an account in more than one currency says so', () => {
 });
 
 describe('an account with no rows in the window', () => {
-  /** Trap 3: an aggregate over nothing is NULL, and fromCents(NaN) serialises as null. */
+  /** An aggregate over nothing is NULL, and fromCents(NaN) serialises as null. */
   it('answers zeroes and empty lists, never nulls', async () => {
     expect(await summaryTotals(emptyScope, FROM, TO)).toEqual({ expense: 0, income: 0 });
     expect(await summaryByCategory(emptyScope, FROM, TO)).toEqual([]);

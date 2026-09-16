@@ -1,5 +1,5 @@
 /**
- * Transaction ids are surrogate UUIDs assigned on insert (ROADMAP 4.2), so a test
+ * Transaction ids are surrogate UUIDs assigned on insert, so a test
  * can no longer choose one and use it afterwards. It inserts rows and looks the
  * id back up by whatever actually distinguishes the row - which is closer to how
  * the app works anyway: the client gets its ids from a list endpoint too.
@@ -94,7 +94,7 @@ export async function rejectionOf(attempt: Promise<unknown>): Promise<Error> {
 
 /**
  * Upload and confirm in one call, answering in the shape the upload had before the
- * confirmation step existed (ROADMAP 5.3). It is here so that the cases about
+ * confirmation step existed. It is here so that the cases about
  * parsing, deduplication and provenance keep asserting exactly what they asserted
  * before - a test rewritten around the new response is no longer evidence that the
  * old guarantee still holds.

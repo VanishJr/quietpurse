@@ -219,7 +219,7 @@ describe('the stem a filename becomes', () => {
    * whole character set through both doors - one character at a time, and in every
    * position, because a class that is wrong at the head alone is green in the middle
    * and at the tail. `)` is the character that was wrong: it is legal inside a key
-   * segment and closes one, and it opens none, so `)statement.csv` built a key
+   * segment and closes one, and it opens none, so a name beginning with `)` built a key
    * resolveKey threw on and the upload was refused as an unwritable folder, forever.
    *
    * getObject is the door, because resolveKey is not exported: a key it refuses

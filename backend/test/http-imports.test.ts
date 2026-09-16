@@ -1,5 +1,5 @@
 /**
- * Deleting an import over HTTP (ROADMAP row 75). The data layer's delete - the rows,
+ * Deleting an import over HTTP. The data layer's delete - the rows,
  * the ordinals, the stored file - is held in imports.test.ts; what this route adds is
  * the count in the answer and the recompute after the delete, because transfer
  * pairing changes when the other leg disappears: a surviving leg still tagged as a
@@ -75,7 +75,9 @@ const importIds = async (): Promise<string[]> => {
   return (res.body.imports as { id: string }[]).map((i) => i.id);
 };
 
-/** Where the file for an upload named `statement.csv` sits, spelled out as import-documents.test.ts spells it. */
+/**
+ * Where the file for the upload sits, spelled out as import-documents.test.ts spells it.
+ */
 const blobExists = (importId: string): Promise<boolean> =>
   fs
     .access(path.join(storageRoot(), `statement_${importId}.csv`))

@@ -1,5 +1,5 @@
 /**
- * A category set by hand on one transaction (ROADMAP row 50).
+ * A category set by hand on one transaction.
  *
  * The whole feature is two columns: `category` is what the categorizer decided and
  * `category_manual` is the user's own answer, and every read that reports a category
@@ -46,14 +46,14 @@ import { freshTestDb } from './pglite';
 const FROM = '2026-01-01T00:00:00.000Z';
 const TO = '2026-12-31T23:59:59.999Z';
 
-/** The two rows that must land in ONE bucket: one auto, one overridden (Trap 4). */
+/** The two rows that must land in ONE bucket: one auto, one overridden. */
 const AUTO_SPEND = 10;
 const MANUAL_SPEND = 20;
 const AUTO_INCOME = 100;
 const MANUAL_INCOME = 200;
 /** The rent group: three months of it, and the newest one is the overridden row. */
 const RENT = 400;
-/** The row invariant (a) works on, and one of the four rows the rule caption counts. */
+/** The row the manual mark is set on, and one of the four rows the rule caption counts. */
 const STRAY = 5;
 const CAPTION_ROW = 1;
 /** Every row that really is 'other' - the moved one is deliberately not among them. */
@@ -101,7 +101,7 @@ beforeAll(async () => {
   concealed = await make('Concealed');
 
   await insertTransactions([
-    // Trap 4, the spending arm: an auto 'transport' row and an auto 'other' row that
+    // The spending arm: an auto 'transport' row and an auto 'other' row that
     // the user moves to 'transport'. One bucket, or the SELECT and the GROUP BY are
     // not the same expression.
     tx({ accountId: manualAccount.id, amount: -AUTO_SPEND, description: 'Bolt ride' }),
@@ -109,7 +109,7 @@ beforeAll(async () => {
     // the same shape on the income arm
     tx({ accountId: manualAccount.id, amount: AUTO_INCOME, description: 'Gehalt Maerz' }),
     tx({ accountId: manualAccount.id, amount: MANUAL_INCOME, description: 'ZZ Mystery Two' }),
-    // invariant (a)'s row: it gets an override and then a rule that moves its auto answer
+    // the overridden row: it gets an override and then a rule that moves its auto answer
     tx({ accountId: manualAccount.id, amount: -STRAY, description: 'ZZ Mystery Three' }),
     // three months of the same payment, so the detector calls it recurring. The group
     // reports its NEWEST row's category, which is the one the override goes on.
@@ -161,12 +161,11 @@ async function newestRentId(): Promise<string> {
 
 describe('the data layer: a manual category, and what may not touch it', () => {
   /**
-   * Invariant (a), and Trap 1 with it. The user corrects one row, then writes a rule
-   * that moves that row's AUTO answer. The rule may not clear the mark (D2), the mark
-   * still wins, and the auto column underneath must be brought up to date by the
-   * recompute - because that is what a later clear falls back to. A recompute that
-   * skipped overridden rows would leave a months-old answer there and nothing on
-   * screen would say so.
+   * The user corrects one row, then writes a rule that moves that row's AUTO answer. The
+   * rule may not clear the mark, the mark still wins, and the auto column underneath must
+   * be brought up to date by the recompute - because that is what a later clear falls
+   * back to. A recompute that skipped overridden rows would leave a months-old answer
+   * there and nothing on screen would say so.
    */
   it('survives a recompute, and the auto answer underneath is kept current', async () => {
     const id = await idOf('ZZ Mystery Three');
@@ -180,7 +179,7 @@ describe('the data layer: a manual category, and what may not touch it', () => {
     try {
       await reclassifyAll();
 
-      // the rule did not erase the annotation (D2), and it still beats the rule
+      // the rule did not erase the annotation, and it still beats the rule
       expect((await columnsOf(id)).manual).toBe('health');
       expect((await getTransaction(id))!.category).toBe('health');
       expect((await getTransaction(id))!.categoryManual).toBe(true);
@@ -200,7 +199,7 @@ describe('the data layer: a manual category, and what may not touch it', () => {
   });
 
   /**
-   * Trap 4. Two rows in the same effective category, one auto and one overridden, must
+   * Two rows in the same effective category, one auto and one overridden, must
    * be one bucket. `SELECT COALESCE(...) AS category ... GROUP BY category` resolves
    * the name to the input column and errors; a sweep that misses the GROUP BY entirely
    * splits them in two.
@@ -234,7 +233,7 @@ describe('the data layer: a manual category, and what may not touch it', () => {
   });
 
   /**
-   * R12: the filter is SQL and the value on the row is TypeScript, and the fragment
+   * The filter is SQL and the value on the row is TypeScript, and the fragment
    * names only one of the two. Presence alone is green when the SQL half is what put
    * the row in the list, so the returned value is what this asserts.
    */
@@ -254,7 +253,7 @@ describe('the data layer: a manual category, and what may not touch it', () => {
   });
 
   /**
-   * Invariant (e). `matches` keeps meaning "rows whose description contains the
+   * `matches` keeps meaning "rows whose description contains the
    * pattern" - four here, one of them on a hidden account, because
    * countCategoryRuleMatches carries WS() and no VISIBLE_ACCOUNT() and `overridden`
    * must carry exactly the same filters. Take one of the two through the visibility
@@ -271,10 +270,10 @@ describe('the data layer: a manual category, and what may not touch it', () => {
   });
 
   /**
-   * Trap 8, both directions. sanitizeRow drops an unrecognised key with no error and
+   * Both directions. sanitizeRow drops an unrecognised key with no error and
    * no count, so "a backup taken before this change restores to auto" and "a backup
    * taken after it carries the mark back" are two different facts and neither is
-   * implied by the other. R18: POST /api/restore runs reclassifyAll immediately after
+   * implied by the other. POST /api/restore runs reclassifyAll immediately after
    * restoring, which is the one place a manual mark meets a full table rewrite on a
    * path the user did not start.
    */
@@ -430,7 +429,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
 
   describe('PATCH /api/transactions/:id/category', () => {
     /**
-     * Invariant (c). D4 leaves no CHECK on the column, so the route is the whole of
+     * There is no CHECK on the column, so the route is the whole of
      * what keeps an unknown slug out of it: a bucket every summary answers, that no
      * client dictionary can label and no budget ever matches.
      */
@@ -480,7 +479,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
   });
 
   /**
-   * Invariant (d), the enumeration. Every surface is asserted positively - the
+   * The enumeration. Every surface is asserted positively - the
    * overridden category present with the amount the fixture says - before anything is
    * asserted about the slug it left, because `not.toContain` over an empty payload is
    * green whether the sweep landed or not.
@@ -540,7 +539,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     });
 
     /**
-     * R14. Both arms call the same two functions, so sweeping the function covers this
+     * Both arms call the same two functions, so sweeping the function covers this
      * by construction - which is a test that passes because of how the code is
      * factored. The card on the account screen is the one place a user's correction
      * could silently fail to appear.
@@ -604,7 +603,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
   });
 
   /**
-   * Invariant (e) on the wire: both payloads that carry `matches` carry `overridden`
+   * On the wire: both payloads that carry `matches` carry `overridden`
    * beside it, or the caption is honest in one place and false in the other.
    */
   describe('the category rules payloads', () => {
@@ -627,7 +626,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
       expect(list.body[0]).toMatchObject({ pattern: 'ZZ Mystery', matches: 3, overridden: 2 });
 
       // the rule really did move the row it was allowed to move, and really did not
-      // move the two it was not (D2)
+      // move the two it was not
       expect(await one(agent, 'ZZ Mystery Clear')).toMatchObject({ category: 'entertainment' });
       expect(await one(agent, 'ZZ Mystery Shop')).toMatchObject({ category: 'food' });
       expect(await one(agent, 'ZZ Mystery Income')).toMatchObject({ category: 'salary' });

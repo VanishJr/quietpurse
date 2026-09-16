@@ -1136,7 +1136,7 @@ describe('the account menu', () => {
   });
 
   /**
-   * The per-account view is per-account, and after row 66 that is the server's job:
+   * The per-account view is per-account, and that is the server's job:
    * the assertion is what the screen ASKED for, not what it kept. Asserting the
    * render instead would be a tautology — a mock answering one row proving that one
    * row appears — and the client re-filtering is what ImportHistory's own suite
@@ -1400,7 +1400,7 @@ describe('adding an account', () => {
 
     await panel('Cash');
     // an equality, so what is asserted is the ABSENCE of a currency key: the client
-    // no longer guesses one, and the server defaults it (row 65)
+    // no longer guesses one, and the server defaults it
     expect(sent).toEqual({ name: 'Cash' });
     expect(await tab('Cash')).toBeInTheDocument();
     expect(screen.getByText(/Nothing has been loaded into Cash/)).toBeInTheDocument();

@@ -89,7 +89,7 @@ describe('genericMapping', () => {
   /**
    * "Дата начала" is when the transaction started and "Дата выполнения" when it
    * completed, and the completed one is the date this importer means - a date days
-   * off goes into the dedup key (ROADMAP 4.2), where it cannot be corrected by
+   * off goes into the dedup key, where it cannot be corrected by
    * re-importing. Correctness, not the exactness holder: see the matchColumn case.
    */
   it('a header carrying both Revolut date columns resolves to the completed one', () => {
@@ -157,7 +157,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
     expect(rewe.description).toBe('REWE Markt REWE SAGT DANKE');
 
     // re-uploading the same file is caught by its hash before any parsing
-    // happens at all (ROADMAP 4.3); see imports.test.ts for that layer
+    // happens at all; see imports.test.ts for that layer
     const r2 = await importAndConfirm({
       accountId: await accountFor('Sparkasse Giro'),
       preset: 'sparkasse',
@@ -173,7 +173,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 
   /**
    * The `PENDING` row states a balance, which the real export never does - kept as
-   * found (row 54, D3), because it is the case R10's discriminator was written for:
+   * found, because it is the case the gate's own discriminator was written for:
    * the balance column covers a row this import drops, so the gate turns itself off
    * rather than reading a run it does not cover. That verdict is asserted on its own
    * fixture in the gate block below - `importAndConfirm` hands back no summary, so it
@@ -199,7 +199,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   });
 
   /**
-   * The case the surrogate-key split exists for (ROADMAP 4.2): two statements
+   * The case the surrogate-key split exists for: two statements
    * whose windows overlap. Every repeated row has to be recognised as the same
    * transaction, and only the genuinely new ones may be inserted.
    */
@@ -315,7 +315,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
 });
 
 /**
- * One bank, one export, fifteen languages (ROADMAP 5.2). The header below is the
+ * One bank, one export, fifteen languages. The header below is the
  * Russian Revolut one, reproduced from a measured file - column names are the bank's,
  * not personal data, and every row under it is fabricated here: no real statement
  * enters this repository.
@@ -328,12 +328,12 @@ describe('a bank export in a language the preset also accepts', () => {
     'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance';
 
   /**
-   * The balance column reads 195.30 and not 195.80, and the pending row states none.
-   * Both were repaired towards what the real export was measured to do (row 54, D3):
-   * this fixture broke by EXACTLY the fee, which is the pre-037a arithmetic the bank's
-   * own running balance disproves, and the real export leaves the cell empty on every
-   * `В ОБРАБОТКЕ` row. Tuning either number to make the gate pass would have put that
-   * defect back inside a test.
+   * The balance column reads 195.30 and not 195.80, and the pending row states none. Both
+   * were repaired towards what the real export was measured to do: this fixture broke by
+   * EXACTLY the fee, which is the arithmetic from before fees were folded in, and the
+   * bank's own running balance disproves it; and the real export leaves the cell empty on
+   * every `В ОБРАБОТКЕ` row. Tuning either number to make the gate pass would have put
+   * that defect back inside a test.
    */
   it('the Russian export imports under the same revolut preset', async () => {
     const ru = [
@@ -358,8 +358,8 @@ describe('a bank export in a language the preset also accepts', () => {
     expect(coffee.amount).toBe(-4.2);
     // the file's own currency column, not the USD the request asked for
     expect(coffee.currency).toBe('EUR');
-    // Сумма MINUS Комиссия. This assertion read 100 until row 037a: the fee is
-    // stated on top of the amount, so the account moved by 99.50 and the old
+    // Сумма MINUS Комиссия. This assertion read 100 before the fee was folded in: the fee
+    // is stated on top of the amount, so the account moved by 99.50 and the old
     // arithmetic stored a number the statement's own balance never shows
     const topup = txs.find((t) => t.description === 'Пополнение счёта')!;
     expect(topup.amount).toBe(99.5);
@@ -500,7 +500,7 @@ describe('a bank export in a language the preset also accepts', () => {
   });
 
   /**
-   * ROADMAP row 56, and the incident it was raised for: the same file read by the
+   * The incident the reader descriptor was raised for: the same file read by the
    * preset and by the generic reader produces the SAME five headline figures, so the
    * screen was right by coincidence three times running while nothing on it said which
    * reader had run. The two summaries differ in readAs and the counts do not - which is
@@ -564,7 +564,7 @@ describe('a bank export in a language the preset also accepts', () => {
 });
 
 /**
- * The rest of row 56: what the descriptor names when a preset is not what read the
+ * The other half of the descriptor: what it names when a preset is not what read the
  * file. Every case here drives importStatement rather than building a summary, because
  * a descriptor that echoes the request passes any test that does not open the file.
  */
@@ -649,21 +649,21 @@ describe('the summary names the columns the parser settled on', () => {
 });
 
 /**
- * A fee a statement states on top of the amount (ROADMAP 37a). Every shape below is
+ * A fee a statement states on top of the amount. Every shape below is
  * one the measured Revolut export actually carries, reproduced with fabricated rows:
  * the amount column alone is short by the fee on every charge that has one, and the
  * plan-fee row - Amount 0.00, Fee 2.99 - is a real charge the importer used to drop
  * whole at the `amount === 0` guard.
  *
- * These assertions were the only thing holding the arithmetic until row 54 gave this
- * path a gate; the bank's own running balance now says the same thing independently,
+ * These assertions were the only thing holding the arithmetic before this path had
+ * a gate; the bank's own running balance now says the same thing independently,
  * in the block below.
  *
  * Neither header carries a `Balance` column any more. It sat in both as filler - the
  * parser ignored it, so a literal 0 on every row cost nothing - and filler becomes an
  * assertion the day something reads the column: every one of those rows claims the
- * account was left at zero. A fixture must not carry a column it does not mean (row
- * 54, D3), and what these cases mean is the fee.
+ * account was left at zero. A fixture must not carry a column it does not mean, and
+ * what these cases mean is the fee.
  */
 describe('a fee the statement states beside the amount', () => {
   const WITH_FEE = 'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State';
@@ -791,7 +791,7 @@ describe('a fee the statement states beside the amount', () => {
   });
 
   /**
-   * Trap 1. The fee is resolved outside resolvePreset's match(), so it records no
+   * The fee is resolved outside resolvePreset's match(), so it records no
    * unresolved slot - and resolveColumns is the XLSX header scan's predicate as well
    * as the mapper's, so a fee that could refuse a header would move which row the
    * scan settles on.
@@ -891,10 +891,11 @@ describe('a fee the statement states beside the amount', () => {
   });
 
   /**
-   * I2 in miniature, and it needs no real file: the same operation stated two ways -
-   * the fee beside the amount, and the fee already inside it - is ONE transaction.
-   * That holds only while `amount` means the same thing for every format, and it goes
-   * red the moment the fee stops being folded in or starts entering the dedup key.
+   * The one-transaction rule in miniature, and it needs no real file: the same operation
+   * stated two ways - the fee beside the amount, and the fee already inside it - is ONE
+   * transaction. That holds only while `amount` means the same thing for every format,
+   * and it goes red the moment the fee stops being folded in or starts entering the dedup
+   * key.
    */
   it('the same operation stated with and without its fee is one row', async () => {
     const first = await importRevolut(
@@ -915,7 +916,7 @@ describe('a fee the statement states beside the amount', () => {
 });
 
 /**
- * The gate the sheet path did not have (ROADMAP row 54). The statement prints a
+ * The gate the sheet path did not have. The statement prints a
  * running balance after each row, so every accepted row is a step from the balance
  * before it to the one after it, and a complete statement's steps form ONE unbroken
  * run. A row the parser dropped or misread splits the run in two, and the gap where
@@ -1008,7 +1009,7 @@ describe("the statement's own running balance, on the sheet path", () => {
     // "Savings" is a single row, so its run is a single link that no verdict could
     // have failed on - 315.00 of that opening and 445.00 of that closing were checked
     // by nothing at all. How many were summed and how many were checked are two
-    // different numbers on this file, so the card carries both (row 63)
+    // different numbers on this file, so the card carries both
     expect(summary.balances).toEqual({
       opening: 387.40,
       closing: 579.85,
@@ -1020,10 +1021,10 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Row 63's other end: a file every run of which is one row. Nothing was compared
-   * anywhere in it - two links, neither of them next to another - and the pair is
-   * still true and still shown. Withholding it would take a correct pair off the
-   * fallback path's confirmation screen, which is R10's failure mode with a new
+   * The one-row series taken to its end: a file every run of which is one row. Nothing
+   * was compared anywhere in it - two links, neither of them next to another - and the
+   * pair is still true and still shown. Withholding it would take a correct pair off the
+   * fallback path's confirmation screen, which is refusing over uncertainty with a new
    * cause; `balancesNotShown` is why no pair could be DERIVED and one was.
    */
   it('a pair every run of which is one row is shown, and claims nothing', async () => {
@@ -1054,9 +1055,9 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * R1, and the reason the check is stated over links rather than over the first and
-   * last row: file order is a property of one bank's exporter, and the day one of
-   * them ships newest-first a gate that read row 1 as the opening starts refusing
+   * The reason the check is stated over links rather than over the first and last
+   * row: file order is a property of one bank's exporter, and the day one of
+   * them ships newest-first a gate that read the first row as the opening starts refusing
    * good statements. Nothing here reads a row index.
    */
   it('the verdict and the pair are the same under any order of the rows', async () => {
@@ -1095,7 +1096,7 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Q7, and the limit of the diagnostic said out loud. The VERDICT is order-independent
+   * The limit of the diagnostic said out loud. The VERDICT is order-independent
    * and this file is refused either way; the two lines the sentence names are the first
    * adjacent pair that does not chain in the file's own order, so on a file that is not
    * in posting order they are a true fact about two lines rather than the missing
@@ -1167,15 +1168,15 @@ describe("the statement's own running balance, on the sheet path", () => {
     expect(result.summary.accepted).toBe(2);
     expect(result.summary.skipped).toBe(0);
     // both absent: this file never claimed to carry a balance, so nothing on the
-    // screen may say it could not be checked (row 6b, Trap 9)
+    // screen may say it could not be checked
     expect(result.summary.balances).toBeUndefined();
     expect(result.summary.balancesNotShown).toBeUndefined();
   });
 
   /**
-   * I1 and I2 in one file: three reasons a row is dropped, three different counts, and
-   * the sum the card's own "Read N of M rows" is built on. The values differ because a
-   * count read off the wrong bucket renders identically when they match.
+   * Three reasons a row is dropped in one file, three different counts, and the sum the
+   * card's own "Read N of M rows" is built on. The values differ because a count read off
+   * the wrong bucket renders identically when they match.
    *
    * On the header with no balance column: a stated balance would refuse this file at
    * the gate over the rows it could not read, and no summary would reach the assertion.
@@ -1205,11 +1206,11 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * R10's second class, and the case that would otherwise be a regression on the
-   * fallback path: the pending row states a balance the import correctly drops, so the
-   * run the gate can see has a hole in it that is not missing money. The gate turns
-   * itself off and says which state it is in - it does not refuse, and it does not
-   * spell the same as a file that states no balance at all.
+   * The second class of run the gate cannot use, and the case that would otherwise be a
+   * regression on the fallback path: the pending row states a balance the import
+   * correctly drops, so the run the gate can see has a hole in it that is not missing
+   * money. The gate turns itself off and says which state it is in - it does not refuse,
+   * and it does not spell the same as a file that states no balance at all.
    */
   it('a skipped row that states a balance turns the gate off rather than refusing', async () => {
     const summary = await summaryOf(
@@ -1241,12 +1242,12 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * D14, and the two cases the pair above cannot pin: both of them are single-series
+   * The two cases the pair above cannot pin: both of them are single-series
    * files, where "a run we cannot use turns the gate off" and "a broken run refuses"
    * agree. They disagree the moment a file has two running balances and one of each,
    * and there the file's own arithmetic saying money is missing outranks our
    * uncertainty about a DIFFERENT balance - one blank cell anywhere would otherwise
-   * disarm the refusal for the whole file, which is the €2.99 case surviving the row
+   * disarm the refusal for the whole file, which is the €2.99 case surviving the gate
    * built to catch it.
    */
   it('a run we cannot use does not disarm a break in another one', async () => {
@@ -1280,8 +1281,8 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Q5: the run is provably unbroken, and the balances alone cannot say which value it
-   * starts at. Nothing says money is missing, so refusing would be the R10 mistake.
+   * The run is provably unbroken, and the balances alone cannot say which value it starts
+   * at. Nothing says money is missing, so refusing would be refusing over uncertainty.
    */
   it('a series that ends where it began shows no pair and is not refused', async () => {
     const summary = await summaryOf(
@@ -1295,7 +1296,7 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Trap 5. The pdf arm REFUSES a file whose rows are not all in the balances'
+   * The pdf arm REFUSES a file whose rows are not all in the balances'
    * currency, because the document states its box in one; the sheet arm must not
    * inherit that - a Revolut file with two pockets imports today and nothing printed a
    * single claim about it. Each currency is its own running balance, each is checked,
@@ -1324,11 +1325,11 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Trap 3, and it is a behaviour change on merged code stated rather than discovered:
-   * a row with an unreadable fee is refused row-level and deliberately so (037a), but
+   * A behaviour change on merged code stated rather than discovered:
+   * a row with an unreadable fee is refused row-level and deliberately so, but
    * the money really did not import, and the statement's own balance now says so. The
    * file-level refusal is the right end of that - an import short by a row, reported as
-   * complete, is the failure CLAUDE.md ranks above a crash.
+   * complete, is the failure AGENTS.md ranks above a crash.
    */
   it('a row refused for its fee refuses the file, and is named as the cause', async () => {
     const message = await refusalOf('Balance Fee Refused', CARD, { ...IN, fee: 'cucumber' }, RENT);
@@ -1340,21 +1341,21 @@ describe("the statement's own running balance, on the sheet path", () => {
 
   /**
    * The other site of the same count, and the one nothing held: deleting the second
-   * `unreadable++` left the whole backend suite green (054 D19, re-measured on this
-   * tip). A date cell no format parses is money that did not import for the same
-   * reason an unreadable fee is, and the clause pointing the user at it has to survive
-   * the mapping being wrong rather than only the line being deleted.
+   * `unreadable++` left the whole backend suite green. A date cell no format parses is
+   * money that did not import for the same reason an unreadable fee is, and the clause
+   * pointing the user at it has to survive the mapping being wrong rather than only the
+   * line being deleted.
    */
   it('a row whose date cell cannot be read is named as the cause too', async () => {
     const message = await refusalOf('Balance Date Unread', CARD, { ...IN, date: '' }, RENT);
     expect(message).toContain('100.00 EUR is unaccounted for between them');
     // stops before the hard-coded `are`, which reads "the 1 transaction line ... are" and
-    // is DEBT's to fix: a third assertion pinning it raises the price of that one word
+    // is a known gap: a third assertion pinning it raises the price of that one word
     expect(message).toContain('the 1 transaction line this importer could not read');
   });
 
   /**
-   * Trap 4, and it needs no special case: a row whose movement is zero is dropped
+   * It needs no special case: a row whose movement is zero is dropped
    * before it becomes a transaction, and its balance equals its predecessor's - so the
    * step it would have been is a loop on one value, and removing it changes no degree
    * and joins no two values.
@@ -1379,7 +1380,7 @@ describe("the statement's own running balance, on the sheet path", () => {
 
   /**
    * And the cause clause counts rows the parser genuinely failed on, never the ones it
-   * dropped on purpose (row 6b, R5). A zero-movement row was read perfectly and is
+   * dropped on purpose. A zero-movement row was read perfectly and is
    * provably not where the money went - its balance is a self-loop - so pointing the
    * user at it names a cause that is not the cause.
    */
@@ -1434,7 +1435,7 @@ describe("the statement's own running balance, on the sheet path", () => {
   });
 
   /**
-   * Trap 9: the XLSX path shares this arm and there is no real Revolut workbook in the
+   * The XLSX path shares this arm and there is no real Revolut workbook in the
    * tree. A workbook hands the mapper a float where a CSV hands it a string, so this
    * is the other branch of the Cell seam through the same gate - and there is no second
    * implementation for it to drift from.
@@ -1577,10 +1578,10 @@ describe('what the new refusals may spend', () => {
 
   /**
    * The other cap, and the one that binds first: on the XLSX path this refusal is
-   * carried inside closestClause, whose cut is cutBounded's since row 021 and lands
-   * on a separator or not at all. This case stays as the cheap parity check that
-   * could not see the defect that row fixed: its workbook names the sheet Statement
-   * and puts the header at row 1, which pins the prefix width - sheet name plus row
+   * carried inside closestClause, whose cut is cutBounded's and lands on a
+   * separator or not at all. This case stays as the cheap parity check that could
+   * not see the mid-token cut: its workbook names the sheet Statement and puts the
+   * header at the first row, which pins the prefix width - sheet name plus row
    * label - that the defect needed 27 to 31 characters of. The sweep in
    * xlsx.test.ts is what varies it. An odd number of quotes in the delivered message
    * is exactly a quoted name cut in half.
@@ -1804,12 +1805,11 @@ describe('what the new refusals may spend', () => {
   });
 
   /**
-   * And row 54's, against ERROR_DETAIL_MAX rather than against 199: it is a throw from
-   * reconcile, not a clause of noRowsParsed, so xlsx.ts's NOTICE_MAX is untouched by
-   * it. Built FROM the bounds rather than beside them (row 6b, D10) - the currency
-   * code is composed out of CURRENCY_CODE_MAX, and the series name is swept rather
-   * than sampled because what its bound buys is only spent by a name wide enough to
-   * be cut.
+   * And the reconciliation gate's, against ERROR_DETAIL_MAX rather than against 199: it
+   * is a throw from reconcile, not a clause of noRowsParsed, so xlsx.ts's NOTICE_MAX is
+   * untouched by it. Built FROM the bounds rather than beside them - the currency code is
+   * composed out of CURRENCY_CODE_MAX, and the series name is swept rather than sampled
+   * because what its bound buys is only spent by a name wide enough to be cut.
    *
    * Every amount is at the widest toFixed(2) produces before it turns to exponential
    * notation, and negative, which is the only way any of the three can be wider still.
@@ -1869,12 +1869,12 @@ describe('the row-refusal dispatch', () => {
   });
 
   /**
-   * And the ordering Trap 3 asks for is a compile error rather than a convention. A
-   * hand-built refusal is how a caller would come to claim a zero movement for a row
-   * whose date never parsed; the brand stops it, and rowVerdict tests nullness first,
-   * once. Remove the brand and this directive becomes TS2578 under
-   * tsconfig.test.json - which is the half of `npm run typecheck` that reads this
-   * tree, and is what holds the rule.
+   * And the ordering - an unreadable date refused before any movement is claimed - is a
+   * compile error rather than a convention. A hand-built refusal is how a caller would
+   * come to claim a zero movement for a row whose date never parsed; the brand stops it,
+   * and rowVerdict tests nullness first, once. Remove the brand and this directive
+   * becomes TS2578 under tsconfig.test.json - which is the half of `npm run typecheck`
+   * that reads this tree, and is what holds the rule.
    */
   it('cannot be built anywhere but rowVerdict', () => {
     // @ts-expect-error the brand is private to statement.ts

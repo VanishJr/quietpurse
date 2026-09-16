@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
-import { censusOf, compareSources, tokensOf } from '../scripts/comment-tokens';
+import { censusOf, commentsOf, compareSources, tokensOf } from '../scripts/comment-tokens';
 
 /**
  * The control table. A comparator that has only ever agreed is worth nothing, and the
@@ -189,6 +189,81 @@ describe('the census', () => {
       nonBlank: 1,
       blocks: 1,
     });
+  });
+});
+
+/**
+ * The list the census folds over, and the one walk specs.test.ts reads comments through:
+ * a holder built on a second walk would drift from this one in its control table first.
+ */
+describe('the comment list the census folds over', () => {
+  const spans = (fileName: string, text: string): [number, number, string][] =>
+    commentsOf(fileName, text).map((c) => [c.line, c.lineEnd, c.text]);
+
+  it('commentsOf lists a docblock, a whole-line comment and a trailing one once each, with the lines they start and end on', () => {
+    expect(spans('fixture.ts', TS_BASE)).toEqual([
+      [1, 3, '/**\n * A docblock carrying a digit: row 65.\n */'],
+      [6, 6, '// a whole comment line'],
+      [8, 8, '// and a trailing one'],
+    ]);
+  });
+
+  it('commentsOf reads a bare JSX comment inside braces', () => {
+    expect(spans('fixture.tsx', TSX_BASE)).toEqual([
+      [3, 3, '// a line comment above the component'],
+      [7, 7, '/* the figure and its unit are one sentence */'],
+    ]);
+  });
+
+  it('commentsOf reads nothing out of a string or a template that looks like one', () => {
+    const text = ['const a = "http://x";', 'const b = `y // z`;', ''].join('\n');
+    expect(commentsOf('fixture.ts', text)).toEqual([]);
+  });
+
+  it('commentsOf reads a comment after the last statement', () => {
+    expect(spans('fixture.ts', 'const a = 1;\n// after everything\n')).toEqual([
+      [2, 2, '// after everything'],
+    ]);
+  });
+
+  /**
+   * JSX text is rendered copy, and a scanner started inside it reads a `//` there as a
+   * comment: once as the text's own leading range, once as the trailing range of the
+   * brace before it. Either way it is what tokensOf calls a JsxText token. The third
+   * shape puts the closing tag on a line of its own, so the range a scanner mints there
+   * carries no `</` — a filter reading the text for one keeps it, and only a filter
+   * reading the node's span drops it. The case after this one is the other half of
+   * that pair.
+   */
+  it('commentsOf reads nothing out of JSX text that opens with //, on its own or after a brace', () => {
+    const text = [
+      'export const x = <p>// row 54 is text</p>;',
+      'export const y = <p>{a}// row 54 is text too</p>;',
+      'export const z = (',
+      '  <p>',
+      '    // row 54 is text',
+      '  </p>',
+      ');',
+      '',
+    ].join('\n');
+    expect(commentsOf('fixture.tsx', text)).toEqual([]);
+  });
+
+  it('commentsOf keeps a real comment whose text carries a closing tag', () => {
+    const text = [
+      'export const x = (',
+      '  // the element below closes with </p>',
+      '  <p>{a}</p>',
+      ');',
+      '',
+    ].join('\n');
+    expect(spans('fixture.tsx', text)).toEqual([[2, 2, '// the element below closes with </p>']]);
+  });
+
+  it('commentsOf reads a docblock once, and nothing nested out of a // inside it', () => {
+    expect(spans('fixture.ts', '/** @deprecated // row 57 */\nexport const a = 1;\n')).toEqual([
+      [1, 1, '/** @deprecated // row 57 */'],
+    ]);
   });
 });
 

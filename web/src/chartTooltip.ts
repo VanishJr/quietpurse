@@ -2,8 +2,8 @@
  * The `<Tooltip>` every chart in this app is handed, and the grounds it is drawn on.
  *
  * Four surfaces draw a chart. Two of them hand-rolled a tooltip object and the other
- * two answered nothing at all when you pointed at them — which is the divergence row
- * 40 is about rather than the absence, since a reader who learns that pointing works
+ * two answered nothing at all when you pointed at them — which is the divergence this
+ * module is about rather than the absence, since a reader who learns that pointing works
  * on the Account screen learns it wrongly for the Overview. A fifth surface takes the
  * object from here or does not get one.
  *
@@ -14,7 +14,7 @@
  * decides the tooltip's colours. `brand` is the navy the two money charts have drawn
  * their tooltip in since the cards were drawn, and it is correct on `surface` and on
  * `page` — but the Overview's spending card is a `panel` fill, and in dark mode
- * `panel` and `brand` are the same value (`theme.tsx:115` and `:119`, deliberately),
+ * `panel` and `brand` are the same value (`darkInk`'s `brand` and `panel`, deliberately),
  * while in light mode they are two navies 1.20:1 apart. Copied unchanged onto that
  * card the tooltip is painted in the card's own colour.
  *

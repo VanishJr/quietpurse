@@ -13,8 +13,7 @@
  * The owner's `npm run dev` and the ~/Finto folder it runs on are out of reach by
  * construction, not by care: every path goes through assertRunPaths and every kill
  * through shouldKill. Those live in check-stack-guards.ts, which a test can import
- * without any of this running. `.agents/concepts/check-stack.md` is the mechanism
- * written out.
+ * without any of this running. The mechanism is written out once, outside this file.
  */
 import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';

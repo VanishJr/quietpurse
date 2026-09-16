@@ -61,8 +61,8 @@ const GROUNDS = Object.keys(TOOLTIP_CHIP) as TooltipGround[];
 describe('a tooltip is never painted in the colour of the ground it is drawn on', () => {
   /*
    * The list is the record's own keys and never a hand-written one: an enumeration of
-   * what crosses a boundary is written by somebody who can be one short, which row 052b
-   * paid for. The record being total over the union is the structural half of this — a
+   * what crosses a boundary is written by somebody who can be one short, which the charts
+   * door paid for. The record being total over the union is the structural half of this — a
    * ground added without a chip does not compile, and this case then covers it without
    * being edited. A ground's name being the `Ink` key of its own fill is what lets the
    * comparison below read the real card colour rather than a second idea of it.
@@ -121,12 +121,12 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
 
   /*
    * The separations each chip was chosen on, written into the comments beside them and
-   * pinned here so that a palette move makes them red rather than false. This is not
-   * the floor D4 refused: a floor is a bound on what the design may become and reds for
-   * a reason a reader cannot connect to a tooltip, where a pin on a measured value says
-   * something true and actionable — the figures written down are stale, re-measure
-   * them. The minimum of this set is 1.36, which is the "tightest pair that ships"
-   * sentence below carried by a number instead of by prose.
+   * pinned here so that a palette move makes them red rather than false. This is not a
+   * floor, and a floor was refused on purpose: a floor is a bound on what the design may
+   * become and reds for a reason a reader cannot connect to a tooltip, where a pin on a
+   * measured value says something true and actionable — the figures written down are
+   * stale, re-measure them. The minimum of this set is 1.36, which is the "tightest pair
+   * that ships" sentence below carried by a number instead of by prose.
    */
   it('the separations the chips were chosen on are the ones written beside them', () => {
     const shipped: [string, number, number][] = [

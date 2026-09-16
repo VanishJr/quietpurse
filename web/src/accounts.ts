@@ -8,7 +8,7 @@
  * figures, in its own currency.
  *
  * What is left is the half the server deliberately does not do. It answers only the
- * months that HAVE rows (048 D5), so the anchoring, the window and the interior gaps
+ * months that HAVE rows, so the anchoring, the window and the interior gaps
  * are the caller's: see `windowMonths`, which is where the whole of that rule lives and
  * the one thing here no type can hold.
  *

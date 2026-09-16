@@ -6,10 +6,10 @@ import { IncomeSourceDef, Transaction, TransferRuleWithMatches } from '../types'
 import { TransactionsScreen } from './TransactionsScreen';
 
 /**
- * Item 16's first site: "No transactions in the selected period." over a period the
- * screen never read. The rows are file-local rather than in fixtures.ts because the
- * descriptions below are asserted on, and a fixture tuned to one file's assertions
- * is how the next row gets a surprise.
+ * The first of the empty-versus-failed states: "No transactions in the selected period."
+ * over a period the screen never read. The rows are file-local rather than in fixtures.ts
+ * because the descriptions below are asserted on, and a fixture tuned to one file's
+ * assertions is how the next change gets a surprise.
  */
 
 const EMPTY = 'No transactions in the selected period.';
@@ -516,7 +516,7 @@ describe('the category of a whole group', () => {
 });
 
 /**
- * The sheet's other writes (ROADMAP row 75): the transfer flag, the one-off mark, the
+ * The sheet's other writes: the transfer flag, the one-off mark, the
  * income source and the transfer rule. Each case asserts the body the route received
  * and the effect on the screen with a presence anchor beside every absence.
  *

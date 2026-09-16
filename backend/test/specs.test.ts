@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { commentsOf, type Comment } from '../scripts/comment-tokens';
 
 /**
  * A SPEC.md sits beside the module it describes, so nothing imports it and nothing
  * typechecks it. What rots in one is a coordinate that has moved, a path somebody
  * renamed, a pointer to a file only this machine has, and a status a reader cannot
- * see - and prose that has rotted is read as settled.
+ * see - and prose that has rotted is read as settled. A comment in source is prose
+ * too, and the same four things rot in it, so the clauses that can run over a
+ * comment run over every one the tree carries.
  *
  * The unpublished set is DERIVED from .gitignore, never listed here. The rule is
  * "ignored by .gitignore" and never "is a root-level .md": AGENTS.md is a root-level
@@ -66,8 +69,8 @@ const BOUNDARY = '(?<![\\w@.\\-:/])';
 const PATH_TOKEN = new RegExp(`${BOUNDARY}[\\w@.-]+(?:/[\\w@.-]+)*\\.(?:${EXT})\\b`, 'g');
 /**
  * The second shape a pointer takes. A directory carries no extension, so PATH_TOKEN
- * cannot see one - and `.agents/tasks/` is the pointer this whole file was raised
- * about.
+ * cannot see one - and a pointer into the task directories is what this whole file
+ * was raised about.
  */
 const DIR_TOKEN = new RegExp(`${BOUNDARY}[\\w@.-]+(?:/[\\w@.-]+)*/`, 'g');
 /** No boundary, deliberately: this one refuses rather than resolves, so a lookbehind could
@@ -98,6 +101,42 @@ const extractCitations = (text: string): string[] => [...new Set(text.match(CITA
 
 const extractBackticked = (text: string): string[] =>
   [...text.matchAll(BACKTICKED)].map((m) => m[1].trim());
+
+/**
+ * Every way prose in this tree names the plan without a path: the plan by name; a
+ * row, item, finding, decision, trap, question or stage by number; an invariant by
+ * number or lettered; a pull request; a round of reviewing or of fixing; a decision,
+ * invariant, review finding, question, settled item or memo finding by its letter and
+ * number, and a lettered decision; a section; a zero-padded task id with an optional
+ * stage letter. No boundary can be loosened to dodge a real hit, and a false positive
+ * is one word to rephrase.
+ *
+ * The lookbehinds are what let a stored value written in quotes, a decimal, a grouped
+ * thousand and a figure with a thin space through, and the stage-letter range is what
+ * keeps a word that begins with a capital and digits from reading as a reference.
+ * Case-sensitive on the letters: a lower-case letter and a digit is a variable, not a
+ * reference. What the pattern cannot see is stated in backend/test/SPEC.md.
+ */
+const PLAN = new RegExp(
+  [
+    String.raw`\b(?:ROADMAP|[Rr]oadmap)\b`,
+    String.raw`\b(?:[Rr]ows?|[Ii]tems?|[Ff]indings?|[Dd]ecisions?|[Tt]raps?|[Qq]uestions?|[Ss]tages?)\s+\d+[a-e]?`,
+    String.raw`\b[Ii]nvariants?\s+(?:\d+|\([a-z]\))`,
+    String.raw`\bPR\s?#\d+`,
+    String.raw`\b(?:review|fix) rounds?\b`,
+    String.raw`(?<!#)\b(?:D|I|R|Q|S|MD|M)-?\d+[a-e]?\b`,
+    String.raw`\bD-[A-Z]\b`,
+    String.raw`§\s?\d+`,
+    String.raw`(?<![\w.,'"])(?<!\d\s)0\d\d[a-e]?\b`,
+  ].join('|'),
+  'g',
+);
+
+type Hit = { token: string; offset: number };
+
+/** Offsets and not a Set of tokens, because a hit is reported on the line it sits on. */
+const extractPlan = (text: string): Hit[] =>
+  [...text.matchAll(PLAN)].map((m) => ({ token: m[0], offset: m.index }));
 
 interface IgnoreRule {
   readonly source: string;
@@ -156,7 +195,7 @@ const parseGitignore = (text: string): IgnoreRule[] =>
         negated,
         dirOnly,
         // an interior slash anchors a pattern to the repository root; without one it
-        // matches a name at any depth, which is what carries *.pdf into backend/data/
+        // matches a name at any depth, which is what carries *.pdf into the data folder
         anchored: rooted || pattern.includes('/'),
         re: toRegex(pattern),
       };
@@ -166,14 +205,14 @@ const parseGitignore = (text: string): IgnoreRule[] =>
  * git's model rather than substring containment: every prefix of the path, every
  * pattern in file order, last match wins, a `!` line un-ignores. Containment would
  * refuse `.agents/README.md`, which is published; matching only the full path would
- * permit `.agents/tasks/<id>/decisions.md`, which is not, because what excludes it is
- * the pattern hitting its parent directory.
+ * permit a decisions file two levels inside the ignored directory beside it, which is
+ * not, because what excludes it is the pattern hitting its parent directory.
  *
  * A file under an excluded directory cannot be re-included, so a level that comes out
  * ignored ends the walk.
  *
  * A trailing slash is how a caller says the last level is a directory - a directory
- * citation in a spec, and this file's own walk. Without it `backend/data/` is tested
+ * citation in a spec, and this file's own walk. Without it the data folder is tested
  * as a file and every dirOnly pattern declines to look at it.
  */
 const isIgnored = (p: string, rules: readonly IgnoreRule[]): boolean => {
@@ -211,21 +250,79 @@ const KNOWN_UNPUBLISHED = [
 ];
 
 /**
- * SPEC_DIRS holds one direction and only one: a spec that was deleted. The other is a
- * spec that was written and not declared, which no clause here reads and which
- * therefore rots with the suite green. The walk skips what isIgnored denies rather
- * than a second skip list by hand - an unpublished spec is out of scope by the rule the
- * rest of this file already uses - and skips .git, which is not the tree git tracks.
+ * The one walk two sets are read off: the specs on disk, and every source file whose
+ * comments are read below. It skips what isIgnored denies rather than a second skip
+ * list by hand - an unpublished file is out of scope by the rule the rest of this file
+ * already uses, and a file the walk visits and a path a comment names are judged by
+ * the same derivation - and skips .git, which is not the tree git tracks, and
+ * node_modules by name even if the rule that ignores it were to go.
  */
-const findSpecs = (dir: string, prefix = ''): string[] =>
+const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === '.git') return [];
-      return isIgnored(`${rel}/`, RULES) ? [] : findSpecs(path.join(dir, entry.name), rel);
+      return isIgnored(`${rel}/`, RULES) ? [] : findFiles(path.join(dir, entry.name), keep, rel);
     }
-    return entry.name === 'SPEC.md' && !isIgnored(rel, RULES) ? [rel] : [];
+    return keep(entry.name) && !isIgnored(rel, RULES) ? [rel] : [];
   });
+
+/**
+ * SPEC_DIRS holds one direction and only one: a spec that was deleted. The other is a
+ * spec that was written and not declared, which no clause here reads and which
+ * therefore rots with the suite green.
+ */
+const findSpecs = (dir: string): string[] => findFiles(dir, (name) => name === 'SPEC.md');
+
+type Source = { file: string; comments: readonly Comment[] };
+
+/**
+ * Enumerated through the comment tool's own walk and never a walk or a line scan of
+ * this file's own: a second enumerator drifts from the first in its control table
+ * before it drifts in its code, and a line scan cannot tell a comment from the
+ * product's own refusal strings.
+ */
+const SOURCES: Source[] = findFiles(ROOT, (name) => /\.tsx?$/.test(name)).map((file) => ({
+  file,
+  comments: commentsOf(file, read(file)),
+}));
+
+const lineOf = (c: Comment, offset: number): number =>
+  c.line + c.text.slice(0, offset).split('\n').length - 1;
+
+const at = (file: string, c: Comment, offset: number): string => `${file}:${lineOf(c, offset)}`;
+
+const deadPathsIn = ({ file, comments }: Source): string[] =>
+  comments.flatMap((c) =>
+    [...extractPaths(c.text), ...extractDirs(c.text)]
+      .filter((token) => isIgnored(token, RULES))
+      .map(
+        (token) =>
+          `${at(file, c, c.text.indexOf(token))} names ${token}, which .gitignore keeps out of the tree - it exists here and nowhere a reader is; state the rule and cite nothing`,
+      ),
+  );
+
+const planReferencesIn = ({ file, comments }: Source): string[] =>
+  comments.flatMap((c) =>
+    extractPlan(c.text).map(
+      ({ token, offset }) =>
+        `${at(file, c, offset)} says "${token}" - the plan is not in the tree a reader has; write the reason the reference stood for, or nothing`,
+    ),
+  );
+
+const coordinatesIn = ({ file, comments }: Source): string[] =>
+  comments.flatMap((c) => [
+    ...extractCitations(c.text).map(
+      (token) =>
+        `${at(file, c, c.text.indexOf(token))} cites ${token} - a line number is the coordinate that rots first; name the symbol and let the reader look`,
+    ),
+    ...extractBackticked(c.text)
+      .filter((token) => SHA.test(token))
+      .map(
+        (token) =>
+          `${at(file, c, c.text.indexOf(token))} names the commit ${token} - a comment describes the code as it is, and a sha describes it as it was`,
+      ),
+  ]);
 
 /** A trailing slash is a claim about the kind: a directory citation that resolves to a
  * file is as dead a pointer as one that resolves to nothing. */
@@ -278,6 +375,16 @@ describe('every SPEC.md this repository declares', () => {
             `${spec.file} names the commit ${token} - a spec describes the module as it is, and a sha describes it as it was`,
         ),
     ]);
+    expect(found).toEqual([]);
+  });
+
+  it('names no row, item, task, decision or finding of the plan', () => {
+    const found = specs.flatMap((spec) =>
+      extractPlan(spec.text).map(
+        ({ token }) =>
+          `${spec.file} says "${token}" - the plan is not in the tree a reader has; write the reason the reference stood for, or nothing`,
+      ),
+    );
     expect(found).toEqual([]);
   });
 
@@ -340,6 +447,44 @@ describe('every SPEC.md this repository declares', () => {
         `${spec.file} reads "${lines[0]}" - the flip out of draft is the owner's review and there is no third value to hide it behind`,
       ).toContain(lines[0]);
     }
+  });
+});
+
+describe('every comment in the .ts and .tsx files .gitignore leaves in the tree', () => {
+  it('reads the whole tree, the config files beside the packages included, and enters nothing ignored', () => {
+    const files = SOURCES.map((s) => s.file);
+    // one from every directory the walk is meant to reach, written out: a future ignore
+    // line matching one of them by name drops the directory with every clause green
+    for (const anchor of [
+      'backend/drizzle.config.ts',
+      'backend/vitest.config.ts',
+      'web/vite.config.ts',
+      'web/vitest.config.ts',
+      'backend/src/app.ts',
+      'backend/scripts/comment-tokens.ts',
+      'backend/test/specs.test.ts',
+      'web/src/main.tsx',
+    ]) {
+      expect(files, `${anchor} is not in the walked set - the clauses below pass over it`).toContain(
+        anchor,
+      );
+    }
+    const entered = files.filter((f) =>
+      f.split('/').some((part) => part === 'node_modules' || part === 'dist'),
+    );
+    expect(entered).toEqual([]);
+  });
+
+  it('names nothing a reader of the public tree cannot open', () => {
+    expect(SOURCES.flatMap(deadPathsIn)).toEqual([]);
+  });
+
+  it('names no row, item, task, decision or finding of the plan', () => {
+    expect(SOURCES.flatMap(planReferencesIn)).toEqual([]);
+  });
+
+  it('carries no line citation and no commit sha in any comment', () => {
+    expect(SOURCES.flatMap(coordinatesIn)).toEqual([]);
   });
 });
 
@@ -458,5 +603,182 @@ describe('the rules those clauses are built from', () => {
       permitted,
       'a dirOnly pattern declines to look at a path whose last level it reads as a file, so without the trailing slash a directory citation ships the dead pointer this clause exists to stop',
     ).toEqual([]);
+  });
+
+  /**
+   * One fixture per way the plan gets named, each run on its own through extractPlan:
+   * joined into one text, a fixture that stopped matching hides behind its neighbours.
+   */
+  const REFERENCES = [
+    'ROADMAP 4.2',
+    'roadmap item 10',
+    'row 54',
+    'rows 26a, 26b',
+    'Row 65',
+    "item 10's D23",
+    'finding 6',
+    'findings 8, 13',
+    'settled decision 2',
+    'Trap 9',
+    'trap 3',
+    'question 4',
+    'stage 8',
+    'Stages 2, 3 and 8',
+    'invariant 3',
+    'invariant (a)',
+    'PR #75',
+    'PR#75',
+    'review round',
+    'four review rounds',
+    'fix round',
+    'D3',
+    'I4(a)',
+    'I2b',
+    'Q1',
+    'R10',
+    'S3',
+    'MD8',
+    'M6',
+    "the memo's M3",
+    "D-A's evidence",
+    "row 25's §20",
+    'see §7',
+    '054 D19',
+    '052b',
+    '(007 D5)',
+    'pre-037a',
+    'since row 021',
+    "011b's",
+  ];
+
+  /** The shapes the tree writes beside a capital, a hyphen, a digit or a zero that are not references. */
+  const NOT_REFERENCES = [
+    'the first row',
+    'the header row',
+    "Excel's last row",
+    'the capture stage',
+    'stages the upload before the read',
+    'the invariant a test holds',
+    'UTF-16',
+    'N26',
+    'C24',
+    'DE00',
+    'TS2578',
+    'V8',
+    'COM1',
+    'ES2022',
+    'SHA-256',
+    'I18n',
+    '#D50000',
+    'A-Z stand for 10..35',
+    '" [A-Z]{3}"',
+    'D-Day',
+    "'007'",
+    '1.005',
+    '1,000',
+    '1,200,000',
+    '1,082 EUR',
+    '10_000',
+    '5 000-character',
+    '0700 on a directory',
+    'U+0020',
+    '0x30',
+    '2026-08-08',
+    '100.00',
+    'md5 of the bytes',
+    'r2 is the second remainder',
+  ];
+
+  it('refuses every way a comment names the plan', () => {
+    const missed = REFERENCES.filter((text) => extractPlan(`// ${text}`).length === 0);
+    expect(missed, 'a reference the pattern no longer sees').toEqual([]);
+  });
+
+  it('lets a number, a code and a name that are not references through', () => {
+    const hit = NOT_REFERENCES.filter((text) => extractPlan(`// ${text}`).length > 0).map(
+      (text) => `${text}: ${extractPlan(`// ${text}`).map((h) => h.token).join(', ')}`,
+    );
+    expect(hit, 'a false positive is one word to rephrase, and these are the words the tree uses').toEqual(
+      [],
+    );
+  });
+
+  const crafted = (fileName: string, lines: string[]): Source => ({
+    file: fileName,
+    comments: commentsOf(fileName, lines.join('\n')),
+  });
+
+  it('reads comments and never strings, in .ts and in .tsx', () => {
+    const source = crafted('crafted.ts', [
+      "const refusal = 'row 2: could not parse the date';",
+      "const bank = 'Q1 Bank';",
+      'const doc = `/** ROADMAP row 65 */`;',
+      "const where = '.agents/tasks/054-x/decisions.md';",
+      '// row 54',
+      'const a = 1;',
+      '/** see DEBT.md */',
+      'const b = 2;',
+    ]);
+    expect(source.comments.map((c) => [c.line, c.text])).toEqual([
+      [5, '// row 54'],
+      [7, '/** see DEBT.md */'],
+    ]);
+    expect(planReferencesIn(source)).toEqual([
+      'crafted.ts:5 says "row 54" - the plan is not in the tree a reader has; write the reason the reference stood for, or nothing',
+    ]);
+    expect(deadPathsIn(source)).toEqual([
+      'crafted.ts:7 names DEBT.md, which .gitignore keeps out of the tree - it exists here and nowhere a reader is; state the rule and cite nothing',
+    ]);
+
+    const jsx = crafted('crafted.tsx', [
+      "const label = 'row 2';",
+      'export const x = <p>{/* row 54 */}{label}</p>;',
+    ]);
+    expect(jsx.comments.map((c) => [c.line, c.text])).toEqual([[2, '/* row 54 */']]);
+    expect(planReferencesIn(jsx).map((r) => r.split(' - ')[0])).toEqual([
+      'crafted.tsx:2 says "row 54"',
+    ]);
+  });
+
+  it('reports a hit on the line of a docblock it sits on, not the line the block opens on', () => {
+    const source = crafted('crafted.ts', [
+      '/**',
+      ' * The reason, stated.',
+      ' * Then a pointer at row 54, and',
+      ' * a citation of app.ts:12.',
+      ' */',
+      'const a = 1;',
+    ]);
+    expect(planReferencesIn(source).map((r) => r.split(' says')[0])).toEqual(['crafted.ts:3']);
+    expect(coordinatesIn(source).map((r) => r.split(' cites')[0])).toEqual(['crafted.ts:4']);
+  });
+
+  it('denies a path only this machine can open inside a comment, and permits a published one', () => {
+    const source = crafted('crafted.ts', [
+      '/** see DEBT.md */',
+      'const a = 1;',
+      '// .agents/tasks/054-x/decisions.md',
+      'const b = 2;',
+      '/* backend/data/ */',
+      'const c = 3;',
+      '// .agents/README.md and backend/src/app.ts',
+      'const d = 4;',
+    ]);
+    expect(deadPathsIn(source).map((r) => r.split(',')[0])).toEqual([
+      'crafted.ts:1 names DEBT.md',
+      'crafted.ts:3 names .agents/tasks/054-x/decisions.md',
+      'crafted.ts:3 names .agents/tasks/054-x/',
+      'crafted.ts:5 names backend/data/',
+    ]);
+  });
+
+  it('refuses a line citation and a commit sha inside a comment, and not a file or a name', () => {
+    const red = crafted('crafted.ts', ['// see app.ts:12', 'const a = 1;', '// since `cefb277`', 'const b = 2;']);
+    expect(coordinatesIn(red).map((r) => r.split(' - ')[0])).toEqual([
+      'crafted.ts:1 cites app.ts:12',
+      'crafted.ts:3 names the commit cefb277',
+    ]);
+    const green = crafted('crafted.ts', ['// see app.ts', 'const a = 1;', '// the `abc` helper', 'const b = 2;']);
+    expect(coordinatesIn(green)).toEqual([]);
   });
 });

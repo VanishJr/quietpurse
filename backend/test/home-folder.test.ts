@@ -1,5 +1,5 @@
 /**
- * The folder on the person's own disk (row 72, FIXES findings 6 and 10).
+ * The folder on the person's own disk.
  *
  * Two things nothing else holds. A folder that cannot be written to has to say so in
  * words a person can act on, and for the database that means saying it BEFORE the
@@ -7,9 +7,9 @@
  * migration is reported as the SQL it was running with every bound value in it, and
  * the permission that actually stopped it is two levels down on `cause`.
  *
- * And row 72 removed the encryption that used to stand between a bank statement and a
- * second account on the machine, so the mode on the folder is now the whole of what
- * is left. It is asserted on the disk, because a mode passed to mkdir on a directory
+ * And the sealing under a server key went with the hosted product, so the mode on the
+ * folder is now the whole of what stands between a bank statement and a second account
+ * on the machine. It is asserted on the disk, because a mode passed to mkdir on a directory
  * that already exists does nothing and would look identical in the source.
  */
 import fs from 'fs/promises';
@@ -100,8 +100,7 @@ describe('the folder Finto keeps everything in', () => {
 });
 
 /**
- * The one line a person reads off a console when the app refuses to start (FIXES
- * finding 6, and the half of finding 18 that makes the documents true again).
+ * The one line a person reads off a console when the app refuses to start.
  *
  * These are the two shapes a boot failure actually arrives in, and they want opposite
  * orderings from causeChain: a wrapper whose own message is the SQL, and a boot check

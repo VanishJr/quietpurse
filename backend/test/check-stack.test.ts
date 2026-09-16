@@ -44,7 +44,7 @@ const observed = (r: ChildRecord, over: Partial<Observed> = {}): Observed => ({
 });
 
 /**
- * I3. Written first because it is the whole reason shouldKill exists: a manifest
+ * Written first because it is the whole reason shouldKill exists: a manifest
  * left behind by a crashed run names a pid Windows has since handed to something
  * else, and the fix meant to prevent the taskkill incident is what reproduces it.
  */
@@ -87,8 +87,7 @@ describe('shouldKill', () => {
   });
 });
 
-/** I1. The owner's database and the suite's are one typo apart from the check's. */
-/** I2. */
+/** The owner's database and the suite's are one typo apart from the check's. */
 describe('assertCheckPort', () => {
   it.each([4000, 5173, 5174, 5175])('refuses %i, which the owner is on or drifts onto', (port) => {
     expect(() => assertCheckPort('app', port)).toThrow(/owner's stack/);
@@ -112,7 +111,6 @@ describe('assertCheckPort', () => {
   });
 });
 
-/** I2b. */
 describe('the child command lines', () => {
   it('pins the web port with --strictPort, so a busy port is a failure and not a drift', () => {
     const argv = webArgv({ viteBin: 'vite.js', port: 5473, host: 'localhost', marker: MARKER });
@@ -193,7 +191,6 @@ describe('assertNoOptions', () => {
   });
 });
 
-/** I4. */
 /**
  * Where the check's own statements land. FINTO_HOME decides the database and it does
  * NOT decide the statements folder on its own: DOCUMENT_STORE_PATH beats it, and the
@@ -260,7 +257,6 @@ describe('assertRunPaths', () => {
   });
 });
 
-/** I5. */
 describe('reuseVerdict', () => {
   const live = { record: record(), verdict: { kill: true } as const };
   const dead = { record: record({ pid: 1 }), verdict: { kill: false, reason: 'gone' } as const };

@@ -53,7 +53,7 @@ describe('insertTransactions', () => {
       0,
     );
     // ...and the row already there keeps the description it was stored with: a
-    // duplicate is skipped, never merged (correcting facts belongs to ROADMAP 4.4)
+    // duplicate is skipped, never merged (correcting a fact is not dedup's job)
     const stored = await getTransaction(await idOf('ROSSMANN'));
     expect(stored!.description).toBe('ROSSMANN');
   });
@@ -168,11 +168,13 @@ const violated = async (write: Promise<unknown>): Promise<unknown> => {
 };
 
 /**
- * The column is the guard, and it was taken for a producer that does not exist yet:
- * 37b reads a fee off a PDF and never goes through readFee, so nothing else stands
- * between it and a negative fee (ROADMAP 37a, D2). The CHECK is declared in
- * schema.ts and emitted by drizzle-kit - a toolchain that stopped emitting it would
- * leave the migration without it, the guarantee gone, and every other test green.
+ * The column is the guard: a restore hands transactions whatever fee a backup carries,
+ * because sanitizeRow checks a column's name, its type and that a number is finite and
+ * never its sign, and restoreBackup inserts what it lets through straight into the
+ * table. So the CHECK is the one guard on that path and the last one beneath every
+ * producer's own reading. It is declared in schema.ts and emitted by drizzle-kit - a
+ * toolchain that stopped emitting it would leave the migration without it, the
+ * guarantee gone, and every other test green.
  *
  * Through the data layer rather than raw SQL, and by the constraint's own name: a
  * renamed column that quietly dropped the check would still throw something.

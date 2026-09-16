@@ -47,7 +47,7 @@ describe('the Goal screen’s month bars', () => {
 
   /*
    * A month with no base is not 0% self-sufficient, and this pins what the screen does
-   * today rather than endorsing it — it is DEBT.md's own item, not this row's.
+   * today rather than endorsing it — it is a known gap, not this case's to close.
    */
   it('answers zero for a month with nothing to be a share of', () => {
     const [bar] = selfSufficiencyBars([month({ month: '2026-03', ownIncome: 500 })], false, 0);

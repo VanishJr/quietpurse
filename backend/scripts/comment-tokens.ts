@@ -1,9 +1,9 @@
 /**
  * Two readings of one parse of one source text: the leaf-token stream that says
- * whether a change was comment-only, and the comment census that says how much of a
- * file is comment. Separate from comment-check.ts because a test that imported the
- * entry would drag in argv, the filesystem and `git show` to reach one walk: nothing
- * here may run at import time or reach a module but `typescript`, and
+ * whether a change was comment-only, and the comment list that the census folds into
+ * how much of a file is comment. Separate from comment-check.ts because a test that
+ * imported the entry would drag in argv, the filesystem and `git show` to reach one
+ * walk: nothing here may run at import time or reach a module but `typescript`, and
  * comment-tokens.test.ts holds both.
  */
 import ts from 'typescript';
@@ -15,6 +15,8 @@ export type Verdict =
   | { same: false; index: number; base?: Token; work?: Token };
 
 export type Census = { commentLines: number; nonBlank: number; blocks: number };
+
+export type Comment = { pos: number; end: number; line: number; lineEnd: number; text: string };
 
 /** `parseDiagnostics` is not on the public type; the refusal below is the only reader. */
 type Parsed = ts.SourceFile & { parseDiagnostics?: readonly ts.Diagnostic[] };
@@ -94,25 +96,31 @@ export function compareSources(fileName: string, base: string, work: string): Ve
 }
 
 /**
- * A comment line is a source line any part of a comment range occupies; the answer is
- * the distinct such lines, the file's non-blank lines and the distinct ranges. The
- * share those make is not a partition — a line carrying code and a trailing comment
- * is in both numerator and denominator — so it is a floor on lines touched by a
- * comment and never the fraction of a file that is prose.
+ * Every comment range once, in file order, delimiters included: `text` is the raw
+ * slice, so a reader matching against it sees `//` and `/*` and nothing here decides
+ * what a comment is a second time. `line` and `lineEnd` are 1-based.
  */
-export function censusOf(fileName: string, text: string): Census {
+export function commentsOf(fileName: string, text: string): Comment[] {
   const source = parseSource(fileName, text);
-  const lines = new Set<number>();
-  const spans = new Set<string>();
+  const found = new Map<number, Comment>();
+  const jsxText: [number, number][] = [];
   const add = (range: ts.CommentRange): void => {
-    const key = `${range.pos}:${range.end}`;
-    if (spans.has(key)) return;
-    spans.add(key);
-    const from = source.getLineAndCharacterOfPosition(range.pos).line;
-    const to = source.getLineAndCharacterOfPosition(range.end).line;
-    for (let line = from; line <= to; line += 1) lines.add(line);
+    if (found.has(range.pos)) return;
+    found.set(range.pos, {
+      pos: range.pos,
+      end: range.end,
+      line: source.getLineAndCharacterOfPosition(range.pos).line + 1,
+      lineEnd: source.getLineAndCharacterOfPosition(range.end).line + 1,
+      text: text.slice(range.pos, range.end),
+    });
   };
+  const jsDoc = (node: ts.Node): boolean =>
+    node.kind === ts.SyntaxKind.JSDoc ||
+    (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode);
   const walk = (node: ts.Node): void => {
+    /** The block is a leading range of what it documents; inside it a `//` is prose. */
+    if (jsDoc(node)) return;
+    if (node.kind === ts.SyntaxKind.JsxText) jsxText.push([node.pos, node.end]);
     if (node.kind !== ts.SyntaxKind.SourceFile) {
       for (const range of ts.getLeadingCommentRanges(text, node.pos) ?? []) add(range);
       /** A comment sharing a line with the code before it is a leading range of nothing. */
@@ -121,6 +129,29 @@ export function censusOf(fileName: string, text: string): Census {
     for (const child of node.getChildren(source)) walk(child);
   };
   walk(source);
+  /**
+   * Started inside rendered text, a scanner reads a `//` there as a comment - as the
+   * text's own leading range or as the trailing range of the brace before it - where
+   * tokensOf reads the same characters as the JsxText they are.
+   */
+  const inJsxText = (c: Comment): boolean =>
+    jsxText.some(([pos, end]) => c.pos >= pos && c.pos < end);
+  return [...found.values()]
+    .filter((c) => !inJsxText(c))
+    .sort((a, b) => a.pos - b.pos);
+}
+
+/**
+ * A comment line is a source line any part of a comment range occupies; the answer is
+ * the distinct such lines, the file's non-blank lines and the distinct ranges. The
+ * share those make is not a partition — a line carrying code and a trailing comment
+ * is in both numerator and denominator — so it is a floor on lines touched by a
+ * comment and never the fraction of a file that is prose.
+ */
+export function censusOf(fileName: string, text: string): Census {
+  const comments = commentsOf(fileName, text);
+  const lines = new Set<number>();
+  for (const c of comments) for (let line = c.line; line <= c.lineEnd; line += 1) lines.add(line);
   const nonBlank = text.split(/\r?\n/).filter((line) => line.trim() !== '').length;
-  return { commentLines: lines.size, nonBlank, blocks: spans.size };
+  return { commentLines: lines.size, nonBlank, blocks: comments.length };
 }

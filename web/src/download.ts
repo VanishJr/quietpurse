@@ -1,7 +1,7 @@
 /**
  * Saving bytes the API already handed over. Split out from the components so the one
  * call to URL.createObjectURL takes a Blob and nothing else — no Response, no path,
- * so a body nobody checked cannot become a file (010 D23).
+ * so a body nobody checked cannot become a file.
  */
 
 /** The server's own cap, so a name is not cut differently at the two ends. */

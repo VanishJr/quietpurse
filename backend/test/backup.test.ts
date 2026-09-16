@@ -195,7 +195,7 @@ describe('backup and restore (JSON)', () => {
   });
 
   /**
-   * The operator's own upgrade path (ROADMAP 5.4): a backup taken before the bank
+   * The operator's own upgrade path: a backup taken before the bank
    * integrations were deleted is the file they restore from AFTER dropping and
    * recreating the database, so it has to keep working with tables and columns this
    * schema no longer has. The two halves are held differently and both are asserted

@@ -1,5 +1,5 @@
 /**
- * The two account routes over real HTTP (ROADMAP 5.1, row 25): creating an account
+ * The two account routes over real HTTP: creating an account
  * before any statement names one, and renaming or removing one afterwards.
  *
  * Driven through supertest, because what is worth asserting here
@@ -20,8 +20,9 @@ const csvFile = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
 
 /**
- * An empty account over the door that creates one. Since row 26b it is the only door
- * that does, so every account this file uploads into comes through here.
+ * An empty account over the door that creates one. Since the upload stopped taking a name
+ * it is the only door that does, so every account this file uploads into comes through
+ * here.
  */
 const makeAccount = async (name: string): Promise<string> => {
   const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
@@ -126,7 +127,7 @@ describe('POST /api/accounts', () => {
   });
 
   /**
-   * Row 65's first half: the currency was required, so the "+ Add" control that asks
+   * The currency was required, so the "+ Add" control that asks
    * for a name alone had to guess one on the server's behalf. It is defaulted here
    * now, from the same setting the client was reading.
    */
@@ -140,7 +141,7 @@ describe('POST /api/accounts', () => {
 
   /**
    * Optional is not unchecked, and the sentence no longer says "required". The upload
-   * used to compose this one too; since row 26b it takes no currency at all, so this
+   * used to compose this one too; it takes no currency at all now, so this
    * schema is left with the two account doors.
    */
   it('still refuses a currency that is not a 3-letter code', async () => {
@@ -172,10 +173,10 @@ describe('the account name bound is one number at both doors that write one', ()
   });
 
   /**
-   * The failure decision 10 names: a name an account already has that its own rename
-   * endpoint would refuse. It is reachable only if the doors bound different strings,
-   * which is what one schema - trimming before it bounds - prevents. The upload was
-   * the third door until row 26b; the two that remain are the two that write a name.
+   * The failure: a name an account already has that its own rename endpoint would refuse.
+   * It is reachable only if the doors bound different strings, which is what one schema -
+   * trimming before it bounds - prevents. The upload was the third door before it stopped
+   * taking a name; the two that remain are the two that write a name.
    */
   it('and a name accepted on create can be sent back to the rename endpoint', async () => {
     // its own filler, because the case above already holds `longest`
@@ -250,7 +251,7 @@ describe('PATCH /api/accounts/:id', () => {
 });
 
 /**
- * Row 65's second half, on the wire. The currency an account was created in can be
+ * The correction on the wire. The currency an account was created in can be
  * corrected, and only while the account holds no rows of its own - balance_cents is
  * the plain sum of amount_cents whatever each row says, so re-denominating a
  * populated account relabels a total that was never in the new unit and nothing
@@ -258,8 +259,7 @@ describe('PATCH /api/accounts/:id', () => {
  *
  * Both halves of that guard answer here, and with different sentences: a committed
  * import is permanent and a staged one is a discard away. There is no control for
- * any of it yet (the account menu is row 27's), so these requests are the whole
- * surface.
+ * any of it in the client, so these requests are the whole surface.
  */
 describe('PATCH /api/accounts/:id {currency}', () => {
   const HELD =
@@ -344,12 +344,12 @@ describe('PATCH /api/accounts/:id {currency}', () => {
   });
 
   /**
-   * The trap S3 exists for, run to the end. An import stamps each of its rows with
-   * the account's currency when the file is READ, and nothing re-resolves that at
-   * confirm - so a correction made while an import waits would stand on the account
-   * and be reverted on its rows, which then refuse every further change. The guard
-   * refuses inside that window instead, and the sentence names the one way through:
-   * discard, correct, upload again.
+   * The trap in correcting a currency while an import waits, run to the end. An import
+   * stamps each of its rows with the account's currency when the file is READ, and
+   * nothing re-resolves that at confirm - so a correction made while an import waits
+   * would stand on the account and be reverted on its rows, which then refuse every
+   * further change. The guard refuses inside that window instead, and the sentence names
+   * the one way through: discard, correct, upload again.
    */
   it('refuses while an import is staged, and the order the sentence names works', async () => {
     const account = await create('Staged Correction');
@@ -382,10 +382,10 @@ describe('PATCH /api/accounts/:id {currency}', () => {
 });
 
 /**
- * Row 11a: DELETE, which is not the PATCH above with `hidden` set. Hiding is
+ * DELETE, which is not the PATCH above with `hidden` set. Hiding is
  * reversible and keeps every row; this destroys the account, its transactions, its
  * imports, their staged rows and their stored statements, and answers with the
- * counts of what it actually removed (ROADMAP 5.1, 6.1).
+ * counts of what it actually removed.
  */
 describe('DELETE /api/accounts/:id', () => {
   const STAGED =
@@ -427,11 +427,11 @@ describe('DELETE /api/accounts/:id', () => {
     }[];
 
   /**
-   * Trap 5 and Trap 6 together: numeric literals after JSON.stringify catch a count
-   * that arrived as a string from node-postgres, and the key set catches a field that
-   * arrived undefined through rowsVia - toEqual alone treats an absent key and an
-   * undefined one as the same thing. The three numbers are deliberately different:
-   * equal ones would let a dropped `document_key_version` pass as a correct answer.
+   * Numeric literals after JSON.stringify catch a count that arrived as a string from
+   * node-postgres, and the key set catches a field that arrived undefined through rowsVia
+   * - toEqual alone treats an absent key and an undefined one as the same thing. The
+   * three numbers are deliberately different: equal ones would let a dropped
+   * `document_key_version` pass as a correct answer.
    */
   it('answers with what it destroyed, and with nothing else', async () => {
     const account = await create('Destroyed Counts');
@@ -465,10 +465,10 @@ describe('DELETE /api/accounts/:id', () => {
   });
 
   /**
-   * Settled decision 2 on the wire. The state is momentary and one click from over
-   * in either direction, and the sentence says so - where the currency correction's
-   * near-identical refusal offers only discard, because confirming defeats that one
-   * and is harmless here.
+   * The waiting import's refusal on the wire. The state is momentary and one click from
+   * over in either direction, and the sentence says so - where the currency correction's
+   * near-identical refusal offers only discard, because confirming defeats that one and
+   * is harmless here.
    *
    * One test, two holders: the clause is on the imports statement AND on the
    * accounts one, and dropping either turns this 200. Without the first the imports
@@ -492,7 +492,7 @@ describe('DELETE /api/accounts/:id', () => {
     expect(await readAccount(account.id)).toBeUndefined();
   });
 
-  /** Trap 7: the accounts people delete are the ones they hid first. */
+  /** The accounts people delete are the ones they hid first. */
   it('deletes an account that was removed from the app', async () => {
     const account = await create('Hidden Then Deleted Http');
     await commit(account.id, csvRows('2026-07-04,-74.00,Hidden and full'));
@@ -505,7 +505,7 @@ describe('DELETE /api/accounts/:id', () => {
   });
 
   /**
-   * Trap 9 and the name, which are the same class of thing: imports_file_hash_unique
+   * The hash and the name, which are the same class of thing: imports_file_hash_unique
    * is partial on `committed` and accounts_name_unique is not partial at all, so
    * destroying the account has to free both. A delete that left either held would
    * make the statement permanently un-importable and the name permanently unusable,
@@ -531,11 +531,10 @@ describe('DELETE /api/accounts/:id', () => {
   });
 
   /**
-   * The consequence ROADMAP row 11 states in its own words: delete an account and
-   * its transfers "re-read as income and expense across the whole history,
-   * retroactively". The surviving leg's monthly figures move, legitimately and with
-   * nothing on screen saying so - which is 011b's sentence to decide and this row's
-   * to leave possible.
+   * The consequence of a real delete: its transfers re-read as income and expense across
+   * the whole history, retroactively. The surviving leg's monthly figures move,
+   * legitimately and with nothing on screen saying so - which is the client's sentence to
+   * decide and the route's to leave possible.
    *
    * Asserted as the EFFECT and not as the call: `reclassifyAll` appears nowhere else
    * in this suite, so "the route calls it" is held by nothing at all. Removing the
@@ -561,12 +560,12 @@ describe('DELETE /api/accounts/:id', () => {
 });
 
 /**
- * Row 26a's confirm gate on the wire. This is the two-tab case at HTTP scale: the
- * upload proved the account was there, the account was removed in another tab, and
- * Confirm is pressed on a summary card that is still on screen. The status is what
+ * The confirm gate on the picked account, on the wire. This is the two-tab case at HTTP
+ * scale: the upload proved the account was there, the account was removed in another tab,
+ * and Confirm is pressed on a summary card that is still on screen. The status is what
  * matters as much as the sentence - a 409 is the user's to fix, where the 500
- * ImportNotConfirmable answers would page an operator for a state the user created,
- * and every clause of its sentence would be false here.
+ * ImportNotConfirmable answers would page an operator for a state the user created, and
+ * every clause of its sentence would be false here.
  */
 describe('a confirm whose account was removed while it waited', () => {
   it('answers 409 with the way out, and confirms once the account is restored', async () => {
@@ -601,7 +600,7 @@ describe('a confirm whose account was removed while it waited', () => {
 });
 
 /**
- * The sibling above's harder half (row 26b): the account was not hidden, it was
+ * The sibling above's harder half: the account was not hidden, it was
  * deleted, and no request the user can make brings it back - ids are minted
  * server-side. So the sentence may not say "try again", which is what disqualified
  * reusing account-hidden's, and this is the only place that sentence is asserted at

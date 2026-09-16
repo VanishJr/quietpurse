@@ -1,5 +1,5 @@
 /**
- * Provenance (ROADMAP 4.4): every upload is an `imports` row, and deleting that
+ * Provenance: every upload is an `imports` row, and deleting that
  * row takes the transactions it wrote with it.
  *
  * The ordinal test near the bottom is the one this suite exists for. Deleting an
@@ -199,7 +199,7 @@ describe('imports: the file layer', () => {
   });
 
   /**
-   * The reason the document is written BEFORE the parse (ROADMAP 4.5): "my import
+   * The reason the document is written BEFORE the parse: "my import
    * came out wrong" is undiagnosable without the input, and the imports that went
    * wrong are exactly the failed ones.
    */
@@ -296,7 +296,7 @@ describe('imports: the file layer', () => {
     }
 
     // the disk is fixed: the same bytes go in, because only a `committed` import
-    // ever claimed the hash (ROADMAP 4.3)
+    // ever claimed the hash
     const retried = await importAndConfirm({ accountId, bytes: Buffer.from(csv, 'utf8') });
     expect(retried.duplicate).toBeUndefined();
     expect(retried.inserted).toBe(1);
@@ -323,7 +323,7 @@ describe('imports: the file layer', () => {
   });
 
   /**
-   * ROADMAP 4.4's ordinal case, with the numbers that actually break it: a hole
+   * The ordinal case, with the numbers that actually break it: a hole
    * below the incoming file's row count, and a live ordinal above it.
    *
    *   A claims 2 -> ordinals 1,2      B claims 4 -> adds 3,4
@@ -413,7 +413,7 @@ describe('imports: the file layer', () => {
 });
 
 /**
- * ROADMAP row 66: the page is capped, the totals are not. What is under test is that
+ * The page is capped, the totals are not. What is under test is that
  * the three totals describe the whole FILTERED set and the page describes the first
  * `limit` of it, so a panel can say how many are not listed instead of counting what
  * it was sent.
@@ -449,7 +449,7 @@ describe('listImports: the filter and the totals', () => {
     const mark = seq;
     // the account first, and with these ids rather than minted ones: listImports
     // filters on the literal below. An upload cannot stage into an account that is
-    // not there, so neither may this (row 26b)
+    // not there, so neither may this
     await upsertAccount({ id: accountId, provider: 'upload', name, currency: 'EUR', balance: 0 });
     const record = await createImport({
       fileHash: `totals-${mark}`,
@@ -464,7 +464,7 @@ describe('listImports: the filter and the totals', () => {
     const confirmed = await confirmImport(record.id);
     expect(confirmed, `confirming ${record.id}`).toMatchObject({ confirmed: true });
     // the pointer only; no bytes are written, and documentAvailable is about the
-    // pointer (010 D5)
+    // pointer
     await recordImportDocument(record.id);
     return record.id;
   }
