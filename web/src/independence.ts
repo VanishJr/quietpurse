@@ -2,21 +2,12 @@ import { MONTHS_SHORT } from './format';
 import { IndependenceMonth } from './types';
 
 /**
- * The Goal screen's month bars, which are the one chart in this app that is not money.
- *
- * Lifted out of the screen so that the two figures below can be held by a case: the
- * screen has no test file of its own, and the chart itself cannot be checked anywhere
- * — recharts measures a 0x0 box in jsdom.
- */
-
-/**
  * How high a bar is allowed to draw. One month far over the line would flatten every
  * other bar into the axis, and the shape of the year is what the chart is for.
  */
 const DRAWN_MAX_PCT = 150;
 
 export interface SelfSufficiencyBar {
-  /** the bar's height, %, capped at `DRAWN_MAX_PCT` */
   drawn: number;
   /**
    * the same month's true ratio, %, uncapped — and the only one of the two that may be

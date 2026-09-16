@@ -1,10 +1,5 @@
 import { ReadAs, ReadColumns, SeriesCounts } from './types';
 
-/**
- * Import status dictionary: the API returns stable slugs, the sentences live here
- * only — the same rule as the providers and the categories. Nothing is ever sent
- * back, so no code path branches on a label.
- */
 export const IMPORT_STATUS_LABELS: Record<string, string> = {
   pending: 'Interrupted',
   awaiting_confirmation: 'Waiting for confirmation',
@@ -13,7 +8,6 @@ export const IMPORT_STATUS_LABELS: Record<string, string> = {
   discarded: 'Discarded',
 };
 
-/** Status label; an unknown value is returned as-is (an older row, a new status). */
 export const importStatusLabel = (status: string): string =>
   IMPORT_STATUS_LABELS[status] ?? status;
 
@@ -42,17 +36,13 @@ export function importStatusNote(status: string, errorDetail: string | null): st
 }
 
 /**
- * What the generic reader is called on this screen. Deliberately a PREFIX of the
- * backend's own title for it — "Any statement (auto-detect the date, amount and
- * description columns)" — and not equal to it: the long form is a chip label, and
- * pasting it into the sentence below would put a parenthetical clause in the middle
- * of a sentence. So the online chip carries more than this sentence names, and only
- * the offline fallback chip is word for word the same; what the backend sends is
- * asserted to START with this string in backend/test/upload.test.ts.
+ * Deliberately a PREFIX of the backend's own title for the generic reader and not equal
+ * to it: the long form is a chip label, and pasted into the sentence below it would put
+ * a parenthetical clause in the middle of a sentence.
  */
 export const GENERIC_PRESET_TITLE = 'Any statement';
 
-/** How much of an unrecognised reader's slug is quoted back — see the default arm. */
+/** How much of an unrecognised reader's slug is quoted back. */
 const UNKNOWN_KIND_MAX = 40;
 
 /** Cut with a mark, so a slug with more behind it does not read as the whole one. */
@@ -83,7 +73,7 @@ const columnClause = (columns: ReadColumns): string =>
  *   never applied to it.
  * - every run checked: the pair is derived and the rows read run unbroken through it.
  * - some checked: the pair is still true and still shown, and the part of it that
- *   rests on a run of one row is named. On the owner's real export that is one of two.
+ *   rests on a run of one row is named.
  * - none checked: every run is a single row, so no balance in the file was ever
  *   compared with another. The lead-in drops to "Read from" here, because nothing was
  *   checked and "Checked against" would be the claim wearing a hat.
@@ -134,22 +124,16 @@ export function balanceClaim(series: SeriesCounts | undefined): { lead: string; 
 }
 
 /**
- * Which reader produced the numbers on the confirmation card. The one thing the counts
- * cannot say: the generic reader has three times now produced every headline figure a
- * Revolut export was expected to have, and not one correct reason.
+ * Which reader produced the numbers on the confirmation card — the one thing the counts
+ * cannot say, and a generic reader can produce every headline figure a bank's export
+ * was expected to have without one correct reason.
  *
  * Total over `kind` with a `never`, not IMPORT_STATUS_LABELS' Record-with-a-fallback:
  * a status arrives from an old database row and may legitimately be unknown, where an
- * arm nobody named here is a build this repository should not be able to produce.
- *
- * The default arm still returns a sentence rather than throwing, and the difference is
- * the whole summary card: the union is the server's declaration by type, so a build of
- * this app cannot name an arm the server does not — but a body can still come from a
- * server of another version than the one this client was built from — `web/dist` is
- * whatever was last built, the backend runs from source — or through a proxy; there is
- * no error boundary in this app, and Discard lives inside this card and nowhere else —
- * so a throw here would leave a staged import that can be neither confirmed nor
- * discarded from the UI at all.
+ * arm nobody named here is a build this repository should not be able to produce. The
+ * default arm still returns a sentence rather than throwing, because a body can come
+ * from a server this client was not built against, and a throw here takes the card
+ * down with the staged import inside it.
  */
 export function readAsSentence(readAs: ReadAs): string {
   // Ahead of the switch, because `readAs.kind` on an absent field throws before the
@@ -170,8 +154,8 @@ export function readAsSentence(readAs: ReadAs): string {
       // and the names that follow would then read as three columns the caller chose
       return `Read with a column mapping sent with this upload — ${columnClause(readAs.columns)}.`;
     case 'pdf-template':
-      // "not a preset" and not "not the preset above": this module is imported by
-      // ImportHistory too, and nothing keeps the sentence on a screen with a chip on it
+      // "not a preset" and not "not the preset above": nothing keeps the sentence on a
+      // screen with a chip on it
       return `Read as a ${readAs.title} PDF statement — a PDF has no column header, so the layout that matched decides the columns, not a preset.`;
     default: {
       const unhandled: never = readAs;

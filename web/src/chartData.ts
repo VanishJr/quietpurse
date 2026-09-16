@@ -1,21 +1,11 @@
 /**
- * A `Chart` turned into requests, and the answers turned into something drawable.
+ * A `Chart` turned into requests, and the answers turned into something drawable: the
+ * one seam between the Analytics screen and the server, with two arms — every account
+ * together, or one account.
  *
- * The one place in the workspace that fetches. `analytics.ts` holds the model and the
- * arithmetic and is pure; the components draw; this is the seam, and it is a seam
- * because a field the reader sets in a dialog decides which SHAPE of body the same two
- * endpoints come back with:
- *
- *  - **Every account together** is `/api/summary` and `/api/summary/months` with no
- *    account named: the whole workspace, converted into its base currency.
- *  - **One account** is the same two with an `accountId` on them: that account's own
- *    rows, in that account's own currency, with nothing converted.
- *
- * Both arms are summed by the server and by the same SQL — a transfer between your own
- * accounts is neither income nor an expense, a refund subtracts from the expenses of
- * the period it landed in. What differs is the UNIT, and a card must print the one it
- * was actually given: `currency` rides with the data for that reason, taken off the
- * body that answered and never off the accounts list.
+ * What differs between the two arms is the UNIT, and a card must print the one it was
+ * given: `currency` rides with the data for that reason, taken off the body that
+ * answered and never off the accounts list.
  */
 import { useEffect, useState } from 'react';
 import { api } from './api';
@@ -57,19 +47,13 @@ export interface ChartLoad {
 }
 
 /**
- * What a fetch actually depends on.
- *
  * Not the whole spec: renaming a chart, and switching which measures a series draws,
- * change nothing about the request — all three measures arrive in one payload. Keying
+ * change nothing about the request — every measure arrives in one payload — and keying
  * the effect on the spec object would refetch on every keystroke in the wizard's name
- * box, which is the one place a spec changes character by character.
- *
- * And the SHAPE rather than the kind, which is what this comment always claimed and the
- * code did not: a line, an area and a column are one payload under three names, so
- * keying on the name made "Change shape" a round trip between charts made of numbers
- * already in hand — with the wizard's live preview replaced by "Reading the numbers…"
- * each time. What a kind adds beyond its shape is whether it wants the window before
- * this one, and that is the other half of the key.
+ * box. And the SHAPE rather than the kind: a line, an area and a column are one payload
+ * under three names, so keying on the name makes changing the shape a round trip
+ * between charts made of numbers already in hand. What a kind adds beyond its shape is
+ * whether it wants the window before this one, and that is the other half of the key.
  */
 const fetchKey = (spec: Chart): string => {
   const kind = chartKind(spec.kind);
@@ -122,8 +106,8 @@ async function loadShare(
   if (!accountId) {
     /*
      * Two requests rather than one wider one: `/api/summary` answers a split of the
-     * range it is given and there is no arithmetic on this side that could take the
-     * earlier half back out of a doubled window.
+     * range it is given, and nothing on this side could take the earlier half back out
+     * of a doubled window.
      */
     const [summary, before] = await Promise.all([
       api.summary(from, to),
@@ -135,12 +119,11 @@ async function loadShare(
       currency: summary.baseCurrency,
       slices,
       /*
-       * `positiveShares` on both sides, and `slices` above left whole. The only
-       * comparative kind is the radar, which is built out of radii: a category a refund
-       * pushed negative is a negative radius, which recharts plots mirrored through the
-       * centre — a self-crossing polygon reading as a LARGER value pointing the wrong
-       * way. `positiveShares` says a donut or a radar drops those, and this is the radar
-       * half of that sentence. The ranking still gets the honest figure off `slices`.
+       * `positiveShares` on both sides, and `slices` above left whole: a comparative
+       * kind is built out of radii, and a category a refund pushed negative is a
+       * negative radius, plotted mirrored through the centre — a self-crossing polygon
+       * reading as a LARGER value pointing the wrong way. The ranking still gets the
+       * honest figure off `slices`.
        */
       compared: before
         ? compareShares(
@@ -152,10 +135,9 @@ async function loadShare(
   }
 
   /*
-   * One account, and one request per window for the reason the workspace arm above
-   * gives: this endpoint answers a split of the range it is given, so both periods in
-   * one window come back added together and nothing on this side could take the earlier
-   * half out again — every category's `before` would be its own `now`.
+   * One account, and one request per window for the reason the arm above gives: both
+   * periods in one window come back added together, and every category's `before`
+   * would be its own `now`.
    */
   const [summary, before] = await Promise.all([
     api.accountSummary(accountId, from, to),
@@ -166,7 +148,7 @@ async function loadShare(
     shape: 'share',
     currency: summary.currency,
     slices,
-    // positives only, for the reason the workspace path above gives
+    // positives only, for the reason the arm above gives
     compared: before
       ? compareShares(
           positiveShares(slices),
@@ -177,22 +159,9 @@ async function loadShare(
 }
 
 /**
- * The chart's numbers, or the reason there are none.
- *
- * `accounts` is null while the screen is still reading the list. That state has to be
- * distinguishable from "read, and this account is not in it": with the two flattened
- * onto an empty array, every per-account chart on the screen printed "that account is
- * no longer here" for the length of one request and then corrected itself.
- *
- * `accountsError` is the third of those states, and it is why the argument exists: the
- * list stays null when the read FAILED too, and a per-account card told only "still
- * null" waited on a request that was never coming — "Reading the numbers…" for the rest
- * of the session, with no error on the card and nothing to press.
- *
- * `data` is nulled before every load and not kept across one. A card that held the
- * previous range's points while the new range was in flight would print an axis
- * labelled with months it is no longer about — the same failure the old screen's
- * single `data` object was introduced to fix, one range selector further along.
+ * The chart's numbers, or the reason there are none. The three states of `accounts`
+ * this distinguishes are the screen's contract with it, stated under *What a chart is,
+ * and where its numbers come from* in this package's spec.
  */
 export function useChartData(
   spec: Chart,
@@ -208,27 +177,22 @@ export function useChartData(
    * field of it and are handed the id alone. So what the effect depends on is WHETHER it
    * resolved, and not on an array identity that changes every time the screen reloads
    * the list.
-   *
-   * The currency that used to be in that list went with the read. Nothing is lost by it,
-   * and the sentence saying so is on the other side of the tree: `app.ts` refuses to
-   * correct an account's currency once the account has a row in it, so an account whose
-   * code can still move has nothing on a chart to be mislabelled while a tab holds the
-   * old one.
    */
   const account =
     spec.accountId && accounts ? (accounts.find((a) => a.id === spec.accountId) ?? null) : null;
   const known = account !== null;
   /*
-   * Only a per-account chart waits for the list. A workspace-wide one needs nothing
-   * from it, and gating on `accounts === null` there would fetch once on mount and
-   * again the moment the list landed, for every such card on the screen.
-   *
-   * And it waits only while there is something to wait FOR — see the header.
+   * Only a per-account chart waits for the list: gating a chart of every account on
+   * `accounts === null` would fetch once on mount and again the moment the list landed,
+   * for every such card on the screen. And it waits only while the list may still
+   * arrive — an `accountsError` ends the wait.
    */
   const waiting = spec.accountId !== null && accounts === null && accountsError === null;
 
   useEffect(() => {
     let live = true;
+    // `data` is nulled before every load, never kept across one: a card holding the
+    // previous range's points would print an axis about months it is no longer about
     setState({ data: null, error: null, loading: true });
     if (waiting) return;
 
@@ -248,9 +212,8 @@ export function useChartData(
 
     /*
      * An id that names no account is not "every account": the account was deleted, or
-     * hidden and then removed, and answering the workspace's totals under a card
-     * titled after one account is the kind of quiet substitution nothing in this app
-     * is allowed to make.
+     * hidden and then removed, and answering the whole under a card titled after one
+     * account is the kind of quiet substitution nothing in this app is allowed to make.
      */
     if (spec.accountId && !known) {
       setState({
