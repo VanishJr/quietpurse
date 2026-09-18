@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { CATEGORIES, Category, categoryLabel } from '../categories';
+import { CATEGORIES, Category, categoryLabel, incomeSourceLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
 import { CategoryRuleEditor } from '../components/CategoryRuleEditor';
@@ -157,12 +157,14 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name;
 
   /**
-   * The category filter as of the last render. A decision taken when a PATCH settles
-   * cannot read the selection the handler was created under: by then it may not be the selection
-   * the list in state answers.
+   * The category filter as of the last render, and the reload bound to the filters as of
+   * the last render. A decision taken when a PATCH settles cannot read the selection the
+   * handler was created under: by then it may not be the selection the list in state answers.
    */
   const currentCategory = useRef(category);
   currentCategory.current = category;
+  const currentLoad = useRef(load);
+  currentLoad.current = load;
 
   /** Transfer flag: null hands the decision back to the backend's auto-detection. */
   const applyTransfer = async (tx: Transaction, value: boolean | null) => {
@@ -219,14 +221,18 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
       setError(null);
       setNotice(null);
       const updated = await api.setCategory(tx.id, next);
-      const selectedCategory = currentCategory.current;
-      const stays = selectedCategory === 'all' || updated.category === selectedCategory;
-      setTxs((list) => {
-        if (list === null) return null;
-        if (!stays) return list.filter((t) => t.id !== updated.id);
-        if (list.some((t) => t.id === updated.id)) return list.map((t) => t.id === updated.id ? updated : t);
-        return [...list, updated].sort((a, b) => b.date.localeCompare(a.date));
-      });
+      if (tx.category === 'support' || updated.category === 'support') {
+        await currentLoad.current();
+      } else {
+        const selectedCategory = currentCategory.current;
+        const stays = selectedCategory === 'all' || updated.category === selectedCategory;
+        setTxs((list) => {
+          if (list === null) return null;
+          if (!stays) return list.filter((t) => t.id !== updated.id);
+          if (list.some((t) => t.id === updated.id)) return list.map((t) => t.id === updated.id ? updated : t);
+          return [...list, updated].sort((a, b) => b.date.localeCompare(a.date));
+        });
+      }
       setSelected(updated);
     } catch (e) {
       setError((e as Error).message);
@@ -272,6 +278,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
         // accounts load is outstanding or was refused, and the separator sits inside
         // the conditional so neither leaves a dangling middot
         const account = accountId === 'all' ? accountName(item.accountId) : undefined;
+        const source = sourceById(item.incomeSource);
         return (
           <button
             key={item.id}
@@ -301,8 +308,8 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 {item.refund && <span className="badge">refund</span>}
                 {item.oneOff && <span className="badge">one-off</span>}
                 {/* outside help (family, stipend...) — a badge with the source name */}
-                {!item.transfer && sourceById(item.incomeSource)?.kind === 'external' && (
-                  <span className="badge">{sourceById(item.incomeSource)!.label}</span>
+                {!item.transfer && source?.kind === 'external' && (
+                  <span className="badge">{incomeSourceLabel(source.id, source.label)}</span>
                 )}
               </span>
             </span>

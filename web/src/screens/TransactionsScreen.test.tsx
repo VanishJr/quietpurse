@@ -62,6 +62,9 @@ const mount = () => renderThemed(<TransactionsScreen />);
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 const chooseFilter = (label: string, value: string) =>
   fireEvent.change(screen.getByRole('combobox', { name: label }), { target: { value } });
+/** The list's titles in the order they are on screen; the sheet's heading is not a row. */
+const titles = (): string[] =>
+  Array.from(document.querySelectorAll('.row .row-title')).map((el) => el.textContent ?? '');
 
 /**
  * The booleans default to `false`, what the server sends for a row nobody touched,
@@ -400,6 +403,31 @@ describe('the category of one transaction', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Food, this transaction only' }));
     await waitFor(() => expect(screen.queryByText(EMPTY)).toBeNull());
     expect(screen.getAllByText('REWE Berlin')).toHaveLength(2);
+  });
+
+  it('puts a row that comes back to the filter where its date belongs, not at the foot', async () => {
+    const newest = row({ id: 'tx-new', description: 'Lidl Nord', date: '2026-07-20', category: 'food' });
+    const middle = row({ id: 'tx-mid', description: 'REWE Berlin', date: '2026-07-17', category: 'food' });
+    const oldest = row({ id: 'tx-old', description: 'Edeka Mitte', date: '2026-07-14', category: 'food' });
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([newest, middle, oldest]),
+      'PATCH /api/transactions/tx-mid/category': (init) =>
+        ok({ ...middle, category: JSON.parse(String(init?.body)).category, categoryManual: true }),
+    });
+    mount();
+    await screen.findByText('REWE Berlin');
+    chooseFilter('Category', 'food');
+    await settle();
+
+    fireEvent.click(screen.getByText('REWE Berlin'));
+    fireEvent.click(screen.getByRole('button', { name: 'Transport, this transaction only' }));
+    await waitFor(() => expect(titles()).toEqual(['Lidl Nord', 'Edeka Mitte']));
+
+    // back into the filter between the two that stayed: the list is date DESC and a row
+    // spliced back in is not the newest, so neither the foot nor the head is its place
+    fireEvent.click(screen.getByRole('button', { name: 'Food, this transaction only' }));
+    await waitFor(() => expect(titles()).toEqual(['Lidl Nord', 'REWE Berlin', 'Edeka Mitte']));
   });
 
   it('leaves the list alone when the category filter moves while the write is in flight', async () => {
@@ -780,6 +808,62 @@ describe('the income source', () => {
     expect(requests().some((request) => request.endsWith('/source'))).toBe(false);
   });
 
+  it('re-reads the list after a Support pick, which can un-pair a transfer on another account', async () => {
+    // an inferred pair: the incoming leg here, the outgoing one on the other account
+    const incoming = { ...INCOME, category: 'transfers', transfer: true };
+    const partner = row({
+      id: 'tx-out',
+      accountId: 'acc-2',
+      description: 'To ZZ',
+      amount: -100,
+      date: '2026-07-13',
+      category: 'transfers',
+      transfer: true,
+    });
+    const afterwards = [
+      { ...INCOME, category: 'support', categoryManual: true, incomeSource: 'category:support' },
+      { ...partner, category: 'other', transfer: false },
+    ];
+    let reads = 0;
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok(++reads === 1 ? [incoming, partner] : afterwards),
+      'PATCH /api/transactions/tx-in/category': () => ok(afterwards[0]),
+    });
+    mount();
+    await openSheet('ZZ Income');
+    expect(screen.getByText('To ZZ')).toHaveClass('muted-strike');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
+
+    // the server recomputed the pairs, so the partner leg is read again rather than kept
+    await waitFor(() => expect(screen.getByText('To ZZ')).not.toHaveClass('muted-strike'));
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
+    // and the detail stays open on the updated row
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('badges outside help with the catalogue’s own word, and reads the derived source as its category', async () => {
+    const fromFamily = row({ id: 'tx-fam', description: 'From family', amount: 200, incomeSource: 'family' });
+    const derived = row({ id: 'tx-sup', description: 'Support row', amount: 300, category: 'support', incomeSource: 'category:support' });
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok([{ ...SOURCES[1], label: 'Mum and Dad' }]),
+      'GET /api/transactions': () => ok([fromFamily, derived]),
+    });
+    mount();
+
+    const family = (await screen.findByText('From family')).closest<HTMLElement>('.row')!;
+    await waitFor(() => expect(within(family).getByText('Mum and Dad')).toHaveClass('badge'));
+    // the category already says what the derived source is; the badge is the catalogue's
+    const support = screen.getByText('Support row').closest<HTMLElement>('.row')!;
+    expect(support).toHaveTextContent('· Support');
+    expect(within(support).queryByText('category:support')).toBeNull();
+    expect(support.querySelector('.badge')).toBeNull();
+  });
+
   it('marks the row with a chip, and back to auto-detection sends null', async () => {
     const sent: unknown[] = [];
     mockFetch({
@@ -885,6 +969,25 @@ describe('the transfer rule', () => {
     expect(transferSwitch()).toBeChecked();
     expect(sent).toEqual([{ txId: 'tx-1', matchMode: 'similar-v1', previewToken: PREVIEW.previewToken }]);
     expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
+  });
+
+  it('keeps the caption on the screen after the sheet that made it has closed', async () => {
+    mockFetch({
+      ...PREVIEW_ROUTES,
+      'POST /api/transfer-rules': () => ok({ rule: { ...RULE, matchMode: 'similar-v1' }, matches: 2 }),
+    });
+    mount();
+    await openPreview();
+    fireEvent.click(applyRuleButton());
+    expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    // the copy the sheet carried went with it; the one that outlives it is the list's,
+    // in the live region above the rows
+    const caption = screen.getByText('2 transactions marked as transfers.');
+    expect(caption.closest('[aria-live="polite"]')).not.toBeNull();
   });
 
   it('deletes the server-identified rule and preserves independent transfer detection', async () => {

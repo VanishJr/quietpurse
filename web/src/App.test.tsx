@@ -341,4 +341,18 @@ describe('the shell', () => {
       screen.getByRole('button', { name: 'Theme: Auto. Click to change' }),
     ).toBeInTheDocument();
   });
+
+  it('opens on the theme that was saved, and dark only when none was', async () => {
+    // setup.ts clears the key between tests, so the default case above and this one are
+    // two states of the same key and not one state read twice
+    localStorage.setItem('finto.theme', 'light');
+    mockFetch(FIRST_PAINT_ROUTES);
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+
+    expect(
+      screen.getByRole('button', { name: 'Theme: Light. Click to change' }),
+    ).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
 });

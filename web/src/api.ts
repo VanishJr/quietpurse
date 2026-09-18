@@ -243,11 +243,6 @@ export const api = {
     `/api/transactions/${encodeURIComponent(id)}/transfer-rule-preview`,
   ),
 
-  /**
-   * "Mark every transaction like this as a transfer" — a rule by the transaction's
-   * description and account. Applied to the whole history at once and to every new
-   * transaction from then on.
-   */
   addTransferRule: (txId: string, previewToken?: string) =>
     request<TransferRuleCreated>('/api/transfer-rules', json('POST', {
       txId,
@@ -324,17 +319,6 @@ export const api = {
   categoryRulePreview: (pattern: string) =>
     request<CategoryRulePreview>('/api/category-rules/preview', json('POST', { pattern })),
 
-  /**
-   * A "description contains … -> category" rule (+ a full recompute on the backend).
-   *
-   * Take `pattern` where the bank appends something changing to every line — a month
-   * in a rent reference, a contract number: a rule built from one full description
-   * would then match that single transaction and nothing else. `txId` is the shorthand
-   * for "the whole description as it is".
-   *
-   * The counts are beside `rule` on the wire and not inside it — `rule` is the stored
-   * row and carries neither.
-   */
   addCategoryRule: (target: { txId: string } | { pattern: string }, category: Category, previewToken?: string) =>
     request<CategoryRuleCreated>('/api/category-rules', json('POST', { ...target, category, previewToken })),
 

@@ -57,11 +57,15 @@ export function Shell() {
   const importing = onOverview && url.panel === 'import';
 
   const go = (key: TabKey) => {
+    // on `tab`, not the URL: the app opens on `/`, where Overview is current without being
+    // named, and writing `?screen=overview` there is a history entry Back steps over silently
     if (key === tab && url.panel === null) return;
     setUrl(patchFor(key));
   };
 
   const navigate = (e: React.MouseEvent, run: () => void) => {
+    // a modified click asked the browser for something — a new tab, the link copied —
+    // and is left to it
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     run();

@@ -4,9 +4,16 @@ import {
   CATEGORY_LABELS,
   categoryLabel,
   categoryRuleCaption,
+  incomeSourceLabel,
+  REST_SECTOR,
+  spendRing,
   spendSectors,
 } from './categories';
 import { PROVIDER_LABELS, providerLabel } from './providers';
+import type { SUPPORT_INCOME_SOURCE } from './types';
+
+/** The one derived source the server answers today, held to the wire's literal by tsc. */
+const SUPPORT_SOURCE = 'category:support' satisfies typeof SUPPORT_INCOME_SOURCE;
 
 describe('category dictionary', () => {
   it('has a label for every slug in the picker', () => {
@@ -17,6 +24,20 @@ describe('category dictionary', () => {
 
   it('returns an unknown slug as-is', () => {
     expect(categoryLabel('groceries-2')).toBe('groceries-2');
+  });
+});
+
+describe('the word for an income source', () => {
+  it('reads a derived source through the category dictionary, whatever label it arrived with', () => {
+    // the server answers the id as the label and composes no word: the word is this
+    // dictionary's, so a renamed category and the source it derives cannot come apart
+    expect(incomeSourceLabel(SUPPORT_SOURCE, SUPPORT_SOURCE)).toBe(categoryLabel('support'));
+    expect(incomeSourceLabel(SUPPORT_SOURCE, SUPPORT_SOURCE)).not.toBe(SUPPORT_SOURCE);
+  });
+
+  it('keeps the label a catalogue source arrived with, which is the person’s own word', () => {
+    expect(incomeSourceLabel('family', 'Mum and Dad')).toBe('Mum and Dad');
+    expect(incomeSourceLabel('src-1', 'Acme GmbH')).toBe('Acme GmbH');
   });
 });
 
@@ -38,6 +59,69 @@ describe('the sectors of the Overview ring', () => {
       { category: 'cash', total: 0 },
     ]);
     expect(sectors.map((s) => s.category)).toEqual(['food']);
+  });
+});
+
+describe('the ring against its legend', () => {
+  /** Two in the tail, one of them a refund that exactly offsets the other. */
+  const SPEND = [
+    { category: 'food', total: 100 },
+    { category: 'health', total: 50 },
+    { category: 'shopping', total: 30 },
+    { category: 'cash', total: 20 },
+    { category: 'travel', total: -20 },
+  ];
+
+  it('draws the tail’s positive spending while the legend prints its net remainder', () => {
+    const ring = spendRing(SPEND, 180);
+    expect(ring.top.map((c) => c.category)).toEqual(['food', 'health', 'shopping']);
+    expect(ring.rest.map((c) => c.category)).toEqual(['cash', 'travel']);
+    // the tail’s row: 180 less the three named, which the refund has brought to nothing
+    expect(ring.restTotal).toBe(0);
+    // the tail’s sector: the cash that was spent, which a refund elsewhere does not undraw
+    expect(ring.sectors.map((s) => [s.category, s.total])).toEqual([
+      ['food', 100],
+      ['health', 50],
+      ['shopping', 30],
+      [REST_SECTOR, 20],
+    ]);
+    expect(ring.sectors[3].label).toBe('Other · 2 categories');
+  });
+
+  it('subtracts in cents, so a remainder that is zero on paper is zero on screen', () => {
+    // 180.6 less 100.1, 50.2 and 30.3 is a few quadrillionths off zero in floating
+    // point, which fmtMoney prints as −0; in cents it is 0 and prints as 0
+    const ring = spendRing(
+      [
+        { category: 'food', total: 100.1 },
+        { category: 'health', total: 50.2 },
+        { category: 'shopping', total: 30.3 },
+        { category: 'cash', total: 20 },
+        { category: 'travel', total: -20 },
+      ],
+      180.6,
+    );
+    expect(ring.restTotal).toBe(0);
+  });
+
+  it('draws no tail when the tail is nothing but refunds, and none when there is no tail', () => {
+    const refundsOnly = [
+      { category: 'food', total: 100 },
+      { category: 'health', total: 50 },
+      { category: 'shopping', total: 30 },
+      { category: 'travel', total: -20 },
+    ];
+    expect(spendRing(refundsOnly, 160).sectors.map((s) => s.category)).toEqual([
+      'food',
+      'health',
+      'shopping',
+    ]);
+    expect(spendRing([{ category: 'food', total: 100 }], 100)).toEqual({
+      top: [{ category: 'food', total: 100 }],
+      rest: [],
+      restTotal: 0,
+      sectors: [{ category: 'food', total: 100, label: 'Food' }],
+    });
   });
 });
 

@@ -1,12 +1,9 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { toCents } from '../accounts';
-import { categoryLabel, spendSectors } from '../categories';
+import { categoryLabel, REST_SECTOR, restLabel, spendRing } from '../categories';
 import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
 import { CategorySummary } from '../types';
-
-const TOP = 3;
 
 interface Props {
   spend: CategorySummary[];
@@ -18,21 +15,14 @@ interface Props {
 
 export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: Props) {
   const { ink } = useTheme();
-  const top = spend.slice(0, TOP);
-  const rest = spend.slice(TOP);
-  // Subtract in cents so a zero remainder stays zero after the wire's conversion.
-  const restTotal =
-    (toCents(total) - top.reduce((sum, c) => sum + toCents(c.total), 0)) / 100;
+  const { top, rest, restTotal, sectors } = spendRing(spend, total);
   const palette = [ink.good, ink.lavender, ink.sand];
-  const otherLabel = `Other · ${rest.length} ${rest.length === 1 ? 'category' : 'categories'}`;
-  const positiveRest =
-    spendSectors(rest).reduce((sum, c) => sum + toCents(c.total), 0) / 100;
-  const sectors = [
-    ...top.map((c, i) => ({ ...c, label: categoryLabel(c.category), color: palette[i] })),
-    ...(positiveRest > 0
-      ? [{ category: '__rest', label: otherLabel, total: positiveRest, color: ink.muted }]
-      : []),
-  ].filter((c) => c.total > 0);
+  // by the legend's slot and not the sector's index: a named category a refund pushed
+  // below zero has a legend row and no sector, and the colours after it must not shift
+  const colorOf = (category: string) =>
+    category === REST_SECTOR
+      ? ink.muted
+      : palette[top.findIndex((c) => c.category === category)];
   const hasRefunds = spend.some((c) => c.total < 0);
 
   return (
@@ -62,7 +52,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                 isAnimationActive={false}
               >
                 {sectors.map((c) => (
-                  <Cell key={c.category} fill={c.color} />
+                  <Cell key={c.category} fill={colorOf(c.category)} />
                 ))}
               </Pie>
               <Tooltip {...tooltipProps(ink, 'surface', tooltipMoney(currency))} />
@@ -109,7 +99,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
         {rest.length > 0 && (
           <li className="ov-spend-row is-rest">
             <span className="dot" style={{ background: ink.muted }} aria-hidden="true" />
-            <span className="ov-spend-name">{otherLabel}</span>
+            <span className="ov-spend-name">{restLabel(rest.length)}</span>
             <span className="ov-spend-amount">{fmtMoney(restTotal, currency)}</span>
           </li>
         )}

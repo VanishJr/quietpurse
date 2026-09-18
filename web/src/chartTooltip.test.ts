@@ -87,6 +87,28 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
     expect(TOOLTIP_CHIP.surface).toEqual(TOOLTIP_CHIP.page);
   });
 
+  /*
+   * The fill sits a step off its ground on purpose and the border is what makes the box
+   * a box, so the string inequality above is the only other hold on the tightest live
+   * pair. A pin on the measured figures and not a floor: a floor bounds what the design
+   * may become and reds for a reason nobody reading it could connect to a tooltip, where
+   * a pin says the numbers written down are stale — re-measure them. Precision 2, because
+   * a palette step of two hex values moves these by a few hundredths.
+   */
+  it('the tightest fill on its ground, and the border between them, are the figures written here', () => {
+    const shipped: [string, number, number][] = [
+      ['raised on surface, dark', contrast(darkInk.raised, darkInk.surface), 1.102],
+      ['border on surface, dark', contrast(darkInk.border, darkInk.surface), 1.387],
+      ['raised on page, light', contrast(lightInk.raised, lightInk.page), 1.075],
+      ['border on page, light', contrast(lightInk.border, lightInk.page), 1.244],
+    ];
+    for (const [what, measured, written] of shipped) {
+      expect(measured, `${what}: the figure written down is no longer the measurement`).toBeCloseTo(
+        written,
+        2,
+      );
+    }
+  });
 });
 
 describe('the props the module hands recharts', () => {

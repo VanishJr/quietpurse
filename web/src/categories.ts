@@ -1,3 +1,4 @@
+import { toCents } from './accounts';
 import { CategoryRuleCounts, CategorySummary } from './types';
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -43,6 +44,17 @@ export type Category = (typeof CATEGORIES)[number];
 
 export const categoryLabel = (slug: string): string => CATEGORY_LABELS[slug] ?? slug;
 
+/** The read-only income source the server derives from a category: this prefix and the slug. */
+const CATEGORY_SOURCE = 'category:';
+
+/**
+ * The word for an income source. A derived one reads through the category dictionary, so
+ * the category and the source it derives are one word wherever either is printed; every
+ * other id keeps the label it arrived with, the catalogue's or the wire's.
+ */
+export const incomeSourceLabel = (id: string, label: string): string =>
+  id.startsWith(CATEGORY_SOURCE) ? categoryLabel(id.slice(CATEGORY_SOURCE.length)) : label;
+
 export interface SpendSector extends CategorySummary {
   label: string;
 }
@@ -61,6 +73,48 @@ export const spendSectors = (spend: CategorySummary[]): SpendSector[] =>
   spend
     .filter((c) => c.total > 0)
     .map((c) => ({ ...c, label: categoryLabel(c.category) }));
+
+/** How many categories the Overview ring names before it groups the tail. */
+const RING_TOP = 3;
+
+/** The tail's own key, which no slug can be. */
+export const REST_SECTOR = '__rest';
+
+export const restLabel = (count: number): string =>
+  `Other · ${count} ${count === 1 ? 'category' : 'categories'}`;
+
+export interface SpendRing {
+  /** The categories the legend names, in the server's order. */
+  top: CategorySummary[];
+  /** What the legend groups under one row. */
+  rest: CategorySummary[];
+  /** The tail as the legend prints it: the month's net total less the named categories. */
+  restTotal: number;
+  /** What the ring draws: the named categories and the tail, positive parts only. */
+  sectors: SpendSector[];
+}
+
+/**
+ * The legend keeps the server's net figures while the ring draws only what has a size,
+ * so the tail's sector is the sum of its positive categories and not the legend's
+ * remainder — a refund inside the tail can zero the one and not the other.
+ */
+export function spendRing(spend: CategorySummary[], total: number): SpendRing {
+  const top = spend.slice(0, RING_TOP);
+  const rest = spend.slice(RING_TOP);
+  // Subtract in cents so a zero remainder stays zero after the wire's conversion.
+  const restTotal =
+    (toCents(total) - top.reduce((sum, c) => sum + toCents(c.total), 0)) / 100;
+  const positiveRest =
+    spendSectors(rest).reduce((sum, c) => sum + toCents(c.total), 0) / 100;
+  const sectors = [
+    ...spendSectors(top),
+    ...(positiveRest > 0
+      ? [{ category: REST_SECTOR, label: restLabel(rest.length), total: positiveRest }]
+      : []),
+  ];
+  return { top, rest, restTotal, sectors };
+}
 
 const PATTERN_DISPLAY_MAX = 80;
 

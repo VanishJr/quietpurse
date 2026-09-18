@@ -62,6 +62,7 @@ export type {
   CHART_TITLE_MAX,
   CHARTS_MAX,
   ERROR_DETAIL_MAX,
+  SUPPORT_INCOME_SOURCE,
 } from '../../backend/src/wire';
 
 /**

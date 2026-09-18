@@ -582,6 +582,34 @@ describe('spending by category', () => {
     expect(more).toHaveTextContent('↗');
   });
 
+  it('keeps the net figures in the legend and says so when a refund is inside them', async () => {
+    // two in the tail, one of them a refund that exactly offsets the other: the tail's
+    // legend row is the server's net remainder, and the ring — which jsdom cannot see —
+    // draws the cash that was spent; `categories.test.ts` pins that half on the same fixture
+    const refunds: AccountSummary['byCategory'] = [
+      { category: 'food', total: 100 },
+      { category: 'health', total: 50 },
+      { category: 'shopping', total: 30 },
+      { category: 'cash', total: 20 },
+      { category: 'travel', total: -20 },
+    ];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/summary': (_init, url) =>
+        ok(summaryBody(url, { totals: { income: 0, expense: 180 }, byCategory: refunds })),
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 180, net: -180 }])),
+    });
+
+    const card = await panel('Spending by category, Aug 2026');
+    expect(
+      within(card).getByText('Total includes net refunds; the ring shows positive spending.'),
+    ).toBeInTheDocument();
+    const tail = within(await legend()).getByText('Other · 2 categories').closest('li');
+    expect(tail).toHaveTextContent('0 EUR');
+    expect(within(card).getByText('180')).toBeInTheDocument();
+  });
+
   it('gives the figure in the middle of the ring to the table beside it', async () => {
     // `.donut-center` is inside the container the donut is hidden by — it is painted over
     // a drawing that has to be hidden as one piece — so the biggest number on the card
@@ -655,6 +683,42 @@ describe('switching tabs while a read is in flight', () => {
     expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1);
     expect(requests().filter((r) => r === 'GET /api/summary/months')).toHaveLength(1);
     expect(screen.getByRole('region', { name: 'Balance of Quick' })).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+
+  it('drops the figures for the tab the reader left, even once its recent list had landed', async () => {
+    const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
+    let release: (r: Response) => void = () => {};
+    let slowAsked = '';
+    let calls = 0;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(two),
+      // both recent lists come back at once; the summary that does not is the first
+      // one asked for, which is Slow's, and its window is kept for the answer below
+      'GET /api/summary': (_init, url) => {
+        calls += 1;
+        if (calls === 1) {
+          slowAsked = url ?? '';
+          return new Promise<Response>((resolve) => (release = resolve));
+        }
+        return ok(summaryBody(url));
+      },
+    });
+
+    // the switch happens after Slow's recent list landed and its summaries were asked
+    // for — the case above holds the other window, before the recent list comes back
+    await waitFor(() => expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1));
+    fireEvent.click(await tab('Quick'));
+    await panel('Balance of Quick');
+
+    release(ok(summaryBody(slowAsked)));
+    await settle();
+
+    // both summaries were answered; only Quick's is on screen
+    expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Balance of Quick' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
 
