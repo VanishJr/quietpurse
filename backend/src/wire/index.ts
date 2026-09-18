@@ -68,7 +68,9 @@ export type GoalMode = z.infer<typeof goalModeSchema>;
 export const balancesNotShownSchema = z.enum(BALANCES_NOT_SHOWN);
 export type BalancesNotShown = z.infer<typeof balancesNotShownSchema>;
 
-/** The id of a row in income_sources, seeded or the user's own. */
+export const SUPPORT_INCOME_SOURCE = 'category:support';
+
+/** A configured source id, or the read-only source derived from the Support category. */
 export const incomeSourceSchema = z.string();
 export type IncomeSource = z.infer<typeof incomeSourceSchema>;
 
@@ -102,6 +104,8 @@ export const transactionSchema = z.strictObject({
   date: z.string(),
   description: z.string(),
   mcc: z.number().optional(),
+  displayDescription: z.string().optional(),
+  valueDate: z.string().optional(),
   category: z.string(),
   /** true — the category above was set by hand and no recompute will change it */
   categoryManual: z.boolean(),
@@ -129,10 +133,13 @@ export const transactionSchema = z.strictObject({
 });
 export type Transaction = z.infer<typeof transactionSchema>;
 
+export const TRANSFER_RULE_MATCH_MODES = ['exact', 'similar-v1'] as const;
+
 export const transferRuleSchema = z.strictObject({
   id: z.number(),
   description: z.string(),
   accountId: z.string(),
+  matchMode: z.enum(TRANSFER_RULE_MATCH_MODES),
   createdAt: z.string(),
 });
 export type TransferRule = z.infer<typeof transferRuleSchema>;
@@ -143,6 +150,18 @@ export const transferRuleCreatedSchema = z.strictObject({
   matches: z.number(),
 });
 export type TransferRuleCreated = z.infer<typeof transferRuleCreatedSchema>;
+
+export const transferRulePreviewSchema = z.strictObject({
+  txId: z.string(),
+  accountId: z.string(),
+  description: z.string(),
+  transactions: z.array(transactionSchema),
+  matches: z.number(),
+  manualOverrides: z.number(),
+  activeRule: transferRuleSchema.nullable(),
+  previewToken: z.string(),
+});
+export type TransferRulePreview = z.infer<typeof transferRulePreviewSchema>;
 
 export const incomeSourceDefSchema = z.strictObject({
   id: z.string(),
@@ -357,6 +376,16 @@ export const categoryRuleCreatedSchema = z.strictObject({
   ...categoryRuleCounts,
 });
 export type CategoryRuleCreated = z.infer<typeof categoryRuleCreatedSchema>;
+
+export const categoryRulePreviewSchema = z.strictObject({
+  pattern: z.string(),
+  transactions: z.array(transactionSchema),
+  ...categoryRuleCounts,
+  activeRule: categoryRuleSchema.nullable(),
+  otherRules: z.array(categoryRuleSchema),
+  previewToken: z.string(),
+});
+export type CategoryRulePreview = z.infer<typeof categoryRulePreviewSchema>;
 
 export const budgetSchema = z.strictObject({
   category: z.string(),
@@ -641,6 +670,8 @@ export const ANSWERS = {
   'PATCH /api/accounts/:id': json(accountSchema),
   'DELETE /api/accounts/:id': json(accountDeletedSchema),
   'GET /api/transactions': json(z.array(transactionSchema)),
+  'GET /api/transactions/:id': json(transactionSchema),
+  'GET /api/transactions/:id/transfer-rule-preview': json(transferRulePreviewSchema),
   'PATCH /api/transactions/:id/transfer': json(transactionSchema),
   'PATCH /api/transactions/:id/category': json(transactionSchema),
   'PATCH /api/transactions/:id/source': json(transactionSchema),
@@ -671,6 +702,7 @@ export const ANSWERS = {
   'GET /api/baseline': json(baselineResponseSchema),
   'PUT /api/baseline': json(baselineResponseSchema),
   'GET /api/category-rules': json(z.array(categoryRuleWithCountsSchema)),
+  'POST /api/category-rules/preview': json(categoryRulePreviewSchema),
   'POST /api/category-rules': json(categoryRuleCreatedSchema),
   'DELETE /api/category-rules/:id': json(deletedSchema),
   'GET /api/budgets': json(budgetsResponseSchema),

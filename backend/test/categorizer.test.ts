@@ -31,7 +31,7 @@ it('the rule lists carry the version that reaches existing databases', () => {
     .update(JSON.stringify([KEYWORD_RULES, INCOME_KEYWORD_RULES, REFUND_MARKERS]))
     .digest('hex')
     .slice(0, 12)}`;
-  expect(stamp).toBe('9:d31e418ae7d2');
+  expect(stamp).toBe('10:d31e418ae7d2');
 });
 
 describe('the boundary rule, over the rule lists themselves', () => {

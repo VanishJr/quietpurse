@@ -13,6 +13,7 @@ import {
 import { backfillBaseAmounts } from './fxrates';
 import { getRatesToUAH } from './rates';
 import { Transaction } from './types';
+import { categoryPatternMatches, makeTransferRuleMatcher } from './transaction-description';
 
 /**
  * Window for a same-currency pair: the amounts have to match to the cent, so there is
@@ -68,16 +69,8 @@ async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
   };
 }
 
-/**
- * Matched exactly, as the bank sent it: a rule is created by tapping one specific
- * transaction, so the string is what that bank sends for that whole group.
- */
 async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
-  const rules = new Set(
-    (await listTransferRules()).map((r) => `${r.accountId}\0${r.description}`),
-  );
-  if (rules.size === 0) return () => false;
-  return (t: Transaction) => rules.has(`${t.accountId}\0${t.description}`);
+  return makeTransferRuleMatcher(await listTransferRules());
 }
 
 /** Patterns are matched like owner names, and the first matching source by sort wins. */
@@ -101,18 +94,9 @@ async function makeSourceMatcher(): Promise<(description: string) => string | un
 
 /** Stronger than the dictionary: the dictionary is a default, a rule is the owner's decision. */
 async function makeCategoryRuleMatcher(): Promise<(description: string) => string | undefined> {
-  const rules = (await listCategoryRules()).map(
-    (r) => [r.pattern.toLowerCase(), r.category] as const,
-  );
+  const rules = await listCategoryRules();
   if (rules.length === 0) return () => undefined;
-  return (description: string) => {
-    const d = (description || '').toLowerCase();
-    if (!d) return undefined;
-    for (const [pattern, category] of rules) {
-      if (pattern && d.includes(pattern)) return category;
-    }
-    return undefined;
-  };
+  return (description: string) => rules.find((r) => categoryPatternMatches(description, r.pattern))?.category;
 }
 
 const RECURRING_MIN_MONTHS = 3;
@@ -250,6 +234,7 @@ export async function reclassifyAll(): Promise<number> {
       !result.get(t.id)!.refund &&
       !result.get(t.id)!.transfer &&
       sourceFor(t.description) === undefined &&
+      !(t.categoryManual && t.category === 'support') &&
       PAIRABLE_CATEGORIES.has(result.get(t.id)!.category),
   );
 
@@ -293,6 +278,9 @@ export async function reclassifyAll(): Promise<number> {
 
 /** A source's kind is deliberately outside it: kind moves summaries, not tags. */
 async function rulesSignature(): Promise<string> {
+  const transferRules = (await listTransferRules())
+    .map((r) => JSON.stringify([r.accountId, r.matchMode, r.description]))
+    .sort();
   const categoryRules = (await listCategoryRules())
     .map((r) => `${r.pattern}>${r.category}`)
     .sort()
@@ -302,7 +290,7 @@ async function rulesSignature(): Promise<string> {
     .sort()
     .join(';');
   const { ownerNames } = await getAppSettings();
-  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}`;
+  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}|[${transferRules.join(',')}]`;
 }
 
 export async function reclassifyIfRulesChanged(): Promise<boolean> {

@@ -18,6 +18,7 @@ import {
   IMPORT_SOURCE_TYPES,
   IMPORT_STATUSES,
   INCOME_SOURCE_KINDS,
+  TRANSFER_RULE_MATCH_MODES,
 } from '../wire';
 
 export const accounts = pgTable(
@@ -202,9 +203,13 @@ export const transferRules = pgTable(
     id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
     description: text('description').notNull(),
     accountId: text('account_id').notNull(),
+    matchMode: text('match_mode', { enum: TRANSFER_RULE_MATCH_MODES }).notNull().default('exact'),
     createdAt: text('created_at').notNull(),
   },
-  (t) => [uniqueIndex('transfer_rules_desc_account_unique').on(t.description, t.accountId)],
+  (t) => [
+    uniqueIndex('transfer_rules_desc_account_unique').on(t.description, t.accountId, t.matchMode),
+    check('transfer_rules_match_mode_check', sql`${t.matchMode} IN (${sql.raw(inList(TRANSFER_RULE_MATCH_MODES))})`),
+  ],
 );
 
 export const recurringIgnores = pgTable('recurring_ignores', {

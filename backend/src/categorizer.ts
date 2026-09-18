@@ -9,7 +9,7 @@
  */
 
 /** Bump on any change to the rule lists below, or the recompute has nothing to notice. */
-export const RULES_VERSION = 9;
+export const RULES_VERSION = 10;
 
 export const CATEGORIES = [
   'housing',
@@ -22,6 +22,7 @@ export const CATEGORIES = [
   'cash',
   'transfers',
   'salary',
+  'support',
   'cashback',
   'other',
 ] as const;

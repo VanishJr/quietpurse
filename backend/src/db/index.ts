@@ -17,6 +17,13 @@ import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
 import { assertWritableDir } from '../storage';
 import {
+  categoryPatternMatches,
+  matchesTransferRule,
+  similarDescriptionKey,
+  tallyTransferRuleMatches,
+  transactionDescription,
+} from '../transaction-description';
+import {
   Account,
   AccountMonthTotals,
   CategorySummary,
@@ -35,6 +42,7 @@ import {
   CHART_METRICS,
   type CategoryRule,
   type CategoryRuleCounts,
+  type CategoryRulePreview,
   type Chart,
   type ChartList,
   type ChartMetric,
@@ -45,6 +53,8 @@ import {
   type ImportStatus,
   type ImportTotals,
   type RecurringGroup,
+  type TransferRulePreview,
+  SUPPORT_INCOME_SOURCE,
 } from '../wire';
 import {
   COMPUTED_PREFIX,
@@ -121,24 +131,42 @@ export interface DatabaseHandle {
  * the same directory.
  */
 export async function openDatabase(): Promise<DatabaseHandle> {
-  if (config.databaseUrl) {
-    const pool = new Pool({ connectionString: config.databaseUrl });
-    const instance = drizzlePg(pool, { schema: s });
-    await migratePg(instance, { migrationsFolder: MIGRATIONS_DIR });
-    return {
-      db: instance,
-      location: config.databaseUrl.replace(/:[^:@/]+@/, ':***@'),
-      close: () => pool.end(),
-    };
+  const opened = config.databaseUrl ? openServer(config.databaseUrl) : await openEmbedded(config.databaseDir);
+  try {
+    await opened.migrate();
+  } catch (e) {
+    await opened.close();
+    throw e;
   }
+  return opened;
+}
+
+type Opened = DatabaseHandle & { migrate(): Promise<void> };
+
+function openServer(url: string): Opened {
+  const pool = new Pool({ connectionString: url });
+  const instance = drizzlePg(pool, { schema: s });
+  return {
+    db: instance,
+    location: url.replace(/:[^:@/]+@/, ':***@'),
+    close: () => pool.end(),
+    migrate: () => migratePg(instance, { migrationsFolder: MIGRATIONS_DIR }),
+  };
+}
+
+async function openEmbedded(directory: string): Promise<Opened> {
   // the same probe the statements folder gets, and for a sharper reason: a database
   // folder that cannot be written to is discovered by the migration, which reports
   // the SQL it was running and not the permission that stopped it
-  await assertWritableDir(config.databaseDir, 'the database folder (FINTO_HOME/db)');
-  const client = new PGlite(config.databaseDir);
+  await assertWritableDir(directory, 'the database folder (FINTO_HOME/db)');
+  const client = new PGlite(directory);
   const instance = drizzlePglite(client, { schema: s });
-  await migratePglite(instance, { migrationsFolder: MIGRATIONS_DIR });
-  return { db: instance, location: config.databaseDir, close: () => client.close() };
+  return {
+    db: instance,
+    location: directory,
+    close: () => client.close(),
+    migrate: () => migratePglite(instance, { migrationsFolder: MIGRATIONS_DIR }),
+  };
 }
 
 let handle: DatabaseHandle | undefined;
@@ -661,6 +689,8 @@ interface TxRow {
 }
 
 function rowToTx(r: TxRow): Transaction {
+  const category = r.category_manual ?? r.category;
+  const support = category === 'support' && r.amount_cents > 0 && !r.refund;
   return {
     id: r.id,
     accountId: r.account_id,
@@ -670,8 +700,9 @@ function rowToTx(r: TxRow): Transaction {
     currency: r.currency,
     date: r.date,
     description: r.description,
+    ...transactionDescription(r.description),
     mcc: r.mcc ?? undefined,
-    category: r.category_manual ?? r.category,
+    category,
     categoryManual: r.category_manual !== null,
     transfer: r.transfer_manual ?? r.transfer,
     transferManual: r.transfer_manual,
@@ -679,9 +710,9 @@ function rowToTx(r: TxRow): Transaction {
     baseAmount: fromCentsOrUndefined(r.base_amount_cents),
     incomeSource:
       r.amount_cents > 0
-        ? ((r.income_source_manual ?? r.income_source ?? 'other') as Transaction['incomeSource'])
+        ? (support ? SUPPORT_INCOME_SOURCE : (r.income_source_manual ?? r.income_source ?? 'other'))
         : undefined,
-    incomeSourceManual: r.income_source_manual !== null,
+    incomeSourceManual: !support && r.income_source_manual !== null,
     recurring: r.recurring,
     oneOff: r.one_off,
   };
@@ -784,10 +815,11 @@ export async function summaryIncomeByCategory(
   return rows.map((r) => ({ category: r.category, total: fromCents(Number(r.total_cents)) }));
 }
 
-const INCOME_SOURCE = sql`COALESCE(income_source_manual, income_source, 'other')`;
+const INCOME_SOURCE = sql`CASE WHEN ${CATEGORY} = 'support' AND amount_cents > 0 AND NOT refund
+  THEN ${SUPPORT_INCOME_SOURCE} ELSE COALESCE(income_source_manual, income_source, 'other') END`;
 
 const IS_EXTERNAL = (): SQL =>
-  sql`${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external')`;
+  sql`(${CATEGORY} = 'support' OR ${INCOME_SOURCE} IN (SELECT id FROM income_sources WHERE kind = 'external'))`;
 
 export async function summaryIncomeBySource(
   scope: SummaryScope,
@@ -797,8 +829,8 @@ export async function summaryIncomeBySource(
   const { where, money } = scopeSql(scope);
   const rows = await rowsOf<Omit<IncomeSourceTotal, 'total'> & { total_cents: string }>(sql`
     SELECT ${INCOME_SOURCE} AS source,
-           COALESCE(i.label, ${INCOME_SOURCE}) AS label,
-           COALESCE(i.kind, 'own') AS kind,
+           CASE WHEN ${CATEGORY} = 'support' THEN ${SUPPORT_INCOME_SOURCE} ELSE COALESCE(i.label, ${INCOME_SOURCE}) END AS label,
+           CASE WHEN ${CATEGORY} = 'support' THEN 'external' ELSE COALESCE(i.kind, 'own') END AS kind,
            SUM(${money}) AS total_cents
     FROM transactions
     LEFT JOIN income_sources i ON i.id = ${INCOME_SOURCE}
@@ -2141,6 +2173,7 @@ const rowToRule = (r: RuleRow): TransferRule => ({
   id: r.id,
   description: r.description,
   accountId: r.accountId,
+  matchMode: r.matchMode,
   createdAt: r.createdAt,
 });
 
@@ -2167,6 +2200,7 @@ export async function addTransferRule(
       and(
         eq(s.transferRules.description, description),
         eq(s.transferRules.accountId, accountId),
+        eq(s.transferRules.matchMode, 'exact'),
       ),
     );
   return rowToRule(rows[0]);
@@ -2180,12 +2214,91 @@ export async function deleteTransferRule(id: number): Promise<boolean> {
   return rows.length > 0;
 }
 
-export async function countRuleMatches(description: string, accountId: string): Promise<number> {
-  const rows = await rowsOf<{ n: string }>(
-    sql`SELECT COUNT(*) AS n FROM transactions
-        WHERE description = ${description} AND account_id = ${accountId}`,
-  );
-  return Number(rows[0].n);
+export async function countTransferRuleMatches(rules: TransferRule[]): Promise<Map<number, number>> {
+  const counts = new Map<number, number>();
+  for (const accountId of new Set(rules.map((rule) => rule.accountId))) {
+    const rows = await rowsOf<Pick<TxRow, 'account_id' | 'description'>>(
+      sql`SELECT account_id, description FROM transactions WHERE account_id = ${accountId}`,
+    );
+    const covered = tallyTransferRuleMatches(rows.map((r) => ({ accountId: r.account_id, description: r.description })));
+    for (const rule of rules) {
+      if (rule.accountId === accountId) counts.set(rule.id, covered(rule));
+    }
+  }
+  return counts;
+}
+
+export async function countRuleMatches(rule: TransferRule): Promise<number> {
+  return (await countTransferRuleMatches([rule])).get(rule.id) ?? 0;
+}
+
+function transferPreview(source: Transaction, rows: Transaction[], rules: TransferRule[]): TransferRulePreview {
+  const key = similarDescriptionKey(source.description);
+  const match = { accountId: source.accountId, description: source.description, matchMode: 'similar-v1' as const };
+  const transactions = rows.filter((row) => matchesTransferRule(match, row));
+  const relatedRules = rules.filter((rule) => similarDescriptionKey(rule.description) === key);
+  const activeRules = relatedRules.filter((rule) => matchesTransferRule(rule, source));
+  const activeRule = activeRules.find((rule) => rule.matchMode === 'similar-v1') ?? activeRules[0] ?? null;
+  const previewToken = crypto.createHash('sha256').update(JSON.stringify([
+    source.id, source.accountId, key,
+    transactions.map((t) => [t.id, t.description, t.date, t.amount, t.currency, t.transferManual]),
+    relatedRules,
+  ])).digest('hex');
+  return {
+    txId: source.id,
+    accountId: source.accountId,
+    description: source.displayDescription ?? source.description,
+    transactions,
+    matches: transactions.length,
+    manualOverrides: transactions.filter((t) => t.transferManual !== null).length,
+    activeRule,
+    previewToken,
+  };
+}
+
+export async function previewTransferRule(id: string): Promise<TransferRulePreview | undefined> {
+  const source = await getTransaction(id);
+  if (!source) return undefined;
+  const rows = await rowsOf<TxRow>(sql`
+    SELECT * FROM transactions WHERE account_id = ${source.accountId} ORDER BY date DESC, id ASC`);
+  const rules = await getDb().select().from(s.transferRules)
+    .where(eq(s.transferRules.accountId, source.accountId)).orderBy(asc(s.transferRules.id));
+  return transferPreview(source, rows.map(rowToTx), rules.map(rowToRule));
+}
+
+export async function applySimilarTransferRule(id: string, previewToken: string): Promise<
+  | { ok: true; rule: TransferRule; matches: number }
+  | { ok: false; reason: 'not-found' | 'empty' | 'changed' }
+> {
+  return getDb().transaction(async (tx) => {
+    const sourceRow = (await rowsVia<TxRow>(tx, sql`SELECT * FROM transactions WHERE id = ${id}`)).at(0);
+    if (!sourceRow) return { ok: false, reason: 'not-found' };
+    const holder = await tx.select({ id: s.accounts.id }).from(s.accounts)
+      .where(eq(s.accounts.id, sourceRow.account_id)).for('update');
+    if (!holder.length) return { ok: false, reason: 'not-found' };
+    const rows = await rowsVia<TxRow>(tx, sql`
+      SELECT * FROM transactions WHERE account_id = ${sourceRow.account_id}
+      ORDER BY date DESC, id ASC FOR UPDATE`);
+    const source = rows.find((row) => row.id === id);
+    if (!source) return { ok: false, reason: 'not-found' };
+    const key = similarDescriptionKey(source.description);
+    if (!key) return { ok: false, reason: 'empty' };
+    const rules = await tx.select().from(s.transferRules)
+      .where(eq(s.transferRules.accountId, source.account_id)).orderBy(asc(s.transferRules.id)).for('update');
+    const preview = transferPreview(rowToTx(source), rows.map(rowToTx), rules.map(rowToRule));
+    if (preview.previewToken !== previewToken) return { ok: false, reason: 'changed' };
+    const replaced = rules.filter((rule) => similarDescriptionKey(rule.description) === key);
+    if (replaced.length) {
+      await tx.delete(s.transferRules).where(inArray(s.transferRules.id, replaced.map((r) => r.id)));
+    }
+    const [rule] = await tx.insert(s.transferRules).values({
+      description: source.description, accountId: source.account_id, matchMode: 'similar-v1', createdAt: new Date().toISOString(),
+    }).returning();
+    for (const ids of chunked(preview.transactions.map((t) => t.id), CLASSIFY_BATCH)) {
+      await tx.update(s.transactions).set({ transferManual: null }).where(inArray(s.transactions.id, ids));
+    }
+    return { ok: true, rule: rowToRule(rule), matches: preview.matches };
+  });
 }
 
 /**
@@ -2359,6 +2472,47 @@ export async function addCategoryRule(pattern: string, category: string): Promis
   return { id: row.id, pattern: row.pattern, category: row.category, createdAt: row.createdAt };
 }
 
+function categoryPreview(pattern: string, rows: Transaction[], rules: CategoryRule[]): CategoryRulePreview {
+  const activeRule = rules.find((rule) => rule.pattern === pattern) ?? null;
+  const otherRules = rules.filter((rule) => rule.id !== activeRule?.id && (
+    categoryPatternMatches(pattern, rule.pattern) ||
+    rows.some((row) => categoryPatternMatches(row.description, rule.pattern))
+  ));
+  const previewToken = crypto.createHash('sha256').update(JSON.stringify([
+    pattern,
+    rows.map((row) => [row.id, row.accountId, row.description, row.date, row.amount, row.currency, row.category, row.categoryManual]),
+    rules,
+  ])).digest('hex');
+  return {
+    pattern, transactions: rows, matches: rows.length,
+    overridden: rows.filter((row) => row.categoryManual).length,
+    activeRule, otherRules, previewToken,
+  };
+}
+
+async function readCategoryPreview(db: Db, pattern: string): Promise<CategoryRulePreview> {
+  const rows = await rowsVia<TxRow>(db, sql`SELECT * FROM transactions ORDER BY date DESC, id ASC`);
+  const rules = await db.select().from(s.categoryRules).orderBy(asc(s.categoryRules.id));
+  return categoryPreview(pattern, rows.filter((r) => categoryPatternMatches(r.description, pattern)).map(rowToTx), rules);
+}
+
+export async function previewCategoryRule(pattern: string): Promise<CategoryRulePreview> {
+  return readCategoryPreview(getDb(), pattern);
+}
+
+export async function applyPreviewedCategoryRule(pattern: string, category: string, previewToken: string): Promise<CategoryRule | undefined> {
+  return getDb().transaction(async (tx) => {
+    await tx.execute(sql`LOCK TABLE transactions, category_rules IN SHARE ROW EXCLUSIVE MODE`);
+    const preview = await readCategoryPreview(tx, pattern);
+    if (preview.previewToken !== previewToken) return undefined;
+    const [rule] = await tx.insert(s.categoryRules)
+      .values({ pattern, category, createdAt: new Date().toISOString() })
+      .onConflictDoUpdate({ target: [s.categoryRules.pattern], set: { category } })
+      .returning();
+    return rule;
+  });
+}
+
 export async function deleteCategoryRule(id: number): Promise<boolean> {
   const rows = await getDb()
     .delete(s.categoryRules)
@@ -2369,18 +2523,16 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
 
 /**
  * How many transactions the pattern covers, and how many of those the rule cannot
- * change because the user set the category by hand. One WHERE computing both, so the
+ * change because the user set the category by hand. One filter computing both, so the
  * two can never be taken through different filters and matches - overridden go wrong
  * as soon as one account is hidden.
  */
 export async function countCategoryRuleMatches(pattern: string): Promise<CategoryRuleCounts> {
-  const rows = await rowsOf<{ matches: string; overridden: string }>(
-    sql`SELECT COUNT(*) AS matches,
-               COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
-        FROM transactions
-        WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0`,
+  const rows = await rowsOf<Pick<TxRow, 'description' | 'category_manual'>>(
+    sql`SELECT description, category_manual FROM transactions`,
   );
-  return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
+  const matched = rows.filter((r) => categoryPatternMatches(r.description, pattern));
+  return { matches: matched.length, overridden: matched.filter((r) => r.category_manual !== null).length };
 }
 
 export async function listBudgets(): Promise<Budget[]> {

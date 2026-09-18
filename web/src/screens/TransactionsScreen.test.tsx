@@ -546,6 +546,7 @@ const RULE: TransferRuleWithMatches = {
   id: 7,
   description: 'REWE Berlin',
   accountId: 'acc-1',
+  matchMode: 'exact',
   createdAt: '2026-07-20T10:00:00.000Z',
   matches: 3,
 };

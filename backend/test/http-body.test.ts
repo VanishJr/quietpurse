@@ -52,6 +52,7 @@ const JSON_ROUTES: [Method, string][] = [
   ['patch', '/api/app-settings'],
   ['put', '/api/baseline'],
   ['post', '/api/category-rules'],
+  ['post', '/api/category-rules/preview'],
   ['put', '/api/budgets'],
 ];
 

@@ -24,13 +24,16 @@ import {
   type SummaryScope,
   accountOtherCurrencies,
   addCategoryRule,
+  applyPreviewedCategoryRule,
   addTransferRule,
+  applySimilarTransferRule,
   clearImportDocument,
   clearManualForRule,
   confirmImport,
   discardImport,
   countCategoryRuleMatches,
   countRuleMatches,
+  countTransferRuleMatches,
   currentBaseCurrency,
   deleteAccount,
   deleteCategoryRule,
@@ -46,6 +49,8 @@ import {
   getImportDocumentRef,
   getIncomeSource,
   getTransaction,
+  previewTransferRule,
+  previewCategoryRule,
   type ImportDocumentInfo,
   INCOME_SOURCE_LABEL_MAX,
   listIncomeSources,
@@ -569,6 +574,24 @@ app.get('/api/transactions', async (req, res) => {
   );
 });
 
+app.get('/api/transactions/:id', async (req, res) => {
+  const tx = await getTransaction(req.params.id);
+  if (!tx) {
+    res.status(404).json({ error: 'transaction not found' });
+    return;
+  }
+  answer(res, 'GET /api/transactions/:id', tx);
+});
+
+app.get('/api/transactions/:id/transfer-rule-preview', async (req, res) => {
+  const preview = await previewTransferRule(req.params.id);
+  if (!preview) {
+    res.status(404).json({ error: 'transaction not found' });
+    return;
+  }
+  answer(res, 'GET /api/transactions/:id/transfer-rule-preview', preview);
+});
+
 /** Manual "transfer between own accounts" mark; null hands the decision back to auto-detection. */
 app.patch('/api/transactions/:id/transfer', async (req, res) => {
   const body = jsonBody(req, res);
@@ -586,11 +609,6 @@ app.patch('/api/transactions/:id/transfer', async (req, res) => {
   answer(res, 'PATCH /api/transactions/:id/transfer', tx);
 });
 
-/**
- * The category of this one transaction, and of no other: null hands the row back to
- * auto-detection and is the only thing that ever clears the mark. No reclassifyAll -
- * nothing derived reads the manual category, and a manual mark is not a rule.
- */
 app.patch('/api/transactions/:id/category', async (req, res) => {
   const body = jsonBody(req, res);
   if (!body) return;
@@ -599,7 +617,12 @@ app.patch('/api/transactions/:id/category', async (req, res) => {
     res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
     return;
   }
-  const tx = await setCategoryOverride(req.params.id, category);
+  const before = await getTransaction(req.params.id);
+  let tx = await setCategoryOverride(req.params.id, category);
+  if (tx && (before?.category === 'support' || tx.category === 'support')) {
+    await reclassifyAll();
+    tx = await getTransaction(req.params.id);
+  }
   if (!tx) {
     res.status(404).json({ error: 'transaction not found' });
     return;
@@ -609,16 +632,8 @@ app.patch('/api/transactions/:id/category', async (req, res) => {
 
 app.get('/api/transfer-rules', async (_req, res) => {
   const rules = await listTransferRules();
-  answer(
-    res,
-    'GET /api/transfer-rules',
-    await Promise.all(
-      rules.map(async (r) => ({
-        ...r,
-        matches: await countRuleMatches(r.description, r.accountId),
-      })),
-    ),
-  );
+  const matches = await countTransferRuleMatches(rules);
+  answer(res, 'GET /api/transfer-rules', rules.map((r) => ({ ...r, matches: matches.get(r.id) ?? 0 })));
 });
 
 app.post('/api/transfer-rules', async (req, res) => {
@@ -627,6 +642,27 @@ app.post('/api/transfer-rules', async (req, res) => {
   const txId = body.txId;
   if (typeof txId !== 'string' || !txId) {
     res.status(400).json({ error: 'txId field required' });
+    return;
+  }
+  if (body.matchMode !== undefined && body.matchMode !== 'exact' && body.matchMode !== 'similar-v1') {
+    res.status(400).json({ error: 'unknown transfer rule matching mode' });
+    return;
+  }
+  if (body.matchMode === 'similar-v1') {
+    if (typeof body.previewToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.previewToken)) {
+      res.status(400).json({ error: 'preview the matching transactions before applying this rule' });
+      return;
+    }
+    const result = await applySimilarTransferRule(txId, body.previewToken);
+    if (!result.ok) {
+      switch (result.reason) {
+        case 'not-found': res.status(404).json({ error: 'transaction not found' }); return;
+        case 'empty': res.status(400).json({ error: 'the transaction has an empty description - there is nothing to hang a rule on' }); return;
+        case 'changed': res.status(409).json({ error: 'The matching transactions changed. Refresh the preview before applying the rule.' }); return;
+      }
+    }
+    await reclassifyAll();
+    answer(res, 'POST /api/transfer-rules', { rule: result.rule, matches: result.matches });
     return;
   }
   const tx = await getTransaction(txId);
@@ -644,7 +680,7 @@ app.post('/api/transfer-rules', async (req, res) => {
   await reclassifyAll();
   answer(res, 'POST /api/transfer-rules', {
     rule,
-    matches: await countRuleMatches(rule.description, rule.accountId),
+    matches: await countRuleMatches(rule),
   });
 });
 
@@ -884,6 +920,11 @@ app.patch('/api/transactions/:id/source', async (req, res) => {
   if (source !== null && (typeof source !== 'string' || !(await getIncomeSource(source)))) {
     const ids = (await listIncomeSources()).map((s) => s.id);
     res.status(400).json({ error: `source field required: ${ids.join(' | ')} | null` });
+    return;
+  }
+  const existing = await getTransaction(req.params.id);
+  if (existing?.category === 'support' && existing.amount > 0 && !existing.refund) {
+    res.status(409).json({ error: 'Support is external income. Change the category before choosing another income source.' });
     return;
   }
   const tx = await setIncomeSourceOverride(req.params.id, source);
@@ -1139,6 +1180,17 @@ app.get('/api/category-rules', async (_req, res) => {
   );
 });
 
+app.post('/api/category-rules/preview', async (req, res) => {
+  const body = jsonBody(req, res);
+  if (!body) return;
+  const pattern = typeof body.pattern === 'string' ? body.pattern.trim() : '';
+  if (!pattern) {
+    res.status(400).json({ error: 'Enter the part of the description to match.' });
+    return;
+  }
+  answer(res, 'POST /api/category-rules/preview', await previewCategoryRule(pattern));
+});
+
 app.post('/api/category-rules', async (req, res) => {
   const body = jsonBody(req, res);
   if (!body) return;
@@ -1160,7 +1212,17 @@ app.post('/api/category-rules', async (req, res) => {
     res.status(400).json({ error: 'pattern field required (or txId with a non-empty description)' });
     return;
   }
-  const rule = await addCategoryRule(pattern, category);
+  if (body.previewToken !== undefined && (typeof body.previewToken !== 'string' || !/^[a-f0-9]{64}$/.test(body.previewToken))) {
+    res.status(400).json({ error: 'Preview the matching transactions before applying this rule.' });
+    return;
+  }
+  const rule = body.previewToken === undefined
+    ? await addCategoryRule(pattern, category)
+    : await applyPreviewedCategoryRule(pattern, category, body.previewToken);
+  if (!rule) {
+    res.status(409).json({ error: 'The matching transactions or rules changed. Refresh the preview before applying the rule.' });
+    return;
+  }
   await reclassifyAll();
   answer(res, 'POST /api/category-rules', { rule, ...(await countCategoryRuleMatches(rule.pattern)) });
 });

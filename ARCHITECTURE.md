@@ -77,6 +77,7 @@ every clause in it was paid for by a document that broke the previous one.
 | `backend/src/providers/sheet.ts` | Cell-level reads shared by the xlsx and pdf paths (`cellDate`, `cellAmount`, …) |
 | `backend/src/categorizer.ts` | MCC and description rules → a category slug; refund and recurrence detection |
 | `backend/src/classify.ts` | Transfer pairing between the user's own accounts, and re-classification when rules change |
+| `backend/src/transaction-description.ts` | The second reading of a stored description: the value-date suffix, the similarity key, and the one predicate each kind of rule is matched by — in the classifier, the previews and the counts alike |
 | `backend/src/independence.ts` | The self-sufficiency computation |
 | `backend/src/fxrates.ts` / `backend/src/rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
 | `backend/src/money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
