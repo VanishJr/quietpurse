@@ -3,6 +3,7 @@ import path from 'path';
 import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
 import fs from 'fs/promises';
 import { PGlite } from '@electric-sql/pglite';
+import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -16,7 +17,13 @@ import { type DocumentLocator, type DocumentRef, deleteDocument } from '../docum
 import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
 import { assertWritableDir } from '../storage';
-import { matchesTransferRule, similarDescriptionKey, transactionDescription } from '../transaction-description';
+import {
+  categoryPatternMatches,
+  matchesTransferRule,
+  similarDescriptionKey,
+  tallyTransferRuleMatches,
+  transactionDescription,
+} from '../transaction-description';
 import {
   Account,
   AccountMonthTotals,
@@ -125,32 +132,89 @@ export interface DatabaseHandle {
  * the same directory.
  */
 export async function openDatabase(): Promise<DatabaseHandle> {
-  if (config.databaseUrl) {
-    const pool = new Pool({ connectionString: config.databaseUrl });
-    const instance = drizzlePg(pool, { schema: s });
-    await migratePg(instance, { migrationsFolder: MIGRATIONS_DIR });
-    return {
-      db: instance,
-      location: config.databaseUrl.replace(/:[^:@/]+@/, ':***@'),
-      close: () => pool.end(),
-    };
+  const opened = config.databaseUrl ? openServer(config.databaseUrl) : await openEmbedded(config.databaseDir);
+  try {
+    await assertJournalIsTheTree(opened.db, opened.location, 'prefix');
+    await opened.migrate();
+  } catch (e) {
+    await opened.close();
+    throw e;
   }
+  return opened;
+}
+
+type Opened = DatabaseHandle & { migrate(): Promise<void> };
+
+function openServer(url: string): Opened {
+  const pool = new Pool({ connectionString: url });
+  const instance = drizzlePg(pool, { schema: s });
+  return {
+    db: instance,
+    location: url.replace(/:[^:@/]+@/, ':***@'),
+    close: () => pool.end(),
+    migrate: () => migratePg(instance, { migrationsFolder: MIGRATIONS_DIR }),
+  };
+}
+
+async function openEmbedded(directory: string): Promise<Opened> {
   // the same probe the statements folder gets, and for a sharper reason: a database
   // folder that cannot be written to is discovered by the migration, which reports
   // the SQL it was running and not the permission that stopped it
-  await assertWritableDir(config.databaseDir, 'the database folder (FINTO_HOME/db)');
-  const client = new PGlite(config.databaseDir);
+  await assertWritableDir(directory, 'the database folder (FINTO_HOME/db)');
+  const client = new PGlite(directory);
   const instance = drizzlePglite(client, { schema: s });
-  await migratePglite(instance, { migrationsFolder: MIGRATIONS_DIR });
-  return { db: instance, location: config.databaseDir, close: () => client.close() };
+  return {
+    db: instance,
+    location: directory,
+    close: () => client.close(),
+    migrate: () => migratePglite(instance, { migrationsFolder: MIGRATIONS_DIR }),
+  };
 }
 
 let handle: DatabaseHandle | undefined;
 
+/** In the order drizzle applies; a database it has never touched has no journal table yet. */
+async function appliedMigrations(d: Db): Promise<{ hash: string; created_at: string | number }[]> {
+  const [journal] = await rowsVia(d, sql`
+    SELECT 1 FROM information_schema.tables WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'`);
+  if (!journal) return [];
+  return rowsVia(d, sql`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at ASC, id ASC`);
+}
+
+/**
+ * The expected hashes come from drizzle's own reader, the function that wrote them.
+ * `prefix` holds every row the journal has to the tree's at its position and lets the
+ * journal stop short; `whole` holds the two row for row.
+ */
+async function assertJournalIsTheTree(d: Db, location: string, extent: 'prefix' | 'whole'): Promise<void> {
+  const tree = readMigrationFiles({ migrationsFolder: MIGRATIONS_DIR });
+  const applied = await appliedMigrations(d);
+  const compared = extent === 'whole' ? Math.max(tree.length, applied.length) : applied.length;
+  for (let i = 0; i < compared; i++) {
+    const ours = tree.at(i);
+    const theirs = applied.at(i);
+    if (ours?.hash === theirs?.hash) continue;
+    const theirRow = theirs ? `${theirs.hash} applied at ${Number(theirs.created_at)}` : `missing (it has ${applied.length})`;
+    const ourRow = ours ? `${ours.hash} at ${ours.folderMillis}` : `missing (it has ${tree.length})`;
+    throw new Error(
+      `the database at ${location} was migrated by a build of Finto this one does not know: its migration ` +
+        `${i + 1} is ${theirRow}, and this build's migration ${i + 1} is ${ourRow}. Start the build that ` +
+        `migrated it, or delete the database and import your statements again.`,
+    );
+  }
+}
+
 export async function connectDatabase(): Promise<void> {
-  handle = await openDatabase();
-  initDb(handle.db);
-  logDb.info(`database ready at ${handle.location}`);
+  const opened = await openDatabase();
+  try {
+    await assertJournalIsTheTree(opened.db, opened.location, 'whole');
+  } catch (e) {
+    await opened.close();
+    throw e;
+  }
+  handle = opened;
+  initDb(opened.db);
+  logDb.info(`database ready at ${opened.location}`);
 }
 
 export async function closeDatabase(): Promise<void> {
@@ -805,7 +869,7 @@ export async function summaryIncomeBySource(
   const { where, money } = scopeSql(scope);
   const rows = await rowsOf<Omit<IncomeSourceTotal, 'total'> & { total_cents: string }>(sql`
     SELECT ${INCOME_SOURCE} AS source,
-           CASE WHEN ${CATEGORY} = 'support' THEN 'Support' ELSE COALESCE(i.label, ${INCOME_SOURCE}) END AS label,
+           CASE WHEN ${CATEGORY} = 'support' THEN ${SUPPORT_INCOME_SOURCE} ELSE COALESCE(i.label, ${INCOME_SOURCE}) END AS label,
            CASE WHEN ${CATEGORY} = 'support' THEN 'external' ELSE COALESCE(i.kind, 'own') END AS kind,
            SUM(${money}) AS total_cents
     FROM transactions
@@ -2190,9 +2254,22 @@ export async function deleteTransferRule(id: number): Promise<boolean> {
   return rows.length > 0;
 }
 
+export async function countTransferRuleMatches(rules: TransferRule[]): Promise<Map<number, number>> {
+  const counts = new Map<number, number>();
+  for (const accountId of new Set(rules.map((rule) => rule.accountId))) {
+    const rows = await rowsOf<Pick<TxRow, 'account_id' | 'description'>>(
+      sql`SELECT account_id, description FROM transactions WHERE account_id = ${accountId}`,
+    );
+    const covered = tallyTransferRuleMatches(rows.map((r) => ({ accountId: r.account_id, description: r.description })));
+    for (const rule of rules) {
+      if (rule.accountId === accountId) counts.set(rule.id, covered(rule));
+    }
+  }
+  return counts;
+}
+
 export async function countRuleMatches(rule: TransferRule): Promise<number> {
-  const rows = await rowsOf<TxRow>(sql`SELECT * FROM transactions WHERE account_id = ${rule.accountId}`);
-  return rows.filter((r) => matchesTransferRule(rule, rowToTx(r))).length;
+  return (await countTransferRuleMatches([rule])).get(rule.id) ?? 0;
 }
 
 function transferPreview(source: Transaction, rows: Transaction[], rules: TransferRule[]): TransferRulePreview {
@@ -2438,8 +2515,8 @@ export async function addCategoryRule(pattern: string, category: string): Promis
 function categoryPreview(pattern: string, rows: Transaction[], rules: CategoryRule[]): CategoryRulePreview {
   const activeRule = rules.find((rule) => rule.pattern === pattern) ?? null;
   const otherRules = rules.filter((rule) => rule.id !== activeRule?.id && (
-    pattern.toLowerCase().includes(rule.pattern.toLowerCase()) ||
-    rows.some((row) => row.description.toLowerCase().includes(rule.pattern.toLowerCase()))
+    categoryPatternMatches(pattern, rule.pattern) ||
+    rows.some((row) => categoryPatternMatches(row.description, rule.pattern))
   ));
   const previewToken = crypto.createHash('sha256').update(JSON.stringify([
     pattern,
@@ -2454,11 +2531,9 @@ function categoryPreview(pattern: string, rows: Transaction[], rules: CategoryRu
 }
 
 async function readCategoryPreview(db: Db, pattern: string): Promise<CategoryRulePreview> {
-  const rows = await rowsVia<TxRow>(db, sql`
-    SELECT * FROM transactions WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0
-    ORDER BY date DESC, id ASC`);
+  const rows = await rowsVia<TxRow>(db, sql`SELECT * FROM transactions ORDER BY date DESC, id ASC`);
   const rules = await db.select().from(s.categoryRules).orderBy(asc(s.categoryRules.id));
-  return categoryPreview(pattern, rows.map(rowToTx), rules);
+  return categoryPreview(pattern, rows.filter((r) => categoryPatternMatches(r.description, pattern)).map(rowToTx), rules);
 }
 
 export async function previewCategoryRule(pattern: string): Promise<CategoryRulePreview> {
@@ -2488,18 +2563,16 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
 
 /**
  * How many transactions the pattern covers, and how many of those the rule cannot
- * change because the user set the category by hand. One WHERE computing both, so the
+ * change because the user set the category by hand. One filter computing both, so the
  * two can never be taken through different filters and matches - overridden go wrong
  * as soon as one account is hidden.
  */
 export async function countCategoryRuleMatches(pattern: string): Promise<CategoryRuleCounts> {
-  const rows = await rowsOf<{ matches: string; overridden: string }>(
-    sql`SELECT COUNT(*) AS matches,
-               COUNT(*) FILTER (WHERE category_manual IS NOT NULL) AS overridden
-        FROM transactions
-        WHERE POSITION(LOWER(${pattern}) IN LOWER(description)) > 0`,
+  const rows = await rowsOf<Pick<TxRow, 'description' | 'category_manual'>>(
+    sql`SELECT description, category_manual FROM transactions`,
   );
-  return { matches: Number(rows[0].matches), overridden: Number(rows[0].overridden) };
+  const matched = rows.filter((r) => categoryPatternMatches(r.description, pattern));
+  return { matches: matched.length, overridden: matched.filter((r) => r.category_manual !== null).length };
 }
 
 export async function listBudgets(): Promise<Budget[]> {

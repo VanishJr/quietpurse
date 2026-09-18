@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll, reclassifyIfRulesChanged } from '../src/classify';
 import { addTransferRule, allTransactions, exportBackup, insertTransactions, listTransferRules, parseBackup, restoreBackup, seedDefaults, setTransferOverride } from '../src/db';
+import { matchesTransferRule } from '../src/transaction-description';
 import type { NewTransaction } from '../src/types';
-import type { TransferRulePreview } from '../src/wire';
+import type { TransferRule, TransferRulePreview } from '../src/wire';
 import { freshTestDb } from './pglite';
 
 const agent = request(app);
@@ -108,6 +109,30 @@ describe('similar transfer rules over HTTP', () => {
     const removed = await agent.delete(`/api/transfer-rules/${res.body.rule.id}`);
     expect(removed.status).toBe(200);
     expect((await allTransactions()).filter((t) => t.transfer)).toEqual([]);
+  });
+
+  it('answers each rule with the count of rows the classifier tags for it, inside its own account', async () => {
+    const other = await account('Another account');
+    await insertTransactions([
+      transaction('2026-08-31'), transaction('2026-09-01'),
+      transaction('2026-09-02', ' example  PERSON Gutschriften Wertstellung 02.09.2026'),
+      transaction('2026-09-03', 'Rent'), transaction('2026-09-04', 'Rent'), transaction('2026-09-05', 'rent'),
+      { ...transaction('2026-08-31'), accountId: other }, { ...transaction('2026-09-03', 'Rent'), accountId: other },
+    ]);
+    const rows = await allTransactions();
+    const source = rows.find((t) => t.date === '2026-08-31' && t.accountId === accountId)!;
+    expect((await apply(await preview(source.id))).status).toBe(200);
+    const rent = rows.find((t) => t.description === 'Rent' && t.accountId === accountId)!;
+    expect((await agent.post('/api/transfer-rules').send({ txId: rent.id })).status).toBe(200);
+    const tagged = (await allTransactions()).filter((t) => t.transfer);
+    expect(tagged.map((t) => t.accountId)).toEqual(Array(5).fill(accountId));
+    const listed = await agent.get('/api/transfer-rules');
+    expect(listed.status).toBe(200);
+    const rules = listed.body as (TransferRule & { matches: number })[];
+    expect(rules.map((rule) => rule.matches).sort()).toEqual([2, 3]);
+    for (const rule of rules) {
+      expect(rule.matches, rule.matchMode).toBe(tagged.filter((t) => matchesTransferRule(rule, t)).length);
+    }
   });
 
   it('only expands legacy rules when the user applies the preview and consolidates the group', async () => {

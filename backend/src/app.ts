@@ -33,6 +33,7 @@ import {
   discardImport,
   countCategoryRuleMatches,
   countRuleMatches,
+  countTransferRuleMatches,
   currentBaseCurrency,
   deleteAccount,
   deleteCategoryRule,
@@ -631,16 +632,8 @@ app.patch('/api/transactions/:id/category', async (req, res) => {
 
 app.get('/api/transfer-rules', async (_req, res) => {
   const rules = await listTransferRules();
-  answer(
-    res,
-    'GET /api/transfer-rules',
-    await Promise.all(
-      rules.map(async (r) => ({
-        ...r,
-        matches: await countRuleMatches(r),
-      })),
-    ),
-  );
+  const matches = await countTransferRuleMatches(rules);
+  answer(res, 'GET /api/transfer-rules', rules.map((r) => ({ ...r, matches: matches.get(r.id) ?? 0 })));
 });
 
 app.post('/api/transfer-rules', async (req, res) => {

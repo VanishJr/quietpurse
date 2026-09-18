@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     const done = await reclassifyIfRulesChanged();
     if (done) logClassify.info('re-tagged every transaction with the new rules');
     else await backfillBaseAmounts();
-  })().catch((e: Error) => logClassify.error(`recompute failed: ${e.message}`));
+  })().catch((e: Error) => logClassify.error(`recompute failed: ${reasonFirst(e)}`));
 
   const server = app.listen(config.port, config.host, () => {
     logger.info(`Finto is at http://localhost:${config.port}`);

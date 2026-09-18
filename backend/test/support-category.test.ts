@@ -41,7 +41,7 @@ describe('Support category', () => {
       const result = await summary(account);
       expect(result.totals.income).toBe(1500);
       expect(result.incomeByCategory).toContainEqual({ category: 'support', total: 300 });
-      expect(result.incomeBySource).toContainEqual({ source: res.body.incomeSource, label: 'Support', kind: 'external', total: 300 });
+      expect(result.incomeBySource).toContainEqual({ source: res.body.incomeSource, label: 'category:support', kind: 'external', total: 300 });
     }
     await upsertBaselineItem('Living costs', 1000);
     const goal = await computeIndependence(new Date('2026-09-16T00:00:00Z'));
@@ -58,7 +58,7 @@ describe('Support category', () => {
     const refused = await agent.patch(`/api/transactions/${help.id}/source`).send({ source: 'salary' });
     expect(refused.status).toBe(409);
     expect(refused.body.error).toContain('Support is external income');
-    expect((await summary()).incomeBySource).toMatchObject([{ label: 'Support', kind: 'external', total: 300 }]);
+    expect((await summary()).incomeBySource).toMatchObject([{ label: 'category:support', kind: 'external', total: 300 }]);
     const cleared = await agent.patch(`/api/transactions/${help.id}/category`).send({ category: null });
     expect(cleared.status).toBe(200);
     expect(cleared.body).toMatchObject({ category: 'other', incomeSource: 'salary', incomeSourceManual: true });
@@ -77,7 +77,7 @@ describe('Support category', () => {
     await insertTransactions([row('Assistance payment Wertstellung 20.08.2026', 200, '2026-08-20')]);
     await reclassifyAll();
     expect((await allTransactions()).every((tx) => tx.category === 'support')).toBe(true);
-    expect((await summary()).incomeBySource).toMatchObject([{ label: 'Support', kind: 'external', total: 500 }]);
+    expect((await summary()).incomeBySource).toMatchObject([{ label: 'category:support', kind: 'external', total: 500 }]);
     expect((await agent.delete(`/api/category-rules/${rule.body.rule.id}`)).status).toBe(200);
     expect((await summary()).incomeBySource).toMatchObject([{ source: 'other', kind: 'own', total: 500 }]);
   });
@@ -114,7 +114,7 @@ describe('Support category', () => {
     await agent.patch(`/api/transactions/${help.id}/category`).send({ category: 'support' });
     const changed = await agent.put('/api/income-sources/family').send({ label: 'Repurposed source', kind: 'own' });
     expect(changed.status).toBe(200);
-    expect((await summary()).incomeBySource).toMatchObject([{ label: 'Support', kind: 'external', total: 300 }]);
+    expect((await summary()).incomeBySource).toMatchObject([{ label: 'category:support', kind: 'external', total: 300 }]);
     expect((await computeIndependence(new Date('2026-09-16T00:00:00Z'))).ownIncomeAvg).toBe(0);
   });
 });

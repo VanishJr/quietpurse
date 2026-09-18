@@ -61,6 +61,18 @@ describe('category rule preview', () => {
     expect((await allTransactions()).find((tx) => tx.id === manual.id)?.category).toBe('health');
   });
 
+  it('previews exactly the rows the rule tags where SQL and JavaScript lowercase a letter differently', async () => {
+    await insertTransactions([row('İSTANBUL MARKET'), row('istanbul market', '2026-08-30'), row('ΟΔΟΣ ΑΘΗΝΑΣ 12', '2026-08-29')]);
+    for (const [pattern, category] of [['istanbul', 'shopping'], ['οδος', 'housing']] as const) {
+      const p = await preview(pattern);
+      const res = await apply(p, category);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const tagged = (await allTransactions()).filter((tx) => tx.category === category).map((tx) => tx.id).sort();
+      expect(p.transactions.map((tx) => tx.id).sort(), pattern).toEqual(tagged);
+      expect(res.body.matches, pattern).toBe(tagged.length);
+    }
+  });
+
   it('is not capped by the transactions list and treats wildcards literally', async () => {
     await insertTransactions([...Array.from({ length: 1001 }, () => row('Shop 50%_')), row('Shop 500')]);
     const p = await preview('  Shop 50%_  ');
