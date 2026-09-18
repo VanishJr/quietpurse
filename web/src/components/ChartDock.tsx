@@ -51,12 +51,12 @@
  * reader with eight charts should not have to scroll to the end of their own list to
  * add a ninth. The arrows sit outside it for the same reason.
  *
- * Not a `role="tablist"`, for the reason `AccountTabs` gives: the app already has one
- * idiom for "which of these is the current one", and it is `aria-current` on a plain
- * button. A real tablist would also make the strip a composite widget with a roving
- * tabindex, which is a keyboard model nobody asked for on a row that is at most a
- * handful of names — and the same argument keeps the popover a labelled group of
- * buttons rather than a `role="menu"` promising arrow keys it does not implement.
+ * Not a `role="tablist"`: the app already has one idiom for "which of these is the
+ * current one", and it is `aria-current` on a plain button. A real tablist would also
+ * make the strip a composite widget with a roving tabindex, which is a keyboard model
+ * nobody asked for on a row that is at most a handful of names — and the same argument
+ * keeps the popover a labelled group of buttons rather than a `role="menu"` promising
+ * arrow keys it does not implement.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChartGlyph, GlyphName } from './ChartGlyphs';

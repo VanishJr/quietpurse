@@ -13,8 +13,8 @@ export const TABS_PER_PAGE = 3;
  * in the middle — see `truncateMiddle`, and the reason there: the default name is the
  * statement's filename, and everything that distinguishes two of them is at the end.
  *
- * The whole name is never lost. It is the tab's `title`, it is the tab's accessible
- * name, and it is the heading of the balance card below.
+ * The whole name is never lost. It is the tab's `title`, and it is the tab's accessible
+ * name.
  */
 export const TAB_NAME_BUDGET = 18;
 

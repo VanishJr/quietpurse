@@ -75,8 +75,10 @@ export const spendSectors = <T extends CategorySummary>(spend: T[]): (T & SpendS
     .filter((c) => c.total > 0)
     .map((c) => ({ ...c, label: categoryLabel(c.category) }));
 
+export const RING_SLOT_INK = ['good', 'lavender', 'sand'] as const;
+
 /** How many categories the Overview ring names before it groups the tail. */
-const RING_TOP = 3;
+const RING_TOP = RING_SLOT_INK.length;
 
 /** The tail's own key, which no slug can be. */
 export const REST_SECTOR = '__rest';

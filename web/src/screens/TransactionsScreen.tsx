@@ -248,7 +248,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   };
 
   const ruleApplied = async (updated: Transaction, message: string) => {
-    await load();
+    await currentLoad.current();
     setSelected(updated);
     setNotice(message);
     returnToTransaction();

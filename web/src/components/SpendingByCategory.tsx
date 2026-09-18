@@ -1,5 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { categoryLabel, restLabel, spendRing } from '../categories';
+import { RING_SLOT_INK, categoryLabel, restLabel, spendRing } from '../categories';
 import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
@@ -16,7 +16,7 @@ interface Props {
 export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: Props) {
   const { ink } = useTheme();
   const { top, rest, restTotal, sectors } = spendRing(spend, total);
-  const palette = [ink.good, ink.lavender, ink.sand];
+  const palette = RING_SLOT_INK.map((k) => ink[k]);
   const hasRefunds = spend.some((c) => c.total < 0);
 
   return (

@@ -110,6 +110,17 @@ describe('the transactions list', () => {
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
 
+  it('colours the dot of a row whose category is a prototype key like any unknown one', async () => {
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([row({ id: 'tx-proto', description: 'Proto row', category: '__proto__' })]),
+    });
+    mount();
+    await screen.findByText('Proto row');
+    // a plain lookup answers Object.prototype here, and React paints that as no colour
+    expect(document.querySelector<HTMLElement>('.row .dot')?.style.background).not.toBe('');
+  });
+
   it('says the period is empty when the period really is empty', async () => {
     // the mirror for the test below: without it that one passes against a screen
     // that lost its empty state entirely
@@ -627,6 +638,28 @@ describe('category rules with a preview', () => {
     await screen.findByRole('dialog', { name: 'Transaction' });
     expect(requests().filter((r) => r === 'POST /api/category-rules')).toHaveLength(1);
   });
+
+  it('re-reads under the filter the list answers when the rule lands, not the one it was applied under', async () => {
+    let release: (response: Response) => void = () => {};
+    mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules': () => new Promise<Response>((resolve) => { release = resolve; }) });
+    mount();
+    await openCategoryPreview();
+    fireEvent.click(applyCategoryRule());
+
+    // the filter moves while the write is in flight, and the list re-reads for it
+    chooseFilter('Category', 'food');
+    await settle();
+
+    release(ok(ruleAnswer('REWE Berlin', 2, 1)));
+    await settle();
+    await settle();
+
+    // the third read is the rule's, and it carries the filter as of the settle: read
+    // off the URL, because the rows alone are the same under either filter
+    const lists = requestUrls().filter((url) => url.startsWith('GET /api/transactions?'));
+    expect(lists).toHaveLength(3);
+    expect(lists[2]).toContain('category=food');
+  });
 });
 
 const EXPENSE = row({ id: 'tx-1', description: 'REWE Berlin', amount: -42.5, category: 'food' });
@@ -1137,6 +1170,31 @@ describe('the transfer rule', () => {
     release(ok({ rule: RULE, matches: 2 }));
     expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
     expect(requests().filter((r) => r === 'POST /api/transfer-rules')).toHaveLength(1);
+  });
+
+  it('re-reads under the filter the list answers when the rule lands, not the one it was applied under', async () => {
+    let release: (response: Response) => void = () => {};
+    mockFetch({
+      ...PREVIEW_ROUTES,
+      'POST /api/transfer-rules': () => new Promise<Response>((resolve) => { release = resolve; }),
+    });
+    mount();
+    await openPreview();
+    fireEvent.click(applyRuleButton());
+
+    // the filter moves while the write is in flight, and the list re-reads for it
+    chooseFilter('Category', 'food');
+    await settle();
+
+    release(ok({ rule: { ...RULE, matchMode: 'similar-v1' }, matches: 2 }));
+    await settle();
+    await settle();
+
+    // the third read is the rule's, and it carries the filter as of the settle: read
+    // off the URL, because the rows alone are the same under either filter
+    const lists = requestUrls().filter((url) => url.startsWith('GET /api/transactions?'));
+    expect(lists).toHaveLength(3);
+    expect(lists[2]).toContain('category=food');
   });
 });
 
