@@ -284,6 +284,17 @@ sending an id the route now refuses, and the route refuses the whole list over i
 
 ## Invariants
 
+The effective Support category derives a read-only external income source. Transaction mapping and
+SQL summaries must make the same choice, using the manual category before the automatic category.
+Stored source overrides remain available when Support is removed. The derived source is independent
+of editable income-source names and kinds, so repurposing the seeded Support source cannot turn a
+Support category into own earnings.
+
+Transfer rules carry their matching mode explicitly. An old database or backup defaults to exact
+matching; widening that mode requires the previewed group action. The forward migration preserves
+local transactions and source descriptions. Squashing that migration into the initial schema would
+require discarding the local data this change is meant to keep.
+
 **Adding a table means editing lists by hand, and nothing connects any of them to
 `backend/src/db/schema.ts`.** They are `BACKUP_TABLES` in `backend/src/db/index.ts`, which decides
 what a backup contains, and `TABLES` in `backend/test/pglite.ts`, the truncate list. Nothing holds

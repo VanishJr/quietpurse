@@ -134,8 +134,9 @@ the database.
 
 `backend/src/db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
 `backend/drizzle/` and applied when the database is opened. Until the first release the history is
-squashed into a single `backend/drizzle/0000_initial.sql` on every schema change — the history has no databases to
-upgrade. **A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
+squashable into `backend/drizzle/0000_initial.sql` when the local databases are disposable. Changes that must preserve
+existing local data, such as the transfer-rule matching mode, use a forward migration instead.
+**A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
 one, because the regenerated file carries a later journal timestamp and drizzle re-applies it. From
 the first release on, migrations are append-only and an applied one is never edited.
 

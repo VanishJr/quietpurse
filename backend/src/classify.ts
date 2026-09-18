@@ -13,6 +13,7 @@ import {
 import { backfillBaseAmounts } from './fxrates';
 import { getRatesToUAH } from './rates';
 import { Transaction } from './types';
+import { matchesTransferRule } from './transaction-description';
 
 /**
  * Window for a same-currency pair: the amounts have to match to the cent, so there is
@@ -68,16 +69,9 @@ async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
   };
 }
 
-/**
- * Matched exactly, as the bank sent it: a rule is created by tapping one specific
- * transaction, so the string is what that bank sends for that whole group.
- */
 async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
-  const rules = new Set(
-    (await listTransferRules()).map((r) => `${r.accountId}\0${r.description}`),
-  );
-  if (rules.size === 0) return () => false;
-  return (t: Transaction) => rules.has(`${t.accountId}\0${t.description}`);
+  const rules = await listTransferRules();
+  return (t) => rules.some((rule) => matchesTransferRule(rule, t));
 }
 
 /** Patterns are matched like owner names, and the first matching source by sort wins. */
@@ -250,6 +244,7 @@ export async function reclassifyAll(): Promise<number> {
       !result.get(t.id)!.refund &&
       !result.get(t.id)!.transfer &&
       sourceFor(t.description) === undefined &&
+      !(t.categoryManual && t.category === 'support') &&
       PAIRABLE_CATEGORIES.has(result.get(t.id)!.category),
   );
 
@@ -293,6 +288,9 @@ export async function reclassifyAll(): Promise<number> {
 
 /** A source's kind is deliberately outside it: kind moves summaries, not tags. */
 async function rulesSignature(): Promise<string> {
+  const transferRules = (await listTransferRules())
+    .map((r) => [r.accountId, r.matchMode, r.description])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const categoryRules = (await listCategoryRules())
     .map((r) => `${r.pattern}>${r.category}`)
     .sort()
@@ -302,7 +300,7 @@ async function rulesSignature(): Promise<string> {
     .sort()
     .join(';');
   const { ownerNames } = await getAppSettings();
-  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}`;
+  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}|${JSON.stringify(transferRules)}`;
 }
 
 export async function reclassifyIfRulesChanged(): Promise<boolean> {

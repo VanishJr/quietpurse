@@ -441,6 +441,35 @@ never offered for pairing. The last is the user's manual flag, in a column of it
 classifier never writes. A transaction already explained is not offered for pairing at all, because
 offering it is how a real cash expense disappears from the figures.
 
+**Transfer similarity is a separate interpretation of the source description.**
+`transaction-description.ts` derives a display name and value date without rewriting the stored
+description. Only a valid labelled value-date suffix is removed; other dates, contract numbers and
+the remaining bank wording distinguish groups. The matcher owns case and whitespace normalization
+on the server, and both classification and the rule preview use it. The client never reconstructs
+the matching key from its display name.
+
+An existing exact rule keeps its meaning until the person applies a similar-description rule from
+the preview. The new rule replaces the exact rules in that account's normalized group, clears the
+manual transfer overrides shown in the preview and governs future imports too. Manual changes made
+afterwards are exceptions again. Removing a rule returns the rows to the other independent signals;
+it is not an instruction to force their transfer flags off.
+
+The preview covers the source account's full history, independently of the list's filters and limit.
+Its token binds the group and manual overrides to the rules being replaced. Applying checks that
+token while holding the account and transaction rows; a changed preview is refused without writing.
+The rule and override changes commit together before classification runs. The classification
+signature includes transfer rules so a restart repairs an interrupted recompute.
+
+**A category-rule preview has the rule's full scope.** The substring search includes hidden accounts
+and the full history, independent of the transaction list's filters and cap. It reports manual
+categories as preserved exceptions and exposes overlapping rules for management. The existing
+newest-rule precedence and the creation time of an edited rule remain intact.
+
+Clients using the preview send its token when applying a category rule. The token binds the pattern,
+matching transaction state and category rules. The data layer blocks transaction and category-rule
+writes while it rechecks that state and saves the rule; a mismatch refuses the write. Manual category
+choices are not cleared. Requests without a token retain the existing direct-creation API contract.
+
 **The owner names are the only source that signal has.** They come from the settings table and from
 nowhere else — the bank-supplied account-holder name left with the deleted integrations — so a
 person who leaves that setting empty gets no owner-name signal at all, silently and correctly. That
@@ -456,6 +485,17 @@ merchant word then stays two rows — real income on one account, real spending 
 counted, both wrong. The person adding the keyword is not editing the classifier and has no reason
 to open it. Nothing holds this.
 
+The Support category is an explicit choice of external income, whether assigned to one transaction
+or by a category rule. Incoming Support stays in total income but contributes only to external
+income in the Goal calculation. Amount sign, refunds and explicit own-account transfer signals
+still determine whether a row is income at all. A manual Support category prevents amount-based
+transfer pairing; entering or leaving that category recomputes the pairs.
+
+Support derives its income source at read time rather than overwriting a stored source choice.
+Removing the category restores the ordinary source selection. The source-editing route refuses
+an attempt to override incoming Support until its category changes, so a successful source write
+cannot appear to turn help into earnings while summaries continue to treat it as help.
+
 **An income source's patterns are matched by words, and a pattern below the floor matches nothing
 rather than everything.** The match is over the set of words rather than the string, with a floor on
 how many long-enough words a pattern must reduce to; a pattern that falls below it is dropped, and a
@@ -463,7 +503,7 @@ source whose only pattern was dropped leaves the matcher entirely. Nothing on th
 person types that pattern says so, and nothing refuses it either.
 
 **The tagging rules have a signature.** The categoriser's own version, the owner names, the income
-sources' patterns and the user's category rules are composed into one string, and a start whose
+sources' patterns and the user's category and transfer rules are composed into one string, and a start whose
 signature differs from the one recorded recomputes every transaction. That is the upgrade path, and
 it is also the trap: a rule list edited in `backend/src/categorizer.ts` without its version moving is
 a change the signature cannot see, so every existing row keeps a tag the current rules would not give

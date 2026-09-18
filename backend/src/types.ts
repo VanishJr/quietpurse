@@ -20,6 +20,8 @@ export type {
 } from './wire';
 
 type AssignedAfterInsert =
+  | 'displayDescription'
+  | 'valueDate'
   | 'categoryManual'
   | 'transfer'
   | 'transferManual'
