@@ -83,20 +83,22 @@ Stop it with Ctrl+C. Start it again the same way; your data is where you left it
 
 ### Coming from an earlier checkout
 
-Migrations are append-only: a schema change is a new migration file after the last one, and
-a database this build's initial migration created is upgraded in place on the next start,
-with your transactions where they were.
-
-**A database whose initial migration is not the one this build ships is the exception.** Before
-the forward migrations existed, every schema change was folded into the one initial migration by
-regenerating it, so a database migrated by an older regeneration carries a file this build does
-not have, and there is no repair and no conversion. The start says so rather than guessing: it
-either dies with `relation "accounts" already exists` or refuses, naming the migration it does not
-know. When it does, delete the database and start again:
+**If an earlier build of Finto ever started on this machine, delete its database before you
+start this one.**
 
 ```bash
 rm -rf ~/Finto/db
 ```
+
+Finto is pre-release, so a schema change is folded into the one migration by regenerating it
+rather than by adding a second one. A database that an earlier build already migrated does not
+know that: it sees a migration it has run before, carrying a newer timestamp, runs it again,
+and the start dies with `relation "accounts" already exists`.
+
+**There is no repair and no conversion.** A regenerated migration and an already-migrated
+database cannot be reconciled, by design — that is the cost of squashing, and it is why this
+step is a step and not a footnote. From the first release on, migrations are append-only and
+nothing like this is asked of anybody again.
 
 Your uploaded statements in `~/Finto/statements/` are untouched by any of this. Import them
 again once the app starts. If you point `DATABASE_URL` at a PostgreSQL server, drop that
@@ -157,11 +159,11 @@ order is load-bearing: reversed, the client's typecheck fails on `zod`.
 The database schema lives in `backend/src/db/schema.ts`. SQL migrations are generated from
 it (`npm run db:generate`) into `backend/drizzle/` and applied when the app starts.
 
-> **Migrations are append-only, and `0000_initial.sql` is never regenerated.** A schema change
-> is a new file after the last one, and an applied migration is never edited. A database whose
-> initial migration is an older regeneration this tree does not ship cannot be upgraded — the
-> start refuses it or dies with `relation "accounts" already exists` — and the step under
-> *Coming from an earlier checkout* is for that database and no other.
+> Until the first release, a schema change may be folded into the existing migration by
+> regenerating it. **A squash invalidates every database already migrated** — the next start
+> dies with `relation "accounts" already exists` — so after one, delete `~/Finto/db` and any
+> `*_test` database. **From the first release on, migrations are append-only** and an applied
+> one is never edited.
 
 ## Documentation
 

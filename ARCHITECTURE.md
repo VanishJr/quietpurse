@@ -134,18 +134,11 @@ the database.
 ## Migrations
 
 `backend/src/db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
-`backend/drizzle/` and applied when the database is opened. **Migrations are append-only from
-`0001` on, and `backend/drizzle/0000_initial.sql` is never regenerated again**: a schema change is
-a new file after the last one, and an applied migration is never edited. drizzle applies the
-entries whose journal timestamp is later than the last one the database records and compares
-nothing else, so a regenerated initial migration would either be re-applied over a database that
-ran the old one — the start dies with `relation "accounts" already exists` — or, timestamped after
-`0001`, let that database skip `0001` in silence. The open refuses either case by name before
-anything is written: `connectDatabase` in `backend/src/db/index.ts` reads the journal table
-against the tree's migration files and throws, naming the first row that differs, unless every
-applied migration is the tree's at its position, and reads it again after migrating, refusing
-unless the journal is the tree's row for row. `README.md` carries the instruction for a person
-whose database's initial migration is not this tree's.
+`backend/drizzle/` and applied when the database is opened. Until the first release the history is
+squashed into a single `backend/drizzle/0000_initial.sql` on every schema change — the history has no databases to
+upgrade. **A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
+one, because the regenerated file carries a later journal timestamp and drizzle re-applies it. From
+the first release on, migrations are append-only and an applied one is never edited.
 
 ## Adding a statement format
 

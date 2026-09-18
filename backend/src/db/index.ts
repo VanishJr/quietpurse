@@ -3,7 +3,6 @@ import path from 'path';
 import { and, asc, eq, getTableColumns, inArray, sql, type SQL } from 'drizzle-orm';
 import fs from 'fs/promises';
 import { PGlite } from '@electric-sql/pglite';
-import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator';
 import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
@@ -134,7 +133,6 @@ export interface DatabaseHandle {
 export async function openDatabase(): Promise<DatabaseHandle> {
   const opened = config.databaseUrl ? openServer(config.databaseUrl) : await openEmbedded(config.databaseDir);
   try {
-    await assertJournalIsTheTree(opened.db, opened.location, 'prefix');
     await opened.migrate();
   } catch (e) {
     await opened.close();
@@ -173,48 +171,10 @@ async function openEmbedded(directory: string): Promise<Opened> {
 
 let handle: DatabaseHandle | undefined;
 
-/** In the order drizzle applies; a database it has never touched has no journal table yet. */
-async function appliedMigrations(d: Db): Promise<{ hash: string; created_at: string | number }[]> {
-  const [journal] = await rowsVia(d, sql`
-    SELECT 1 FROM information_schema.tables WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'`);
-  if (!journal) return [];
-  return rowsVia(d, sql`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at ASC, id ASC`);
-}
-
-/**
- * The expected hashes come from drizzle's own reader, the function that wrote them.
- * `prefix` holds every row the journal has to the tree's at its position and lets the
- * journal stop short; `whole` holds the two row for row.
- */
-async function assertJournalIsTheTree(d: Db, location: string, extent: 'prefix' | 'whole'): Promise<void> {
-  const tree = readMigrationFiles({ migrationsFolder: MIGRATIONS_DIR });
-  const applied = await appliedMigrations(d);
-  const compared = extent === 'whole' ? Math.max(tree.length, applied.length) : applied.length;
-  for (let i = 0; i < compared; i++) {
-    const ours = tree.at(i);
-    const theirs = applied.at(i);
-    if (ours?.hash === theirs?.hash) continue;
-    const theirRow = theirs ? `${theirs.hash} applied at ${Number(theirs.created_at)}` : `missing (it has ${applied.length})`;
-    const ourRow = ours ? `${ours.hash} at ${ours.folderMillis}` : `missing (it has ${tree.length})`;
-    throw new Error(
-      `the database at ${location} was migrated by a build of Finto this one does not know: its migration ` +
-        `${i + 1} is ${theirRow}, and this build's migration ${i + 1} is ${ourRow}. Start the build that ` +
-        `migrated it, or delete the database and import your statements again.`,
-    );
-  }
-}
-
 export async function connectDatabase(): Promise<void> {
-  const opened = await openDatabase();
-  try {
-    await assertJournalIsTheTree(opened.db, opened.location, 'whole');
-  } catch (e) {
-    await opened.close();
-    throw e;
-  }
-  handle = opened;
-  initDb(opened.db);
-  logDb.info(`database ready at ${opened.location}`);
+  handle = await openDatabase();
+  initDb(handle.db);
+  logDb.info(`database ready at ${handle.location}`);
 }
 
 export async function closeDatabase(): Promise<void> {

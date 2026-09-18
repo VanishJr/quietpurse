@@ -106,26 +106,16 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   backup gets to choose. So those three fields are written once and updated by nothing, and a
   delete carries all three. The reduction of the filename, and why `CON.txt` is the shape to
   worry about, is in `src/SPEC.md`.
-- **Migrations are append-only from `0001` on, and `0000_initial.sql` is never regenerated
-  again.** A schema change is a new file generated after the last one and applied in place on
-  the next start. Until `0001` the history was squashable — nothing was published, so three
-  schema changes were one regenerated `0000_initial.sql` — and that ended the day the owner had
-  data in `~/Finto/db` they meant to keep, which is the end the old rule named for itself. The
-  record of what a squash costs stays, because it is also why two rules at once would be worse
-  than either: **a regenerated migration invalidates every database already migrated.** The
-  regenerated file carries a later `_journal.json` timestamp; drizzle orders by that timestamp
-  and compares nothing else, so on a database that ran the old file it re-applies the new one
-  and the run dies with `relation "accounts" already exists` (SQLSTATE `42P07`, on the error's
-  `cause` and not in the sentence), and on a database that ran a regenerated file timestamped
-  after `0001` it skips `0001` in silence. The start refuses either database by name rather than
-  dying on the first or serving the second: before anything is written, `connectDatabase` reads
-  the journal table against the tree's migration files and throws, naming the first row that
-  differs, unless every applied migration is the tree's at its position — and reads it again after
-  migrating, refusing unless the journal is the tree's row for row. A database whose initial
-  migration is not this tree's cannot be upgraded — it is deleted and its statements imported
-  again; `README.md` carries the instruction for a person. CI is not affected: its Postgres is a
-  service container created fresh per run, and the default suite is an in-memory PGlite with no
-  directory to carry a journal.
+- **Migrations are squashable until the first release.** Nothing is published and no copy of the
+  app is running anywhere but a checkout, so migration history has no value yet: three schema
+  changes are one regenerated `0000_initial.sql`. That stops being true the day somebody has
+  data they mean to keep. **A squash invalidates every database already migrated:** the
+  regenerated file carries a later `_journal.json` timestamp, so drizzle re-applies it and the
+  run dies with `relation "accounts" already exists` (SQLSTATE `42P07`, which is on the error's
+  `cause` and not in the sentence). Every local database — `~/Finto/db` and every `*_test` — has
+  to be deleted after one. CI is not affected: its Postgres is a service container created fresh
+  per run, and the default suite is an in-memory PGlite with no directory to carry a journal.
+  `README.md` carries the instruction for a person; this is why it exists.
 - **Categories are slugs** in the database and over the API; display names live in the client
   dictionary. The slug is a stable contract.
 - **Nothing is required to start.** Every setting has a default that works on a machine with

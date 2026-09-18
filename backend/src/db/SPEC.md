@@ -8,7 +8,7 @@ parent: module-backend
 
 What this module is for, where it stops, and the rules about it that no type and no test holds.
 Everything already enforced beside the code it governs stays there: `AGENTS.md`'s *Invariants*
-carry transaction identity, import provenance and the migration rule, and nothing below
+carry transaction identity, import provenance and the migration-squash rule, and nothing below
 repeats them. The reasoning behind the constraints the schema declares used to sit in the headers of
 those files; it is here now. What stayed beside the code is what an edit to its own line would break.
 
@@ -26,20 +26,6 @@ those files; it is here now. What stayed beside the code is what an edit to its 
   in `backend/src` that needs a handle goes through it, so the choice is made in one place. The
   suite is the one opener that does not: `backend/test/pglite.ts` opens its own — in memory, or on
   the server its own variable names — and migrates it from the same directory.
-- **Refusing a database the tree does not know.** Before anything is written, `connectDatabase`
-  reads the journal table in timestamp order against the tree's migration files and throws,
-  naming the database and the first row that differs, unless every applied migration is the
-  tree's at its position; after migrating it reads the journal again and refuses unless the two
-  are the same row for row. drizzle applies the entries newer than the last one the journal
-  records and compares nothing else, so a database another checkout migrated with a regenerated
-  initial migration would otherwise keep its old schema, report ready, and fail on the first query
-  naming the column it never got, after the write that query followed had landed. The whole
-  journal and not its newest row, because a regenerated initial migration stamped between this
-  tree's initial migration and its first forward one would otherwise take the forward migration
-  over a schema this tree never wrote, and the newest row would then be the tree's own. The
-  expected hashes come from drizzle's own reader, the function that computed the ones it wrote.
-  `backend/test/migration-journal.test.ts` holds the refusal on both engines, at both stamps, and
-  the accept direction beside it.
 - **Every finance query the app makes.** There is one person's data and nothing else in the
   database, so a query names no owner: the whole table is theirs.
 - **The deduplication key format** (`backend/src/db/dedup.ts`). It is this module's alone now: its
@@ -306,9 +292,7 @@ Support category into own earnings. Its label is the client's, like every other 
 summary answers the derived source's id as its label and composes no display word.
 
 Transfer rules carry their matching mode explicitly. An old database or backup defaults to exact
-matching; widening that mode requires the previewed group action. The forward migration preserves
-local transactions and source descriptions. Squashing that migration into the initial schema would
-require discarding the local data this change is meant to keep.
+matching; widening that mode requires the previewed group action.
 
 **Adding a table means editing lists by hand, and nothing connects any of them to
 `backend/src/db/schema.ts`.** They are `BACKUP_TABLES` in `backend/src/db/index.ts`, which decides

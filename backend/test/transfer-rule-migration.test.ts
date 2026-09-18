@@ -1,41 +1,48 @@
-import fs from 'fs/promises';
-import os from 'os';
-import path from 'path';
-import { PGlite } from '@electric-sql/pglite';
-import { drizzle } from 'drizzle-orm/pglite';
-import { migrate } from 'drizzle-orm/pglite/migrator';
-import { expect, it } from 'vitest';
-import { MIGRATIONS_DIR } from '../src/db';
+/**
+ * transfer_rules.match_mode is a column with a default and a CHECK, held here on
+ * whichever engine the suite runs on. A backup taken before the column existed carries
+ * no matchMode key, sanitizeRow passes what it has, and the insert leaves the column to
+ * its default.
+ */
+import { sql } from 'drizzle-orm';
+import { beforeEach, expect, it } from 'vitest';
+import { dbInstance, listTransferRules, parseBackup, restoreBackup } from '../src/db';
+import { freshTestDb } from './pglite';
 
-it('upgrades an existing database without rewriting transactions or expanding its rules', async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'finto-rule-migration-'));
-  const client = new PGlite();
-  try {
-    await fs.mkdir(path.join(directory, 'meta'));
-    const journal = JSON.parse(await fs.readFile(path.join(MIGRATIONS_DIR, 'meta/_journal.json'), 'utf8'));
-    const initial = journal.entries[0];
-    await fs.writeFile(path.join(directory, 'meta/_journal.json'), JSON.stringify({ ...journal, entries: [initial] }));
-    await fs.copyFile(path.join(MIGRATIONS_DIR, `${initial.tag}.sql`), path.join(directory, `${initial.tag}.sql`));
-    const db = drizzle(client);
-    await migrate(db, { migrationsFolder: directory });
-    await client.exec(`
-      INSERT INTO accounts (id, provider, name, currency) VALUES ('old', 'upload', 'Existing account', 'EUR');
-      INSERT INTO transactions (id, account_id, dedup_key, provider, amount_cents, currency, date, description, transfer_manual)
-      VALUES ('old-tx', 'old', 'old-key', 'upload', 5000, 'EUR', '2026-08-31', 'Example Wertstellung 31.08.2026', false);
-      INSERT INTO transfer_rules (description, account_id, created_at)
-      VALUES ('Example Wertstellung 31.08.2026', 'old', '2026-09-01');
-    `);
-    const before = await client.query('SELECT * FROM transactions');
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    expect((await client.query('SELECT * FROM transactions')).rows).toEqual(before.rows);
-    expect((await client.query('SELECT description, account_id, match_mode FROM transfer_rules')).rows).toEqual([
-      { description: 'Example Wertstellung 31.08.2026', account_id: 'old', match_mode: 'exact' },
-    ]);
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    expect((await client.query('SELECT * FROM transactions')).rows).toEqual(before.rows);
-    await expect(client.exec("UPDATE transfer_rules SET match_mode = 'unknown'")).rejects.toMatchObject({ code: '23514' });
-  } finally {
-    await client.close();
-    await fs.rm(directory, { recursive: true, force: true });
-  }
+beforeEach(async () => {
+  await freshTestDb();
+});
+
+it('a backup from before the matching mode existed restores its transfer rules as exact', async () => {
+  const backup = parseBackup({
+    format: 'finto-backup',
+    version: 1,
+    tables: {
+      transfer_rules: [
+        { id: 7, description: 'Example Wertstellung 31.08.2026', accountId: 'old', createdAt: '2026-09-01' },
+      ],
+    },
+  });
+  expect(await restoreBackup(backup)).toEqual({ tables: 1, rows: 1 });
+  expect(await listTransferRules()).toEqual([
+    {
+      id: expect.any(Number),
+      description: 'Example Wertstellung 31.08.2026',
+      accountId: 'old',
+      matchMode: 'exact',
+      createdAt: '2026-09-01',
+    },
+  ]);
+});
+
+it('the column refuses a matching mode outside its vocabulary', async () => {
+  const write = dbInstance().execute(sql`
+    INSERT INTO transfer_rules (description, account_id, match_mode, created_at)
+    VALUES ('Example Wertstellung 31.08.2026', 'old', 'unknown', '2026-09-01')`);
+  const { code, constraint } = (await write.then(
+    () => ({}),
+    (e: { cause?: { code?: string; constraint?: string } }) => e.cause ?? {},
+  )) as { code?: string; constraint?: string };
+  expect({ code, constraint }).toEqual({ code: '23514', constraint: 'transfer_rules_match_mode_check' });
+  expect(await listTransferRules()).toEqual([]);
 });

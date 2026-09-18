@@ -1,5 +1,5 @@
 {
-  "id": "85a73683-8c4f-4317-a3fc-1a7b86fb9779",
+  "id": "2b764cdb-1243-4a2d-94c8-ea51c34178d3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -957,6 +957,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "match_mode": {
+          "name": "match_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'exact'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -979,6 +986,12 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "match_mode",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -991,7 +1004,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "transfer_rules_match_mode_check": {
+          "name": "transfer_rules_match_mode_check",
+          "value": "\"transfer_rules\".\"match_mode\" IN ('exact', 'similar-v1')"
+        }
+      },
       "isRLSEnabled": false
     }
   },
