@@ -1,15 +1,3 @@
-/**
- * The navigation's icons. Stroked, 20px, `currentColor` — so a nav item that is
- * current lightens its icon by changing its own colour and nothing has to be swapped.
- *
- * `aria-hidden` on every one of them: each sits beside its own label, and an icon
- * announced next to the word it draws is the word twice.
- *
- * They are drawn on a phone and not on a wide window: the design's top bar is text
- * pills, and `styles.css` hides them there. Settings is not a section in the list but
- * the control at the right of the bar, and its icon is drawn at every width.
- */
-
 const box = {
   width: 20,
   height: 20,

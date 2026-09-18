@@ -1,8 +1,8 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { ACCOUNTS, INCOME_SOURCES, TRANSFER_RULES } from '../test/fixtures';
+import { describe, expect, it } from 'vitest';
+import { ACCOUNTS, INCOME_SOURCES } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
-import { IncomeSourceDef, Transaction, TransferRuleWithMatches } from '../types';
+import { IncomeSourceDef, Transaction, CategoryRulePreview, TransferRulePreview, TransferRuleWithMatches } from '../types';
 import { TransactionsScreen } from './TransactionsScreen';
 
 /**
@@ -51,17 +51,17 @@ const ROWS: Transaction[] = [
   },
 ];
 
-/** All four of the screen's mount requests, including in the tests where one fails. */
 const TX_ROUTES: Routes = {
   'GET /api/accounts': () => ok(ACCOUNTS),
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
-  'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(ROWS),
 };
 
 const mount = () => renderThemed(<TransactionsScreen />);
 
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+const chooseFilter = (label: string, value: string) =>
+  fireEvent.change(screen.getByRole('combobox', { name: label }), { target: { value } });
 
 /**
  * The booleans default to `false`, what the server sends for a row nobody touched,
@@ -93,21 +93,6 @@ const ruleAnswer = (pattern: string, matches: number, overridden: number) => ({
   matches,
   overridden,
 });
-
-const ruleChip = (label: string) =>
-  screen.getByRole('button', {
-    name: `${label}, every transaction whose description contains this text`,
-  });
-
-const openPicker = () =>
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Change the category of transactions like this…' }),
-  );
-
-const typePattern = (value: string) =>
-  fireEvent.change(screen.getByLabelText('Apply to transactions whose description contains'), {
-    target: { value },
-  });
 
 describe('the transactions list', () => {
   it('renders the rows it was given', async () => {
@@ -160,10 +145,10 @@ describe('the transactions list', () => {
     mount();
     expect(await screen.findByText('REWE Berlin')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Food' }));
+    chooseFilter('Category', 'food');
 
     expect(await screen.findByText(/the transaction store is unreachable/)).toBeInTheDocument();
-    // rows kept from before a refused reload sit under a chip they were never an
+    // rows kept from before a refused reload sit under a filter they were never an
     // answer to: all-categories rows under "Food"
     expect(screen.queryByText('REWE Berlin')).not.toBeInTheDocument();
     expect(screen.queryByText('BVG Ticket')).not.toBeInTheDocument();
@@ -172,13 +157,46 @@ describe('the transactions list', () => {
 });
 
 describe('the window the screen asks for', () => {
+  it('keeps the existing choices and sends each selected filter to the API', async () => {
+    mockFetch(TX_ROUTES);
+    mount();
+    await screen.findByText('REWE Berlin');
+
+    expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('30d');
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('all');
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('all');
+    expect(within(screen.getByRole('combobox', { name: 'Period' })).getAllByRole('option'))
+      .toHaveLength(4);
+
+    const latestQuery = () => new URL(
+      requestUrls().filter((url) => url.startsWith('GET /api/transactions?')).at(-1)!.slice(4),
+      'http://localhost',
+    ).searchParams;
+
+    chooseFilter('Period', '7d');
+    await settle();
+    expect(latestQuery().has('from')).toBe(true);
+    expect(latestQuery().has('to')).toBe(true);
+    expect(latestQuery().has('limit')).toBe(false);
+
+    chooseFilter('Account', 'acc-1');
+    await settle();
+    expect(latestQuery().get('accountId')).toBe('acc-1');
+
+    chooseFilter('Category', 'food');
+    await settle();
+    expect(latestQuery().get('category')).toBe('food');
+  });
+
   it('opens unbounded when the Overview sends the reader here', async () => {
     mockFetch(TX_ROUTES);
     renderThemed(<TransactionsScreen focus={{ accountId: 'acc-1', nonce: 1 }} />);
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true'),
+      expect(screen.getByRole('combobox', { name: 'Period' })).toHaveValue('all'),
     );
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('acc-1');
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveValue('all');
     await settle();
 
     // "All transactions →" is what sent the reader here, so the request behind it
@@ -190,7 +208,20 @@ describe('the window the screen asks for', () => {
 });
 
 describe('the account a row belongs to', () => {
-  it('names it in every row, and stops once the Account chip names one', async () => {
+  it('shows a hidden account when it is the active filter', async () => {
+    mockFetch(TX_ROUTES);
+    renderThemed(<TransactionsScreen focus={{ accountId: 'acc-2', nonce: 1 }} />);
+
+    expect(await screen.findByRole('option', { name: 'Old DKB' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveValue('acc-2');
+    const asked = requestUrls().filter((url) => url.startsWith('GET /api/transactions?'));
+    expect(asked.at(-1)).toMatch(/[?&]accountId=acc-2/);
+
+    chooseFilter('Account', 'all');
+    expect(screen.queryByRole('option', { name: 'Old DKB' })).toBeNull();
+  });
+
+  it('names it in every row, and stops once the Account filter names one', async () => {
     mockFetch({
       ...TX_ROUTES,
       'GET /api/transactions': () =>
@@ -204,10 +235,10 @@ describe('the account a row belongs to', () => {
     expect(await screen.findByText(/· Sparkasse Giro/)).toBeInTheDocument();
     expect(screen.getByText(/· Old DKB/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sparkasse Giro' }));
+    chooseFilter('Account', 'acc-1');
     await settle();
 
-    // a column with one value in it is not a column, and the chip states that value
+    // a column with one value in it is not a column, and the filter states that value
     expect(screen.queryByText(/· Sparkasse Giro/)).not.toBeInTheDocument();
     expect(screen.queryByText(/· Old DKB/)).not.toBeInTheDocument();
     expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
@@ -320,7 +351,7 @@ describe('the category of one transaction', () => {
     );
   });
 
-  it('drops a row that stopped answering the category chip, and the count agrees', async () => {
+  it('drops a row that stopped answering the category filter', async () => {
     const one = row({ id: 'tx-1', description: 'REWE Berlin', category: 'food' });
     const two = row({ id: 'tx-2', description: 'Edeka Mitte', category: 'food' });
     mockFetch({
@@ -331,50 +362,51 @@ describe('the category of one transaction', () => {
     });
     mount();
     await screen.findByText('REWE Berlin');
-    fireEvent.click(screen.getByRole('button', { name: 'Food' }));
+    chooseFilter('Category', 'food');
     await settle();
 
     fireEvent.click(screen.getByText('REWE Berlin'));
     fireEvent.click(screen.getByRole('button', { name: 'Transport, this transaction only' }));
     await settle();
 
-    expect(screen.queryByText('REWE Berlin')).not.toBeInTheDocument();
+    expect(screen.getAllByText('REWE Berlin')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'REWE Berlin' })).toBeInTheDocument();
     expect(screen.getByText('Edeka Mitte')).toBeInTheDocument();
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('Edeka Mitte'));
-    openPicker();
-    expect(screen.getByText(/Matches 1 of the 1 loaded transactions/)).toBeInTheDocument();
   });
 
-  it('closes the sheet on the row it just dropped', async () => {
+  it('keeps the card open to apply the new category to similar transactions under an old category filter', async () => {
     const one = row({ id: 'tx-1', description: 'REWE Berlin', category: 'food' });
     mockFetch({
       ...TX_ROUTES,
       'GET /api/transactions': () => ok([one]),
-      'PATCH /api/transactions/tx-1/category': () =>
-        ok({ ...one, category: 'transport', categoryManual: true }),
+      'PATCH /api/transactions/tx-1/category': (init) =>
+        ok({ ...one, category: JSON.parse(String(init?.body)).category, categoryManual: true }),
     });
     mount();
     await screen.findByText('REWE Berlin');
-    fireEvent.click(screen.getByRole('button', { name: 'Food' }));
+    chooseFilter('Category', 'food');
     await settle();
 
     fireEvent.click(screen.getByText('REWE Berlin'));
     fireEvent.click(screen.getByRole('button', { name: 'Transport, this transaction only' }));
     await settle();
 
-    // a sheet left open on a row the list no longer holds takes a second pick that
-    // lands on nothing, and the row is then gone until a chip is touched
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Transport, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Apply to similar transactions' })).toBeEnabled();
     expect(screen.getByText(EMPTY)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Food, this transaction only' }));
+    await waitFor(() => expect(screen.queryByText(EMPTY)).toBeNull());
+    expect(screen.getAllByText('REWE Berlin')).toHaveLength(2);
   });
 
-  it('leaves the list alone when the category chip moves while the write is in flight', async () => {
+  it('leaves the list alone when the category filter moves while the write is in flight', async () => {
     const food = [row({ id: 'tx-1', description: 'REWE Berlin', category: 'food' })];
     // the row the PATCH is moving is in the answer to the reload: a server that
     // forgot the write it had just acknowledged makes a stale drop a no-op, and the
-    // case then passes against the stale chip it exists to forbid
+    // case then passes against the stale filter it exists to forbid
     const transport = [
       row({ id: 'tx-9', description: 'BVG Ticket', category: 'transport' }),
       row({ id: 'tx-1', description: 'REWE Berlin', category: 'transport', categoryManual: true }),
@@ -392,14 +424,14 @@ describe('the category of one transaction', () => {
     });
     mount();
     await screen.findByText('REWE Berlin');
-    fireEvent.click(screen.getByRole('button', { name: 'Food' }));
+    chooseFilter('Category', 'food');
     await settle();
 
     fireEvent.click(screen.getByText('REWE Berlin'));
     fireEvent.click(screen.getByRole('button', { name: 'Transport, this transaction only' }));
 
-    // the chip the handler was created under is not the chip the list now answers
-    fireEvent.click(screen.getByRole('button', { name: 'Transport' }));
+    // the filter the handler was created under is not the filter the list now answers
+    chooseFilter('Category', 'transport');
     expect(await screen.findByText('BVG Ticket')).toBeInTheDocument();
 
     release(ok({ ...food[0], category: 'transport', categoryManual: true }));
@@ -412,120 +444,163 @@ describe('the category of one transaction', () => {
   });
 });
 
-describe('the category of a whole group', () => {
-  it('leaves the caption on the screen after the sheet that made it has closed', async () => {
-    mockFetch({
-      ...TX_ROUTES,
-      'POST /api/category-rules': () => ok(ruleAnswer('REWE', 15, 3)),
-      'PATCH /api/transactions/tx-2/category': () =>
-        ok({ ...ROWS[1], category: 'food', categoryManual: true }),
+const CATEGORY_PREVIEW: CategoryRulePreview = {
+  pattern: 'REWE Berlin', transactions: [ROWS[0], { ...ROWS[0], id: 'older', date: '2025-01-01', accountId: 'acc-2', categoryManual: true }],
+  matches: 2, overridden: 1, activeRule: null, otherRules: [], previewToken: 'c'.repeat(64),
+};
+const CATEGORY_ROUTES: Routes = {
+  ...TX_ROUTES,
+  'POST /api/category-rules/preview': () => ok(CATEGORY_PREVIEW),
+  'GET /api/transactions/tx-1': () => ok(ROWS[0]),
+};
+const openCategoryPreview = async () => {
+  fireEvent.click(await screen.findByText('REWE Berlin'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply to similar transactions' }));
+  await screen.findByText('2 transactions match');
+};
+const applyCategoryRule = () => screen.getByRole('button', { name: 'Apply Food' });
+
+describe('category rules with a preview', () => {
+  it('carries the category just selected in the card through viewing an existing rule and refreshing', async () => {
+    const sent: unknown[] = [];
+    const oldRule = ruleAnswer('REWE', 2, 1).rule;
+    mockFetch({ ...CATEGORY_ROUTES,
+      'PATCH /api/transactions/tx-1/category': () => ok({ ...ROWS[0], category: 'support', categoryManual: true }),
+      'POST /api/category-rules/preview': (init) => ok({
+        ...CATEGORY_PREVIEW,
+        pattern: JSON.parse(String(init?.body)).pattern,
+        activeRule: JSON.parse(String(init?.body)).pattern === 'REWE' ? oldRule : null,
+        otherRules: JSON.parse(String(init?.body)).pattern === 'REWE' ? [] : [oldRule],
+      }),
+      'POST /api/category-rules': (init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return ok({ ...ruleAnswer('REWE', 2, 1), rule: { ...oldRule, category: 'support' } });
+      },
+      'GET /api/transactions/tx-1': () => ok({ ...ROWS[0], category: 'support', categoryManual: true }),
     });
     mount();
-
     fireEvent.click(await screen.findByText('REWE Berlin'));
-    openPicker();
-    typePattern('REWE');
-    fireEvent.click(ruleChip('Food'));
-
-    expect(
-      await screen.findByText(/3 of them keep a category you set by hand/),
-    ).toBeInTheDocument();
-    // the sentence is composed from the answer to an operation that closes the sheet
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText('BVG Ticket'));
-    fireEvent.click(screen.getByRole('button', { name: 'Food, this transaction only' }));
-    await settle();
-
-    // and it goes the moment a hand-set category makes its count wrong: this row is
-    // the fourth the rule could not move, and the sentence still says three
-    expect(screen.queryByText(/keep a category you set by hand/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to similar transactions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View rule: REWE → Food' }));
+    expect(await screen.findByText('Active rule: Food.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Support' })).toBeEnabled());
+    expect(within(screen.getByRole('dialog')).queryByRole('combobox')).toBeNull();
+    expect(sent).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Support' }));
+    await screen.findByRole('dialog', { name: 'Transaction' });
+    expect(sent).toEqual([{ pattern: 'REWE', category: 'support', previewToken: CATEGORY_PREVIEW.previewToken }]);
   });
 
-  it('brings the caption into view, since the row that made it may be far down the list', async () => {
-    mockFetch({
-      ...TX_ROUTES,
-      'POST /api/category-rules': () => ok(ruleAnswer('REWE', 15, 3)),
-    });
+  it('shows the full server group and manual exceptions, then applies only after confirmation', async () => {
+    const sent: unknown[] = [];
+    mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules': (init) => {
+      sent.push(JSON.parse(String(init?.body)));
+      return ok({ ...ruleAnswer('REWE Berlin', 2, 1), rule: { ...ruleAnswer('REWE Berlin', 2, 1).rule, category: 'food' } });
+    } });
     mount();
-
-    fireEvent.click(await screen.findByText('REWE Berlin'));
-    openPicker();
-    typePattern('REWE');
-    fireEvent.click(ruleChip('Food'));
-    await screen.findByText(/3 of them keep a category you set by hand/);
-
-    // which element was scrolled, not that something was: the caption sits above a
-    // list the reader scrolled down through, so in a browser it lands off-screen
-    const scrolled = vi.mocked(Element.prototype.scrollIntoView).mock.instances;
-    expect(scrolled).toHaveLength(1);
-    expect(scrolled[0]).toHaveTextContent('3 of them keep a category you set by hand');
+    await openCategoryPreview();
+    expect(screen.getByText('All accounts · All dates')).toBeInTheDocument();
+    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText(/01.01.2025/)).toHaveTextContent('Old DKB');
+    expect(screen.getByText('1 transaction keeps its manually assigned category.')).toBeInTheDocument();
+    expect(applyCategoryRule()).toBeEnabled();
+    expect(within(screen.getByRole('dialog')).queryByRole('combobox')).toBeNull();
+    expect(sent).toEqual([]);
+    fireEvent.click(applyCategoryRule());
+    expect(await screen.findByRole('dialog', { name: 'Transaction' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Food, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
+    expect(sent).toEqual([{ pattern: 'REWE Berlin', category: 'food', previewToken: CATEGORY_PREVIEW.previewToken }]);
+    expect(screen.getByRole('status')).toHaveTextContent('1 of them keeps a category you set by hand');
   });
 
-  it('scrolls nothing when a single row changes category', async () => {
-    const one = row({ id: 'tx-1', description: 'REWE Berlin', category: 'food' });
-    mockFetch({
-      ...TX_ROUTES,
-      'GET /api/transactions': () => ok([one]),
-      'PATCH /api/transactions/tx-1/category': () =>
-        ok({ ...one, category: 'shopping', categoryManual: true }),
+  it('requires a new preview after editing the pattern and submits that preview token', async () => {
+    const sent: unknown[] = [];
+    mockFetch({ ...CATEGORY_ROUTES,
+      'POST /api/category-rules/preview': (init) => ok({ ...CATEGORY_PREVIEW, pattern: JSON.parse(String(init?.body)).pattern, previewToken: 'd'.repeat(64) }),
+      'POST /api/category-rules': (init) => { sent.push(JSON.parse(String(init?.body))); return ok(ruleAnswer('REWE', 2, 1)); },
     });
     mount();
-
-    fireEvent.click(await screen.findByText('REWE Berlin'));
-    fireEvent.click(screen.getByRole('button', { name: 'Shopping, this transaction only' }));
-    await settle();
-
-    // it writes no caption, so there is nothing to bring into view and the reader
-    // keeps the place in the list they were working in
-    expect(vi.mocked(Element.prototype.scrollIntoView)).not.toHaveBeenCalled();
+    await openCategoryPreview();
+    fireEvent.change(screen.getByLabelText('Description contains'), { target: { value: 'REWE' } });
+    expect(applyCategoryRule()).toBeDisabled();
+    expect(screen.queryByRole('list')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
+    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(applyCategoryRule());
+    await screen.findByRole('dialog', { name: 'Transaction' });
+    expect(sent).toEqual([{ pattern: 'REWE', category: 'food', previewToken: 'd'.repeat(64) }]);
   });
 
-  it('keeps its two counts apart: the loaded rows and the whole workspace', async () => {
-    mockFetch({
-      ...TX_ROUTES,
-      'GET /api/transactions': () =>
-        ok([
-          row({ id: 'tx-1', description: 'REWE Berlin', category: 'food' }),
-          row({ id: 'tx-2', description: 'REWE Mitte', category: 'food' }),
-          row({ id: 'tx-3', description: 'BVG Ticket', category: 'transport' }),
-          row({ id: 'tx-4', description: 'Netflix', category: 'subscriptions' }),
-        ]),
-      'POST /api/category-rules': () => ok(ruleAnswer('REWE', 15, 3)),
+  it('opens an existing broader rule for removal and returns to the refreshed transaction', async () => {
+    const activeRule = ruleAnswer('REWE', 2, 1).rule;
+    mockFetch({ ...CATEGORY_ROUTES,
+      'POST /api/category-rules/preview': (init) => ok(JSON.parse(String(init?.body)).pattern === 'REWE'
+        ? { ...CATEGORY_PREVIEW, pattern: 'REWE', activeRule }
+        : { ...CATEGORY_PREVIEW, otherRules: [activeRule] }),
+      'DELETE /api/category-rules/7': () => ok({ deleted: true }),
     });
     mount();
+    await openCategoryPreview();
+    fireEvent.click(screen.getByRole('button', { name: 'View rule: REWE → Food' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove category rule' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Category rule removed');
+    expect(requests()).toContain('DELETE /api/category-rules/7');
+    expect(requests()).not.toContain('POST /api/category-rules');
+    expect(screen.getByRole('dialog', { name: 'Transaction' })).toBeInTheDocument();
+  });
 
-    fireEvent.click(await screen.findByText('REWE Berlin'));
-    openPicker();
-    typePattern('REWE');
+  it('requires a refresh after a stale preview and preserves the chosen category', async () => {
+    mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules': () => fail(409, { error: 'Refresh the preview before applying the rule.' }) });
+    mount();
+    await openCategoryPreview();
+    fireEvent.click(applyCategoryRule());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh the preview');
+    expect(applyCategoryRule()).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    expect(applyCategoryRule()).toHaveTextContent('Apply Food');
+  });
 
-    // every number in this case differs from every other, so no assertion can pass by
-    // reading the wrong one
-    expect(screen.getByText(/Matches 2 of the 4 loaded transactions/)).toBeInTheDocument();
-    // and no pressed state on this grid: it sets no row's category, and the honest
-    // value would be the rule's, which this screen never asks the server for
-    expect(ruleChip('Food')).not.toHaveAttribute('aria-pressed');
+  it('backs out without a write and restores focus to category rules', async () => {
+    mockFetch(CATEGORY_ROUTES);
+    mount();
+    await openCategoryPreview();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to transaction' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply to similar transactions' })).toHaveFocus());
+    expect(requests()).not.toContain('POST /api/category-rules');
+  });
 
-    fireEvent.click(ruleChip('Food'));
+  it('uses the clean title for the initial pattern', async () => {
+    const sent: unknown[] = [];
+    mockFetch({ ...CATEGORY_ROUTES,
+      'GET /api/transactions': () => ok([{ ...ROWS[0], description: 'REWE Berlin Wertstellung 14.07.2026', displayDescription: 'REWE Berlin' }]),
+      'POST /api/category-rules/preview': (init) => { sent.push(JSON.parse(String(init?.body))); return ok(CATEGORY_PREVIEW); },
+    });
+    mount();
+    await openCategoryPreview();
+    expect(sent).toEqual([{ pattern: 'REWE Berlin' }]);
+  });
 
-    const caption = await screen.findByText(/across every account/);
-    expect(caption).toHaveTextContent('15 transactions match that text');
-    expect(caption).toHaveTextContent('3 of them keep a category you set by hand');
-    expect(caption).not.toHaveTextContent('loaded');
+  it('keeps the dialog open and disables editing while saving', async () => {
+    let release: (response: Response) => void = () => {};
+    mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules': () => new Promise<Response>((resolve) => { release = resolve; }) });
+    mount();
+    await openCategoryPreview();
+    fireEvent.click(applyCategoryRule());
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.getByLabelText('Description contains')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back to transaction' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('dialog', { name: 'Apply category' })).toBeInTheDocument();
+    release(ok(ruleAnswer('REWE Berlin', 2, 1)));
+    await screen.findByRole('dialog', { name: 'Transaction' });
+    expect(requests().filter((r) => r === 'POST /api/category-rules')).toHaveLength(1);
   });
 });
 
-/**
- * The sheet's other writes: the transfer flag, the one-off mark, the
- * income source and the transfer rule. Each case asserts the body the route received
- * and the effect on the screen with a presence anchor beside every absence.
- *
- * "Rule off with no rule sends nothing" is not a case: the switch is checked exactly
- * when a rule exists, so a click on an unchecked switch arrives as `checked: true`
- * and the control cannot produce that event.
- */
-
-/** An expense the sheet offers every switch for, and an income it offers the sources for. */
 const EXPENSE = row({ id: 'tx-1', description: 'REWE Berlin', amount: -42.5, category: 'food' });
 const INCOME = row({
   id: 'tx-in',
@@ -536,7 +611,6 @@ const INCOME = row({
   incomeSourceManual: false,
 });
 
-/** A catalog of this file's own: the shared fixture is `[]`. */
 const SOURCES: IncomeSourceDef[] = [
   { id: 'salary', label: 'Salary', kind: 'own', patterns: [], sort: 0, builtin: true },
   { id: 'family', label: 'Support', kind: 'external', patterns: [], sort: 1, builtin: true },
@@ -552,9 +626,9 @@ const RULE: TransferRuleWithMatches = {
 };
 
 const transferSwitch = () => screen.getByRole('checkbox', { name: /Transfer between own accounts/ });
-const ruleSwitch = () => screen.getByRole('checkbox', { name: /on this account/ });
+const ruleButton = () => screen.getByRole('button', { name: 'Manage transfer rules' });
 const oneOffSwitch = () => screen.getByRole('checkbox', { name: /One-off large purchase/ });
-/** Inside the sheet: the category filter above the list carries a chip of the same name. */
+/** Inside the sheet: the category filter above the list carries an option of the same name. */
 const sourceChip = (label: string) =>
   within(screen.getByRole('dialog')).getByRole('button', { name: label });
 
@@ -580,20 +654,19 @@ describe('the transfer flag', () => {
     });
     mount();
     await openSheet('REWE Berlin');
-    expect(screen.getByText(/Counted as neither income nor expense · auto-detected/)).toBeInTheDocument();
+    expect(transferSwitch()).not.toBeChecked();
+    expect(screen.queryByText(/Counted as neither income nor expense/)).toBeNull();
 
     fireEvent.click(transferSwitch());
 
-    // the badge is the answer replacing the row in the list; the hint, in the sheet
     expect(await screen.findByText('transfer')).toBeInTheDocument();
-    expect(screen.getByText(/Counted as neither income nor expense · set manually/)).toBeInTheDocument();
     expect(transferSwitch()).toBeChecked();
     expect(sent).toEqual([{ transfer: true }]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to auto-detection' }));
 
     await waitFor(() => expect(sent).toEqual([{ transfer: true }, { transfer: null }]));
-    expect(await screen.findByText(/Counted as neither income nor expense · auto-detected/)).toBeInTheDocument();
+    await waitFor(() => expect(transferSwitch()).not.toBeChecked());
     expect(screen.queryByText('transfer')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Back to auto-detection' })).toBeNull();
   });
@@ -686,6 +759,27 @@ describe('the one-off mark', () => {
 });
 
 describe('the income source', () => {
+  it('assigns Support through the category picker and explains its external-income treatment', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok([INCOME]),
+      'PATCH /api/transactions/tx-in/category': (init) => {
+        sent.push(bodyOf(init));
+        return ok({ ...INCOME, category: 'support', categoryManual: true, incomeSource: 'category:support' });
+      },
+    });
+    mount();
+    await openSheet('ZZ Income');
+    fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
+    expect(await screen.findByText('Support is included in income, but excluded from your own earnings on the Goal screen.')).toBeInTheDocument();
+    expect(sent).toEqual([{ category: 'support' }]);
+    expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Salary' })).toBeNull();
+    expect(requests().some((request) => request.endsWith('/source'))).toBe(false);
+  });
+
   it('marks the row with a chip, and back to auto-detection sends null', async () => {
     const sent: unknown[] = [];
     mockFetch({
@@ -740,70 +834,165 @@ describe('the income source', () => {
   });
 });
 
+const PREVIEW: TransferRulePreview = {
+  txId: EXPENSE.id,
+  accountId: EXPENSE.accountId,
+  description: EXPENSE.description,
+  transactions: [EXPENSE, { ...EXPENSE, id: 'older', date: '2025-01-01', transferManual: false }],
+  matches: 2,
+  manualOverrides: 1,
+  activeRule: null,
+  previewToken: 'a'.repeat(64),
+};
+
+const PREVIEW_ROUTES: Routes = {
+  ...TX_ROUTES,
+  'GET /api/transactions': () => ok([EXPENSE]),
+  'GET /api/transactions/tx-1/transfer-rule-preview': () => ok(PREVIEW),
+  'GET /api/transactions/tx-1': () => ok({ ...EXPENSE, transfer: true }),
+};
+
+const openPreview = async () => {
+  await openSheet('REWE Berlin');
+  fireEvent.click(ruleButton());
+  await screen.findByText('2 transactions match');
+};
+
+const applyRuleButton = () => screen.getByRole('button', { name: 'Apply transfer rule' });
+
 describe('the transfer rule', () => {
-  it('creates one from the row, re-reads the rules and the list, and closes the sheet', async () => {
+  it('previews the server group before any write and keeps the updated transaction open after applying', async () => {
     const sent: unknown[] = [];
     mockFetch({
-      ...TX_ROUTES,
-      'GET /api/transactions': () => ok([EXPENSE]),
+      ...PREVIEW_ROUTES,
       'POST /api/transfer-rules': (init) => {
         sent.push(bodyOf(init));
-        return ok({ rule: RULE, matches: 1 });
+        return ok({ rule: { ...RULE, matchMode: 'similar-v1' }, matches: 2 });
       },
     });
     mount();
-    await openSheet('REWE Berlin');
-    expect(ruleSwitch()).not.toBeChecked();
+    await openPreview();
 
-    fireEvent.click(ruleSwitch());
+    expect(within(screen.getByRole('list', { name: 'Matching transactions' })).getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByText('1 manual transfer setting will be replaced.')).toBeInTheDocument();
+    expect(screen.getByText(/Manually marked as not a transfer/)).toBeInTheDocument();
+    expect(screen.getByText(/future matching transactions on this account/)).toBeInTheDocument();
+    expect(sent).toEqual([]);
+    fireEvent.click(applyRuleButton());
 
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(sent).toEqual([{ txId: 'tx-1' }]);
-    // the row is still there: the sheet closed, the list did not empty
-    expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
-    expect(requests().filter((r) => r === 'GET /api/transfer-rules')).toHaveLength(2);
+    expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Transaction' })).toBeInTheDocument();
+    expect(transferSwitch()).toBeChecked();
+    expect(sent).toEqual([{ txId: 'tx-1', matchMode: 'similar-v1', previewToken: PREVIEW.previewToken }]);
     expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
   });
 
-  it('deletes the rule the row already has', async () => {
+  it('deletes the server-identified rule and preserves independent transfer detection', async () => {
     mockFetch({
-      ...TX_ROUTES,
-      'GET /api/transfer-rules': () => ok([RULE]),
-      'GET /api/transactions': () => ok([EXPENSE]),
+      ...PREVIEW_ROUTES,
+      'GET /api/transactions/tx-1/transfer-rule-preview': () => ok({ ...PREVIEW, activeRule: RULE }),
       'DELETE /api/transfer-rules/7': () => ok({ deleted: true }),
     });
     mount();
-    await openSheet('REWE Berlin');
-    await waitFor(() => expect(ruleSwitch()).toBeChecked());
-    expect(screen.getByText('Rule on · transactions tagged: 3')).toBeInTheDocument();
+    await openPreview();
+    expect(screen.getByText(/existing rule applies only to identical descriptions/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove transfer rule' }));
 
-    fireEvent.click(ruleSwitch());
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByText(/Transfer rule removed/)).toBeInTheDocument();
+    expect(transferSwitch()).toBeChecked();
     expect(requests()).toContain('DELETE /api/transfer-rules/7');
     expect(requests()).not.toContain('POST /api/transfer-rules');
-    expect(screen.getByText('REWE Berlin')).toBeInTheDocument();
   });
 
-  it('keeps the row and the sheet, and re-enables the switch, when the rule is refused', async () => {
+  it('returns from the preview without writing and restores focus', async () => {
+    mockFetch(PREVIEW_ROUTES);
+    mount();
+    await openPreview();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to transaction' }));
+    await waitFor(() => expect(ruleButton()).toHaveFocus());
+    expect(transferSwitch()).not.toBeChecked();
+    expect(requests().some((r) => r.startsWith('POST ') || r.startsWith('DELETE '))).toBe(false);
+  });
+
+  it('requires a fresh preview after a refusal and sends the refreshed token on retry', async () => {
+    let reads = 0;
+    const sent: unknown[] = [];
     mockFetch({
-      ...TX_ROUTES,
-      'GET /api/transactions': () => ok([EXPENSE]),
-      'POST /api/transfer-rules': () => fail(500, { error: 'the rule could not be saved' }),
+      ...PREVIEW_ROUTES,
+      'GET /api/transactions/tx-1/transfer-rule-preview': () => ok({ ...PREVIEW, previewToken: ++reads === 1 ? PREVIEW.previewToken : 'b'.repeat(64) }),
+      'POST /api/transfer-rules': (init) => {
+        sent.push(bodyOf(init));
+        return sent.length === 1
+          ? fail(409, { error: 'The matching transactions changed. Refresh the preview before applying the rule.' })
+          : ok({ rule: RULE, matches: 2 });
+      },
+    });
+    mount();
+    await openPreview();
+    fireEvent.click(applyRuleButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh the preview');
+    expect(applyRuleButton()).toBeDisabled();
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyRuleButton()).toBeEnabled());
+    fireEvent.click(applyRuleButton());
+    expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
+    expect(sent[1]).toEqual({ txId: 'tx-1', matchMode: 'similar-v1', previewToken: 'b'.repeat(64) });
+  });
+
+  it('shows a preview load failure in the dialog and retries it', async () => {
+    let reads = 0;
+    mockFetch({
+      ...PREVIEW_ROUTES,
+      'GET /api/transactions/tx-1/transfer-rule-preview': () => ++reads === 1 ? fail(500, { error: 'Preview unavailable' }) : ok(PREVIEW),
     });
     mount();
     await openSheet('REWE Berlin');
+    fireEvent.click(ruleButton());
+    expect(await within(screen.getByRole('dialog')).findByRole('alert')).toHaveTextContent('Preview unavailable');
+    expect(screen.queryByRole('button', { name: 'Apply transfer rule' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    expect(await screen.findByText('2 transactions match')).toBeInTheDocument();
+  });
 
-    fireEvent.click(ruleSwitch());
-
-    expect(await screen.findByText(/Error: the rule could not be saved/)).toBeInTheDocument();
+  it('prevents duplicate submissions and dismissal while saving', async () => {
+    let release: (response: Response) => void = () => {};
+    mockFetch({
+      ...PREVIEW_ROUTES,
+      'POST /api/transfer-rules': () => new Promise<Response>((resolve) => { release = resolve; }),
+    });
+    mount();
+    await openPreview();
+    fireEvent.click(applyRuleButton());
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back to transaction' })).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    // the list row and the sheet's own heading: neither emptied nor closed
-    expect(screen.getAllByText('REWE Berlin')).toHaveLength(2);
-    expect(screen.queryByText('transfer')).toBeNull();
-    expect(ruleSwitch()).not.toBeChecked();
-    expect(ruleSwitch()).toBeEnabled();
-    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(1);
+    release(ok({ rule: RULE, matches: 2 }));
+    expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
+    expect(requests().filter((r) => r === 'POST /api/transfer-rules')).toHaveLength(1);
+  });
+});
+
+describe('transaction descriptions', () => {
+  it.each(['2026-08-31', '2026-09-01'])('uses the server title and retains the original and value date when booked on %s', async (date) => {
+    const original = 'Example Person Gutschriften Wertstellung 31.08.2026';
+    const display = 'Example Person Gutschriften';
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ok([{ ...EXPENSE, date, description: original, displayDescription: display, valueDate: '2026-08-31' }]),
+    });
+    mount();
+    await openSheet(display);
+    expect(screen.getByRole('heading', { name: display })).toBeInTheDocument();
+    const details = screen.getByText('Original description').closest('details')!;
+    expect(details).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('Original description'));
+    expect(details).toHaveAttribute('open');
+    expect(within(details).getByText(original)).toBeVisible();
+    expect(screen.queryByText(/Value date:/) !== null).toBe(date !== '2026-08-31');
+    expect(screen.queryByText(/spread over 12 months/)).toBeNull();
+    expect(oneOffSwitch()).toBeInTheDocument();
   });
 });
 
@@ -824,7 +1013,7 @@ describe('while a write is in flight', () => {
     fireEvent.click(transferSwitch());
 
     expect(transferSwitch()).toBeDisabled();
-    expect(ruleSwitch()).toBeDisabled();
+    expect(ruleButton()).toBeDisabled();
     expect(oneOffSwitch()).toBeDisabled();
     expect(foodChip()).toBeDisabled();
 
@@ -832,7 +1021,7 @@ describe('while a write is in flight', () => {
     release(ok({ ...EXPENSE, transfer: false, transferManual: false }));
 
     await waitFor(() => expect(transferSwitch()).toBeEnabled());
-    expect(ruleSwitch()).toBeEnabled();
+    expect(ruleButton()).toBeEnabled();
     expect(oneOffSwitch()).toBeEnabled();
     expect(foodChip()).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Back to auto-detection' })).toBeEnabled();

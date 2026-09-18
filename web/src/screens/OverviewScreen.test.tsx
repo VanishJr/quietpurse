@@ -173,10 +173,10 @@ const account = (patch: Partial<Account>): Account => ({
 /** Everything already queued has run by the time a macrotask does. */
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
-describe('the hero', () => {
-  it('greets over today’s date', async () => {
+describe('the page heading', () => {
+  it('names the page under today’s date', async () => {
     mount();
-    expect(await screen.findByRole('heading', { name: 'Welcome!' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument();
     // the day this test runs on, formatted the one way fmtWeekday formats it — so the
     // assertion is that the line is drawn from a real clock, not that it says a date
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
@@ -377,9 +377,9 @@ describe('the balance card', () => {
     mount();
 
     const card = await panel('Balance of Sparkasse Giro');
-    expect(within(card).getByText('1,234.50 EUR')).toBeInTheDocument();
+    expect(within(card).getByText('1,234.50', { exact: false })).toBeInTheDocument();
     expect(
-      within(card).getByRole('heading', { name: 'Sparkasse Giro' }),
+      within(card).getByText('Sparkasse Giro'),
     ).toBeInTheDocument();
   });
 });
@@ -420,6 +420,10 @@ describe('income against expenses', () => {
     const flows = await panel('Income and expenses for Sparkasse Giro');
     expect(within(flows).getByText('+60 EUR')).toBeInTheDocument();
     expect(within(flows).queryByText(/−−/)).not.toBeInTheDocument();
+    const spending = await panel('Spending by category, Aug 2026');
+    expect(within(spending).getByText('Net refunds in Aug 2026 exceed spending.')).toBeInTheDocument();
+    const total = within(spending).getByRole('rowheader', { name: 'Total' }).closest('tr');
+    expect(total).toHaveTextContent('−60 EUR');
   });
 
   it('compares each figure with the month before it, and colours the two differently', async () => {
@@ -472,13 +476,13 @@ describe('income against expenses', () => {
     await panel('Sparkasse Giro');
     const before = requests();
 
-    fireEvent.click(screen.getByRole('button', { name: '3 months' }));
+    fireEvent.click(screen.getByRole('button', { name: '3M' }));
 
     // the chips are the only thing that moved: the longest window is fetched once and
     // 3 and 6 are cuts of it, so narrowing is arithmetic rather than a request. The
     // whole list and not the transaction reads alone — the request this toggle would
     // tempt somebody into making is a summary one.
-    expect(await screen.findByRole('button', { name: '3 months', pressed: true })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '3M', pressed: true })).toBeInTheDocument();
     expect(requests()).toEqual(before);
   });
 
@@ -523,7 +527,7 @@ describe('spending by category', () => {
     // is not spending, which is the same rule the Expenses figure above it follows
     const rows = within(await legend());
     expect(rows.getByText('Food')).toBeInTheDocument();
-    expect(rows.getByText('100%')).toBeInTheDocument();
+    expect(rows.getByText('120 EUR')).toBeInTheDocument();
     // the middle of the ring is `totals.expense` off the body this breakdown came
     // from, and the flows card's figure is the same month out of the months body: two
     // requests, one number, and the screen would be contradicting itself if not
@@ -550,8 +554,8 @@ describe('spending by category', () => {
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
     // the legend is the top three, and then the tail named as a tail — 100 of 1000
-    expect(rows.getByText('1 more category')).toBeInTheDocument();
-    expect(rows.getByText('10%')).toBeInTheDocument();
+    expect(rows.getByText('Other · 1 category')).toBeInTheDocument();
+    expect(rows.getByText('100 EUR')).toBeInTheDocument();
     expect(rows.queryByText('Health')).not.toBeInTheDocument();
     // the fourth one is not lost: the table beside the ring has all of them, which is
     // what a screen reader gets and what jsdom can see of a donut
@@ -575,7 +579,7 @@ describe('spending by category', () => {
     const more = within(card).getByRole('button', { name: 'All analytics' });
     // the arrow is a picture of the verb and is read as a word — it stays on screen and
     // stays out of the name, which is what the name above being the bare phrase asserts
-    expect(more).toHaveTextContent('→');
+    expect(more).toHaveTextContent('↗');
   });
 
   it('gives the figure in the middle of the ring to the table beside it', async () => {
@@ -605,6 +609,20 @@ describe('spending by category', () => {
 });
 
 describe('switching tabs while a read is in flight', () => {
+  it('announces loading without painting a zero balance', async () => {
+    let release: (r: Response) => void = () => {};
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+    await tab('Sparkasse Giro');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading your account');
+    expect(screen.queryByRole('region', { name: 'Balance of Sparkasse Giro' })).toBeNull();
+    release(ok(TXS));
+    await panel('Balance of Sparkasse Giro');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('drops the answer for the tab the reader left', async () => {
     const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
     let release: (r: Response) => void = () => {};
@@ -785,11 +803,28 @@ describe('the recent transactions', () => {
     expect(within(list).getByText('+900 EUR')).toBeInTheDocument();
     // the transfer is on the list and marked, because it is what the figures above left out
     expect(within(list).getByText('To savings')).toBeInTheDocument();
-    expect(within(list).getByText('transfer')).toBeInTheDocument();
+    expect(within(list).getByText('Transfer')).toBeInTheDocument();
     // a status column would have to invent one: a statement records what already happened
     expect(within(list).queryByText('Completed')).not.toBeInTheDocument();
     expect(within(list).queryByRole('columnheader', { name: 'Account' })).not.toBeInTheDocument();
     expect(within(list).queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the category alongside every transaction flag', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04T00:00:00.000Z', 60, {
+          description: 'Returned purchase', category: 'shopping',
+          transfer: true, refund: true, oneOff: true,
+        }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const row = within(list).getByText('Returned purchase').closest('tr')!;
+    for (const text of ['Shopping', 'Transfer', 'Refund', 'One-off']) {
+      expect(within(row).getByText(text)).toBeInTheDocument();
+    }
   });
 
   it('keeps every cell in its own column', async () => {
@@ -811,9 +846,9 @@ describe('the recent transactions', () => {
     mount();
     await panel('Recent transactions in Sparkasse Giro');
 
-    const all = screen.getByRole('button', { name: 'All transactions' });
+    const all = screen.getByRole('button', { name: 'See all' });
     // the name is the bare phrase; the arrow is still painted on it
-    expect(all).toHaveTextContent('→');
+    expect(all).toHaveTextContent('↗');
 
     fireEvent.click(all);
 
@@ -1392,7 +1427,7 @@ describe('adding an account', () => {
     });
     await panel('Sparkasse Giro');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add more +' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Cash' } });
     // the currency is not asked for: it is the workspace's base currency
     expect(screen.getByText(/your base currency/)).toHaveTextContent('EUR');

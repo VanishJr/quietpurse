@@ -11,6 +11,7 @@ export const CATEGORY_LABELS: Record<string, string> = {
   cash: 'Cash',
   transfers: 'Transfers',
   salary: 'Salary',
+  support: 'Support',
   cashback: 'Cashback',
   other: 'Other',
   // pseudo-category on the Goal screen: amortized one-off purchases
@@ -29,6 +30,7 @@ export const CATEGORIES = [
   'cash',
   'transfers',
   'salary',
+  'support',
   'cashback',
   'other',
 ] as const;

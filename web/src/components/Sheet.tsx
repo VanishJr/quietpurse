@@ -30,6 +30,26 @@ export function Sheet({ open, onClose, position = 'bottom', wide = false, title,
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
+      if (e.key !== 'Tab') return;
+      const card = cardRef.current;
+      if (!card) return;
+      const controls = Array.from(card.querySelectorAll<HTMLElement>(
+        ':is(button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"])',
+      )).filter((el) => !el.closest('[hidden]'));
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      const fromPanel = document.activeElement instanceof HTMLElement &&
+        card.contains(document.activeElement) && !controls.includes(document.activeElement);
+      if (!first) {
+        e.preventDefault();
+        card.focus();
+      } else if (e.shiftKey && (document.activeElement === first || fromPanel)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || fromPanel)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
@@ -52,7 +72,12 @@ export function Sheet({ open, onClose, position = 'bottom', wide = false, title,
    * mid-word.
    */
   useEffect(() => {
-    if (open) cardRef.current?.focus();
+    if (!open) return;
+    const opener = document.activeElement;
+    cardRef.current?.focus();
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, [open]);
 
   if (!open) return null;

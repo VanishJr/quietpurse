@@ -94,12 +94,12 @@ export interface MetricDef {
    * because the two schemes have two palettes and a literal here would be right in
    * one of them.
    */
-  ink: 'good' | 'accent' | 'net';
+  ink: 'good' | 'lavender' | 'net';
 }
 
 export const METRIC_DEFS = {
   income: { label: 'Income', ink: 'good' },
-  expense: { label: 'Expenses', ink: 'accent' },
+  expense: { label: 'Expenses', ink: 'lavender' },
   net: { label: 'Net', ink: 'net' },
 } satisfies Record<ChartMetric, Omit<MetricDef, 'key'>>;
 

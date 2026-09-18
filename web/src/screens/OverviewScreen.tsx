@@ -1,63 +1,3 @@
-/**
- * Overview: one account at a time.
- *
- * The screen used to be a list of every account with a balance beside each. It is now
- * a rail of tabs — one tab per account — and everything below it is about the selected
- * one: its balance, its month, its spending, its chart, its last transactions. The
- * list answered "what do I have"; the rail answers "how is this one doing", which is
- * the question somebody who has just uploaded a statement actually has.
- *
- * ---------------------------------------------------------------------------
- * The shape the design draws
- *
- * A navy hero that continues the navigation bar above it — today's date, the greeting,
- * the rail — with rounded corners where it ends, and the first row of cards pulled up
- * over that edge so the two overlap. Then two columns: the balance and the spending
- * donut down the left, income-against-expenses and the last transactions down the
- * right.
- *
- * The left one is a column of its own inside the grid rather than two of its cells,
- * and it spans both rows. That is what lets the navy card run past the foot of the
- * transactions table, the way the design draws it: cells of a shared row are all one
- * height, so as two cells the donut could only ever end exactly where the table did.
- * A narrow window is the same four blocks in that order down one column — balance,
- * spending, income against expenses, transactions.
- *
- * The hero is full-bleed and the body is not, so neither is inside a padded wrapper —
- * each carries its own `.shell`, which is the column every screen is laid out in.
- *
- * ---------------------------------------------------------------------------
- * Where the numbers come from
- *
- * From the summary endpoints, per account: `/api/summary?accountId=` for the newest
- * month's totals and its breakdown by category, `/api/summary/months?accountId=` for
- * the chart. Both answer in that account's own currency and both are the server's own
- * sums — this screen used to read the rows and add them up itself, which is a mirror
- * of SQL that drifts from it.
- *
- * Three requests per account, and the two summaries depend on the first. The recent
- * list says when this account's newest transaction is, and both windows are anchored
- * on that rather than on today: an account whose last statement is eighteen months old
- * would otherwise answer an empty year while its seven most recent transactions sit
- * underneath it. The pair goes out together and lands in one state write — a failure
- * in either is the dashboard's refusal, because a fresh total beside twelve empty bars
- * is two answers about two different things.
- *
- * What the server does NOT do is fill the gaps: it answers only the months that have
- * rows. The anchoring, the window and the 0/0/0 months inside it are `windowMonths` in
- * `accounts.ts`, and they are what make "vs Jul" mean the month before and not
- * whichever month was answered second-newest.
- *
- * ---------------------------------------------------------------------------
- * What is no longer here
- *
- * Recurring payments, the app settings, the export and the workspace-wide import
- * history are about every account and not about any one of them. They are on the
- * Settings screen, in order. The theme button and the settings control went to the
- * navigation bar, which is where the design puts them and where they are reachable
- * from all five screens rather than from this one. This screen is one account and
- * nothing else.
- */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import {
@@ -76,6 +16,7 @@ import { AccountDialog, DialogKind } from '../components/AccountDialog';
 import { AccountFlows } from '../components/AccountFlows';
 import { AccountTabs } from '../components/AccountTabs';
 import { CsvImport } from '../components/CsvImport';
+import { ImportIcon } from '../components/NavIcons';
 import { ImportHistory } from '../components/ImportHistory';
 import { RecentTransactions, RECENT_LIMIT } from '../components/RecentTransactions';
 import { SpendingByCategory } from '../components/SpendingByCategory';
@@ -141,7 +82,8 @@ const openAt = (kind: DialogKind, account: Account | null): Dialog => ({
 });
 
 /** Singular at one, each count on its own, so a mixed sentence still reads. */
-const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+const count = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
 
 /**
  * What the delete destroyed, in the server's own numbers and never the preview's —
@@ -269,13 +211,16 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
       return;
     }
     try {
-      const recent = await api.transactions({ accountId: account.id, limit: RECENT_LIMIT });
+      const recent = await api.transactions({
+        accountId: account.id,
+        limit: RECENT_LIMIT,
+      });
       if (token !== request.current) return;
       if (recent.length === 0) {
         setData({ accountId: account.id, recent, figures: null });
         return;
       }
-      // anchored on the newest transaction, not on today: see the header
+      // Anchor on the uploaded history; today could be outside every statement.
       const anchor = monthOf(recent[0].date);
       // the last day of the month, and the endpoints keep it whole — a `to` short by
       // one drops that day out of the donut, both figures and the newest point at once
@@ -402,63 +347,51 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
 
   return (
     <div className="ov">
-      {/* `ov-band` is the same gradient the navigation bar carries, and both are the
-          full width of the window — so the two read as one band that ends here */}
-      <div className="ov-hero ov-band">
-        <div className="shell">
+      <header className="ov-heading">
+        <div>
           <p className="ov-date">{fmtWeekday(today)}</p>
-          <h1 className="welcome-title">Welcome!</h1>
-
-          {onRail.length > 0 && (
-            <AccountTabs
-              accounts={onRail}
-              selectedId={selected?.id ?? null}
-              onSelect={(id) => setUrl({ account: id })}
-              onAdd={() => setDialog(openAt('add', null))}
-              hiddenCount={hidden.length}
-              showHidden={showHidden}
-              onToggleHidden={() => setShowHidden((v) => !v)}
-            />
-          )}
+          <h1 className="overview-title">Overview</h1>
+          <p className="ov-subtitle">A clear view of your everyday account.</p>
         </div>
-      </div>
+        <button className="btn ov-import" onClick={() => setUrl({ panel: 'import' })}>
+          <ImportIcon /> Import statement
+        </button>
+      </header>
 
-      <div className="shell ov-body">
-        {/* Above the content, not below it: a refusal read after the list is a refusal
-            the reader has already acted on.
+      {onRail.length > 0 && (
+        <AccountTabs
+          accounts={onRail}
+          selectedId={selected?.id ?? null}
+          onSelect={(id) => setUrl({ account: id })}
+          onAdd={() => setDialog(openAt('add', null))}
+          hiddenCount={hidden.length}
+          showHidden={showHidden}
+          onToggleHidden={() => setShowHidden((v) => !v)}
+        />
+      )}
 
-            One wrapper for both sentences rather than one each. It is always here and
-            only the sentences are conditional, because a live region that arrives in the
-            same commit as its text announces nothing — and both of these arrive out of a
-            request that has already come back, which is a moment nothing else on the page
-            marks. The refusal is the whole of what the reader is told when the accounts
-            could not be listed; the delete's sentence needs it for a second reason on top
-            of that, that Sheet does not restore focus on close, so afterwards focus is on
-            <body> and there is nothing else to say the account went.
-
-            `ov-notice` is what makes either of them survivable. This body is pulled 64px
-            up over the hero, so whatever is first in it is drawn ON the navy — and
-            `--ink-bad` there is 2.6:1. It is on the sentences and not on the wrapper: the
-            wrapper is in the DOM with nothing to say, and a card's fill and padding on an
-            empty element would be a blank white box sitting on the navy. */}
+      <div className="ov-body">
+        {((accounts === null && !error) || (selected && !mine && !dataError)) && (
+          <p className="ov-loading" role="status">
+            Loading your account…
+          </p>
+        )}
         <div aria-live="polite">
           {error && <p className="error ov-notice">Error: {error}</p>}
           {notice && <p className="hint ov-notice">{notice}</p>}
         </div>
 
-        {/* the whole reason this screen exists for a new user: nothing has been uploaded,
-            and the way to upload is the biggest thing on the page */}
         {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
           <div className="acct-blank">
-            <h2 className="acct-blank-title">Nothing here yet — start with a statement</h2>
+            <h2 className="acct-blank-title">
+              Nothing here yet — start with a statement
+            </h2>
             <p className="acct-blank-text">
-              Export a statement from your bank in whatever format it offers — .csv, .xlsx or
-              .pdf — and drop it in. Finto reads the transactions out of it and puts them in
-              an account you name on the way in.
+              Export a statement from your bank in whatever format it offers — .csv, .xlsx
+              or .pdf — and drop it in. Finto reads the transactions out of it and puts
+              them in an account you name on the way in.
             </p>
             <div className="acct-blank-actions">
-              {/* the arrow is a picture of the verb beside it, so a reader who is given
-                  it aloud gets a syllable of nothing in front of every one of these */}
               <button className="btn" onClick={() => setUrl({ panel: 'import' })}>
                 <span aria-hidden="true">⭳</span> Import a statement
               </button>
@@ -471,8 +404,8 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
               </button>
             </div>
             <p className="hint">
-              An empty account is for money that has no statement — cash, or a card you enter
-              by hand.
+              An empty account is for money that has no statement — cash, or a card you
+              enter by hand.
             </p>
           </div>
         )}
@@ -486,11 +419,6 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
           </p>
         )}
 
-        {/* The dashboard's own refusal, and a second region rather than a line in the one
-            above: it belongs BELOW the two states that are about the rail, and a sentence
-            about the account on the rail standing over a sentence about the rail itself
-            is the wrong order to read them in. Same rule as that wrapper — always in the
-            DOM, only the sentence conditional. */}
         <div aria-live="polite">
           {dataError && <p className="error ov-notice">Error: {dataError}</p>}
         </div>
@@ -505,12 +433,15 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
               <div className="acct-blank">
                 <h2 className="acct-blank-title">{selected.name} is hidden</h2>
                 <p className="acct-blank-text">
-                  Its transactions are out of every figure the app computes — including the
-                  ones this screen would draw. Nothing has been deleted, and unhiding it
-                  brings all of them back.
+                  Its transactions are out of every figure the app computes — including
+                  the ones this screen would draw. Nothing has been deleted, and unhiding
+                  it brings all of them back.
                 </p>
                 <div className="acct-blank-actions">
-                  <button className="btn" onClick={() => setDialog(openAt('hide', selected))}>
+                  <button
+                    className="btn"
+                    onClick={() => setDialog(openAt('hide', selected))}
+                  >
                     Unhide this account
                   </button>
                   <button
@@ -525,36 +456,11 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
               </div>
             ) : (
               <div className="ov-grid">
-                {/* One column and not two cells: the design's navy card runs from
-                    under the balance to below the transactions table, which two cells
-                    of a shared row cannot do — a row is one height and both its cells
-                    get it. The balance takes what it needs off the top of this column
-                    and the donut takes the rest, so the card is as tall as the two
-                    cells beside it put together. */}
-                <div className="ov-col">
-                  <AccountBalance
-                    account={selected}
-                    comparable={month}
-                    onOpenMenu={() => setDialog(openAt('menu', selected))}
-                  />
-
-                  {/* `month` is the same gate the flows card is behind, so the two can
-                      never disagree about whether the account holds anything; `figures`
-                      is what tells the compiler the bodies are here. Every prop is off
-                      the summary body its own detail came from — a write landing
-                      between the two requests then makes two cards about two months,
-                      each correctly labelled, rather than one labelled with the other's
-                      month. */}
-                  {month && figures && (
-                    <SpendingByCategory
-                      spend={figures.summary.byCategory}
-                      month={monthOf(figures.summary.from)}
-                      total={figures.summary.totals.expense}
-                      currency={selected.currency}
-                      onSeeAll={onOpenAnalytics}
-                    />
-                  )}
-                </div>
+                <AccountBalance
+                  account={selected}
+                  comparable={month}
+                  onOpenMenu={() => setDialog(openAt('menu', selected))}
+                />
 
                 {month ? (
                   <AccountFlows
@@ -573,10 +479,6 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
                       Nothing has been loaded into {selected.name}
                     </h2>
                     <p className="acct-blank-text">
-                      {/* the account's own balance and not a literal zero: the balance
-                          card is directly above this sentence, and a sentence that
-                          names a figure the card beside it disagrees with is worse
-                          than one that names none */}
                       The account is here, and it is empty — which is why its balance is{' '}
                       {fmtMoney(selected.balance, selected.currency)}. Import a statement
                       into it and the figures, the chart and the transactions fill in.
@@ -589,6 +491,16 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
                   </div>
                 )}
 
+                {month && figures && (
+                  <SpendingByCategory
+                    spend={figures.summary.byCategory}
+                    month={monthOf(figures.summary.from)}
+                    total={figures.summary.totals.expense}
+                    currency={selected.currency}
+                    onSeeAll={onOpenAnalytics}
+                  />
+                )}
+
                 {mine.recent.length > 0 && (
                   <RecentTransactions
                     account={selected}
@@ -599,6 +511,12 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {selected && mine && !selected.hidden && figures && (
+          <p className="ov-footnote">
+            Transfers affect your balance, but are excluded from income and expenses.
+          </p>
         )}
 
         {dialog && (

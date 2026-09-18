@@ -288,7 +288,7 @@ export function IndependenceScreen() {
                   className="track-fill"
                   style={{
                     width: `${Math.min(100, pct)}%`,
-                    background: pct >= 100 ? ink.good : ink.accent,
+                    background: pct >= 100 ? ink.good : ink.lavender,
                   }}
                 />
               </div>
@@ -345,7 +345,7 @@ export function IndependenceScreen() {
                       maxBarSize={28}
                     >
                       {bars.map((b) => (
-                        <Cell key={b.label} fill={b.reached ? ink.good : ink.accent} />
+                        <Cell key={b.label} fill={b.reached ? ink.good : ink.lavender} />
                       ))}
                     </Bar>
                   </BarChart>

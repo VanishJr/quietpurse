@@ -176,6 +176,32 @@ cross-origin.
 
 ## Invariants
 
+Support is available in the category picker, category filters and category rules. Its income
+treatment belongs to the API: the client explains that it contributes to income but not to own
+earnings. The separate editable income-source picker is hidden for incoming Support, because the
+category already determines its external treatment. Expense signs, refunds and transfers retain
+their usual meaning even when labelled Support.
+
+Transaction titles use the server's optional display description, with the source text available in
+the detail panel. A distinct value date remains visible as metadata. Similar-transfer previews are
+server results over the full account history, not a filter over the loaded rows. The preview explains
+future matches and identifies manual overrides before the write. A refused write requires refreshing
+the preview, and a successful write returns to the updated transaction rather than dismissing it.
+
+The transfer button opens rule management. The category button applies the transaction's current
+category to similar transactions after a preview. The preview names that category without asking
+for it again; reading an existing rule or refreshing the matches must not replace it with the rule's
+previous category. Rule actions use filled or outlined buttons.
+
+Category rules keep their description-substring scope across all accounts, including hidden ones.
+The initial pattern uses the server's display title so a bank's labelled value date does not narrow
+the group. The server previews the entire history; editing the pattern invalidates that preview until
+it is refreshed. Only confirmation in the preview writes the group rule. Manual category choices
+remain exceptions, and existing rules remain accessible for inspection and removal. A category
+change keeps the detail open even if the transaction leaves the current category filter, so the
+person can immediately apply that choice to similar transactions. Returning to a category that
+matches the filter restores the row. Group changes return to the detail and restore focus.
+
 **The word for money somebody else gives you is written twice, in two packages, and nothing holds
 the two to each other.** This package says *support* in the Goal screen's hero, in the income
 sources block beside it and in the Transactions detail sheet's hint. The second copy is one package
@@ -414,3 +440,28 @@ copies *Boundary* describes, it is pinned to the server by neither a type nor a 
 The client's cleaning is not the server's `cleanName` for a reason: nothing here is percent-encoded,
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.
+
+## Overview presentation
+
+Overview keeps each account's native currency. Its summaries are loaded together after the recent
+transactions identify the newest month with data; an obsolete account request must not replace
+what a later selection has loaded. Each card names the period from its own response. Balance
+comparison uses the month's net movement, including transfers, while the flow figures exclude
+transfers. Neither a balance history nor an update timestamp may be inferred from the recent list.
+
+The spending ring can only draw positive values. Its centre and legend retain the server's net
+expense figures, including refunds, and the remainder is subtracted in cents. The ring's grouped
+remainder includes positive categories even when a refund elsewhere in that group offsets them;
+the explanation must remain visible whenever those net figures differ from what can be drawn.
+The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
+width able to widen a narrow page.
+
+Navigation uses the same links for the desktop sidebar and mobile bar. Screens stay mounted so
+filters survive navigation, with inactive screens excluded through `hidden`. The account's import
+button enters the existing staged import flow, where the destination is explicitly selected and
+confirmed. A currently viewed account is not evidence that the next statement belongs to it.
+
+Dark is the initial theme; an existing saved choice takes precedence. Colours are published from
+`theme.tsx` to CSS and chart components together. The action accent and income may share a colour,
+so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
+a raised surface with its own text colours rather than inheriting colours from the plotted series.

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { CATEGORIES, Category, categoryLabel, categoryRuleCaption } from '../categories';
-import { Chips } from '../components/Chips';
+import { CATEGORIES, Category, categoryLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
+import { TransferRuleEditor } from '../components/TransferRuleEditor';
+import { CategoryRuleEditor } from '../components/CategoryRuleEditor';
 import { fmtDate, fmtMoney, isoDay } from '../format';
 import { useTheme } from '../theme';
 import {
@@ -10,12 +11,11 @@ import {
   IncomeSource,
   IncomeSourceDef,
   Transaction,
-  TransferRuleWithMatches,
   TxFocus,
 } from '../types';
 
 /**
- * The window each chip names, carried on the entry rather than derived from the key a
+ * The window each option names, carried on the entry rather than derived from the key a
  * second time — a label and the window under it cannot then drift apart. `days: null`
  * is unbounded, which is what keeps the Overview's "All transactions" link honest.
  */
@@ -27,6 +27,36 @@ const PERIODS = [
 ] as const;
 
 type PeriodKey = (typeof PERIODS)[number]['key'];
+
+interface FilterOption {
+  key: string;
+  label: string;
+}
+
+function TransactionFilter({
+  label,
+  options,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  options: FilterOption[];
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <label className="transaction-filter">
+      <span>{label}</span>
+      <select value={selected} onChange={(event) => onSelect(event.target.value)}>
+        {options.map((option) => (
+          <option key={option.key} value={option.key}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function periodBounds(p: PeriodKey): { from?: string; to: string } {
   const now = new Date();
@@ -46,32 +76,18 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   /** A failed request used to render as "No transactions in the selected period". */
   const [txs, setTxs] = useState<Transaction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** What a category rule just did — read after the sheet that started it has closed. */
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
-  const [rules, setRules] = useState<TransferRuleWithMatches[]>([]);
+  const [ruleEditor, setRuleEditor] = useState<'transfer' | 'category' | null>(null);
+  const transferButton = useRef<HTMLButtonElement>(null);
+  const categoryButton = useRef<HTMLButtonElement>(null);
   /** income source catalog — chips in the sheet and badges in the list */
   const [sources, setSources] = useState<IncomeSourceDef[]>([]);
-  /** category picker open in the sheet */
-  const [catPicker, setCatPicker] = useState(false);
-  /**
-   * The rule's pattern, editable. Prefilled with the full description, but banks
-   * append a changing part to many lines — a month in a rent reference, a contract
-   * number — and a rule built from the whole string would then match that one
-   * transaction only. Trimming it down to the stable part is the entire point.
-   */
-  const [catPattern, setCatPattern] = useState('');
-
-  const loadRules = useCallback(() => {
-    api.transferRules().then(setRules).catch(() => {});
-  }, []);
-
   useEffect(() => {
-    api.accounts().then(setAccounts).catch(() => {});
+    api.accounts(true).then(setAccounts).catch(() => {});
     api.incomeSources().then(setSources).catch(() => {});
-    loadRules();
-  }, [loadRules]);
+  }, []);
 
   /**
    * Arrived from an account's "All transactions". The link says all of them, so the
@@ -107,7 +123,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
     } catch (e) {
       // Overview's load takes no arguments, so its stale list still answers the same
       // question. This one is filtered: rows kept from before a refused reload sit
-      // under a chip they were never an answer to.
+      // under a filter they were never an answer to.
       setTxs(null);
       setError((e as Error).message);
     }
@@ -118,11 +134,18 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   }, [load]);
 
   const accountOptions = useMemo(
-    () => [
-      { key: 'all', label: 'All accounts' },
-      ...accounts.map((a) => ({ key: a.id, label: a.name })),
-    ],
-    [accounts],
+    () => {
+      const visible = accounts.filter((a) => !a.hidden);
+      const selectedAccount = accounts.find((a) => a.id === accountId);
+      return [
+        { key: 'all', label: 'All accounts' },
+        ...visible.map((a) => ({ key: a.id, label: a.name })),
+        ...(accountId !== 'all' && !visible.some((a) => a.id === accountId)
+          ? [{ key: accountId, label: selectedAccount?.name ?? 'Selected account' }]
+          : []),
+      ];
+    },
+    [accounts, accountId],
   );
   const categoryOptions = useMemo(
     () => [
@@ -134,30 +157,12 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name;
 
   /**
-   * How many of the loaded transactions the pattern covers. Counted on the client and
-   * over the selected period only — it isn't the rule's true reach, just immediate
-   * feedback that trimming the pattern widened the match from one row to the group.
-   */
-  const patternMatches = useMemo(() => {
-    const p = catPattern.trim().toLowerCase();
-    if (!p) return 0;
-    return (txs ?? []).filter((t) => t.description.toLowerCase().includes(p)).length;
-  }, [catPattern, txs]);
-
-  /**
    * The category filter as of the last render. A decision taken when a PATCH settles
-   * cannot read the chip the handler was created under: by then it may not be the chip
+   * cannot read the selection the handler was created under: by then it may not be the selection
    * the list in state answers.
    */
   const currentCategory = useRef(category);
   currentCategory.current = category;
-
-  /**
-   * The caption sits above the list, and the row a rule is built from is often one the
-   * reader scrolled down to reach — so the sentence this screen keeps alive past the
-   * sheet renders a screenful or more above the viewport unless it is brought back.
-   */
-  const noticeRef = useRef<HTMLDivElement>(null);
 
   /** Transfer flag: null hands the decision back to the backend's auto-detection. */
   const applyTransfer = async (tx: Transaction, value: boolean | null) => {
@@ -207,10 +212,6 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   /**
    * This row's category and no other's; null hands it back to auto-detection. Clicking
    * the category the row already has is not a no-op — it pins the row against any rule.
-   *
-   * A row that no longer answers the category chip leaves the list, and the sheet goes
-   * with it: the alternative is a sheet open on a row the list does not contain, where
-   * a second pick lands on nothing and the row is gone until a chip is touched.
    */
   const applyCategory = async (tx: Transaction, next: Category | null) => {
     setSaving(true);
@@ -218,16 +219,15 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
       setError(null);
       setNotice(null);
       const updated = await api.setCategory(tx.id, next);
-      const chip = currentCategory.current;
-      const stays = chip === 'all' || updated.category === chip;
-      setTxs((list) =>
-        list === null
-          ? null
-          : stays
-            ? list.map((t) => (t.id === updated.id ? updated : t))
-            : list.filter((t) => t.id !== updated.id),
-      );
-      setSelected(stays ? updated : null);
+      const selectedCategory = currentCategory.current;
+      const stays = selectedCategory === 'all' || updated.category === selectedCategory;
+      setTxs((list) => {
+        if (list === null) return null;
+        if (!stays) return list.filter((t) => t.id !== updated.id);
+        if (list.some((t) => t.id === updated.id)) return list.map((t) => t.id === updated.id ? updated : t);
+        return [...list, updated].sort((a, b) => b.date.localeCompare(a.date));
+      });
+      setSelected(updated);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -235,84 +235,40 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
     }
   };
 
-  /**
-   * The group: a rule "description contains <pattern> -> category" + a full base
-   * recompute on the backend, so the list is reloaded in full.
-   *
-   * The caption is the reason the answer is kept. A rule cannot move a row whose
-   * category was set by hand, so a user who corrected three rows and then re-tagged
-   * the group watches three refuse to move; `overridden` is the only explanation there
-   * is, and it goes on the screen because this function closes the sheet.
-   */
-  const applyCategoryRule = async (next: Category) => {
-    const pattern = catPattern.trim();
-    if (!pattern) return;
-    setSaving(true);
-    try {
-      setError(null);
-      setNotice(null);
-      const res = await api.addCategoryRule({ pattern }, next);
-      await load();
-      setNotice(categoryRuleCaption(res.rule.pattern, next, res));
-      setSelected(null);
-      setCatPicker(false);
-      // the wrapper is unconditional, so it is in the DOM before the sentence paints
-      // and this needs no ordering against the commit
-      noticeRef.current?.scrollIntoView({ block: 'nearest' });
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+  const returnToTransaction = () => {
+    const button = ruleEditor === 'category' ? categoryButton : transferButton;
+    setRuleEditor(null);
+    requestAnimationFrame(() => button.current?.focus());
   };
 
-  /** The rule for the selected transaction, if one already exists. */
-  const ruleFor = (tx: Transaction) =>
-    rules.find((r) => r.description === tx.description && r.accountId === tx.accountId);
-
-  /**
-   * "All like this on this account": the rule re-tags the whole history on the
-   * backend, so we reload the list in full rather than editing a single row.
-   */
-  const applyRule = async (tx: Transaction, enabled: boolean) => {
-    setSaving(true);
-    try {
-      setError(null);
-      const existing = ruleFor(tx);
-      if (enabled) {
-        await api.addTransferRule(tx.id);
-      } else if (existing) {
-        await api.deleteTransferRule(existing.id);
-      }
-      loadRules();
-      await load();
-      setSelected(null);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
+  const ruleApplied = async (updated: Transaction, message: string) => {
+    await load();
+    setSelected(updated);
+    setNotice(message);
+    returnToTransaction();
   };
 
   return (
     <div className="screen-inner">
       <h1 className="title">Transactions</h1>
-      <Chips
-        label="Period"
-        options={PERIODS.map((p) => ({ key: p.key, label: p.label }))}
-        selected={period}
-        onSelect={(k) => setPeriod(k as PeriodKey)}
-      />
-      <Chips label="Account" options={accountOptions} selected={accountId} onSelect={setAccountId} />
-      <Chips label="Category" options={categoryOptions} selected={category} onSelect={setCategory} />
+      <div className="transaction-filters">
+        <TransactionFilter
+          label="Period"
+          options={PERIODS.map((p) => ({ key: p.key, label: p.label }))}
+          selected={period}
+          onSelect={(key) => setPeriod(key as PeriodKey)}
+        />
+        <TransactionFilter label="Account" options={accountOptions} selected={accountId} onSelect={setAccountId} />
+        <TransactionFilter label="Category" options={categoryOptions} selected={category} onSelect={setCategory} />
+      </div>
 
-      <div aria-live="polite" ref={noticeRef}>
-        {error && <p className="error">Error: {error}</p>}
-        {notice && <p className="hint">{notice}</p>}
+      <div aria-live="polite">
+        {!selected && error && <p className="error">Error: {error}</p>}
+        {!selected && notice && <p className="hint">{notice}</p>}
       </div>
 
       {txs?.map((item) => {
-        // hidden while the Account chip already states the answer; undefined while the
+        // hidden while the Account filter already states the answer; undefined while the
         // accounts load is outstanding or was refused, and the separator sits inside
         // the conditional so neither leaves a dangling middot
         const account = accountId === 'all' ? accountName(item.accountId) : undefined;
@@ -322,15 +278,16 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             className="row"
             style={{ gap: 10 }}
             onClick={() => {
-              setCatPicker(false);
-              setCatPattern(item.description);
+              setRuleEditor(null);
+              setNotice(null);
+              setError(null);
               setSelected(item);
             }}
           >
             <span className="dot" style={{ background: categoryColor(item.category) }} />
             <span className="row-main">
               <span className={`row-title${item.transfer ? ' muted-strike' : ''}`}>
-                {item.description || '(no description)'}
+                {item.displayDescription ?? (item.description || '(no description)')}
               </span>
               <span
                 className="row-sub"
@@ -366,13 +323,29 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
 
       <Sheet
         open={selected !== null}
-        onClose={() => setSelected(null)}
+        onClose={() => { if (!saving) setSelected(null); }}
         position="bottom"
-        title="Transaction"
+        title={ruleEditor === 'transfer' ? 'Transfer rules' : ruleEditor === 'category' ? 'Apply category' : 'Transaction'}
       >
-        {selected && (
+        {selected && ruleEditor === 'category' ? (
+          <CategoryRuleEditor
+            transaction={selected}
+            accounts={accounts}
+            onBack={returnToTransaction}
+            onBusyChange={setSaving}
+            onApplied={ruleApplied}
+          />
+        ) : selected && ruleEditor === 'transfer' ? (
+          <TransferRuleEditor
+            transaction={selected}
+            accountName={accountName(selected.accountId) ?? 'This account'}
+            onBack={returnToTransaction}
+            onBusyChange={setSaving}
+            onApplied={ruleApplied}
+          />
+        ) : selected && (
           <>
-            <h2 className="sheet-title">{selected.description || '(no description)'}</h2>
+            <h2 className="sheet-title">{selected.displayDescription ?? (selected.description || '(no description)')}</h2>
             <div className="sheet-amount">
               {selected.amount > 0 ? '+' : ''}
               {fmtMoney(selected.amount, selected.currency)}
@@ -382,6 +355,17 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               {selected.recurring ? ' · recurring' : ''}
             </div>
             <div className="sheet-meta">{accountName(selected.accountId)}</div>
+            {selected.valueDate && selected.valueDate !== selected.date.slice(0, 10) && (
+              <div className="sheet-meta">Value date: {fmtDate(selected.valueDate)}</div>
+            )}
+            {selected.displayDescription && (
+              <details className="transaction-original">
+                <summary>Original description</summary>
+                <p>{selected.description}</p>
+              </details>
+            )}
+            {error && <p className="error" role="alert">Error: {error}</p>}
+            {notice && <p className="hint" role="status">{notice}</p>}
 
             {/* this row alone. Outside the description gate below it: a rule needs a
                 pattern to hang on and an empty description is exactly the row no rule
@@ -392,6 +376,11 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 This transaction only
                 {selected.categoryManual ? ' · set manually' : ' · auto-detected'}
               </div>
+              {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category === 'support' && (
+                <p className="hint" role="status" style={{ marginTop: 6 }}>
+                  Support is included in income, but excluded from your own earnings on the Goal screen.
+                </p>
+              )}
               <div className="chip-wrap">
                 {CATEGORIES.map((c) => (
                   <button
@@ -409,7 +398,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               </div>
               {selected.categoryManual && (
                 <button
-                  className="btn-link"
+                  className="btn-ghost transaction-secondary-button"
                   disabled={saving}
                   onClick={() => applyCategory(selected, null)}
                 >
@@ -418,65 +407,20 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               )}
             </div>
 
-            {/* the group: a rule by description substring + base recompute */}
-            {selected.description !== '' && (
-              <div style={{ marginTop: 12 }}>
-                <button
-                  className="btn-link"
-                  onClick={() => {
-                    setCatPattern(selected.description);
-                    setCatPicker((v) => !v);
-                  }}
-                >
-                  {catPicker
-                    ? 'Hide category picker'
-                    : 'Change the category of transactions like this…'}
-                </button>
-                {catPicker && (
-                  <>
-                    <label className="setting-label" htmlFor="cat-pattern">
-                      Apply to transactions whose description contains
-                    </label>
-                    <input
-                      id="cat-pattern"
-                      className="input"
-                      value={catPattern}
-                      onChange={(e) => setCatPattern(e.target.value)}
-                      placeholder="part of the description"
-                    />
-                    <p className="hint" style={{ marginTop: 6 }}>
-                      {catPattern.trim()
-                        ? `Matches ${patternMatches} of the ${txs?.length ?? 0} loaded transactions.`
-                        : 'Enter the part of the description that stays the same.'}
-                      {' '}Banks often append a month or a contract number — trim it off and the
-                      rule covers the whole group, this month and every one after.
-                    </p>
-                    <div className="chip-wrap">
-                      {CATEGORIES.map((c) => (
-                        <button
-                          key={c}
-                          className="chip-cat"
-                          aria-label={`${categoryLabel(c)}, every transaction whose description contains this text`}
-                          disabled={saving || !catPattern.trim()}
-                          onClick={() => applyCategoryRule(c)}
-                        >
-                          <span className="dot" style={{ background: categoryColor(c) }} />
-                          {categoryLabel(c)}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
+            {selected.description.trim() !== '' && (
+              <button
+                ref={categoryButton}
+                className="btn-ghost transaction-rule-button"
+                disabled={saving || !CATEGORIES.includes(selected.category as Category)}
+                onClick={() => setRuleEditor('category')}
+              >
+                Apply to similar transactions <span aria-hidden="true">›</span>
+              </button>
             )}
 
             <div className="switch-row">
               <label className="row-main" htmlFor="tx-transfer">
                 <div className="switch-label">Transfer between own accounts</div>
-                <div className="switch-hint">
-                  Counted as neither income nor expense
-                  {selected.transferManual === null ? ' · auto-detected' : ' · set manually'}
-                </div>
               </label>
               <input
                 id="tx-transfer"
@@ -488,27 +432,15 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               />
             </div>
 
-            {selected.description !== '' && (
-              <div className="switch-row">
-                <label className="row-main" htmlFor="tx-rule">
-                  <div className="switch-label">
-                    …and every "{selected.description}" on this account
-                  </div>
-                  <div className="switch-hint">
-                    {ruleFor(selected)
-                      ? `Rule on · transactions tagged: ${ruleFor(selected)!.matches}`
-                      : 'The rule marks the whole history of such transactions, and every new one, as a transfer'}
-                  </div>
-                </label>
-                <input
-                  id="tx-rule"
-                  type="checkbox"
-                  className="switch"
-                  checked={ruleFor(selected) !== undefined}
-                  disabled={saving}
-                  onChange={(e) => applyRule(selected, e.target.checked)}
-                />
-              </div>
+            {selected.description.trim() !== '' && (
+              <button
+                ref={transferButton}
+                className="btn-ghost transaction-rule-button"
+                disabled={saving}
+                onClick={() => setRuleEditor('transfer')}
+              >
+                Manage transfer rules <span aria-hidden="true">›</span>
+              </button>
             )}
 
             {/* expense: "one-off" flag — keeps it from inflating average spending */}
@@ -516,9 +448,6 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               <div className="switch-row">
                 <label className="row-main" htmlFor="tx-oneoff">
                   <div className="switch-label">One-off large purchase</div>
-                  <div className="switch-hint">
-                    In the goal calculation it's spread over 12 months instead of landing in one
-                  </div>
                 </label>
                 <input
                   id="tx-oneoff"
@@ -532,7 +461,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             )}
 
             {/* income: the source — the Goal screen depends on it */}
-            {selected.amount > 0 && !selected.refund && !selected.transfer && (
+            {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
               <div
                 style={{
                   marginTop: 20,
@@ -561,7 +490,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 </div>
                 {selected.incomeSourceManual && (
                   <button
-                    className="btn-link"
+                    className="btn-ghost transaction-secondary-button"
                     disabled={saving}
                     onClick={() => applySource(selected, null)}
                   >
@@ -573,7 +502,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
 
             {selected.transferManual !== null && (
               <button
-                className="btn-link"
+                className="btn-ghost transaction-secondary-button"
                 disabled={saving}
                 onClick={() => applyTransfer(selected, null)}
               >
@@ -582,15 +511,8 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             )}
 
             <button
-              style={{
-                display: 'block',
-                width: '100%',
-                marginTop: 12,
-                padding: '12px 0',
-                fontSize: 15,
-                fontWeight: 600,
-                color: 'var(--ink-secondary)',
-              }}
+              disabled={saving}
+              className="btn-ghost transaction-close-button"
               onClick={() => setSelected(null)}
             >
               Close

@@ -38,7 +38,7 @@ vi.setConfig({ testTimeout: 15_000 });
  * measured landing within a few milliseconds of the 1000ms default. Nothing here is
  * waiting on the app.
  */
-const appMounted = () => screen.findByRole('heading', { name: /^Welcome/ }, { timeout: 5_000 });
+const appMounted = () => screen.findByRole('heading', { name: 'Overview' }, { timeout: 5_000 });
 
 describe('the shell', () => {
   it('shows Overview and keeps the other four mounted but hidden', async () => {
@@ -87,7 +87,7 @@ describe('the shell', () => {
     );
     expect(tabs.getByRole('link', { name: 'Overview' })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('heading', { name: 'Transactions' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: /^Welcome/, hidden: true })).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview', hidden: true })).not.toBeVisible();
   });
 
   it('marks Import as the page while the import panel is the window', async () => {
@@ -126,7 +126,7 @@ describe('the shell', () => {
 
     fireEvent.click(tabs.getByRole('link', { name: 'Overview' }));
 
-    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
@@ -145,7 +145,7 @@ describe('the shell', () => {
     fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }));
     fireEvent.click(tabs.getByRole('link', { name: 'Overview' }));
 
-    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument();
   });
 
@@ -188,7 +188,7 @@ describe('the shell', () => {
       await screen.findByRole('heading', { name: 'Goal' }, { timeout: 5_000 }),
     ).toBeVisible();
     expect(
-      screen.getByRole('heading', { name: /^Welcome/, hidden: true }),
+      screen.getByRole('heading', { name: 'Overview', hidden: true }),
     ).not.toBeVisible();
   });
 
@@ -214,7 +214,7 @@ describe('the shell', () => {
     act(() => window.history.back());
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible(),
+      expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible(),
     );
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
     expect(tabs.getByRole('link', { name: 'Transactions' })).not.toHaveAttribute('aria-current');
@@ -237,7 +237,7 @@ describe('the shell', () => {
     await waitFor(() =>
       expect(screen.queryByRole('heading', { name: 'Import a statement' })).not.toBeInTheDocument(),
     );
-    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
   });
 
   it('reaches Settings through the bar’s own control, which is not in the list', async () => {
@@ -255,7 +255,7 @@ describe('the shell', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
 
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
-    expect(screen.getByRole('heading', { name: /^Welcome/, hidden: true })).not.toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview', hidden: true })).not.toBeVisible();
   });
 
   it('carries the URL of each destination on the destination itself', async () => {
@@ -309,7 +309,7 @@ describe('the shell', () => {
 
     // this window did not move, which is the only thing the app was asked not to do
     expect(window.location.search).toBe('');
-    expect(screen.getByRole('heading', { name: /^Welcome/ })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
 
@@ -334,11 +334,11 @@ describe('the shell', () => {
 
     // it names the theme it is on, because a single glyph is not a state anybody can
     // read; clicking it moves to the next of the three
-    const button = screen.getByRole('button', { name: 'Theme: Auto. Click to change' });
+    const button = screen.getByRole('button', { name: 'Theme: Dark. Click to change' });
     fireEvent.click(button);
 
     expect(
-      screen.getByRole('button', { name: 'Theme: Light. Click to change' }),
+      screen.getByRole('button', { name: 'Theme: Auto. Click to change' }),
     ).toBeInTheDocument();
   });
 });
