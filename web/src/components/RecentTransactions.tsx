@@ -74,11 +74,6 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                   </td>
                   <td className="tx-cat">
                     <span className="tx-cell tx-cat-cell">
-                      <span
-                        className="dot"
-
-                        aria-hidden="true"
-                      />
                       <span className="tx-cat-name">{categoryLabel(t.category)}</span>
                     </span>
                   </td>

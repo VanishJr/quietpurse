@@ -215,14 +215,16 @@ it and in the Transactions detail sheet's hint; and the *Support from outside* k
 `IncomeSourcesBlock`. One package over it is the label `seedDefaults` gives the seeded external
 source in `backend/src/db/index.ts`. The packages share no build, `copy.test.ts` walks this side
 looking for something else entirely, and no check compares them — so any copy can drift and every
-test in both packages stays green. The seeded source's label and the derived source's word are
-meant to differ. The seeded label is the person's own, and one who has renamed it reads their own
-word, which is what the delete confirmation looks up rather than writes out. The source the server
-derives from the Support category is the other way round — the summary answers its id as its label
-and composes no word, and `incomeSourceLabel` in `categories.ts` turns a `category:` id into the
-dictionary's word wherever this package prints a source's label, so renaming the category renames
-the source with it. The Transactions list badges outside help with the catalogue's label and gives
-a derived-source row no badge, because that row's category already says what the money is.
+test in both packages stays green. The seeded label is the person's own, and one who has renamed it
+reads their own word, which is what the delete confirmation looks up rather than writes out. The
+source the server derives from the Support category is the other way round — the summary answers
+its id as its label and composes no word, and `incomeSourceLabel` in `categories.ts` turns a
+`category:` id into the dictionary's word where the share chart prints the summary's sources, so
+renaming the category renames the source with it. On the default seed the seeded source's label
+and the category's word coincide, so a period with income under both draws two slices with one
+word on the income-by-source share, and the chart tells the two apart by colour and figure. The
+Transactions list badges outside help with the catalogue's label and gives a derived-source row no
+badge, because that row's category already says what the money is.
 
 **The account delete's counts — transactions, imports, documents — are what the delete destroyed,
 which for a hidden account is legitimately not what the panel previewed.** The preview counts a
@@ -471,7 +473,10 @@ The accessible tables live inside clipped wrappers: clipping the table itself le
 width able to widen a narrow page.
 
 Navigation uses the same links for the desktop sidebar and mobile bar. Screens stay mounted so
-filters survive navigation, with inactive screens excluded through `hidden`. The account's import
+filters survive navigation, with inactive screens excluded through `hidden`. The account strip
+marks the current account with `aria-current` like the navigation does and is deliberately not a
+tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
+each tab a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 

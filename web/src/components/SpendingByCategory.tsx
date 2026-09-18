@@ -1,5 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { categoryLabel, REST_SECTOR, restLabel, spendRing } from '../categories';
+import { categoryLabel, restLabel, spendRing } from '../categories';
 import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
@@ -17,12 +17,6 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
   const { ink } = useTheme();
   const { top, rest, restTotal, sectors } = spendRing(spend, total);
   const palette = [ink.good, ink.lavender, ink.sand];
-  // by the legend's slot and not the sector's index: a named category a refund pushed
-  // below zero has a legend row and no sector, and the colours after it must not shift
-  const colorOf = (category: string) =>
-    category === REST_SECTOR
-      ? ink.muted
-      : palette[top.findIndex((c) => c.category === category)];
   const hasRefunds = spend.some((c) => c.total < 0);
 
   return (
@@ -52,7 +46,7 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                 isAnimationActive={false}
               >
                 {sectors.map((c) => (
-                  <Cell key={c.category} fill={colorOf(c.category)} />
+                  <Cell key={c.category} fill={c.slot === null ? ink.muted : palette[c.slot]} />
                 ))}
               </Pie>
               <Tooltip {...tooltipProps(ink, 'surface', tooltipMoney(currency))} />

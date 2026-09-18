@@ -25,6 +25,13 @@ describe('category dictionary', () => {
   it('returns an unknown slug as-is', () => {
     expect(categoryLabel('groceries-2')).toBe('groceries-2');
   });
+
+  it('answers a slug that names an inherited property with the slug, and never the property', () => {
+    // a restored backup can carry any string as a category; a plain lookup answers
+    // Object.prototype here, which React refuses as a child and unmounts the screen on
+    expect(categoryLabel('__proto__')).toBe('__proto__');
+    expect(incomeSourceLabel('category:__proto__', 'x')).toBe('__proto__');
+  });
 });
 
 describe('the word for an income source', () => {
@@ -120,8 +127,27 @@ describe('the ring against its legend', () => {
       top: [{ category: 'food', total: 100 }],
       rest: [],
       restTotal: 0,
-      sectors: [{ category: 'food', total: 100, label: 'Food' }],
+      sectors: [{ category: 'food', total: 100, label: 'Food', slot: 0 }],
     });
+  });
+
+  it('carries each named category’s legend row onto its sector, so a refund shifts no colour', () => {
+    // health has a legend row and no sector: shopping keeps the third slot, and the
+    // tail has none — the ring and the legend paint from the same number
+    const ring = spendRing(
+      [
+        { category: 'food', total: 100 },
+        { category: 'health', total: -50 },
+        { category: 'shopping', total: 30 },
+        { category: 'cash', total: 20 },
+      ],
+      100,
+    );
+    expect(ring.sectors.map((s) => [s.category, s.slot])).toEqual([
+      ['food', 0],
+      ['shopping', 2],
+      [REST_SECTOR, null],
+    ]);
   });
 });
 

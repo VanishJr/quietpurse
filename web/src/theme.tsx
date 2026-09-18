@@ -169,7 +169,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       mode,
       setMode,
       ink,
-      categoryColor: (category) => palette[category] || palette['other'],
+      categoryColor: (category) =>
+        Object.hasOwn(palette, category) ? palette[category] : palette['other'],
     };
   }, [scheme, mode, ink]);
 

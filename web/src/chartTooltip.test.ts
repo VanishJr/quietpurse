@@ -65,10 +65,7 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
 
   it.each(GROUNDS)('%s: both text colours are readable on the fill, in both palettes', (ground) => {
     for (const [scheme, ink] of PALETTES) {
-      // the fill and both texts as the factory composed them, for the reason above —
-      // and a colour rather than a key, which is also what makes the quiet white
-      // measurable: `var(--c-on-ground-2)` compared to a fill would pass by being
-      // unequal to everything
+      // the fill and both texts as the factory composed them, for the reason above
       const props = tooltipProps(ink, ground, () => '');
       const fill = props.contentStyle.background;
       const texts = [
@@ -114,12 +111,10 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
 describe('the props the module hands recharts', () => {
 
   it.each(PALETTES)(
-    'is what the two money charts drew before the refit, plus the bar cursor’s fill (%s)',
+    'hands recharts the raised fill, the border, both text colours and the bar cursor’s fill (%s)',
     (_scheme, ink) => {
       const props = tooltipProps(ink, 'surface', tooltipMoney('EUR'));
-      // the one deliberate difference from the hand-rolled objects: without a fill a
-      // bar chart's cursor is recharts' own `#ccc` slab, which the ranking chart has
-      // been drawing all along and which this row hands to a third surface
+      // without a fill a bar chart's cursor is recharts' own `#ccc` slab
       expect(props.cursor).toEqual({ stroke: ink.grid, fill: ink.grid, strokeWidth: 1 });
       expect(props.contentStyle).toEqual({
         background: ink.raised,

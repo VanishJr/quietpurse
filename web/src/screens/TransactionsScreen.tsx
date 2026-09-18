@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { CATEGORIES, Category, categoryLabel, incomeSourceLabel } from '../categories';
+import { CATEGORIES, Category, categoryLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
 import { CategoryRuleEditor } from '../components/CategoryRuleEditor';
@@ -309,7 +309,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 {item.oneOff && <span className="badge">one-off</span>}
                 {/* outside help (family, stipend...) — a badge with the source name */}
                 {!item.transfer && source?.kind === 'external' && (
-                  <span className="badge">{incomeSourceLabel(source.id, source.label)}</span>
+                  <span className="badge">{source.label}</span>
                 )}
               </span>
             </span>

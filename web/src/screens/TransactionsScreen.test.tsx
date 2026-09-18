@@ -845,6 +845,69 @@ describe('the income source', () => {
     expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('re-reads the list when a row leaves Support, which can pair it with a transfer again', async () => {
+    // a hand-marked Support row broke its inferred pair: both legs unstruck for now
+    const marked = { ...INCOME, category: 'support', categoryManual: true, incomeSource: 'category:support' };
+    const partner = row({
+      id: 'tx-out',
+      accountId: 'acc-2',
+      description: 'To ZZ',
+      amount: -100,
+      date: '2026-07-13',
+      category: 'other',
+      transfer: false,
+    });
+    const afterwards = [
+      { ...INCOME, category: 'transfers', transfer: true },
+      { ...partner, category: 'transfers', transfer: true },
+    ];
+    let reads = 0;
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok(++reads === 1 ? [marked, partner] : afterwards),
+      'PATCH /api/transactions/tx-in/category': () => ok(afterwards[0]),
+    });
+    mount();
+    await openSheet('ZZ Income');
+    expect(screen.getByText('To ZZ')).not.toHaveClass('muted-strike');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Category: back to auto-detection' }));
+
+    // the partner leg on the other account is a transfer again, which only a re-read shows
+    await waitFor(() => expect(screen.getByText('To ZZ')).toHaveClass('muted-strike'));
+    expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('re-reads under the filter the list answers when the pick lands, not the one it was made under', async () => {
+    let release: (r: Response) => void = () => {};
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => ok(SOURCES),
+      'GET /api/transactions': () => ok([INCOME]),
+      'PATCH /api/transactions/tx-in/category': () =>
+        new Promise<Response>((resolve) => (release = resolve)),
+    });
+    mount();
+    await openSheet('ZZ Income');
+    fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
+
+    // the filter moves while the write is in flight, and the list re-reads for it
+    chooseFilter('Category', 'food');
+    await settle();
+
+    release(ok({ ...INCOME, category: 'support', categoryManual: true, incomeSource: 'category:support' }));
+    await settle();
+
+    // the third read is the pick's, and it carries the filter as of the settle: read
+    // off the URL, because the rows alone are the same under either filter
+    const lists = requestUrls().filter((url) => url.startsWith('GET /api/transactions?'));
+    expect(lists).toHaveLength(3);
+    expect(lists[2]).toContain('category=food');
+  });
+
   it('badges outside help with the catalogue’s own word, and reads the derived source as its category', async () => {
     const fromFamily = row({ id: 'tx-fam', description: 'From family', amount: 200, incomeSource: 'family' });
     const derived = row({ id: 'tx-sup', description: 'Support row', amount: 300, category: 'support', incomeSource: 'category:support' });

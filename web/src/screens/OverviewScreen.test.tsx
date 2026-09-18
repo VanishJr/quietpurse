@@ -347,10 +347,9 @@ describe('the tab rail', () => {
     expect(screen.queryByRole('button', { name: 'Next accounts' })).not.toBeInTheDocument();
   });
 
-  it('carries the hidden switch as a pressed state, since it has no word on it', async () => {
-    // the control is an icon on the band now: struck through while the hidden ones are
-    // on the rail. `aria-pressed` is the whole of that fact for a reader who gets
-    // neither the glyph nor the slash through it
+  it('carries the hidden switch as a pressed state', async () => {
+    // the icon is struck through while the hidden ones are on the rail: `aria-pressed`
+    // is the whole of that fact for a reader who gets neither the glyph nor the slash
     mount();
     const toggle = await screen.findByRole('button', { name: 'Show 1 hidden account' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -919,18 +918,16 @@ describe('the recent transactions', () => {
     expect(onOpenTransactions).toHaveBeenCalledWith('acc-1');
   });
 
-  it('keeps the disc and the category dot out of what is read aloud', async () => {
+  it('keeps the disc out of what is read aloud', async () => {
     // the disc carries the first letter of the description that is printed immediately
-    // to its right, and the dot carries the colour of the category named in the very
-    // next span: both identify a row at a glance and neither says anything a reader of
-    // the cell is not already told
+    // to its right: it identifies a row at a glance and says nothing a reader of the
+    // cell is not already told
     mount();
     const list = await panel('Recent transactions in Sparkasse Giro');
 
     const row = within(list).getByText('ACME payroll').closest('tr');
     expect(row).not.toBeNull();
     expect(row!.querySelector('.tx-mark')).toHaveAttribute('aria-hidden', 'true');
-    expect(row!.querySelector('.dot')).toHaveAttribute('aria-hidden', 'true');
   });
 });
 

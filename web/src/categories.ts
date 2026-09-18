@@ -42,7 +42,8 @@ export const CATEGORIES = [
  */
 export type Category = (typeof CATEGORIES)[number];
 
-export const categoryLabel = (slug: string): string => CATEGORY_LABELS[slug] ?? slug;
+export const categoryLabel = (slug: string): string =>
+  Object.hasOwn(CATEGORY_LABELS, slug) ? CATEGORY_LABELS[slug] : slug;
 
 /** The read-only income source the server derives from a category: this prefix and the slug. */
 const CATEGORY_SOURCE = 'category:';
@@ -69,7 +70,7 @@ export interface SpendSector extends CategorySummary {
  * up on the datum and never checks it: a ring whose sectors carry only the slug prints
  * `food` at the reader when they point at one, and nothing but a case can say so.
  */
-export const spendSectors = (spend: CategorySummary[]): SpendSector[] =>
+export const spendSectors = <T extends CategorySummary>(spend: T[]): (T & SpendSector)[] =>
   spend
     .filter((c) => c.total > 0)
     .map((c) => ({ ...c, label: categoryLabel(c.category) }));
@@ -83,6 +84,11 @@ export const REST_SECTOR = '__rest';
 export const restLabel = (count: number): string =>
   `Other · ${count} ${count === 1 ? 'category' : 'categories'}`;
 
+export interface RingSector extends SpendSector {
+  /** The sector's row in the legend: its index in `top`, and none for the tail. */
+  slot: number | null;
+}
+
 export interface SpendRing {
   /** The categories the legend names, in the server's order. */
   top: CategorySummary[];
@@ -91,7 +97,7 @@ export interface SpendRing {
   /** The tail as the legend prints it: the month's net total less the named categories. */
   restTotal: number;
   /** What the ring draws: the named categories and the tail, positive parts only. */
-  sectors: SpendSector[];
+  sectors: RingSector[];
 }
 
 /**
@@ -107,10 +113,12 @@ export function spendRing(spend: CategorySummary[], total: number): SpendRing {
     (toCents(total) - top.reduce((sum, c) => sum + toCents(c.total), 0)) / 100;
   const positiveRest =
     spendSectors(rest).reduce((sum, c) => sum + toCents(c.total), 0) / 100;
-  const sectors = [
-    ...spendSectors(top),
+  const sectors: RingSector[] = [
+    // the slot is stamped before the positive filter, so a named category a refund
+    // pushed below zero takes its slot with it and the ones after keep theirs
+    ...spendSectors(top.map((c, slot) => ({ ...c, slot }))),
     ...(positiveRest > 0
-      ? [{ category: REST_SECTOR, label: restLabel(rest.length), total: positiveRest }]
+      ? [{ category: REST_SECTOR, label: restLabel(rest.length), total: positiveRest, slot: null }]
       : []),
   ];
   return { top, rest, restTotal, sectors };

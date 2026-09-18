@@ -9,11 +9,9 @@ export const TABS_PER_PAGE = 3;
 /**
  * How much of a name a tab shows, in characters.
  *
- * A tab is a third of the rail, and this is what fits at the narrowest width the app
- * lays out for without the row of three breaking. It is a character budget rather
- * than a CSS `text-overflow` because the name is cut in the middle — see
- * `truncateMiddle`, and the reason there: the default name is the statement's
- * filename, and everything that distinguishes two of them is at the end.
+ * It is a character budget rather than a CSS `text-overflow` because the name is cut
+ * in the middle — see `truncateMiddle`, and the reason there: the default name is the
+ * statement's filename, and everything that distinguishes two of them is at the end.
  *
  * The whole name is never lost. It is the tab's `title`, it is the tab's accessible
  * name, and it is the heading of the balance card below.
@@ -161,7 +159,8 @@ export function AccountTabs({
 
       <span className="visually-hidden">
         {accounts.length === 1 ? '1 account' : `${accounts.length} accounts`}
-
+        {/* the region is unconditional and only its text is not: a region rendered with
+            its sentence has nothing for the sentence to be a change to, and paging announces nothing */}
         <span aria-live="polite">
           {pages > 1 && (
             <>
