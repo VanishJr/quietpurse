@@ -12,6 +12,7 @@ import {
   ticksOf,
   SummarySplits,
 } from './analytics';
+import { categoryLabel } from './categories';
 import { AccountMonthTotals, Chart, ChartRange, MonthTotals } from './types';
 
 /**
@@ -194,6 +195,23 @@ describe('the parts of one period', () => {
     // answered for one account as readily as for every account together
     expect(shareFromSummary(summary, 'income-sources')).toEqual([
       { key: 'src-1', label: 'Acme GmbH', value: 900 },
+    ]);
+  });
+
+  it('names the source the Support category derives with the category’s own word', () => {
+    // the server answers that source's id as its label and composes no word of its own:
+    // a slice labelled with the id, or with a word that survives renaming the
+    // category, is the slice this case is about
+    const summary = splits({
+      incomeBySource: [
+        { source: 'family', label: 'Mum and Dad', kind: 'external', total: 200 },
+        { source: 'category:support', label: 'category:support', kind: 'external', total: 300 },
+      ],
+    });
+
+    expect(shareFromSummary(summary, 'income-sources')).toEqual([
+      { key: 'category:support', label: categoryLabel('support'), value: 300 },
+      { key: 'family', label: 'Mum and Dad', value: 200 },
     ]);
   });
 

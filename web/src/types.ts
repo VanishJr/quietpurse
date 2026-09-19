@@ -13,6 +13,7 @@ export type {
   BudgetsWritten,
   CategoryRuleCounts,
   CategoryRuleCreated,
+  CategoryRulePreview,
   CategoryRuleWithCounts,
   CategorySummary,
   Chart,
@@ -50,6 +51,7 @@ export type {
   Summary,
   Transaction,
   TransferRuleCreated,
+  TransferRulePreview,
   TransferRuleWithMatches,
 } from '../../backend/src/wire';
 
@@ -60,6 +62,7 @@ export type {
   CHART_TITLE_MAX,
   CHARTS_MAX,
   ERROR_DETAIL_MAX,
+  SUPPORT_INCOME_SOURCE,
 } from '../../backend/src/wire';
 
 /**

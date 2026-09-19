@@ -173,10 +173,10 @@ const account = (patch: Partial<Account>): Account => ({
 /** Everything already queued has run by the time a macrotask does. */
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 
-describe('the hero', () => {
-  it('greets over today’s date', async () => {
+describe('the page heading', () => {
+  it('names the page under today’s date', async () => {
     mount();
-    expect(await screen.findByRole('heading', { name: 'Welcome!' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument();
     // the day this test runs on, formatted the one way fmtWeekday formats it — so the
     // assertion is that the line is drawn from a real clock, not that it says a date
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
@@ -308,8 +308,8 @@ describe('the tab rail', () => {
   });
 
   it('cuts a long name in the middle and keeps the whole one reachable', async () => {
-    // the real shape of a default name: the account is named after the file, .pdf and
-    // all, and everything that tells two of them apart is at the end
+    // the shape of a name that came out of a filename: .pdf and all, and everything
+    // that tells two of them apart is at the end
     const long = 'report_03-09-2026_11-22-33.pdf';
     mount({
       ...OVERVIEW_ROUTES,
@@ -347,10 +347,9 @@ describe('the tab rail', () => {
     expect(screen.queryByRole('button', { name: 'Next accounts' })).not.toBeInTheDocument();
   });
 
-  it('carries the hidden switch as a pressed state, since it has no word on it', async () => {
-    // the control is an icon on the band now: struck through while the hidden ones are
-    // on the rail. `aria-pressed` is the whole of that fact for a reader who gets
-    // neither the glyph nor the slash through it
+  it('carries the hidden switch as a pressed state', async () => {
+    // the icon is struck through while the hidden ones are on the rail: `aria-pressed`
+    // is the whole of that fact for a reader who gets neither the glyph nor the slash
     mount();
     const toggle = await screen.findByRole('button', { name: 'Show 1 hidden account' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -377,9 +376,9 @@ describe('the balance card', () => {
     mount();
 
     const card = await panel('Balance of Sparkasse Giro');
-    expect(within(card).getByText('1,234.50 EUR')).toBeInTheDocument();
+    expect(within(card).getByText('1,234.50', { exact: false })).toBeInTheDocument();
     expect(
-      within(card).getByRole('heading', { name: 'Sparkasse Giro' }),
+      within(card).getByText('Sparkasse Giro'),
     ).toBeInTheDocument();
   });
 });
@@ -420,6 +419,10 @@ describe('income against expenses', () => {
     const flows = await panel('Income and expenses for Sparkasse Giro');
     expect(within(flows).getByText('+60 EUR')).toBeInTheDocument();
     expect(within(flows).queryByText(/−−/)).not.toBeInTheDocument();
+    const spending = await panel('Spending by category, Aug 2026');
+    expect(within(spending).getByText('Net refunds in Aug 2026 exceed spending.')).toBeInTheDocument();
+    const total = within(spending).getByRole('rowheader', { name: 'Total' }).closest('tr');
+    expect(total).toHaveTextContent('−60 EUR');
   });
 
   it('compares each figure with the month before it, and colours the two differently', async () => {
@@ -472,13 +475,13 @@ describe('income against expenses', () => {
     await panel('Sparkasse Giro');
     const before = requests();
 
-    fireEvent.click(screen.getByRole('button', { name: '3 months' }));
+    fireEvent.click(screen.getByRole('button', { name: '3M' }));
 
     // the chips are the only thing that moved: the longest window is fetched once and
     // 3 and 6 are cuts of it, so narrowing is arithmetic rather than a request. The
     // whole list and not the transaction reads alone — the request this toggle would
     // tempt somebody into making is a summary one.
-    expect(await screen.findByRole('button', { name: '3 months', pressed: true })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '3M', pressed: true })).toBeInTheDocument();
     expect(requests()).toEqual(before);
   });
 
@@ -523,7 +526,7 @@ describe('spending by category', () => {
     // is not spending, which is the same rule the Expenses figure above it follows
     const rows = within(await legend());
     expect(rows.getByText('Food')).toBeInTheDocument();
-    expect(rows.getByText('100%')).toBeInTheDocument();
+    expect(rows.getByText('120 EUR')).toBeInTheDocument();
     // the middle of the ring is `totals.expense` off the body this breakdown came
     // from, and the flows card's figure is the same month out of the months body: two
     // requests, one number, and the screen would be contradicting itself if not
@@ -550,8 +553,8 @@ describe('spending by category', () => {
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
     // the legend is the top three, and then the tail named as a tail — 100 of 1000
-    expect(rows.getByText('1 more category')).toBeInTheDocument();
-    expect(rows.getByText('10%')).toBeInTheDocument();
+    expect(rows.getByText('Other · 1 category')).toBeInTheDocument();
+    expect(rows.getByText('100 EUR')).toBeInTheDocument();
     expect(rows.queryByText('Health')).not.toBeInTheDocument();
     // the fourth one is not lost: the table beside the ring has all of them, which is
     // what a screen reader gets and what jsdom can see of a donut
@@ -575,7 +578,35 @@ describe('spending by category', () => {
     const more = within(card).getByRole('button', { name: 'All analytics' });
     // the arrow is a picture of the verb and is read as a word — it stays on screen and
     // stays out of the name, which is what the name above being the bare phrase asserts
-    expect(more).toHaveTextContent('→');
+    expect(more).toHaveTextContent('↗');
+  });
+
+  it('keeps the net figures in the legend and says so when a refund is inside them', async () => {
+    // two in the tail, one of them a refund that exactly offsets the other: the tail's
+    // legend row is the server's net remainder, and the ring — which jsdom cannot see —
+    // draws the cash that was spent; `categories.test.ts` pins that half on the same fixture
+    const refunds: AccountSummary['byCategory'] = [
+      { category: 'food', total: 100 },
+      { category: 'health', total: 50 },
+      { category: 'shopping', total: 30 },
+      { category: 'cash', total: 20 },
+      { category: 'travel', total: -20 },
+    ];
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/summary': (_init, url) =>
+        ok(summaryBody(url, { totals: { income: 0, expense: 180 }, byCategory: refunds })),
+      'GET /api/summary/months': (_init, url) =>
+        ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 180, net: -180 }])),
+    });
+
+    const card = await panel('Spending by category, Aug 2026');
+    expect(
+      within(card).getByText('Total includes net refunds; the ring shows positive spending.'),
+    ).toBeInTheDocument();
+    const tail = within(await legend()).getByText('Other · 2 categories').closest('li');
+    expect(tail).toHaveTextContent('0 EUR');
+    expect(within(card).getByText('180')).toBeInTheDocument();
   });
 
   it('gives the figure in the middle of the ring to the table beside it', async () => {
@@ -605,6 +636,20 @@ describe('spending by category', () => {
 });
 
 describe('switching tabs while a read is in flight', () => {
+  it('announces loading without painting a zero balance', async () => {
+    let release: (r: Response) => void = () => {};
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => new Promise<Response>((resolve) => (release = resolve)),
+    });
+    await tab('Sparkasse Giro');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading your account');
+    expect(screen.queryByRole('region', { name: 'Balance of Sparkasse Giro' })).toBeNull();
+    release(ok(TXS));
+    await panel('Balance of Sparkasse Giro');
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('drops the answer for the tab the reader left', async () => {
     const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
     let release: (r: Response) => void = () => {};
@@ -637,6 +682,42 @@ describe('switching tabs while a read is in flight', () => {
     expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1);
     expect(requests().filter((r) => r === 'GET /api/summary/months')).toHaveLength(1);
     expect(screen.getByRole('region', { name: 'Balance of Quick' })).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
+  });
+
+  it('drops the figures for the tab the reader left, even once its recent list had landed', async () => {
+    const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
+    let release: (r: Response) => void = () => {};
+    let slowAsked = '';
+    let calls = 0;
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => ok(two),
+      // both recent lists come back at once; the summary that does not is the first
+      // one asked for, which is Slow's, and its window is kept for the answer below
+      'GET /api/summary': (_init, url) => {
+        calls += 1;
+        if (calls === 1) {
+          slowAsked = url ?? '';
+          return new Promise<Response>((resolve) => (release = resolve));
+        }
+        return ok(summaryBody(url));
+      },
+    });
+
+    // the switch happens after Slow's recent list landed and its summaries were asked
+    // for — the case above holds the other window, before the recent list comes back
+    await waitFor(() => expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1));
+    fireEvent.click(await tab('Quick'));
+    await panel('Balance of Quick');
+
+    release(ok(summaryBody(slowAsked)));
+    await settle();
+
+    // both summaries were answered; only Quick's is on screen
+    expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(2);
+    expect(screen.getByRole('region', { name: 'Balance of Quick' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
   });
 
@@ -785,11 +866,28 @@ describe('the recent transactions', () => {
     expect(within(list).getByText('+900 EUR')).toBeInTheDocument();
     // the transfer is on the list and marked, because it is what the figures above left out
     expect(within(list).getByText('To savings')).toBeInTheDocument();
-    expect(within(list).getByText('transfer')).toBeInTheDocument();
+    expect(within(list).getByText('Transfer')).toBeInTheDocument();
     // a status column would have to invent one: a statement records what already happened
     expect(within(list).queryByText('Completed')).not.toBeInTheDocument();
     expect(within(list).queryByRole('columnheader', { name: 'Account' })).not.toBeInTheDocument();
     expect(within(list).queryByRole('columnheader', { name: 'Status' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the category alongside every transaction flag', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04T00:00:00.000Z', 60, {
+          description: 'Returned purchase', category: 'shopping',
+          transfer: true, refund: true, oneOff: true,
+        }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const row = within(list).getByText('Returned purchase').closest('tr')!;
+    for (const text of ['Shopping', 'Transfer', 'Refund', 'One-off']) {
+      expect(within(row).getByText(text)).toBeInTheDocument();
+    }
   });
 
   it('keeps every cell in its own column', async () => {
@@ -811,27 +909,25 @@ describe('the recent transactions', () => {
     mount();
     await panel('Recent transactions in Sparkasse Giro');
 
-    const all = screen.getByRole('button', { name: 'All transactions' });
+    const all = screen.getByRole('button', { name: 'See all' });
     // the name is the bare phrase; the arrow is still painted on it
-    expect(all).toHaveTextContent('→');
+    expect(all).toHaveTextContent('↗');
 
     fireEvent.click(all);
 
     expect(onOpenTransactions).toHaveBeenCalledWith('acc-1');
   });
 
-  it('keeps the disc and the category dot out of what is read aloud', async () => {
+  it('keeps the disc out of what is read aloud', async () => {
     // the disc carries the first letter of the description that is printed immediately
-    // to its right, and the dot carries the colour of the category named in the very
-    // next span: both identify a row at a glance and neither says anything a reader of
-    // the cell is not already told
+    // to its right: it identifies a row at a glance and says nothing a reader of the
+    // cell is not already told
     mount();
     const list = await panel('Recent transactions in Sparkasse Giro');
 
     const row = within(list).getByText('ACME payroll').closest('tr');
     expect(row).not.toBeNull();
     expect(row!.querySelector('.tx-mark')).toHaveAttribute('aria-hidden', 'true');
-    expect(row!.querySelector('.dot')).toHaveAttribute('aria-hidden', 'true');
   });
 });
 
@@ -1392,7 +1488,7 @@ describe('adding an account', () => {
     });
     await panel('Sparkasse Giro');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add more +' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Cash' } });
     // the currency is not asked for: it is the workspace's base currency
     expect(screen.getByText(/your base currency/)).toHaveTextContent('EUR');

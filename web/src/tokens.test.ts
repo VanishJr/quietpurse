@@ -67,9 +67,11 @@ describe('every design token has a reader', () => {
 
   it('reads tokens.css and the whole client source tree', () => {
     // written out rather than compared against the lists themselves, which would be
-    // the same values on both sides of the assertion and green however short they got
-    expect(declared).toContain('--c-ground');
-    expect(declared.length).toBeGreaterThan(10);
+    // the same values on both sides of the assertion and green however short they got:
+    // one token per family the file still carries — radii, motion, stacking
+    for (const token of ['--r-md', '--dur-1', '--z-raised']) {
+      expect(declared).toContain(token);
+    }
     expect(FILES).toContain(TOKENS);
     expect(FILES).toContain('styles.css');
     expect(FILES).toContain('../index.html');

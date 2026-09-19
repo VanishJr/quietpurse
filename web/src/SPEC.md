@@ -164,10 +164,11 @@ on purpose. `backend/test/SPEC.md` states that rule and the reason for the diver
 restated here.
 
 **A design token with no `var()` behind it is refused**, by `tokens.test.ts`, because
-`web/src/styles/tokens.css` is the one place values two stylesheets had to agree on were pulled into
-— and CSS fails silently at both ends: an unread declaration costs nothing, and a rule naming one
-that does not exist takes the initial value rather than erroring. The check holds one direction
-only; its own header says which and why the other needs three declaration sources modelled at once.
+`web/src/styles/tokens.css` is the one place the radii, motion and stacking values two stylesheets
+had to agree on were pulled into — the palette left it for `theme.tsx` — and CSS fails silently at
+both ends: an unread declaration costs nothing, and a rule naming one that does not exist takes the
+initial value rather than erroring. The check holds one direction only; its own header says which
+and why the other needs three declaration sources modelled at once.
 
 `API_BASE` is empty because the API is always this page's own origin: `web/vite.config.ts` proxies
 `/api` to the backend while the dev server runs, and `npm start` serves the built client from the
@@ -176,14 +177,54 @@ cross-origin.
 
 ## Invariants
 
-**The word for money somebody else gives you is written twice, in two packages, and nothing holds
-the two to each other.** This package says *support* in the Goal screen's hero, in the income
-sources block beside it and in the Transactions detail sheet's hint. The second copy is one package
-over, in the label `seedDefaults` gives the seeded external source in `backend/src/db/index.ts`. The
-packages share no build, `copy.test.ts` walks this side looking for something else entirely, and no
-check compares them — so either half can drift and every test in both packages stays green. A user
-who has renamed theirs reads their own word instead, which is what the delete confirmation looks up
-rather than writes out.
+Support is available in the category picker, category filters and category rules. Its income
+treatment belongs to the API: the client explains that it contributes to income but not to own
+earnings. The separate editable income-source picker is hidden for incoming Support, because the
+category already determines its external treatment. Expense signs, refunds and transfers retain
+their usual meaning even when labelled Support. A category change into or out of Support is
+answered by re-reading the whole list, as a rule apply is, and not by splicing the one row: the
+server recomputes every transfer pair on that change, so the partner leg on another account may
+have moved too, and the row the person touched is the one row a splice would get right. The detail
+stays open on the updated row either way.
+
+Transaction titles use the server's optional display description, with the source text available in
+the detail panel. A distinct value date remains visible as metadata. Similar-transfer previews are
+server results over the full account history, not a filter over the loaded rows. The preview explains
+future matches and identifies manual overrides before the write. A refused write requires refreshing
+the preview, and a successful write returns to the updated transaction rather than dismissing it.
+
+The transfer button opens rule management. The category button applies the transaction's current
+category to similar transactions after a preview. The preview names that category without asking
+for it again; reading an existing rule or refreshing the matches must not replace it with the rule's
+previous category. Rule actions use filled or outlined buttons.
+
+Category rules keep their description-substring scope across all accounts, including hidden ones.
+The initial pattern uses the server's display title so a bank's labelled value date does not narrow
+the group. The server previews the entire history; editing the pattern invalidates that preview until
+it is refreshed. Only confirmation in the preview writes the group rule. Manual category choices
+remain exceptions, and existing rules remain accessible for inspection and removal. A category
+change keeps the detail open even if the transaction leaves the current category filter, so the
+person can immediately apply that choice to similar transactions. Returning to a category that
+matches the filter restores the row. Group changes return to the detail and restore focus.
+
+**The word for money somebody else gives you is written in more than one place, across both
+packages, and nothing holds the copies to each other.** In this package it is the `support` entry
+of `CATEGORY_LABELS`, which the picker, the category filter, the rule captions and the Transactions
+list print; the prose that explains it in the Goal screen's hero, in the income sources block beside
+it and in the Transactions detail sheet's hint; and the *Support from outside* kind name in
+`IncomeSourcesBlock`. One package over it is the label `seedDefaults` gives the seeded external
+source in `backend/src/db/index.ts`. The packages share no build, `copy.test.ts` walks this side
+looking for something else entirely, and no check compares them — so any copy can drift and every
+test in both packages stays green. The seeded label is the person's own, and one who has renamed it
+reads their own word, which is what the delete confirmation looks up rather than writes out. The
+source the server derives from the Support category is the other way round — the summary answers
+its id as its label and composes no word, and `incomeSourceLabel` in `categories.ts` turns a
+`category:` id into the dictionary's word where the share chart prints the summary's sources, so
+renaming the category renames the source with it. On the default seed the seeded source's label
+and the category's word coincide, so a period with income under both draws two slices with one
+word on the income-by-source share, and the chart tells the two apart by colour and figure. The
+Transactions list badges outside help with the catalogue's label and gives a derived-source row no
+badge, because that row's category already says what the money is.
 
 **The account delete's counts — transactions, imports, documents — are what the delete destroyed,
 which for a hidden account is legitimately not what the panel previewed.** The preview counts a
@@ -387,15 +428,13 @@ Where the theme is kept is *Boundary*'s ruling and is not restated here.
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value, because the ground decides the tooltip's colours and one shared object is what keeps the
 surfaces from diverging — a reader who learns that pointing at a chart works on one screen would
-otherwise learn it wrongly for the next. The navy the money charts draw their tooltip in is right on
-`surface` and on `page` and wrong on the Overview's spending card, whose `panel` fill is the same
-navy in dark mode and a navy a step apart in light, so a tooltip copied unchanged onto it is painted
-in the card's own colour; and the text does not survive the move on its own either, white on a
-`surface` fill being white on white. A ground is named for the `Ink` key of its own fill, so nothing
-states twice what colour a card is, and a ground added to the union without a chip does not compile.
-The separations each chip was chosen on stay beside `NAVY` and `LIGHT` in `chartTooltip.ts`, because
-`chartTooltip.test.ts` pins them there against the live palette and reds when a figure written down
-is no longer the measurement.
+otherwise learn it wrongly for the next. A ground is named for the `Ink` key of its own fill, so
+nothing states twice what colour a card is, and a ground added to the union without a chip does not
+compile. The one chip every ground takes fills the box with `raised`, which sits a step off each
+ground on purpose; the border is what makes the box a box, not the fill. `chartTooltip.test.ts` pins
+the tightest live fill-on-ground pair in each palette with the border's separation beside it, at
+the measured figures rather than under a floor, and reds when a figure written down is no longer
+the measurement.
 
 `tooltipProps` is checked in `unit` against both palettes at once because `chartTooltip.ts` is a
 `.ts` file and not a `.tsx` one on purpose: `web/vitest.config.ts` binds the project to the
@@ -414,3 +453,37 @@ copies *Boundary* describes, it is pinned to the server by neither a type nor a 
 The client's cleaning is not the server's `cleanName` for a reason: nothing here is percent-encoded,
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.
+
+## Overview presentation
+
+Overview keeps each account's native currency. Its summaries are loaded together after the recent
+transactions identify the newest month with data; an obsolete account request must not replace
+what a later selection has loaded. Each card names the period from its own response. Balance
+comparison uses the month's net movement, including transfers, while the flow figures exclude
+transfers. Neither a balance history nor an update timestamp may be inferred from the recent list.
+
+The spending ring can only draw positive values. Its centre and legend retain the server's net
+expense figures, including refunds, and the remainder is subtracted in cents. The ring's grouped
+remainder includes positive categories even when a refund elsewhere in that group offsets them;
+the explanation must remain visible whenever those net figures differ from what can be drawn.
+`spendRing` in `categories.ts` is where the drawn sectors and the legend's remainder part ways, so
+the two figures are one function's answer and `categories.test.ts` can hold them apart on a fixture
+whose tail nets to nothing. The ring's named sectors and their legend dots are coloured by rank, not
+by category — the slot's ink keys and how many categories the legend names are one literal,
+`RING_SLOT_INK` in `categories.ts` — so the Overview ring is the one chart where a category's colour
+is its position and not the colour `categoryColor` gives it everywhere else.
+The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
+width able to widen a narrow page.
+
+Navigation uses the same links for the desktop sidebar and mobile bar. Screens stay mounted so
+filters survive navigation, with inactive screens excluded through `hidden`. The account strip
+marks the current account with `aria-current` like the navigation does and is deliberately not a
+tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
+each tab a composite widget with a roving tabindex nobody asked for. The account's import
+button enters the existing staged import flow, where the destination is explicitly selected and
+confirmed. A currently viewed account is not evidence that the next statement belongs to it.
+
+Dark is the initial theme; an existing saved choice takes precedence. Colours are published from
+`theme.tsx` to CSS and chart components together. The action accent and income may share a colour,
+so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
+a raised surface with its own text colours rather than inheriting colours from the plotted series.

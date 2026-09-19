@@ -1,8 +1,3 @@
-/**
- * The `<Tooltip>` every chart in this app is handed, and the grounds it is drawn on: a
- * ground carries a fill AND the two colours that go on it, as one value, because the
- * ground is what decides the tooltip's colours.
- */
 import { fmtMoney } from './format';
 import { Ink } from './theme';
 import type { TooltipProps } from 'recharts';
@@ -10,44 +5,22 @@ import type { TooltipProps } from 'recharts';
 /** The backgrounds this app paints a chart on. Each is the `Ink` key of its own fill. */
 export type TooltipGround = 'surface' | 'panel' | 'page';
 
-/**
- * `--c-on-ground-2` from `styles/tokens.css`, copied because a `var()` reference
- * resolves in an inline style but to nothing a `unit` test can hold against a fill —
- * compared as the literal string `"var(…)"` it passes by being unequal to every colour.
- * The token is the source of truth and this is not; `chartTooltip.test.ts` pins the copy.
- */
-const QUIET_ON_DARK = 'rgba(255, 255, 255, 0.62)';
+export type TooltipColor = keyof Ink;
 
-/** A colour a tooltip paints with: a palette key, or the quiet white no key carries. */
-export type TooltipColor = keyof Ink | 'quietOnDark';
+export const tooltipColor = (ink: Ink, color: TooltipColor): string => ink[color];
 
-export const tooltipColor = (ink: Ink, color: TooltipColor): string =>
-  color === 'quietOnDark' ? QUIET_ON_DARK : ink[color];
-
-/** A fill and the two colours that are readable on it. One decision, not three. */
 interface TooltipChip {
   fill: keyof Ink;
-  /** the series name, quieter than its figure */
   label: TooltipColor;
-  /** the figure itself */
   item: TooltipColor;
 }
 
-/** The navy the money charts have always drawn: 16.13:1 on `surface` in light, 1.36:1 in dark. */
-const NAVY: TooltipChip = { fill: 'brand', label: 'quietOnDark', item: 'onBrand' };
-
-/**
- * For the one card that is itself a dark navy in both schemes. A `surface` fill clears
- * it at 19.31:1 in light and 1.36:1 in dark — the same separation `brand` on `surface`
- * has shipped with since the flows card was drawn — and the text inverts with the fill,
- * because both of `NAVY`'s whites vanish on a white fill.
- */
-const LIGHT: TooltipChip = { fill: 'surface', label: 'secondary', item: 'primary' };
+const RAISED: TooltipChip = { fill: 'raised', label: 'secondary', item: 'primary' };
 
 export const TOOLTIP_CHIP: Record<TooltipGround, TooltipChip> = {
-  surface: NAVY,
-  page: NAVY,
-  panel: LIGHT,
+  surface: RAISED,
+  page: RAISED,
+  panel: RAISED,
 };
 
 /**
@@ -91,7 +64,7 @@ export function tooltipProps<T>(
     cursor: { stroke: ink.grid, fill: ink.grid, strokeWidth: 1 },
     contentStyle: {
       background: ink[chip.fill],
-      border: 'none',
+      border: `1px solid ${ink.border}`,
       borderRadius: 'var(--r-md)',
       padding: '8px 12px',
       fontSize: 12,

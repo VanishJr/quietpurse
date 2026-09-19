@@ -196,6 +196,15 @@ describe('the calls the offline product depends on', () => {
     });
   });
 
+  it('sends the category preview pattern and binds application to its token', async () => {
+    expect(await sent(() => api.categoryRulePreview('REWE'))).toMatchObject({
+      url: '/api/category-rules/preview', method: 'POST', body: { pattern: 'REWE' },
+    });
+    expect(await sent(() => api.addCategoryRule({ pattern: 'REWE' }, 'food', 'token'))).toMatchObject({
+      url: '/api/category-rules', method: 'POST', body: { pattern: 'REWE', category: 'food', previewToken: 'token' },
+    });
+  });
+
   it('the transfer-rule calls: GET the list, POST the txId, DELETE the rule by id in the path', async () => {
     expect(await sent(() => api.transferRules(), '[]')).toMatchObject({
       url: '/api/transfer-rules',
@@ -211,6 +220,15 @@ describe('the calls the offline product depends on', () => {
       url: '/api/transfer-rules/7',
       method: 'DELETE',
       body: undefined,
+    });
+    expect(await sent(() => api.transferRulePreview('tx/a'))).toMatchObject({
+      url: '/api/transactions/tx%2Fa/transfer-rule-preview', method: undefined,
+    });
+    expect(await sent(() => api.transaction('tx/a'))).toMatchObject({
+      url: '/api/transactions/tx%2Fa', method: undefined,
+    });
+    expect(await sent(() => api.addTransferRule('tx-1', 'preview-token'))).toMatchObject({
+      body: { txId: 'tx-1', matchMode: 'similar-v1', previewToken: 'preview-token' },
     });
   });
 

@@ -14,11 +14,11 @@
  * ---------------------------------------------------------------------------
  * Colour
  *
- * A series is coloured by what it MEANS: income is `good` and expenses are `accent` on
- * every screen in this app, and `METRICS` carries the palette key so this file does not
- * get a vote. A share is coloured by category, from the same `categoryColor` the
- * Overview's donut and the old breakdown legend use, so one category is one colour
- * across the whole app.
+ * A series is coloured by what it MEANS: income is `good` and expenses are `lavender`
+ * on every screen in this app, and `METRICS` carries the palette key so this file does
+ * not get a vote. A share is coloured by category, from the same `categoryColor` the
+ * Transactions list, the budgets and the Goal screen use, so one category is one colour
+ * on every surface but the Overview ring, which colours by legend rank.
  *
  * Income sources are the exception and have to be: they are rows the user created, with
  * ids no palette knows. They take colours off the category ramp by position — distinct

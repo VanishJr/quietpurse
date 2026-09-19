@@ -12,45 +12,16 @@ export interface Ink {
   good: string;
   bad: string;
   onAccent: string;
-  /**
-   * Text on a `bad` fill - the destructive button. White clears light mode's red and
-   * does not clear dark mode's, so the two schemes need different foregrounds and a
-   * borrowed `onAccent` would be right only by the coincidence that both palettes put
-   * their saturated colours on the same side of the surface.
-   */
   onBad: string;
   backdrop: string;
-  /**
-   * The navy the design is built on: the sidebar, the balance card, the selected tab, a
-   * filled button, the expense bars. It is a FILL and not a text colour - `accent` is
-   * what interactive text uses, and the two are the same hue in light mode and
-   * deliberately different in dark, where a navy link would be unreadable.
-   */
+
   brand: string;
   onBrand: string;
-  /**
-   * The ground the Overview's spending donut is drawn on: a navy in both schemes the
-   * way `brand` is, and a different navy from it. A palette entry rather than a
-   * stylesheet custom property because the donut's sector separators have to be the
-   * card's own fill and Recharts is handed that as a string; published as `--ink-panel`
-   * like every other key here, so the card's own `background` reads the same value
-   * rather than a second copy of it.
-   */
   panel: string;
-  /**
-   * The third chart series. Income is `good` and expenses are `accent`, and Net is one
-   * minus the other and therefore neither of those two colours: it cannot borrow one of
-   * the pair without saying something false, it cannot be `brand` (in light mode that
-   * is the same navy as `accent`, and two series would be one line), and it cannot be
-   * `primary` for the same reason one step further, a near-black beside a navy being a
-   * difference nobody reads off a thin stroke. So a hue neither of the other two uses,
-   * clearing both grounds a series can be drawn on at the contrast text needs, because
-   * the same value also draws this series' name in the legend beside it. It overlaps
-   * the Health category's violet, and that is not a collision: a series chart plots
-   * measures over time and a share chart plots categories, and no canvas in the app
-   * draws both.
-   */
   net: string;
+  raised: string;
+  lavender: string;
+  sand: string;
 }
 
 export const lightInk: Ink = {
@@ -67,37 +38,36 @@ export const lightInk: Ink = {
   onAccent: '#ffffff',
   onBad: '#ffffff',
   backdrop: 'rgba(1,7,16,0.40)',
-  brand: '#0a213f',
+  brand: '#365323',
   onBrand: '#ffffff',
-  panel: '#030e20',
-  net: '#6d4aad',
+  panel: '#ffffff',
+  net: '#936921',
+  raised: '#e8eee2',
+  lavender: '#7955ab',
+  sand: '#936921',
 };
 
 export const darkInk: Ink = {
-  primary: '#e8ebf0',
-  secondary: '#a9b3c1',
-  muted: '#818b9b',
-  grid: '#262f3c',
-  border: 'rgba(232,235,240,0.12)',
-  surface: '#161c25',
-  page: '#0d1117',
-  /* not `brand`: navy text on a navy page is not text */
-  accent: '#7aa7ea',
-  good: '#4ec98a',
-  bad: '#f2726f',
-  onAccent: '#0d1117',
-  onBad: '#0d1117',
-  backdrop: 'rgba(0,0,0,0.6)',
-  /* Lighter than the page here, where in light mode it is darker: a fill has to be
-     distinguishable from the surface behind it, and which direction that is depends on
-     the scheme. It has to clear `surface` and not just `page`, because the selected tab
-     and the balance card both sit on a surface. */
-  brand: '#25344c',
-  onBrand: '#e8ebf0',
-  /* the same fill as `brand` here, where in light mode it is a step darker: on this
-     page the card has to clear the surface behind it rather than sink into it */
-  panel: '#25344c',
-  net: '#b59cf0',
+  primary: '#f1f3ed',
+  secondary: '#a6ada4',
+  muted: '#969f93',
+  grid: '#30362f',
+  border: '#30362f',
+  surface: '#191c19',
+  page: '#101211',
+  accent: '#c7e89a',
+  good: '#c7e89a',
+  bad: '#eea49b',
+  onAccent: '#182111',
+  onBad: '#101211',
+  backdrop: 'rgba(0,0,0,0.65)',
+  brand: '#c7e89a',
+  onBrand: '#182111',
+  panel: '#191c19',
+  net: '#d9c6a0',
+  raised: '#20251f',
+  lavender: '#b69ae3',
+  sand: '#d9c6a0',
 };
 
 // keyed by the backend's slugs; the dark palette is the same hue per category, lightened
@@ -113,6 +83,7 @@ const LIGHT_CATEGORY_COLORS: Record<string, string> = {
   cash: '#e87ba4',
   transfers: '#eb6834',
   salary: '#0f7d6b',
+  support: '#9b5b89',
   cashback: '#9c6ade',
   other: '#898781',
 };
@@ -128,6 +99,7 @@ const DARK_CATEGORY_COLORS: Record<string, string> = {
   cash: '#f39ac0',
   transfers: '#f5915f',
   salary: '#35b8a2',
+  support: '#d39cc5',
   cashback: '#c3a0ff',
   other: '#9a9891',
 };
@@ -141,16 +113,6 @@ interface ThemeValue {
   mode: ThemeMode;
   setMode: (m: ThemeMode) => void;
   categoryColor: (category: string) => string;
-  /**
-   * The same category, as it has to be ON `panel` - always the dark palette, in both
-   * schemes, because `panel` is a dark navy either way and the light palette is picked
-   * against a near-white page.
-   *
-   * It is the FLOOR that this exists for and not the average: most of the light palette
-   * clears the contrast a graphical object needs on this ground, and the one that does
-   * not is enough to require the swap.
-   */
-  categoryColorOnPanel: (category: string) => string;
 }
 
 const ThemeContext = createContext<ThemeValue | null>(null);
@@ -159,7 +121,7 @@ const STORAGE_KEY = 'finto.theme';
 
 function readStoredMode(): ThemeMode {
   const raw = localStorage.getItem(STORAGE_KEY);
-  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'system';
+  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'dark';
 }
 
 function applyCssVariables(ink: Ink, scheme: Scheme) {
@@ -170,6 +132,7 @@ function applyCssVariables(ink: Ink, scheme: Scheme) {
   // Lets the browser theme form controls, scrollbars and the caret to match.
   root.style.colorScheme = scheme;
   root.dataset.theme = scheme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', ink.page);
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -206,9 +169,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       mode,
       setMode,
       ink,
-      categoryColor: (category) => palette[category] || palette['other'],
-      categoryColorOnPanel: (category) =>
-        DARK_CATEGORY_COLORS[category] || DARK_CATEGORY_COLORS['other'],
+      categoryColor: (category) =>
+        Object.hasOwn(palette, category) ? palette[category] : palette['other'],
     };
   }, [scheme, mode, ink]);
 

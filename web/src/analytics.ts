@@ -6,7 +6,7 @@
  * once at the end.
  */
 import { monthOf, toCents } from './accounts';
-import { categoryLabel } from './categories';
+import { categoryLabel, incomeSourceLabel } from './categories';
 import { isoDay, MONTHS_SHORT } from './format';
 import {
   CategorySummary,
@@ -94,12 +94,12 @@ export interface MetricDef {
    * because the two schemes have two palettes and a literal here would be right in
    * one of them.
    */
-  ink: 'good' | 'accent' | 'net';
+  ink: 'good' | 'lavender' | 'net';
 }
 
 export const METRIC_DEFS = {
   income: { label: 'Income', ink: 'good' },
-  expense: { label: 'Expenses', ink: 'accent' },
+  expense: { label: 'Expenses', ink: 'lavender' },
   net: { label: 'Net', ink: 'net' },
 } satisfies Record<ChartMetric, Omit<MetricDef, 'key'>>;
 
@@ -341,7 +341,7 @@ export interface SummarySplits {
 export function shareFromSummary(summary: SummarySplits, breakdown: ChartBreakdown): SharePoint[] {
   if (breakdown === 'income-sources') {
     return summary.incomeBySource
-      .map((s) => ({ key: s.source, label: s.label, value: s.total }))
+      .map((s) => ({ key: s.source, label: incomeSourceLabel(s.source, s.label), value: s.total }))
       .sort((a, b) => b.value - a.value);
   }
   return fromCategories(
