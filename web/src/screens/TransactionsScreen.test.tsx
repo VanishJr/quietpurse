@@ -118,7 +118,7 @@ describe('the transactions list', () => {
     mount();
     await screen.findByText('Proto row');
     // a plain lookup answers Object.prototype here, and React paints that as no colour
-    expect(document.querySelector<HTMLElement>('.row .dot')?.style.background).not.toBe('');
+    expect(document.querySelector<HTMLElement>('.row .dot')?.style.background).toBeTruthy();
   });
 
   it('says the period is empty when the period really is empty', async () => {

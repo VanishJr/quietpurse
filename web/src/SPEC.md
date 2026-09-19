@@ -468,7 +468,10 @@ remainder includes positive categories even when a refund elsewhere in that grou
 the explanation must remain visible whenever those net figures differ from what can be drawn.
 `spendRing` in `categories.ts` is where the drawn sectors and the legend's remainder part ways, so
 the two figures are one function's answer and `categories.test.ts` can hold them apart on a fixture
-whose tail nets to nothing.
+whose tail nets to nothing. The ring's named sectors and their legend dots are coloured by rank, not
+by category — the slot's ink keys and how many categories the legend names are one literal,
+`RING_SLOT_INK` in `categories.ts` — so the Overview ring is the one chart where a category's colour
+is its position and not the colour `categoryColor` gives it everywhere else.
 The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
 width able to widen a narrow page.
 

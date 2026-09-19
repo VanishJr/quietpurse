@@ -308,8 +308,8 @@ describe('the tab rail', () => {
   });
 
   it('cuts a long name in the middle and keeps the whole one reachable', async () => {
-    // the real shape of a default name: the account is named after the file, .pdf and
-    // all, and everything that tells two of them apart is at the end
+    // the shape of a name that came out of a filename: .pdf and all, and everything
+    // that tells two of them apart is at the end
     const long = 'report_03-09-2026_11-22-33.pdf';
     mount({
       ...OVERVIEW_ROUTES,

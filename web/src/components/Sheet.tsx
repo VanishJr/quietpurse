@@ -32,7 +32,7 @@ export function Sheet({ open, onClose, position = 'bottom', wide = false, title,
       if (e.key === 'Escape') onClose();
       if (e.key !== 'Tab') return;
       const card = cardRef.current;
-      if (!card) return;
+      if (!card || card.closest('[hidden]')) return;
       const controls = Array.from(card.querySelectorAll<HTMLElement>(
         ':is(button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"])',
       )).filter((el) => !el.closest('[hidden]'));

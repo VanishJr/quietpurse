@@ -36,6 +36,25 @@ describe('account menu keyboard navigation', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toHaveFocus();
   });
 
+  it('leaves Tab to the browser while the sheet sits in a hidden screen', () => {
+    // every screen stays mounted under `hidden`, so Back can leave a sheet open behind
+    // the one that is showing; the trap must not take that screen's Tab with it
+    render(
+      <>
+        <div hidden>
+          <Sheet open onClose={() => {}} title="Transaction">
+            <button>Apply</button>
+          </Sheet>
+        </div>
+        <button>Outside</button>
+      </>,
+    );
+    const outside = screen.getByRole('button', { name: 'Outside' });
+    outside.focus();
+    expect(fireEvent.keyDown(outside, { key: 'Tab' })).toBe(true);
+    expect(outside).toHaveFocus();
+  });
+
   it('keeps Tab and Shift+Tab inside the dialog and returns focus after Escape', () => {
     render(<Menu />);
     const opener = screen.getByRole('button', { name: 'Open menu' });

@@ -10,8 +10,7 @@ export const TABS_PER_PAGE = 3;
  * How much of a name a tab shows, in characters.
  *
  * It is a character budget rather than a CSS `text-overflow` because the name is cut
- * in the middle — see `truncateMiddle`, and the reason there: the default name is the
- * statement's filename, and everything that distinguishes two of them is at the end.
+ * in the middle: `truncateMiddle` carries the reason.
  *
  * The whole name is never lost. It is the tab's `title`, and it is the tab's accessible
  * name.

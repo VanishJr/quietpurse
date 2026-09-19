@@ -25,7 +25,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
-    // tsconfig.json's ES2022 floor, for the bundle too: esbuild lowers syntax, not APIs.
+    // tsconfig.json's ES2022 floor, for the bundle too: esbuild lowers syntax, not APIs;
+    // Vite's `cssTarget` follows it.
     target: 'es2022',
   },
 });
