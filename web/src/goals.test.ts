@@ -55,6 +55,14 @@ describe('Goals presentation', () => {
     expect(
       goalStatusMessage(goal({ progress: progress({ status: 'account-unavailable' }) })),
     ).toContain('Edit this goal');
+    expect(
+      goalStatusMessage(
+        goal({
+          type: 'debt-payoff',
+          progress: progress({ status: 'account-unavailable' }),
+        } as Partial<GoalSummary>),
+      ),
+    ).toContain('Create a new goal');
     expect(goalStatusMessage(goal({ progress: progress({ status: 'tracking' }) }))).toBeNull();
   });
 });

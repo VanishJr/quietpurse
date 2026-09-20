@@ -263,10 +263,10 @@ const monthlyIncomeDetail = (
   const current = unavailable ? null : round2(mean(values));
   const status: GoalStatus =
     current === null ? 'not-enough-data' : current >= goal.target ? 'reached' : 'tracking';
-  const { baseCurrency: currency, ...publicGoal } = goal;
+  const { baseCurrency: _storedCurrency, ...publicGoal } = goal;
   return {
     ...publicGoal,
-    currency,
+    currency: context.baseCurrency,
     source: `${monthsText(rows.length)} · ${goal.incomeScope === 'own' ? 'Earnings' : 'All income'}`,
     progress: completionProgress(
       goal.target,
@@ -331,10 +331,10 @@ const categoryDetail = (
         : forecast !== null && forecast > goal.monthlyLimit
           ? 'at-risk'
           : 'tracking';
-  const { baseCurrency: currency, ...publicGoal } = goal;
+  const { baseCurrency: _storedCurrency, ...publicGoal } = goal;
   return {
     ...publicGoal,
-    currency,
+    currency: context.baseCurrency,
     source: 'Current calendar month',
     progress: usedProgress(
       goal.monthlyLimit,

@@ -54,7 +54,14 @@ export function GoalCard({ goal, busy = false, onEdit, onDelete }: Props) {
         </div>
       </dl>
 
-      <div className="goal-progress" aria-label={progressLabel(progress)}>
+      <div
+        className="goal-progress"
+        role="progressbar"
+        aria-label={progressLabel(progress)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress.percentage === null ? undefined : percentage}
+      >
         <span style={{ width: `${percentage}%` }} />
       </div>
       <p className="goal-progress-label">{progressLabel(progress)}</p>
@@ -65,7 +72,10 @@ export function GoalCard({ goal, busy = false, onEdit, onDelete }: Props) {
         </p>
       )}
       {goal.type === 'financial-independence' && goal.workHoursLeft !== null && (
-        <p className="goal-support">About {goal.workHoursLeft} work hours left</p>
+        <p className="goal-support">
+          Left: {formatGoalValue(progress.remaining, 'money-per-month', goal.currency)} · about{' '}
+          {goal.workHoursLeft} work hours
+        </p>
       )}
       {status && <p className="goal-status">{status}</p>}
     </article>

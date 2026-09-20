@@ -82,7 +82,9 @@ export const goalStatusMessage = (goal: GoalSummary): string | null => {
     case 'not-enough-data':
       return 'Import more transactions to calculate progress.';
     case 'account-unavailable':
-      return 'A selected account was removed. Edit this goal to choose another account.';
+      return goal.type === 'debt-payoff'
+        ? 'The debt account was removed. Create a new goal to track another debt.'
+        : 'A selected account was removed. Edit this goal to choose another account.';
     case 'at-risk':
       return 'Forecast to exceed the limit this month.';
     case 'over-limit':
