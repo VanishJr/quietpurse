@@ -14,6 +14,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   const url = useUrl();
   const [goals, setGoals] = useState<GoalSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GoalSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -31,6 +32,11 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   useEffect(() => {
     void load(true);
   }, [load, reloadToken]);
+
+  const handleMissingGoal = useCallback(() => {
+    setUrl({ goal: null }, 'replace');
+    setNotice('That goal is no longer available.');
+  }, []);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -57,13 +63,17 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
         <button
           className="btn btn-primary"
           disabled={goals === null}
-          onClick={() => setUrl({ screen: 'goal', goal: 'new' })}
+          onClick={() => {
+            setNotice(null);
+            setUrl({ screen: 'goal', goal: 'new' });
+          }}
         >
           New goal
         </button>
       </header>
 
       {goals === null && !error && <p className="state-note">Loading goals…</p>}
+      {notice && <p className="state-note" role="status">{notice}</p>}
       {error && (
         <div className="error-row" role="alert">
           <span>Couldn’t load goals: {error}</span>
@@ -78,7 +88,10 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
           <p>Create one to track progress from your financial data.</p>
           <button
             className="btn btn-primary"
-            onClick={() => setUrl({ screen: 'goal', goal: 'new' })}
+            onClick={() => {
+              setNotice(null);
+              setUrl({ screen: 'goal', goal: 'new' });
+            }}
           >
             Create a goal
           </button>
@@ -91,7 +104,10 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
               key={goal.id}
               goal={goal}
               busy={deleting}
-              onEdit={(selected) => setUrl({ screen: 'goal', goal: selected.id })}
+              onEdit={(selected) => {
+                setNotice(null);
+                setUrl({ screen: 'goal', goal: selected.id });
+              }}
               onDelete={(selected) => {
                 setDeleteError(null);
                 setDeleteTarget(selected);
@@ -104,7 +120,9 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
       <GoalEditor
         goalId={url.goal}
         onClose={() => setUrl({ goal: null }, 'replace')}
+        onMissing={handleMissingGoal}
         onSaved={() => {
+          setNotice(null);
           setUrl({ goal: null }, 'replace');
           void load();
         }}

@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_SETTINGS, SAVINGS_GOAL } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests } from '../test/harness';
@@ -38,6 +39,87 @@ const SAVINGS_DETAIL: GoalDetail = {
   target: 9000,
   accountIds: ['acc-1'],
 };
+
+const FINANCIAL_DETAIL: GoalDetail = {
+  id: 'goal-fi',
+  type: 'financial-independence',
+  name: 'Independent',
+  targetDate: null,
+  createdAt: '2026-05-01T00:00:00.000Z',
+  updatedAt: '2026-05-01T00:00:00.000Z',
+  currency: 'EUR',
+  source: '2 complete months · Essential costs + 10% buffer',
+  supportExcluded: 0,
+  workHoursLeft: null,
+  workHoursCapacityPerMonth: null,
+  workHoursCapacityExceeded: null,
+  basis: 'essential-costs',
+  bufferPct: 10,
+  windowMonths: 6,
+  hourlyRate: null,
+  hoursPerWeek: null,
+  essentialCosts: [
+    { id: 1, label: 'Rent', monthly: 900, sort: 0 },
+    { id: 2, label: 'Food', monthly: 300, sort: 1 },
+  ],
+  progress: {
+    ...SAVINGS_GOAL.progress,
+    unit: 'money-per-month',
+    target: 1320,
+    current: null,
+    remaining: null,
+    overBy: null,
+    percentage: null,
+    status: 'not-enough-data',
+    period: { kind: 'complete-months', from: '2025-11-01', to: '2026-04-30', monthsUsed: 0 },
+  },
+};
+
+const unavailableDetails: Array<{ detail: GoalDetail; amountLabel: string }> = [
+  {
+    detail: {
+      ...SAVINGS_DETAIL,
+      id: 'missing-savings',
+      currency: 'USD',
+      accountIds: ['gone-usd'],
+    },
+    amountLabel: 'Target amount (USD)',
+  },
+  {
+    detail: {
+      id: 'missing-emergency',
+      type: 'emergency-fund',
+      name: 'Emergency',
+      targetDate: null,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      currency: 'USD',
+      source: 'Unavailable account',
+      coverageMonths: 6,
+      monthlyEssentials: 1000,
+      accountIds: ['gone-usd'],
+      progress: { ...SAVINGS_GOAL.progress, status: 'account-unavailable' },
+    },
+    amountLabel: 'Essential monthly amount (USD)',
+  },
+  {
+    detail: {
+      id: 'missing-debt',
+      type: 'debt-payoff',
+      name: 'Debt',
+      targetDate: null,
+      createdAt: '2026-05-01T00:00:00.000Z',
+      updatedAt: '2026-05-01T00:00:00.000Z',
+      currency: 'USD',
+      source: 'Unavailable account',
+      accountId: 'gone-usd',
+      startingDebt: 5000,
+      targetDebt: 0,
+      progress: { ...SAVINGS_GOAL.progress, status: 'account-unavailable' },
+    },
+    amountLabel: 'Target remaining debt (USD)',
+  },
+];
 
 const ACCOUNTS = [
   { id: 'acc-1', provider: 'upload' as const, name: 'Cash', currency: 'EUR', balance: 5400, hidden: false },
@@ -99,7 +181,7 @@ describe('GoalEditor', () => {
     renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: /Financial independence/ }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Independence' } });
-    fireEvent.change(screen.getByLabelText('Cost name'), { target: { value: 'Rent' } });
+    fireEvent.change(screen.getByLabelText('Cost 1 name'), { target: { value: 'Rent' } });
     const amount = screen.getByLabelText('Monthly cost for Rent');
     fireEvent.change(amount, { target: { value: 'not a number' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create goal' }));
@@ -107,7 +189,7 @@ describe('GoalEditor', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Monthly cost for Rent must be a positive number.');
     expect(amount).toHaveValue('not a number');
     expect(requests()).not.toContain('POST /api/goals');
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete Rent' })).toBeVisible();
   });
 
   it('skips type selection on edit and saves a complete replacement', async () => {
@@ -154,6 +236,102 @@ describe('GoalEditor', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Food again');
     expect(screen.getByLabelText(/Monthly limit/)).toHaveValue('500');
     expect(screen.getByRole('dialog')).toBeVisible();
+  });
+
+  it('locks savings selections to the first selected account currency', async () => {
+    mockFetch(baseRoutes);
+    renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Savings balance/ }));
+
+    const eur = screen.getByRole('checkbox', { name: 'Cash · EUR' });
+    const usd = screen.getByRole('checkbox', { name: 'USD cash · USD' });
+    expect(usd).toBeEnabled();
+    fireEvent.click(eur);
+    expect(usd).toBeDisabled();
+    fireEvent.click(usd);
+    expect(usd).not.toBeChecked();
+    fireEvent.click(eur);
+    expect(usd).toBeEnabled();
+  });
+
+  it.each(unavailableDetails)(
+    'keeps the persisted currency for unavailable $detail.type accounts',
+    async ({ detail, amountLabel }) => {
+      mockFetch({
+        ...baseRoutes,
+        [`GET /api/goals/${detail.id}`]: () => ok(detail),
+      });
+      renderThemed(<GoalEditor goalId={detail.id} onClose={vi.fn()} onSaved={vi.fn()} />);
+
+      expect(await screen.findByText('Currency: USD')).toBeVisible();
+      expect(screen.getByLabelText(amountLabel)).toBeVisible();
+    },
+  );
+
+  it('keeps dependency failures separate from forms and retries with cleared state', async () => {
+    let accountReads = 0;
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/accounts': () =>
+        ++accountReads === 2 ? fail(500, { error: 'accounts unavailable' }) : ok(ACCOUNTS),
+    });
+
+    const Host = () => {
+      const [id, setId] = useState<string | null>('new');
+      return (
+        <>
+          <button onClick={() => setId('new')}>Reopen editor</button>
+          <GoalEditor
+            goalId={id}
+            onClose={() => setId(null)}
+            onSaved={vi.fn()}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    expect(await screen.findByRole('button', { name: /Savings balance/ })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reopen editor' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load goal: accounts unavailable',
+    );
+    expect(screen.queryByRole('button', { name: /Savings balance/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Cash · EUR/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('button', { name: /Savings balance/ })).toBeVisible();
+  });
+
+  it('clears a form error when the create wizard returns to type selection', async () => {
+    mockFetch(baseRoutes);
+    renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Monthly income/ }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Income' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create goal' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Monthly target');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Savings balance/ }));
+    expect(screen.getByRole('heading', { name: 'Savings balance' })).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('gives every essential-cost control stable row context', async () => {
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/goals/goal-fi': () => ok(FINANCIAL_DETAIL),
+    });
+    renderThemed(<GoalEditor goalId="goal-fi" onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(await screen.findByLabelText('Cost 1 name')).toHaveValue('Rent');
+    expect(screen.getByLabelText('Monthly cost for Rent')).toHaveValue('900');
+    expect(screen.getByRole('button', { name: 'Delete Rent' })).toBeVisible();
+    expect(screen.getByLabelText('Cost 2 name')).toHaveValue('Food');
+    expect(screen.getByLabelText('Monthly cost for Food')).toHaveValue('300');
+    expect(screen.getByRole('button', { name: 'Delete Food' })).toBeVisible();
   });
 
   it('only offers negative-balance accounts for a new debt goal', async () => {

@@ -49,6 +49,16 @@ export const MAX_RAW_BODY_CHARS = 200;
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 /**
  * Shared by every caller below rather than written into each: a download that skipped
  * it would write the refusal to disk under the name of a statement.
@@ -63,7 +73,7 @@ async function refuse(res: Response): Promise<never> {
   } catch {
     // not JSON — the status and the body are all there is
   }
-  throw new Error(message);
+  throw new ApiError(res.status, message);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

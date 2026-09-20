@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api } from './api';
+import { ApiError, api } from './api';
 
 /**
  * These cover the one thing between a refusal the backend composed and the
@@ -63,6 +63,13 @@ describe('request() error messages', () => {
     const err = await failureOf(api.goals());
     expect(err.message.startsWith('500: ')).toBe(true);
     expect(err.message).toContain('wrong shape');
+  });
+
+  it('keeps the HTTP status available to callers that own status-specific recovery', async () => {
+    respondWith(JSON.stringify({ error: 'goal not found' }), 404);
+    const err = await failureOf(api.goal('missing'));
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 404, message: 'goal not found' });
   });
 });
 

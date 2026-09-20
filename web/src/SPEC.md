@@ -103,6 +103,14 @@ replaced atomically with that configuration. The screen uses the shared `screen-
 its root, and each card's Edit and Delete controls include the goal name in their accessible name,
 so narrow layouts and assistive action lists keep the card context.
 
+**A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
+goal are one retryable load; a new attempt clears the previous account list and currency before any
+form or type choice is enabled. Account-backed edits retain the goal's persisted currency when a
+saved account is gone. Savings selection locks to one currency until the current selection is
+cleared, and unavailable saved ids remain removable. Form refusals stay with their draft, but Back
+or a new type clears them; repeated essential-cost controls carry row context in their accessible
+names.
+
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
 missing id falls back to the list with an explicit unavailable message rather than choosing another
