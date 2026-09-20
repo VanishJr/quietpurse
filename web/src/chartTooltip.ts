@@ -23,32 +23,16 @@ export const TOOLTIP_CHIP: Record<TooltipGround, TooltipChip> = {
   panel: RAISED,
 };
 
-/**
- * What a formatter prints when recharts hands it no datum. `payload` is optional on a
- * tooltip entry, and the one formatter here that reads a field off it would throw
- * during render rather than print a wrong number — a tooltip that throws takes the
- * screen with it. Money never reads the datum and is unaffected.
- */
-export const NO_FIGURE = '—';
-
 /** The value in the chart's own currency. */
 export const tooltipMoney =
   (currency: string) =>
   (value: number): string =>
     fmtMoney(value, currency);
 
-/** Formats an explicitly percentage-denominated series rather than defaulting money to one. */
-export const tooltipPercent = (value: number): string => `${value}%`;
-
-/**
- * `format` is handed the datum as well as the value because they are not always the
- * same claim: a bar's drawn height may be clamped where the figure the reader is owed
- * is not, and recharts only ever passes a formatter the value at the series' `dataKey`.
- */
-export function tooltipProps<T>(
+export function tooltipProps(
   ink: Ink,
   ground: TooltipGround,
-  format: (value: number, datum: T | undefined) => string,
+  format: (value: number) => string,
 ) {
   const chip = TOOLTIP_CHIP[ground];
   return {
@@ -70,6 +54,6 @@ export function tooltipProps<T>(
     },
     labelStyle: { color: tooltipColor(ink, chip.label), marginBottom: 2 },
     itemStyle: { color: tooltipColor(ink, chip.item), padding: 0 },
-    formatter: (value, _name, item) => format(Number(value), item.payload as T | undefined),
+    formatter: (value) => format(Number(value)),
   } satisfies TooltipProps;
 }

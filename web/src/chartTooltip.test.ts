@@ -2,14 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  NO_FIGURE,
-  TOOLTIP_CHIP,
-  TooltipGround,
-  tooltipMoney,
-  tooltipPercent,
-  tooltipProps,
-} from './chartTooltip';
+import { TOOLTIP_CHIP, TooltipGround, tooltipMoney, tooltipProps } from './chartTooltip';
 import { darkInk, Ink, lightInk } from './theme';
 
 const PALETTES: [string, Ink][] = [
@@ -128,29 +121,9 @@ describe('the props the module hands recharts', () => {
     },
   );
 
-  const entry = (payload: unknown) =>
-    ({ payload }) as Parameters<ReturnType<typeof tooltipProps>['formatter']>[2];
-
   it('prints money in the chart’s own currency', () => {
     const props = tooltipProps(lightInk, 'surface', tooltipMoney('UAH'));
-    expect(props.formatter(-2690.5, 'Expenses', entry({}))).toBe('−2,690.50 UAH');
-  });
-
-  it('reads the figure off the datum, not off the value the series was drawn at', () => {
-    const props = tooltipProps<{ actual: number }>(lightInk, 'page', (_value, m) =>
-      m ? tooltipPercent(m.actual) : NO_FIGURE,
-    );
-    expect(props.formatter(150, 'drawn', entry({ actual: 340 }))).toBe('340%');
-  });
-
-  it('says nothing rather than throwing when there is no datum', () => {
-    const props = tooltipProps<{ actual: number }>(lightInk, 'page', (_value, m) =>
-      m ? tooltipPercent(m.actual) : NO_FIGURE,
-    );
-    // the literal and not the constant: the claim is that the fallback is not a
-    // number, and `NO_FIGURE` on both sides is green over a `'0%'` that says a month
-    // recharts handed no datum for was 0% self-sufficient
-    expect(props.formatter(150, 'drawn', entry(undefined))).toBe('—');
+    expect(props.formatter(-2690.5)).toBe('−2,690.50 UAH');
   });
 });
 
