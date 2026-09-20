@@ -9,9 +9,9 @@
 
 [![CI](https://github.com/VanishJr/finto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VanishJr/finto/actions/workflows/ci.yml)
 
-A personal finance tracker built around one question: **how much do I need to earn to
-support myself?** It pulls transactions from several banks, converts everything to a single
-currency, and works out the self-sufficiency threshold.
+A personal finance tracker that turns your own transaction history and account balances into
+clear goals. It still answers the central question — **how much do I need to earn to support
+myself?** — alongside emergency-fund, savings, debt, income, savings-rate and spending goals.
 
 It runs on your own machine. There is no account to create, no server to rent and nothing to
 install but Node.js: two commands, and your statements sit in a folder you can open.
@@ -45,11 +45,10 @@ Hence two things most trackers don't do:
 - **Transactions.** Auto-categorization by MCC and description; "all transactions like this
   one go to this category" rules; detection of transfers between your own accounts, refunds
   and one-off purchases.
-- **Analytics.** Spending and income by category for a month or a year, recurring payments,
-  per-category budgets with a "will you stay under it" forecast.
-- **Goal.** The self-sufficiency threshold in two modes: from a bare minimum (housing, food,
-  transport…) and from your current lifestyle. Shortfall, self-sufficiency by month, the
-  same number expressed in working hours, and "what if I cut spending" scenarios.
+- **Analytics.** Spending and income by category for a month or a year, plus recurring payments.
+- **Goals.** Financial independence, emergency funds, savings balances, debt payoff, monthly
+  income, savings rate and category spending limits. Every target and progress figure is computed
+  by the API from your saved configuration and financial data.
 
 ## Stack
 
@@ -76,34 +75,20 @@ straight to the import; the base currency and the name your bank writes in state
 the Settings screen. Nothing here asks for API access to a bank — a file you exported is all
 it takes.
 
-The Goal screen starts empty too: add the line items of your own bare minimum (rent, food,
-transport…) right on the screen — nobody else's guesses would fit anyway.
+The Goals screen starts empty too. Create only the targets you want to track; nobody else's
+guesses are seeded into a new installation.
 
 Stop it with Ctrl+C. Start it again the same way; your data is where you left it.
 
 ### Coming from an earlier checkout
 
-**If an earlier build of Finto ever started on this machine, delete its database before you
-start this one.**
+Start Finto normally. Database migrations are append-only and upgrade existing data in place. The
+Goals migration converts the former singleton Goal configuration and baseline costs into one
+Financial independence goal, and converts Analytics budgets into category-spending goals. A fresh
+installation starts with no goals.
 
-```bash
-rm -rf ~/Finto/db
-```
-
-Finto is pre-release, so a schema change is folded into the one migration by regenerating it
-rather than by adding a second one. A database that an earlier build already migrated does not
-know that: it sees a migration it has run before, carrying a newer timestamp, runs it again,
-and the start dies with `relation "accounts" already exists`.
-
-**There is no repair and no conversion.** A regenerated migration and an already-migrated
-database cannot be reconciled, by design — that is the cost of squashing, and it is why this
-step is a step and not a footnote. From the first release on, migrations are append-only and
-nothing like this is asked of anybody again.
-
-Your uploaded statements in `~/Finto/statements/` are untouched by any of this. Import them
-again once the app starts. If you point `DATABASE_URL` at a PostgreSQL server, drop that
-database instead and let the app create it again; if you have run the test suite against a
-`*_test` database of your own, drop that too.
+Copy `~/Finto` before upgrading if you want an additional filesystem backup. Do not delete the
+database: preserving it is the purpose of the migration.
 
 ## Where your data is
 
@@ -159,11 +144,9 @@ order is load-bearing: reversed, the client's typecheck fails on `zod`.
 The database schema lives in `backend/src/db/schema.ts`. SQL migrations are generated from
 it (`npm run db:generate`) into `backend/drizzle/` and applied when the app starts.
 
-> Until the first release, a schema change may be folded into the existing migration by
-> regenerating it. **A squash invalidates every database already migrated** — the next start
-> dies with `relation "accounts" already exists` — so after one, delete `~/Finto/db` and any
-> `*_test` database. **From the first release on, migrations are append-only** and an applied
-> one is never edited.
+> Migrations are append-only. Never edit or fold an applied migration into
+> `0000_initial.sql`; generate the next migration and verify that it upgrades an existing database
+> as well as creating a fresh one.
 
 ## Documentation
 

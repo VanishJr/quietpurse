@@ -7,10 +7,10 @@ title: Finto — product goal and scope
 
 ## Goal
 
-A personal finance tracker built around one question: how much does this person need to earn to
-support themselves. It pulls transactions from several banks, converts every amount to one
-currency at the rate on the transaction's date, and works out the self-sufficiency threshold —
-with income split into the person's own and external.
+A personal finance tracker that turns the person's own transaction history and account balances
+into goals they can act on. Financial independence remains the central question — how much this
+person needs to earn to support themselves, with income split into their own and external — and it
+sits beside reserve, savings, debt, income, savings-rate and category-spending goals.
 
 It runs on one person's own machine. They upload bank statements in whatever format they happen
 to have and get their financial data organised and readable. No account, no server: the database
@@ -30,6 +30,12 @@ Node process, and it lives beside the uploaded statements, which are kept plain 
 person can open. A PostgreSQL server is used only when a connection string names one. There is no
 sign-in and no tenant: whoever can reach the port owns the data behind it, so the process binds
 the loopback interface unless told otherwise.
+
+A goal is persisted configuration plus a server-computed answer. The API owns every target,
+current value, remainder, status and percentage; the web client only formats those answers. A new
+installation has no goals until the person creates one. An upgraded installation receives a
+Financial independence goal for the former singleton configuration and a category-spending goal
+for each former budget.
 
 Out of scope, stated as the products it is not: no hosted copy, no account, no tenant, no server
 to rent, no upgrade path from anything earlier than the first release.

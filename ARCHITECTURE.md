@@ -78,14 +78,15 @@ every clause in it was paid for by a document that broke the previous one.
 | `backend/src/categorizer.ts` | MCC and description rules → a category slug; refund and recurrence detection |
 | `backend/src/classify.ts` | Transfer pairing between the user's own accounts, and re-classification when rules change |
 | `backend/src/transaction-description.ts` | The second reading of a stored description: the value-date suffix, the similarity key, and the one predicate each kind of rule is matched by — in the classifier, the previews and the counts alike |
-| `backend/src/independence.ts` | The self-sufficiency computation |
+| `backend/src/goals.ts` | Goal persistence orchestration and every current-progress computation |
+| `backend/src/independence.ts` | The Financial independence calculation used by the goals engine |
 | `backend/src/fxrates.ts` / `backend/src/rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
 | `backend/src/money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
 | `backend/src/documents.ts` | Uploaded statements as plain files in the statements folder: the name a file gets, `putDocument`/`getDocument`/`deleteDocument`, and the hash check on read |
 | `backend/src/storage.ts` | The object store underneath `backend/src/documents.ts`: an atomic write, and a key shape that refuses rather than cleans |
 | `backend/src/settings.ts` / `backend/src/appsettings.ts` | The person's settings in the database |
 
-`web/src/screens/` holds Overview, Transactions, Analytics, Independence and Settings;
+`web/src/screens/` holds Overview, Transactions, Analytics, Goals and Settings;
 `web/src/api.ts` is the only place that talks to the API, and it also owns how a failed request
 becomes a sentence. `web/src/types.ts` is the client's one door to `backend/src/wire`: every wire
 type the client reads is a type-only re-export of the server's declaration, so a field renamed
@@ -134,11 +135,11 @@ the database.
 ## Migrations
 
 `backend/src/db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
-`backend/drizzle/` and applied when the database is opened. Until the first release the history is
-squashed into a single `backend/drizzle/0000_initial.sql` on every schema change — the history has no databases to
-upgrade. **A squash invalidates every database already migrated**, `~/Finto/db` and every `*_test`
-one, because the regenerated file carries a later journal timestamp and drizzle re-applies it. From
-the first release on, migrations are append-only and an applied one is never edited.
+`backend/drizzle/` and applied when the database is opened. Migration history is append-only: an
+applied migration is never edited. The goals migration is the boundary that ended pre-release
+squashing because it upgrades a person's singleton Goal settings, baseline items and budgets in
+place; invalidating that database would discard exactly the configuration the migration exists to
+preserve.
 
 ## Adding a statement format
 

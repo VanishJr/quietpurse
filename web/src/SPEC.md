@@ -89,17 +89,18 @@ between two choices — the chips enforce no minimum — and a chart in that sta
 together, which is what the summary endpoints answer without an id; an id that names no account is
 not that, and `chartData.ts` refuses it rather than answering the whole under one account's title.
 
-**Which of the two goal modes a figure was computed in comes off the body.** `/api/independence`
-answers the mode it actually used beside the mode that was asked for, and
-`web/src/screens/IndependenceScreen.tsx` reads it rather than working it out. The rule it replaced
-was the same expression written once here and once in `backend/src/independence.ts`, agreeing by
-coincidence: either side moving put every heading, hint, legend and what-if label on the screen into
-one mode while the threshold, the shortfall and the self-sufficiency figure were computed in the
-other, with nothing red in either package. Re-deriving it on this side — from the requested mode and
-the line-item total, or by comparing the active threshold against the two the body also carries —
-restores exactly that. Reading the requested mode is a different question and stays: it is what
-decides whether the minimum's line items and their add form are on screen, so the state that cannot
-create its own first item does not exist.
+**A goal card renders the server's answer and never computes an outcome.** `/api/goals` supplies
+the target, current value, remainder, status, percentage semantics and source line for every saved
+goal. The list may format money and choose copy from closed dictionaries, but it may not derive a
+fallback basis, progress, forecast, work-hours result or account total. Editing reads the complete
+configuration from `/api/goals/:id`; the goal type is fixed after creation, and Financial
+independence costs are replaced atomically with that configuration.
+
+**Goal selection is location, not product state.** The stable navigation key remains
+`screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
+missing id falls back to the list with an explicit unavailable message rather than choosing another
+goal. A new installation's empty list is a real empty state and is never shown while the request is
+unresolved or failed.
 
 **The wire types are the server's declaration, reached by type only and through one door.**
 `web/src/types.ts` declares nothing of its own but `TxFocus`: every wire shape in it is an `export
@@ -139,16 +140,16 @@ the client shows the whole diagnostic budget, because the importer orders a refu
 premise that all of it is read, so a smaller cap deletes the clause it put last. The six
 vocabularies are held twice on this side — as the wire's union types and as the def records a picker
 renders, four in `analytics.ts` for the chart kinds, measures, breakdowns and ranges, one in
-`web/src/screens/IndependenceScreen.tsx` for the goal modes and one in
+`web/src/goals.ts` for the goal types and bases and one in
 `web/src/components/IncomeSourcesBlock.tsx` for the income source kinds — and each record is written
 `satisfies` a `Record` over the wire's union, never annotated as one, with the array a picker
 renders derived from it by `defs()`: a member the wire lacks and a wire member the record omits are
 both compile errors whether or not the literal sits on the declaration, where an annotated record
 holds the extra-member direction on a fresh literal alone. A client narrower than the door cannot
 draw a kind the server accepts: `parseChart` refuses the row, `chartEntry` keeps it as unreadable,
-`entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal mode it
-lacks is a screen with no chip selected and no way to pick it, and an income source kind it lacks is
-a label read off a record by a key that is not there, which throws inside render and takes the Goal
+`entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal type it
+lacks is a picker with no tile and no way to create it, and an income source kind it lacks is
+a label read off a record by a key that is not there, which throws inside render and takes the Settings
 screen down with it; one wider composes a list nobody can save. Every pin assumes the wire's export
 carries a literal type, and `web/src/types.test.ts` holds that premise under `tsc`: each client
 constant is asserted equal to the wire export's type and each union equal to its record's keys, so a
@@ -210,8 +211,8 @@ matches the filter restores the row. Group changes return to the detail and rest
 **The word for money somebody else gives you is written in more than one place, across both
 packages, and nothing holds the copies to each other.** In this package it is the `support` entry
 of `CATEGORY_LABELS`, which the picker, the category filter, the rule captions and the Transactions
-list print; the prose that explains it in the Goal screen's hero, in the income sources block beside
-it and in the Transactions detail sheet's hint; and the *Support from outside* kind name in
+list print; the prose that explains it in the Goals cards, in the income sources block under Settings
+and in the Transactions detail sheet's hint; and the *Support* kind name in
 `IncomeSourcesBlock`. One package over it is the label `seedDefaults` gives the seeded external
 source in `backend/src/db/index.ts`. The packages share no build, `copy.test.ts` walks this side
 looking for something else entirely, and no check compares them — so any copy can drift and every
@@ -412,12 +413,12 @@ written twice on purpose: the two sit on two sides of a wire neither can import 
 count in an importer's refusal and a row count on a screen should read alike. Each copy is broken
 only by an edit to itself, which is what makes two copies correct here.
 
-`selfSufficiencyBars`, `tooltipProps` and the arithmetic in `analytics.ts` live in modules with no
-JSX rather than in the screens that draw them, because a chart in jsdom is a box with no size —
-recharts draws nothing there — so a screen test can mount a chart and assert nothing about it. What
-lives there is held by `unit` cases, against both palettes or a fixed date; what recharts reads off
-a datum by name and never checks is pinned as text by `chartTooltip.test.ts`, as a list of named
-attributes and not as a boundary.
+`tooltipProps` and the arithmetic in `analytics.ts` live in modules with no JSX rather than in the
+screens that draw them, because a chart in jsdom is a box with no size — recharts draws nothing
+there — so a screen test can mount a chart and assert nothing about it. What lives there is held by
+`unit` cases, against both palettes or a fixed date; what recharts reads off a datum by name and
+never checks is pinned as text by `chartTooltip.test.ts`, as a list of named attributes and not as a
+boundary.
 
 ## The palette, and what leaves the page
 

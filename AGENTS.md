@@ -106,18 +106,16 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   backup gets to choose. So those three fields are written once and updated by nothing, and a
   delete carries all three. The reduction of the filename, and why `CON.txt` is the shape to
   worry about, is in `src/SPEC.md`.
-- **Migrations are squashable until the first release.** Nothing is published and no copy of the
-  app is running anywhere but a checkout, so migration history has no value yet: three schema
-  changes are one regenerated `0000_initial.sql`. That stops being true the day somebody has
-  data they mean to keep. **A squash invalidates every database already migrated:** the
-  regenerated file carries a later `_journal.json` timestamp, so drizzle re-applies it and the
-  run dies with `relation "accounts" already exists` (SQLSTATE `42P07`, which is on the error's
-  `cause` and not in the sentence). Every local database — `~/Finto/db` and every `*_test` — has
-  to be deleted after one. CI is not affected: its Postgres is a service container created fresh
-  per run, and the default suite is an in-memory PGlite with no directory to carry a journal.
-  `README.md` carries the instruction for a person; this is why it exists.
+- **Migrations are append-only.** The goals migration ended the pre-release squash policy because
+  it carries a person's singleton Goal settings, baseline items and budgets into normalized goals.
+  An applied migration is never edited or folded back into `0000_initial.sql`; a schema change gets
+  the next migration and must upgrade an existing database in place. CI's fresh databases are not
+  evidence that this path works, so migrations that transform data need an explicit upgrade test.
 - **Categories are slugs** in the database and over the API; display names live in the client
   dictionary. The slug is a stable contract.
+- **Goals survive missing accounts.** A goal-to-account row deliberately has no account foreign
+  key. Deleting an account leaves the saved goal visible with an actionable unavailable status;
+  it never cascades the goal or silently retargets it.
 - **Nothing is required to start.** Every setting has a default that works on a machine with
   nothing installed; `.env` holds process settings and no secrets, because there are none.
   Everything a person edits lives in the `settings` table.
