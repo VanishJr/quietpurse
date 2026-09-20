@@ -39,12 +39,12 @@ describe('request() error messages', () => {
   it('passes a refusal through whole at the backend budget', async () => {
     const detail = 'x'.repeat(500);
     respondWith(JSON.stringify({ error: detail }), 400);
-    await expect(api.settings()).rejects.toThrow(detail);
+    await expect(api.goals()).rejects.toThrow(detail);
   });
 
   it('marks the cut when there is more behind it', async () => {
     respondWith(JSON.stringify({ error: 'y'.repeat(501) }), 400);
-    const err = await failureOf(api.settings());
+    const err = await failureOf(api.goals());
     expect(err.message).toHaveLength(500);
     expect(err.message.endsWith('…')).toBe(true);
   });
@@ -52,7 +52,7 @@ describe('request() error messages', () => {
   it('cuts an unbounded non-JSON body much shorter, with the status', async () => {
     // a proxy's error page is not written for a person and has no budget
     respondWith('<html>' + 'z'.repeat(5000) + '</html>', 502, false);
-    const err = await failureOf(api.settings());
+    const err = await failureOf(api.goals());
     expect(err.message).toHaveLength(200);
     expect(err.message.startsWith('502: ')).toBe(true);
     expect(err.message.endsWith('…')).toBe(true);
@@ -60,7 +60,7 @@ describe('request() error messages', () => {
 
   it('falls back to status and body when the JSON carries no error field', async () => {
     respondWith(JSON.stringify({ detail: 'wrong shape' }), 500);
-    const err = await failureOf(api.settings());
+    const err = await failureOf(api.goals());
     expect(err.message.startsWith('500: ')).toBe(true);
     expect(err.message).toContain('wrong shape');
   });
@@ -171,28 +171,35 @@ describe('the calls the offline product depends on', () => {
     await expect(api.backup()).rejects.toThrow('the database is busy');
   });
 
-  it('api.settings() GETs and api.updateSettings() PATCHes the patch as JSON, null included', async () => {
-    expect(await sent(() => api.settings())).toMatchObject({ url: '/api/settings', method: undefined });
-    expect(await sent(() => api.updateSettings({ windowMonths: 12, hourlyRate: null }))).toEqual({
-      url: '/api/settings',
-      method: 'PATCH',
-      body: { windowMonths: 12, hourlyRate: null },
+  it('sends the complete Goals CRUD contract with encoded ids', async () => {
+    const goal = {
+      type: 'monthly-income' as const,
+      name: 'Income',
+      target: 3000,
+      incomeScope: 'own' as const,
+      windowMonths: 6,
+    };
+    expect(await sent(() => api.goals())).toMatchObject({ url: '/api/goals', method: undefined });
+    expect(await sent(() => api.goal('goal/1'))).toMatchObject({
+      url: '/api/goals/goal%2F1',
+      method: undefined,
+    });
+    expect(await sent(() => api.createGoal(goal))).toEqual({
+      url: '/api/goals',
+      method: 'POST',
+      body: goal,
       contentType: 'application/json',
     });
-  });
-
-  /** null is the delete, so it has to reach the wire rather than be dropped as empty. */
-  it('api.baseline() GETs and api.setBaselineItem() PUTs the label and the amount, null included', async () => {
-    expect(await sent(() => api.baseline())).toMatchObject({ url: '/api/baseline', method: undefined });
-    expect(await sent(() => api.setBaselineItem('Rent', 800))).toEqual({
-      url: '/api/baseline',
+    expect(await sent(() => api.updateGoal('goal 1', { ...goal, target: 3500 }))).toEqual({
+      url: '/api/goals/goal%201',
       method: 'PUT',
-      body: { label: 'Rent', monthly: 800 },
+      body: { ...goal, target: 3500 },
       contentType: 'application/json',
     });
-    expect((await sent(() => api.setBaselineItem('Rent', null))).body).toEqual({
-      label: 'Rent',
-      monthly: null,
+    expect(await sent(() => api.deleteGoal('goal/1'))).toMatchObject({
+      url: '/api/goals/goal%2F1',
+      method: 'DELETE',
+      body: undefined,
     });
   });
 

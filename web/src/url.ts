@@ -18,11 +18,13 @@ export interface AppUrl {
   panel: string | null;
   /** A chart id this module knows nothing about, like the account id above. */
   chart: string | null;
+  /** A saved goal id, validated by the Goals screen rather than here. */
+  goal: string | null;
 }
 
-const KEYS = ['screen', 'account', 'panel', 'chart'] as const;
+const KEYS = ['screen', 'account', 'panel', 'chart', 'goal'] as const;
 
-const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null };
+const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null, goal: null };
 
 /**
  * An unchanged `location.search` has to answer with the very same object, which is what
@@ -43,6 +45,7 @@ function read(): AppUrl {
     account: params.get('account'),
     panel: params.get('panel'),
     chart: params.get('chart'),
+    goal: params.get('goal'),
   };
   return cached;
 }

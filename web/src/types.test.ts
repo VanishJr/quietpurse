@@ -15,7 +15,7 @@ import type {
 } from './analytics';
 import type { MAX_ERROR_CHARS } from './api';
 import type { KIND_DEFS as INCOME_SOURCE_KIND_DEFS } from './components/IncomeSourcesBlock';
-import type { GOAL_MODE_DEFS } from './screens/IndependenceScreen';
+import type { GOAL_BASIS_DEFS, GOAL_INCOME_SCOPE_DEFS, GOAL_TYPE_DEFS } from './goals';
 import type {
   CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
   CHART_ID_MAX as WIRE_CHART_ID_MAX,
@@ -36,7 +36,6 @@ import type {
   GOAL_UNITS,
   GoalBasis,
   GoalIncomeScope,
-  GoalMode,
   GoalPeriodKind,
   GoalProgressSemantic,
   GoalStatus,
@@ -412,7 +411,9 @@ describe('the pins stand on literal types, and tsc is what holds this block', ()
     expectTypeOf<ChartMetric>().toEqualTypeOf<keyof typeof METRIC_DEFS>();
     expectTypeOf<ChartBreakdown>().toEqualTypeOf<keyof typeof BREAKDOWN_DEFS>();
     expectTypeOf<ChartRange>().toEqualTypeOf<keyof typeof RANGE_DEFS>();
-    expectTypeOf<GoalMode>().toEqualTypeOf<keyof typeof GOAL_MODE_DEFS>();
+    expectTypeOf<GoalType>().toEqualTypeOf<keyof typeof GOAL_TYPE_DEFS>();
+    expectTypeOf<GoalBasis>().toEqualTypeOf<keyof typeof GOAL_BASIS_DEFS>();
+    expectTypeOf<GoalIncomeScope>().toEqualTypeOf<keyof typeof GOAL_INCOME_SCOPE_DEFS>();
     expectTypeOf<IncomeSourceKind>().toEqualTypeOf<keyof typeof INCOME_SOURCE_KIND_DEFS>();
   });
 });
