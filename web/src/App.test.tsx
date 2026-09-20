@@ -52,9 +52,8 @@ describe('the shell', () => {
     // so without it these would throw - and queryByRole(...) === null would pass
     // just as well against a screen that was never mounted at all.
     // 'Settings' is in the list because a screen mounted but named by nothing is
-    // asserted about by nothing, and the suite stays green while saying so. Level 1,
-    // because the Goal screen carries a block headed Settings of its own
-    for (const title of ['Transactions', 'Analytics', 'Goal', 'Settings']) {
+    // asserted about by nothing, and the suite stays green while saying so.
+    for (const title of ['Transactions', 'Analytics', 'Goals', 'Settings']) {
       expect(
         screen.getByRole('heading', { name: title, level: 1, hidden: true }),
       ).not.toBeVisible();
@@ -185,7 +184,7 @@ describe('the shell', () => {
     render(<App />);
 
     expect(
-      await screen.findByRole('heading', { name: 'Goal' }, { timeout: 5_000 }),
+      await screen.findByRole('heading', { name: 'Goals' }, { timeout: 5_000 }),
     ).toBeVisible();
     expect(
       screen.getByRole('heading', { name: 'Overview', hidden: true }),

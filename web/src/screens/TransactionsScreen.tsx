@@ -467,7 +467,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               </div>
             )}
 
-            {/* income: the source — the Goal screen depends on it */}
+            {/* income: the source — income-based goals depend on it */}
             {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
               <div
                 style={{

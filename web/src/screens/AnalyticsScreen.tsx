@@ -64,15 +64,6 @@
  * and changing one are all things you do to the LIST, and the list is one strip at the
  * foot of the screen rather than three controls in three places.
  *
- * ---------------------------------------------------------------------------
- * Budgets is pinned, and is not a chart
- *
- * Monthly budgets is a per-category limit with an editor behind it, and it lived on this
- * screen because the old fixed view had somewhere to put it. It is not something the
- * wizard could build — there is nothing to configure and no series to plot — so it is a
- * pinned tab at the end of the dock rather than a seventh shape in the picker, and it is
- * unchanged. Deleting it along with the layout it happened to sit in would have been a
- * feature removed by accident.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ChartList, ChartsStaleError } from '../api';

@@ -148,11 +148,10 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
  * asks for every account that HAS a transaction - but TRANSACTIONS here is empty, so it
  * short-circuits on `recent.length === 0` and fires neither. Give that fixture a row and
  * Overview fires both; the guard then names the missing one, which is this mechanism
- * working rather than a hole in it. And Analytics, which used to ask for the summary
- * and the budgets on first paint, is a board of charts the reader builds now: an empty
+ * working rather than a hole in it. Analytics is a board of charts the reader builds:
+ * an empty
  * one asks for the account list and for the charts themselves, which live on the
- * server. /api/summary is a chart that exists, /api/budgets the Budgets tab once it is
- * the one showing.
+ * server. /api/summary is requested only when a saved chart needs it.
  *
  * The charts row answers version 0 with nothing in it, which is deliberately the one
  * response that would set the migration going - and it stays quiet here because there

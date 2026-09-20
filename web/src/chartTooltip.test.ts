@@ -165,16 +165,6 @@ describe('what a reader is told when they point, which lives only in a JSX attri
       'the Overview ring prints the slug — `food`, not `Food`',
     ],
     [
-      'screens/IndependenceScreen.tsx',
-      'dataKey="drawn"',
-      'the Goal bars draw the uncapped ratio, and one 1298% month flattens the rest into the axis',
-    ],
-    [
-      'screens/IndependenceScreen.tsx',
-      'name="Self-sufficiency"',
-      'the Goal tooltip prints `drawn : 340%`, a field name of ours in front of the reader',
-    ],
-    [
       'components/ChartPlot.tsx',
       'name={rankingSeriesName(spec.breakdown)}',
       'the ranking chart answers `value : 1,082 EUR`',

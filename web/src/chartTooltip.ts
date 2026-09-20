@@ -37,8 +37,7 @@ export const tooltipMoney =
   (value: number): string =>
     fmtMoney(value, currency);
 
-/** What the Goal screen prints. A required argument and never a default: that chart is
- *  percentages and every other one in this app is money. */
+/** Formats an explicitly percentage-denominated series rather than defaulting money to one. */
 export const tooltipPercent = (value: number): string => `${value}%`;
 
 /**

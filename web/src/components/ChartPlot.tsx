@@ -17,7 +17,7 @@
  * A series is coloured by what it MEANS: income is `good` and expenses are `lavender`
  * on every screen in this app, and `METRICS` carries the palette key so this file does
  * not get a vote. A share is coloured by category, from the same `categoryColor` the
- * Transactions list, the budgets and the Goal screen use, so one category is one colour
+ * Transactions and Analytics use, so one category is one colour
  * on every surface but the Overview ring, which colours by legend rank.
  *
  * Income sources are the exception and have to be: they are rows the user created, with
@@ -329,7 +329,7 @@ export function ChartPlot({ spec, data, height }: Props) {
             {/* a refund can push a row negative, and a bar chart is the one shape
                 here that can say so — the zero line is what makes it readable */}
             <ReferenceLine x={0} stroke={ink.muted} strokeWidth={1} />
-            {/* named for the same reason the Goal screen's bar is: a series with no
+            {/* named because a series with no
                 `name` is announced by its `dataKey`, and `value : 1,082 EUR` is a
                 field of this file's own vocabulary put in front of the reader */}
             <Bar

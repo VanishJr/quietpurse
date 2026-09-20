@@ -834,27 +834,6 @@ textarea {
   font-weight: 800;
 }
 
-/* ---------- progress / budget bars ---------- */
-
-.track {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--ink-grid);
-  overflow: hidden;
-  margin-top: 14px;
-}
-
-.track-fill {
-  height: 100%;
-  border-radius: 4px;
-}
-
-.track-sm {
-  height: 6px;
-  border-radius: 3px;
-  margin-top: 6px;
-}
-
 /* ---------- modal / sheet ---------- */
 
 .backdrop {
@@ -2104,17 +2083,6 @@ textarea {
   color: var(--ink-onBrand);
 }
 
-/* built-in rather than one the reader made: set apart, and drawn in a broken line
-   until it is the one showing */
-.dock-tab.is-pinned {
-  margin-left: 12px;
-  border-style: dashed;
-}
-
-.dock-tab.is-pinned.is-current {
-  border-style: solid;
-}
-
 .dock-open {
   display: inline-flex;
   align-items: center;
@@ -2124,12 +2092,6 @@ textarea {
   color: inherit;
   font: inherit;
   border-radius: var(--r-sm) 0 0 var(--r-sm);
-}
-
-/* nothing to the right of the name on a tab with no ⋮ */
-.dock-tab.is-pinned .dock-open {
-  padding-right: 13px;
-  border-radius: var(--r-sm);
 }
 
 .dock-glyph {
@@ -2652,65 +2614,12 @@ textarea {
   }
 }
 
-/* ---------- legacy goal styles ---------- */
-
-.hero-label {
-  font-size: 13px;
-  color: var(--ink-secondary);
-}
-
-.hero-value {
-  font-size: 30px;
-  font-weight: 800;
-  margin-top: 6px;
-}
-
-.hero-permonth {
-  font-size: 15px;
-  font-weight: 400;
-  color: var(--ink-muted);
-}
-
-.hero-sub {
-  font-size: 13px;
-  color: var(--ink-secondary);
-  margin-top: 6px;
-}
-
-.hero-compare {
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-top: 10px;
-  line-height: 1.35;
-}
-
-.progress-label {
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-top: 6px;
-}
-
 /* on a <label> too, which would otherwise stay inline and run into the control before it */
 .setting-label {
   display: block;
   font-size: 12px;
   color: var(--ink-muted);
   margin-top: 8px;
-}
-
-.inline-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.inline-row .input {
-  flex: 1;
-}
-
-.input-narrow {
-  width: 96px;
-  flex: none;
 }
 
 .input-code {
@@ -2723,10 +2632,6 @@ textarea {
   color: var(--ink-secondary);
   margin-top: 8px;
   line-height: 1.4;
-}
-
-.bottom-pad {
-  height: 32px;
 }
 
 .csv-input {
