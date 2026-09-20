@@ -954,6 +954,96 @@ export function summaryMonthlyTotals(scope: SummaryScope, from: string, to: stri
   return scope.kind === 'account' ? accountMonths(scope, from, to) : allAccountsMonths(from, to);
 }
 
+export interface GoalMonthTotals extends MonthTotals {
+  rows: number;
+  unconverted: number;
+}
+
+export async function goalMonthlyTotals(from: string, to: string): Promise<GoalMonthTotals[]> {
+  const rows = await rowsOf<{
+    month: string;
+    rows: number;
+    unconverted: number;
+    expense: string;
+    expenseOneOff: string;
+    income: string;
+    incomeOwn: string;
+    incomeExternal: string;
+  }>(sql`
+    SELECT SUBSTR(date, 1, 7) AS month,
+      COUNT(*)::int AS rows,
+      COUNT(*) FILTER (WHERE base_amount_cents IS NULL)::int AS unconverted,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund)
+        THEN -base_amount_cents ELSE 0 END) AS expense,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund) AND one_off
+        THEN -base_amount_cents ELSE 0 END) AS "expenseOneOff",
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        THEN base_amount_cents ELSE 0 END) AS income,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        AND NOT ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeOwn",
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        AND ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeExternal"
+    FROM transactions
+    WHERE ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY 1
+  `);
+  return rows.map((row) => ({
+    month: row.month,
+    rows: Number(row.rows),
+    unconverted: Number(row.unconverted),
+    expense: fromCents(Number(row.expense)),
+    expenseOneOff: fromCents(Number(row.expenseOneOff)),
+    income: fromCents(Number(row.income)),
+    incomeOwn: fromCents(Number(row.incomeOwn)),
+    incomeExternal: fromCents(Number(row.incomeExternal)),
+  }));
+}
+
+export interface GoalCategorySpend {
+  category: string;
+  total: number;
+  rows: number;
+  unconverted: number;
+  totalRows: number;
+}
+
+export async function goalCurrentCategoryTotals(
+  from: string,
+  to: string,
+): Promise<GoalCategorySpend[]> {
+  const rows = await rowsOf<{
+    category: string;
+    total_cents: string;
+    rows: number;
+    unconverted: number;
+    total_rows: number;
+  }>(sql`
+    WITH grouped AS (
+      SELECT ${CATEGORY} AS category,
+        SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund)
+          THEN -base_amount_cents ELSE 0 END) AS total_cents,
+        COUNT(*)::int AS rows,
+        COUNT(*) FILTER (
+          WHERE (amount_cents < 0 OR refund) AND base_amount_cents IS NULL
+        )::int AS unconverted
+      FROM transactions
+      WHERE ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND date >= ${from} AND date <= ${to}
+      GROUP BY 1
+    )
+    SELECT category, total_cents, rows, unconverted,
+      SUM(rows) OVER ()::int AS total_rows
+    FROM grouped
+  `);
+  return rows.map((row) => ({
+    category: row.category,
+    total: fromCents(Number(row.total_cents)),
+    rows: Number(row.rows),
+    unconverted: Number(row.unconverted),
+    totalRows: Number(row.total_rows),
+  }));
+}
+
 export async function avgMonthlyByCategory(
   from: string,
   to: string,
