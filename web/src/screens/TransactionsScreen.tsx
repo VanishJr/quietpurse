@@ -66,7 +66,13 @@ function periodBounds(p: PeriodKey): { from?: string; to: string } {
   return { from: isoDay(new Date(now.getTime() - days * 86_400_000)), to };
 }
 
-export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
+export function TransactionsScreen({
+  focus,
+  dataRevision = 0,
+}: {
+  focus?: TxFocus | null;
+  dataRevision?: number;
+}) {
   const { categoryColor } = useTheme();
 
   const [period, setPeriod] = useState<PeriodKey>('30d');
@@ -84,10 +90,19 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const categoryButton = useRef<HTMLButtonElement>(null);
   /** income source catalog — chips in the sheet and badges in the list */
   const [sources, setSources] = useState<IncomeSourceDef[]>([]);
+  const loadGeneration = useRef(0);
   useEffect(() => {
     api.accounts(true).then(setAccounts).catch(() => {});
-    api.incomeSources().then(setSources).catch(() => {});
   }, []);
+  useEffect(() => {
+    let live = true;
+    api.incomeSources().then((next) => {
+      if (live) setSources(next);
+    }).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [dataRevision]);
 
   /**
    * Arrived from an account's "All transactions". The link says all of them, so the
@@ -105,29 +120,30 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const sourceById = (id?: IncomeSource) => sources.find((s) => s.id === id);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       setError(null);
       const { from, to } = periodBounds(period);
-      setTxs(
-        await api.transactions({
-          from,
-          to,
-          accountId: accountId === 'all' ? undefined : accountId,
-          category: category === 'all' ? undefined : category,
-          // an unbounded window can exceed the backend's default limit (1000), and it
-          // truncates with nothing on the wire saying so. Tied to the missing lower
-          // bound rather than to a key, so a later arm cannot inherit that silently.
-          limit: from === undefined ? 5000 : undefined,
-        }),
-      );
+      const next = await api.transactions({
+        from,
+        to,
+        accountId: accountId === 'all' ? undefined : accountId,
+        category: category === 'all' ? undefined : category,
+        // an unbounded window can exceed the backend's default limit (1000), and it
+        // truncates with nothing on the wire saying so. Tied to the missing lower
+        // bound rather than to a key, so a later arm cannot inherit that silently.
+        limit: from === undefined ? 5000 : undefined,
+      });
+      if (generation === loadGeneration.current) setTxs(next);
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       // Overview's load takes no arguments, so its stale list still answers the same
       // question. This one is filtered: rows kept from before a refused reload sit
       // under a filter they were never an answer to.
       setTxs(null);
       setError((e as Error).message);
     }
-  }, [period, accountId, category]);
+  }, [period, accountId, category, dataRevision]);
 
   useEffect(() => {
     load();

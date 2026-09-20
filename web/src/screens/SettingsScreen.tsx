@@ -33,10 +33,10 @@ const RECURRING_LIMIT = 8;
 interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
   onOpenImport: () => void;
-  onGoalsChanged?: () => void;
+  onDataChanged?: () => void;
 }
 
-export function SettingsScreen({ onOpenImport, onGoalsChanged = () => {} }: Props) {
+export function SettingsScreen({ onOpenImport, onDataChanged = () => {} }: Props) {
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringError, setRecurringError] = useState<string | null>(null);
 
@@ -131,7 +131,7 @@ export function SettingsScreen({ onOpenImport, onGoalsChanged = () => {} }: Prop
         </p>
         <AppSettingsBlock />
         <div className="settings-subsection">
-          <IncomeSourcesBlock onChanged={onGoalsChanged} />
+          <IncomeSourcesBlock onChanged={onDataChanged} />
         </div>
       </section>
 

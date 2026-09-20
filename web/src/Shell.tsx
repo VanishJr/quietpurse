@@ -52,7 +52,7 @@ export function Shell() {
   const url = useUrl();
   const tab = tabOf(url.screen);
   const [focus, setFocus] = useState<TxFocus | null>(null);
-  const [goalsReload, setGoalsReload] = useState(0);
+  const [dataRevision, setDataRevision] = useState(0);
 
   const onOverview = tab === 'overview';
   const importing = onOverview && url.panel === 'import';
@@ -163,18 +163,18 @@ export function Shell() {
           />
         </div>
         <div className="screen" hidden={tab !== 'transactions'}>
-          <TransactionsScreen focus={focus} />
+          <TransactionsScreen focus={focus} dataRevision={dataRevision} />
         </div>
         <div className="screen" hidden={tab !== 'analytics'}>
-          <AnalyticsScreen />
+          <AnalyticsScreen dataRevision={dataRevision} />
         </div>
         <div className="screen" hidden={tab !== 'goal'}>
-          <GoalsScreen reloadToken={goalsReload} />
+          <GoalsScreen reloadToken={dataRevision} />
         </div>
         <div className="screen" hidden={tab !== 'settings'}>
           <SettingsScreen
             onOpenImport={openImport}
-            onGoalsChanged={() => setGoalsReload((value) => value + 1)}
+            onDataChanged={() => setDataRevision((value) => value + 1)}
           />
         </div>
       </main>

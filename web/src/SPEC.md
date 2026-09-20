@@ -243,6 +243,12 @@ word on the income-by-source share, and the chart tells the two apart by colour 
 Transactions list badges outside help with the catalogue's label and gives a derived-source row no
 badge, because that row's category already says what the money is.
 
+**An income-source write invalidates every mounted reader before Settings re-reads its catalog.**
+The Shell keeps Transactions, Analytics and Goals mounted while hidden, so one shared data revision
+reloads the transaction rows and source catalog, chart data and goal progress. The invalidation runs
+as soon as the write succeeds: a failed follow-up catalog GET cannot suppress it. Revision-driven
+loads are latest-request-wins, so a slow pre-mutation response cannot replace the newer answer.
+
 **The account delete's counts — transactions, imports, documents — are what the delete destroyed,
 which for a hidden account is legitimately not what the panel previewed.** The preview counts a
 hidden account by the server's total over its imports, because the transactions endpoint answers

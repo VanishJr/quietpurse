@@ -192,6 +192,29 @@ const figure = (label: string): string =>
 
 const callsTo = (route: string): number => requests().filter((r) => r === route).length;
 
+describe('shared data revisions', () => {
+  it('reloads mounted chart data when income classification changes elsewhere', async () => {
+    seed([COLUMN_CHART]);
+    let reads = 0;
+    mockFetch({
+      ...ROUTES,
+      'GET /api/summary/months': () => {
+        reads++;
+        return ok(MONTHS);
+      },
+    });
+    const view = renderThemed(<AnalyticsScreen dataRevision={0} />);
+    await waitFor(() => expect(reads).toBe(1));
+
+    view.rerender(
+      <ThemeProvider>
+        <AnalyticsScreen dataRevision={1} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(reads).toBe(2));
+  });
+});
+
 describe('the empty workspace', () => {
   it('plots nothing and says so, rather than looking like a chart that failed', async () => {
     mockFetch(ROUTES);

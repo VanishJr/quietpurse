@@ -139,7 +139,7 @@ function editsSentence(cleaned: Normalised): string | null {
   return said.length === 0 ? null : said.join(' ');
 }
 
-export function AnalyticsScreen() {
+export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number }) {
   const [charts, setCharts] = useState<ChartsState>({ phase: 'loading' });
   /** null while the list is in flight — `useChartData` needs the two apart. */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -522,6 +522,7 @@ export function AnalyticsScreen() {
             spec={active}
             accounts={accounts}
             accountsError={accountsError}
+            dataRevision={dataRevision}
           />
         ) : (
           <Blank onNew={() => setWizard({ editing: null })} />
@@ -545,6 +546,7 @@ export function AnalyticsScreen() {
         editing={wizard?.editing ?? null}
         accounts={accounts}
         accountsError={accountsError}
+        dataRevision={dataRevision}
         onClose={() => setWizard(null)}
         onSave={onSave}
       />

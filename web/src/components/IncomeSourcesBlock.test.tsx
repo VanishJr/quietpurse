@@ -86,6 +86,25 @@ describe('IncomeSourcesBlock', () => {
     expect(requests().filter((request) => request === 'GET /api/income-sources')).toHaveLength(2);
   });
 
+  it('invalidates readers even when the post-write catalog refresh fails', async () => {
+    let reads = 0;
+    const changed = vi.fn();
+    await mount(
+      {
+        'GET /api/income-sources': () =>
+          reads++ === 0 ? ok(CATALOG) : fail(500, { error: 'catalog refresh failed' }),
+        'POST /api/income-sources': record('POST', ok(source({ kind: 'own' }))),
+      },
+      changed,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    fireEvent.change(screen.getByLabelText('Source name'), { target: { value: 'Freelance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/catalog refresh failed/)).toBeVisible();
+  });
+
   it('edits every field and keeps the form open on refusal', async () => {
     await mount({
       'PUT /api/income-sources/stipend': () =>

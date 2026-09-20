@@ -61,10 +61,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   }, [load]);
 
   /**
-   * Every write goes through here for the reload: the label, the kind and the patterns
-   * each move the split between own income and support, so the figures the screen is
-   * already showing are stale the moment one lands. Without the second call the user
-   * reads pre-mutation numbers, which looks exactly like the mutation not working.
+   * Invalidation precedes the catalog refresh: the write already changed every reader,
+   * and a failed follow-up GET must not leave those readers on pre-mutation data.
    */
   const run = async (write: () => Promise<unknown>) => {
     setBusy(true);
@@ -72,8 +70,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       setError(null);
       await write();
       setOpen(null);
-      await read();
       await onChanged();
+      await read();
     } catch (e) {
       setError((e as Error).message);
     } finally {

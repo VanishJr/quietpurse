@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { GoalCard } from '../components/GoalCard';
 import { GoalEditor } from '../components/GoalEditor';
@@ -18,14 +18,17 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<GoalSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const loadGeneration = useRef(0);
 
   const load = useCallback(async (initial = false) => {
+    const generation = ++loadGeneration.current;
     if (initial) setGoals(null);
     setError(null);
     try {
-      setGoals((await api.goals()).goals);
+      const next = await api.goals();
+      if (generation === loadGeneration.current) setGoals(next.goals);
     } catch (caught) {
-      setError((caught as Error).message);
+      if (generation === loadGeneration.current) setError((caught as Error).message);
     }
   }, []);
 
