@@ -10,6 +10,7 @@ import {
   replaceGoal,
   seedDefaults,
   setCategoryOverride,
+  setSetting,
   setOneOff,
   updateAccountBalance,
   upsertAccount,
@@ -278,6 +279,8 @@ describe('server-owned goal progress', () => {
       status: 'reached',
       period: { monthsUsed: 2 },
     });
+    await setSetting('base_currency', 'USD');
+    expect((await getGoalProgress(own.id, NOW))?.currency).toBe('USD');
   });
 
   it('calculates savings rate with refunds and support scope, and refuses zero income', async () => {
