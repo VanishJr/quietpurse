@@ -32,7 +32,7 @@ backend/    Express 5 + TypeScript, Drizzle ORM over Postgres (PGlite in the pro
   drizzle/      generated migrations
   test/         vitest + pglite + supertest; helpers.ts and pglite.ts are the harness
 web/        React 19 + Vite + Recharts
-  src/screens/  Overview, Transactions, Analytics, Independence, Settings
+  src/screens/  Overview, Transactions, Analytics, Goals, Settings
 package.json  the two commands a person runs: setup, start
 ```
 

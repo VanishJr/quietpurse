@@ -1,4 +1,3 @@
-/** Not settings.ts, which holds the Goal screen's settings and stores them elsewhere. */
 import { currentBaseCurrency, getSetting, setSetting } from './db';
 import type { AppSettings } from './wire';
 

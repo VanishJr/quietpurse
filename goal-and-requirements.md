@@ -35,8 +35,8 @@ A goal is persisted configuration plus a server-computed answer. The API owns ev
 current value, remainder, status and percentage; the web client only formats those answers. A new
 installation has no goals until the person creates one.
 
-Out of scope, stated as the products it is not: no hosted copy, no account, no tenant, no server
-to rent, no upgrade path from anything earlier than the first release.
+Out of scope, stated as the products it is not: no hosted copy, no account, no tenant and no
+server to rent.
 
 Where the rest lives: `ARCHITECTURE.md` is the module map and the path one statement takes
 through it; `AGENTS.md` carries the commands, the invariants and what a green run cannot see;
