@@ -9,12 +9,16 @@ import {
   pgTable,
   primaryKey,
   text,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import {
   CHART_BREAKDOWNS,
   CHART_KINDS,
   CHART_RANGES,
+  GOAL_BASES,
+  GOAL_INCOME_SCOPES,
+  GOAL_TYPES,
   IMPORT_SOURCE_TYPES,
   IMPORT_STATUSES,
   INCOME_SOURCE_KINDS,
@@ -218,17 +222,236 @@ export const recurringIgnores = pgTable('recurring_ignores', {
   createdAt: text('created_at').notNull(),
 });
 
-export const budgets = pgTable('budgets', {
-  category: text('category').primaryKey(),
-  monthlyCents: integer('monthly_cents').notNull(),
-});
+export const goals = pgTable(
+  'goals',
+  {
+    id: text('id').primaryKey(),
+    type: text('type', { enum: GOAL_TYPES }).notNull(),
+    name: text('name').notNull(),
+    targetDate: text('target_date'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [
+    unique('goals_id_type_unique').on(t.id, t.type),
+    check('goals_type_check', sql`${t.type} IN (${sql.raw(inList(GOAL_TYPES))})`),
+    check('goals_name_check', sql`LENGTH(BTRIM(${t.name})) BETWEEN 1 AND 120`),
+    check(
+      'goals_target_date_check',
+      sql`${t.targetDate} IS NULL OR ${t.targetDate} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`,
+    ),
+  ],
+);
 
-export const baselineItems = pgTable('baseline_items', {
-  id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
-  label: text('label').notNull().unique(),
-  monthlyCents: integer('monthly_cents').notNull(),
-  sort: integer('sort').notNull().default(0),
-});
+export const financialIndependenceGoals = pgTable(
+  'financial_independence_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    basis: text('basis', { enum: GOAL_BASES }).notNull(),
+    bufferPct: doublePrecision('buffer_pct').notNull(),
+    windowMonths: integer('window_months').notNull(),
+    hourlyRateCents: integer('hourly_rate_cents'),
+    hoursPerWeek: doublePrecision('hours_per_week'),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'financial_independence_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('financial_independence_goals_type_check', sql`${t.goalType} = 'financial-independence'`),
+    check(
+      'financial_independence_goals_basis_check',
+      sql`${t.basis} IN (${sql.raw(inList(GOAL_BASES))})`,
+    ),
+    check(
+      'financial_independence_goals_buffer_check',
+      sql`${t.bufferPct} >= 0 AND ${t.bufferPct} <= 100`,
+    ),
+    check(
+      'financial_independence_goals_window_check',
+      sql`${t.windowMonths} BETWEEN 1 AND 24`,
+    ),
+    check(
+      'financial_independence_goals_hourly_rate_check',
+      sql`${t.hourlyRateCents} IS NULL OR ${t.hourlyRateCents} > 0`,
+    ),
+    check(
+      'financial_independence_goals_hours_check',
+      sql`${t.hoursPerWeek} IS NULL OR (${t.hoursPerWeek} > 0 AND ${t.hoursPerWeek} <= 168)`,
+    ),
+  ],
+);
+
+export const emergencyFundGoals = pgTable(
+  'emergency_fund_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    monthlyEssentialsCents: integer('monthly_essentials_cents').notNull(),
+    coverageMonths: integer('coverage_months').notNull(),
+    currency: text('currency').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'emergency_fund_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('emergency_fund_goals_type_check', sql`${t.goalType} = 'emergency-fund'`),
+    check('emergency_fund_goals_amount_check', sql`${t.monthlyEssentialsCents} > 0`),
+    check('emergency_fund_goals_coverage_check', sql`${t.coverageMonths} BETWEEN 1 AND 120`),
+  ],
+);
+
+export const savingsBalanceGoals = pgTable(
+  'savings_balance_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    targetCents: integer('target_cents').notNull(),
+    currency: text('currency').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'savings_balance_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('savings_balance_goals_type_check', sql`${t.goalType} = 'savings-balance'`),
+    check('savings_balance_goals_target_check', sql`${t.targetCents} > 0`),
+  ],
+);
+
+export const debtPayoffGoals = pgTable(
+  'debt_payoff_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    accountId: text('account_id').notNull(),
+    startingDebtCents: integer('starting_debt_cents').notNull(),
+    targetDebtCents: integer('target_debt_cents').notNull(),
+    currency: text('currency').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'debt_payoff_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('debt_payoff_goals_type_check', sql`${t.goalType} = 'debt-payoff'`),
+    check('debt_payoff_goals_start_check', sql`${t.startingDebtCents} > 0`),
+    check(
+      'debt_payoff_goals_target_check',
+      sql`${t.targetDebtCents} >= 0 AND ${t.targetDebtCents} < ${t.startingDebtCents}`,
+    ),
+  ],
+);
+
+export const monthlyIncomeGoals = pgTable(
+  'monthly_income_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    targetMonthlyCents: integer('target_monthly_cents').notNull(),
+    incomeScope: text('income_scope', { enum: GOAL_INCOME_SCOPES }).notNull(),
+    windowMonths: integer('window_months').notNull(),
+    baseCurrency: text('base_currency').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'monthly_income_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('monthly_income_goals_type_check', sql`${t.goalType} = 'monthly-income'`),
+    check('monthly_income_goals_target_check', sql`${t.targetMonthlyCents} > 0`),
+    check(
+      'monthly_income_goals_scope_check',
+      sql`${t.incomeScope} IN (${sql.raw(inList(GOAL_INCOME_SCOPES))})`,
+    ),
+    check('monthly_income_goals_window_check', sql`${t.windowMonths} BETWEEN 1 AND 24`),
+  ],
+);
+
+export const savingsRateGoals = pgTable(
+  'savings_rate_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    targetBasisPoints: integer('target_basis_points').notNull(),
+    incomeScope: text('income_scope', { enum: GOAL_INCOME_SCOPES }).notNull(),
+    windowMonths: integer('window_months').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'savings_rate_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('savings_rate_goals_type_check', sql`${t.goalType} = 'savings-rate'`),
+    check('savings_rate_goals_target_check', sql`${t.targetBasisPoints} BETWEEN 1 AND 10000`),
+    check(
+      'savings_rate_goals_scope_check',
+      sql`${t.incomeScope} IN (${sql.raw(inList(GOAL_INCOME_SCOPES))})`,
+    ),
+    check('savings_rate_goals_window_check', sql`${t.windowMonths} BETWEEN 1 AND 24`),
+  ],
+);
+
+export const categorySpendingGoals = pgTable(
+  'category_spending_goals',
+  {
+    goalId: text('goal_id').primaryKey(),
+    goalType: text('goal_type', { enum: GOAL_TYPES }).notNull(),
+    category: text('category').notNull().unique(),
+    monthlyLimitCents: integer('monthly_limit_cents').notNull(),
+    baseCurrency: text('base_currency').notNull(),
+  },
+  (t) => [
+    foreignKey({
+      columns: [t.goalId, t.goalType],
+      foreignColumns: [goals.id, goals.type],
+      name: 'category_spending_goals_goal_fk',
+    }).onDelete('cascade'),
+    check('category_spending_goals_type_check', sql`${t.goalType} = 'category-spending-limit'`),
+    check('category_spending_goals_limit_check', sql`${t.monthlyLimitCents} > 0`),
+  ],
+);
+
+export const goalAccounts = pgTable(
+  'goal_accounts',
+  {
+    goalId: text('goal_id')
+      .notNull()
+      .references(() => goals.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    position: integer('position').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.goalId, t.accountId] }),
+    unique('goal_accounts_position_unique').on(t.goalId, t.position),
+    check('goal_accounts_position_check', sql`${t.position} >= 0`),
+  ],
+);
+
+export const baselineItems = pgTable(
+  'baseline_items',
+  {
+    id: integer('id').primaryKey().generatedByDefaultAsIdentity(),
+    goalId: text('goal_id')
+      .notNull()
+      .references(() => financialIndependenceGoals.goalId, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    monthlyCents: integer('monthly_cents').notNull(),
+    sort: integer('sort').notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex('baseline_items_goal_label_unique').on(t.goalId, t.label),
+    check('baseline_items_monthly_check', sql`${t.monthlyCents} > 0`),
+  ],
+);
 
 export const incomeSources = pgTable('income_sources', {
   id: text('id').primaryKey(), // slug: salary, family, other, freelance...

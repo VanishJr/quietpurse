@@ -1821,6 +1821,8 @@ const ACCOUNT_CASCADE = {
   transferRules: (id: string): SQL =>
     sql`DELETE FROM transfer_rules WHERE account_id = ${id}`,
   analyticsCharts: OUTLIVES_THE_ACCOUNT,
+  debtPayoffGoals: OUTLIVES_THE_ACCOUNT,
+  goalAccounts: OUTLIVES_THE_ACCOUNT,
 } satisfies Record<
   AccountScoped,
   ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS | typeof OUTLIVES_THE_ACCOUNT
@@ -2536,27 +2538,21 @@ export async function countCategoryRuleMatches(pattern: string): Promise<Categor
 }
 
 export async function listBudgets(): Promise<Budget[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.budgets)
-    .orderBy(sql`${s.budgets.monthlyCents} DESC`);
-  return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthlyCents) }));
+  const rows = await rowsOf<{ category: string; monthly_cents: number }>(
+    sql`SELECT category, monthly_cents FROM budgets ORDER BY monthly_cents DESC`,
+  );
+  return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthly_cents) }));
 }
 
 export async function setBudget(category: string, monthly: number | null): Promise<void> {
   if (monthly === null) {
-    await getDb()
-      .delete(s.budgets)
-      .where(eq(s.budgets.category, category));
+    await getDb().execute(sql`DELETE FROM budgets WHERE category = ${category}`);
   } else {
-    const monthlyCents = toCents(monthly);
-    await getDb()
-      .insert(s.budgets)
-      .values({ category, monthlyCents })
-      .onConflictDoUpdate({
-        target: [s.budgets.category],
-        set: { monthlyCents },
-      });
+    await getDb().execute(sql`
+      INSERT INTO budgets (category, monthly_cents)
+      VALUES (${category}, ${toCents(monthly)})
+      ON CONFLICT (category) DO UPDATE SET monthly_cents = EXCLUDED.monthly_cents
+    `);
   }
 }
 
@@ -2689,10 +2685,15 @@ const rowToBaselineItem = (r: BaselineItemRow): BaselineItem => ({
   sort: r.sort,
 });
 
-export async function listBaselineItems(): Promise<BaselineItem[]> {
+const LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID = '00000000-0000-4000-8000-000000000001';
+
+export async function listBaselineItems(
+  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+): Promise<BaselineItem[]> {
   const rows = await getDb()
     .select()
     .from(s.baselineItems)
+    .where(eq(s.baselineItems.goalId, goalId))
     .orderBy(s.baselineItems.sort, sql`${s.baselineItems.monthlyCents} DESC`);
   return rows.map(rowToBaselineItem);
 }
@@ -2707,12 +2708,13 @@ export async function upsertBaselineItem(
   label: string,
   monthly: number,
   sort?: number,
+  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
 ): Promise<BaselineItem> {
   const existing = (
     await getDb()
       .select()
       .from(s.baselineItems)
-      .where(eq(s.baselineItems.label, label))
+      .where(and(eq(s.baselineItems.goalId, goalId), eq(s.baselineItems.label, label)))
   )[0];
   const nextSort =
     sort ??
@@ -2720,42 +2722,48 @@ export async function upsertBaselineItem(
     Number(
       (
         await rowsOf<{ m: number }>(
-          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items`,
+          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items WHERE goal_id = ${goalId}`,
         )
       )[0].m,
     ) + 1;
   const monthlyCents = toCents(monthly);
   const rows = await getDb()
     .insert(s.baselineItems)
-    .values({ label, monthlyCents, sort: nextSort })
+    .values({ goalId, label, monthlyCents, sort: nextSort })
     .onConflictDoUpdate({
-      target: [s.baselineItems.label],
+      target: [s.baselineItems.goalId, s.baselineItems.label],
       set: { monthlyCents, sort: nextSort },
     })
     .returning();
   return rowToBaselineItem(rows[0]);
 }
 
-export async function deleteBaselineItem(label: string): Promise<boolean> {
+export async function deleteBaselineItem(
+  label: string,
+  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+): Promise<boolean> {
   const rows = await getDb()
     .delete(s.baselineItems)
     .where(
-      eq(s.baselineItems.label, label),
+      and(eq(s.baselineItems.goalId, goalId), eq(s.baselineItems.label, label)),
     )
     .returning({ id: s.baselineItems.id });
   return rows.length > 0;
 }
 
-export async function baselineTotal(): Promise<number> {
+export async function baselineTotal(
+  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+): Promise<number> {
   const rows = await rowsOf<{ total_cents: string }>(
-    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items`,
+    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents
+        FROM baseline_items WHERE goal_id = ${goalId}`,
   );
   return fromCents(Number(rows[0].total_cents));
 }
 
 export interface BackupData {
   format: 'finto-backup';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   tables: Record<string, unknown[]>;
 }
@@ -2770,7 +2778,15 @@ const BACKUP_TABLES = {
   category_rules: s.categoryRules,
   transfer_rules: s.transferRules,
   recurring_ignores: s.recurringIgnores,
-  budgets: s.budgets,
+  goals: s.goals,
+  financial_independence_goals: s.financialIndependenceGoals,
+  emergency_fund_goals: s.emergencyFundGoals,
+  savings_balance_goals: s.savingsBalanceGoals,
+  debt_payoff_goals: s.debtPayoffGoals,
+  monthly_income_goals: s.monthlyIncomeGoals,
+  savings_rate_goals: s.savingsRateGoals,
+  category_spending_goals: s.categorySpendingGoals,
+  goal_accounts: s.goalAccounts,
   baseline_items: s.baselineItems,
   income_sources: s.incomeSources,
   settings: s.settings,
@@ -2781,16 +2797,21 @@ const BACKUP_TABLES = {
 const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
 
 export async function exportBackup(): Promise<BackupData> {
-  const tables: Record<string, unknown[]> = {};
-  for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-    tables[name] = (await getDb().select().from(table)) as Record<string, unknown>[];
-  }
-  return {
-    format: 'finto-backup',
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    tables,
-  };
+  return getDb().transaction(
+    async (tx) => {
+      const tables: Record<string, unknown[]> = {};
+      for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+        tables[name] = (await tx.select().from(table)) as Record<string, unknown>[];
+      }
+      return {
+        format: 'finto-backup' as const,
+        version: 2 as const,
+        exportedAt: new Date().toISOString(),
+        tables,
+      };
+    },
+    { isolationLevel: 'repeatable read' },
+  );
 }
 
 /**
@@ -2802,7 +2823,9 @@ const backupEnvelope = z.object({
   format: z.literal('finto-backup', {
     error: 'not a Finto backup file (expected JSON with format: "finto-backup")',
   }),
-  version: z.literal(1, { error: (issue) => `unsupported backup version: ${String(issue.input)}` }),
+  version: z.union([z.literal(1), z.literal(2)], {
+    error: (issue) => `unsupported backup version: ${String(issue.input)}`,
+  }),
   exportedAt: z.string().optional(),
   tables: z.record(z.string(), z.unknown(), { error: 'backup file has no tables' }),
 });
@@ -2820,6 +2843,133 @@ export function parseBackup(input: unknown): BackupData {
   }
   return { exportedAt: '', ...parsed.data } as BackupData;
 }
+
+const GOAL_BACKUP_TABLES = [
+  'goals',
+  'financial_independence_goals',
+  'emergency_fund_goals',
+  'savings_balance_goals',
+  'debt_payoff_goals',
+  'monthly_income_goals',
+  'savings_rate_goals',
+  'category_spending_goals',
+  'goal_accounts',
+  'baseline_items',
+] as const;
+
+const legacyNumber = (value: unknown, fallback: number, min: number, max: number): number =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback;
+
+const migrateLegacyBackup = (data: BackupData): BackupData => {
+  if (data.version === 2) {
+    for (const name of GOAL_BACKUP_TABLES) {
+      if (!(name in data.tables)) throw new Error(`backup is missing required goal table ${name}`);
+    }
+    return data;
+  }
+  if (GOAL_BACKUP_TABLES.some((name) => name !== 'baseline_items' && name in data.tables)) {
+    throw new Error('backup version 1 contains unsupported goal tables');
+  }
+
+  const tables = Object.fromEntries(
+    Object.entries(data.tables).map(([name, rows]) => [name, [...rows]]),
+  );
+  for (const name of GOAL_BACKUP_TABLES) tables[name] = [];
+
+  const records = (name: string): Record<string, unknown>[] =>
+    (data.tables[name] ?? []).filter(
+      (row): row is Record<string, unknown> =>
+        row !== null && typeof row === 'object' && !Array.isArray(row),
+    );
+  const legacyMeta = records('meta');
+  const legacySettingsRow = legacyMeta.find((row) => row.key === 'settings');
+  let settings: Record<string, unknown> = {};
+  if (typeof legacySettingsRow?.value === 'string') {
+    try {
+      const parsed = JSON.parse(legacySettingsRow.value);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        settings = parsed as Record<string, unknown>;
+      }
+    } catch {
+      settings = {};
+    }
+  }
+
+  const transactions = data.tables.transactions ?? [];
+  const baseline = records('baseline_items');
+  const budgets = records('budgets');
+  const hasLegacyGoal =
+    transactions.length > 0 || legacySettingsRow !== undefined || baseline.length > 0 || budgets.length > 0;
+  const stamp = Number.isNaN(new Date(data.exportedAt).getTime())
+    ? new Date().toISOString()
+    : new Date(data.exportedAt).toISOString();
+  const baseCurrency =
+    records('settings').find((row) => row.key === 'base_currency')?.value ?? 'EUR';
+
+  if (hasLegacyGoal) {
+    const bufferPct = legacyNumber(settings.bufferPct, 10, 0, 100);
+    const windowMonths = Math.round(legacyNumber(settings.windowMonths, 6, 1, 24));
+    const hourlyRate =
+      settings.hourlyRate === null
+        ? null
+        : legacyNumber(settings.hourlyRate, 0, 0, 10_000) || null;
+    const hoursPerWeek = legacyNumber(settings.hoursCapPerWeek, 20, 0.01, 168);
+    tables.goals.push({
+      id: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+      type: 'financial-independence',
+      name: 'Financial independence',
+      targetDate: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    tables.financial_independence_goals.push({
+      goalId: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+      goalType: 'financial-independence',
+      basis: settings.goalMode === 'lifestyle' ? 'current-spending' : 'essential-costs',
+      bufferPct,
+      windowMonths,
+      hourlyRateCents: hourlyRate === null ? null : toCents(hourlyRate),
+      hoursPerWeek,
+    });
+    tables.baseline_items = baseline.map((row) => ({
+      ...row,
+      goalId: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+    }));
+  }
+
+  for (const budget of budgets) {
+    if (
+      typeof budget.category !== 'string' ||
+      typeof budget.monthlyCents !== 'number' ||
+      !Number.isSafeInteger(budget.monthlyCents) ||
+      budget.monthlyCents <= 0
+    ) {
+      continue;
+    }
+    const id = `legacy-budget-${crypto.createHash('md5').update(budget.category).digest('hex')}`;
+    tables.goals.push({
+      id,
+      type: 'category-spending-limit',
+      name: `${budget.category.replace(/-/g, ' ')} spending limit`,
+      targetDate: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    tables.category_spending_goals.push({
+      goalId: id,
+      goalType: 'category-spending-limit',
+      category: budget.category,
+      monthlyLimitCents: budget.monthlyCents,
+      baseCurrency: typeof baseCurrency === 'string' ? baseCurrency : 'EUR',
+    });
+  }
+
+  tables.meta = legacyMeta.filter((row) => row.key !== 'settings');
+  delete tables.budgets;
+  return { ...data, version: 2, tables };
+};
 
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
@@ -2879,13 +3029,15 @@ function sanitizeRow(
  * import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
+  const migrated = migrateLegacyBackup(data);
   let tables = 0;
   let rows = 0;
   await getDb().transaction(async (tx) => {
-    for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-      const incoming = data.tables[name];
-      if (!incoming) continue; // an older backup without this table keeps it empty
+    for (const name of Object.keys(BACKUP_TABLES).reverse()) {
       await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
+    }
+    for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+      const incoming = migrated.tables[name] ?? [];
       const dropId = IDENTITY_TABLES.has(name);
       const values = incoming.map((row) => {
         const clean = sanitizeRow(table, row, name);
