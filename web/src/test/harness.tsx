@@ -4,8 +4,8 @@ import { ThemeProvider } from '../theme';
 import {
   ACCOUNTS,
   APP_SETTINGS,
+  GOALS,
   INCOME_SOURCES,
-  INDEPENDENCE,
   RECURRING,
   TRANSACTIONS,
   NO_CHARTS,
@@ -167,5 +167,5 @@ export const FIRST_PAINT_ROUTES: Routes = {
   'GET /api/income-sources': () => ok(INCOME_SOURCES),
   'GET /api/transfer-rules': () => ok(TRANSFER_RULES),
   'GET /api/transactions': () => ok(TRANSACTIONS),
-  'GET /api/independence': () => ok(INDEPENDENCE),
+  'GET /api/goals': () => ok(GOALS),
 };

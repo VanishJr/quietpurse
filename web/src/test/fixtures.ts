@@ -4,6 +4,8 @@ import {
   AccountSummary,
   AppSettings,
   BudgetsResponse,
+  GoalList,
+  GoalSummary,
   ImportConfirmed,
   ImportList,
   ImportRecord,
@@ -113,6 +115,32 @@ export const accountMonths = (
 });
 
 export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
+
+export const SAVINGS_GOAL = {
+  id: 'goal-savings',
+  type: 'savings-balance',
+  name: 'Emergency savings',
+  targetDate: null,
+  createdAt: '2026-05-01T00:00:00.000Z',
+  updatedAt: '2026-05-01T00:00:00.000Z',
+  currency: 'EUR',
+  source: 'Imported balances · Cash',
+  progress: {
+    semantic: 'completion',
+    unit: 'money',
+    target: 9000,
+    current: 5400,
+    remaining: 3600,
+    overBy: 0,
+    percentage: 60,
+    forecast: null,
+    status: 'tracking',
+    asOf: '2026-05-15T12:00:00.000Z',
+    period: { kind: 'current-balances', from: null, to: null, monthsUsed: null },
+  },
+} satisfies GoalSummary;
+
+export const GOALS: GoalList = { goals: [] };
 
 /**
  * A database that has never saved a chart, which is what the charts route answers a

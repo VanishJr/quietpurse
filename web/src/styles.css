@@ -2399,7 +2399,175 @@ textarea {
   margin-bottom: 6px;
 }
 
-/* ---------- goal (independence) ---------- */
+/* ---------- goals ---------- */
+
+.goals-header,
+.goals-list,
+.goals-empty,
+.state-note,
+.error-row {
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.goals-header {
+  margin-bottom: 18px;
+}
+
+.goals-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.goals-empty {
+  padding: 56px 20px;
+  text-align: center;
+  border: 1px dashed var(--ink-grid);
+  border-radius: var(--r-lg);
+}
+
+.goals-empty p {
+  color: var(--ink-secondary);
+  margin: 8px 0 20px;
+}
+
+.state-note {
+  color: var(--ink-muted);
+  padding: 28px 0;
+}
+
+.error-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-bad);
+  padding: 14px 16px;
+  border: 1px solid var(--ink-bad);
+  border-radius: var(--r-md);
+}
+
+.goal-card {
+  padding: 20px;
+}
+
+.goal-card-header,
+.goal-card-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.goal-card-header h2 {
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.goal-card-actions {
+  flex: none;
+}
+
+.goal-card-kind,
+.goal-source,
+.goal-support,
+.goal-progress-label {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.goal-card-kind {
+  margin-top: 3px;
+}
+
+.goal-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 16px;
+}
+
+.goal-figures dt {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.goal-figures dd {
+  margin: 5px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.goal-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ink-grid);
+}
+
+.goal-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink-accent);
+}
+
+.goal-card-at-risk .goal-progress span,
+.goal-card-over-limit .goal-progress span {
+  background: var(--ink-bad);
+}
+
+.goal-progress-label {
+  margin-top: 7px;
+}
+
+.goal-source,
+.goal-support,
+.goal-status {
+  margin-top: 10px;
+}
+
+.goal-status {
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+@media (max-width: 599px) {
+  .goal-card {
+    padding: 16px;
+  }
+
+  .goal-card-header {
+    align-items: flex-start;
+  }
+
+  .goal-card-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .goal-figures {
+    gap: 8px;
+  }
+
+  .goal-figures dd {
+    font-size: 15px;
+  }
+}
+
+/* ---------- legacy goal styles ---------- */
 
 .hero-label {
   font-size: 13px;

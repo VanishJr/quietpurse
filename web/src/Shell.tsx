@@ -8,7 +8,7 @@ import {
   TransactionsIcon,
 } from './components/NavIcons';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
-import { IndependenceScreen } from './screens/IndependenceScreen';
+import { GoalsScreen } from './screens/GoalsScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
@@ -20,7 +20,7 @@ const TABS = [
   { key: 'overview', title: 'Overview', Icon: OverviewIcon },
   { key: 'transactions', title: 'Transactions', Icon: TransactionsIcon },
   { key: 'analytics', title: 'Analytics', Icon: AnalyticsIcon },
-  { key: 'goal', title: 'Goal', Icon: GoalsIcon },
+  { key: 'goal', title: 'Goals', Icon: GoalsIcon },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'] | 'settings';
@@ -168,7 +168,7 @@ export function Shell() {
           <AnalyticsScreen />
         </div>
         <div className="screen" hidden={tab !== 'goal'}>
-          <IndependenceScreen />
+          <GoalsScreen />
         </div>
         <div className="screen" hidden={tab !== 'settings'}>
           <SettingsScreen onOpenImport={openImport} />
