@@ -570,8 +570,8 @@ cost of guessing is not.
 and this document says only that it exists.** Each is stated once and in one place:
 
 - the goal progress formulas — including Financial independence's two bases, buffered progress,
-  whole-month window and one-off amortisation — in `backend/src/goals.ts` and
-  `backend/src/goals.ts`. They cross the goal configuration rows, the data layer's account and
+  whole-month window, one-off amortisation and work-hours capacity — in `backend/src/goals.ts`.
+  They cross the goal configuration rows, the data layer's account and
   monthly aggregates, and the wire answer that lets every client render without recomputing an
   outcome.
 - the decimal-to-minor-unit rounding, beside `toCents` in `backend/src/money.ts`.

@@ -65,6 +65,9 @@ export const formatGoalValue = (
   return unit === 'money-per-month' ? `${money}/mo` : money;
 };
 
+export const formatWorkHours = (value: number): string =>
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+
 export const progressLabel = (progress: GoalProgress): string => {
   if (progress.status === 'reached') return 'Reached';
   if (progress.percentage === null) return GOAL_STATUS_LABELS[progress.status] || 'Progress unavailable';

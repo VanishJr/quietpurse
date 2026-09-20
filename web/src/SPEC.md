@@ -92,8 +92,9 @@ not that, and `chartData.ts` refuses it rather than answering the whole under on
 **A goal card renders the server's answer and never computes an outcome.** `/api/goals` supplies
 the target, current value, remainder, status, percentage semantics and source line for every saved
 goal. The list may format money and choose copy from closed dictionaries, but it may not derive a
-fallback basis, progress, forecast, work-hours result or account total. Editing reads the complete
-configuration from `/api/goals/:id`; the goal type is fixed after creation, and Financial
+fallback basis, progress, forecast, work-hours result or account total. Required monthly work
+hours, configured monthly capacity and whether that capacity is exceeded all arrive from the server.
+Editing reads the complete configuration from `/api/goals/:id`; the goal type is fixed after creation, and Financial
 independence costs are replaced atomically with that configuration.
 
 **Goal selection is location, not product state.** The stable navigation key remains
@@ -137,15 +138,16 @@ refuses a whole list and not one chart in it, so a client bound under the server
 the server would have taken, one over it composes a list the server refuses whole, and a client
 re-minting ids against a charset the route has narrowed is refused on every save from then on; and
 the client shows the whole diagnostic budget, because the importer orders a refusal's clauses on the
-premise that all of it is read, so a smaller cap deletes the clause it put last. The six
-vocabularies are held twice on this side — as the wire's union types and as the def records a picker
-renders, four in `analytics.ts` for the chart kinds, measures, breakdowns and ranges, one in
-the Goals presentation model for the goal types and bases and one in
-`web/src/components/IncomeSourcesBlock.tsx` for the income source kinds — and each record is written
-`satisfies` a `Record` over the wire's union, never annotated as one, with the array a picker
-renders derived from it by `defs()`: a member the wire lacks and a wire member the record omits are
-both compile errors whether or not the literal sits on the declaration, where an annotated record
-holds the extra-member direction on a fresh literal alone. A client narrower than the door cannot
+premise that all of it is read, so a smaller cap deletes the clause it put last. Client-side
+vocabularies are held twice — as the wire's union types and as exhaustive presentation records:
+`analytics.ts` holds chart kinds, measures, breakdowns and ranges; the Goals presentation model
+holds goal types, bases, income scopes and statuses; and
+`web/src/components/IncomeSourcesBlock.tsx` holds income-source kinds. Each record is written
+`satisfies` a `Record` over the wire's union, never annotated as one, and picker options are derived
+from the applicable records rather than restating their members: a member the wire lacks and a wire
+member the record omits are both compile errors whether or not the literal sits on the declaration,
+where an annotated record holds the extra-member direction on a fresh literal alone. A client
+narrower than the door cannot
 draw a kind the server accepts: `parseChart` refuses the row, `chartEntry` keeps it as unreadable,
 `entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal type it
 lacks is a picker with no tile and no way to create it, and an income source kind it lacks is

@@ -164,6 +164,12 @@ const financialDetail = (
     goal.hourlyRate !== null && progress.remaining !== null
       ? round2(progress.remaining / goal.hourlyRate)
       : null;
+  const workHoursCapacityPerMonth =
+    goal.hoursPerWeek === null ? null : round2((goal.hoursPerWeek * 52) / 12);
+  const workHoursCapacityExceeded =
+    workHoursLeft === null || workHoursCapacityPerMonth === null
+      ? null
+      : workHoursLeft > workHoursCapacityPerMonth;
   const basis = goal.basis === 'essential-costs' ? 'Essential costs' : 'Current spending';
   return {
     ...goal,
@@ -171,6 +177,8 @@ const financialDetail = (
     source: `${monthsText(rows.length)} · ${basis} + ${goal.bufferPct}% buffer`,
     supportExcluded,
     workHoursLeft,
+    workHoursCapacityPerMonth,
+    workHoursCapacityExceeded,
     progress,
   };
 };
@@ -383,6 +391,8 @@ const summaryOf = (detail: GoalDetail): GoalSummary => {
         type: detail.type,
         supportExcluded: detail.supportExcluded,
         workHoursLeft: detail.workHoursLeft,
+        workHoursCapacityPerMonth: detail.workHoursCapacityPerMonth,
+        workHoursCapacityExceeded: detail.workHoursCapacityExceeded,
       };
     case 'category-spending-limit':
       return { ...common, type: detail.type, category: detail.category };

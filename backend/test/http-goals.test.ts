@@ -163,6 +163,19 @@ describe('Goals HTTP API', () => {
     expect(incomplete.body.error).toContain('target:');
   });
 
+  it('refuses values below storage precision before reaching the database', async () => {
+    for (const body of [
+      { ...writes[0], hourlyRate: 20.001 },
+      { ...writes[0], essentialCosts: [{ label: 'Essentials', monthly: 0.001 }] },
+      { ...writes[3], targetDebt: 0.001 },
+      { ...writes[5], targetPercent: 0.001 },
+      { ...writes[6], monthlyLimit: 0.001 },
+    ]) {
+      const res = await agent.post('/api/goals').send(body);
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+    }
+  });
+
   it('returns conflicts for duplicate categories and a changed debt account', async () => {
     const duplicate = await agent.post('/api/goals').send({ ...writes[6], name: 'Food again' });
     expect(duplicate.status).toBe(409);

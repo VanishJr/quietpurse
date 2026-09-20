@@ -1,5 +1,6 @@
 import {
   formatGoalValue,
+  formatWorkHours,
   goalCategoryLabel,
   goalStatusMessage,
   progressLabel,
@@ -74,7 +75,15 @@ export function GoalCard({ goal, busy = false, onEdit, onDelete }: Props) {
       {goal.type === 'financial-independence' && goal.workHoursLeft !== null && (
         <p className="goal-support">
           Left: {formatGoalValue(progress.remaining, 'money-per-month', goal.currency)} · about{' '}
-          {goal.workHoursLeft} work hours
+          {formatWorkHours(goal.workHoursLeft)} work hours/month
+          {goal.workHoursCapacityPerMonth !== null &&
+            goal.workHoursCapacityExceeded !== null && (
+              <>
+                {' · '}
+                {goal.workHoursCapacityExceeded ? 'exceeds' : 'within'}{' '}
+                {formatWorkHours(goal.workHoursCapacityPerMonth)} available hours/month
+              </>
+            )}
         </p>
       )}
       {status && <p className="goal-status">{status}</p>}

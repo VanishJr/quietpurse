@@ -47,8 +47,10 @@ export const goalPeriodKindSchema = z.enum(GOAL_PERIODS);
 export type GoalPeriodKind = z.infer<typeof goalPeriodKindSchema>;
 
 const name = z.string().trim().min(1).max(GOAL_NAME_MAX);
-const amount = z.number().finite().positive().max(GOAL_AMOUNT_MAX);
-const nonNegativeAmount = z.number().finite().min(0).max(GOAL_AMOUNT_MAX);
+const centValue = z.number().finite().multipleOf(0.01);
+const amount = centValue.min(0.01).max(GOAL_AMOUNT_MAX);
+const nonNegativeAmount = centValue.min(0).max(GOAL_AMOUNT_MAX);
+const percentage = z.number().finite().multipleOf(0.01).min(0.01).max(100);
 const windowMonths = z.number().int().min(1).max(GOAL_WINDOW_MAX);
 const accountId = z.string().trim().min(1);
 const accountIds = z.array(accountId).min(1).max(GOAL_ACCOUNT_MAX);
@@ -66,7 +68,7 @@ export const financialIndependenceGoalWriteSchema = z.strictObject({
   basis: goalBasisSchema,
   bufferPct: z.number().finite().min(0).max(100),
   windowMonths,
-  hourlyRate: z.number().finite().min(0.01).max(10_000).nullable(),
+  hourlyRate: centValue.min(0.01).max(10_000).nullable(),
   hoursPerWeek: z.number().finite().min(0.01).max(168).nullable(),
   essentialCosts: z.array(goalCostWriteSchema).max(200),
 });
@@ -102,7 +104,7 @@ export const monthlyIncomeGoalWriteSchema = z.strictObject({
 export const savingsRateGoalWriteSchema = z.strictObject({
   type: z.literal('savings-rate'),
   name,
-  targetPercent: z.number().finite().positive().max(100),
+  targetPercent: percentage,
   incomeScope: goalIncomeScopeSchema,
   windowMonths,
 });
@@ -165,6 +167,8 @@ export const financialIndependenceGoalSummarySchema = z.strictObject({
   type: z.literal('financial-independence'),
   supportExcluded: z.number(),
   workHoursLeft: z.number().nullable(),
+  workHoursCapacityPerMonth: z.number().nullable(),
+  workHoursCapacityExceeded: z.boolean().nullable(),
 });
 export const emergencyFundGoalSummarySchema = z.strictObject({
   ...goalSummaryFields,

@@ -198,6 +198,52 @@ describe('the Goals write contract', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('refuses money and percentage values that their integer storage cannot represent', () => {
+    const financial = {
+      type: 'financial-independence',
+      name: 'Independent',
+      basis: 'essential-costs',
+      bufferPct: 10,
+      windowMonths: 6,
+      hourlyRate: 20,
+      hoursPerWeek: 20,
+      essentialCosts: [{ label: 'Essentials', monthly: 1000 }],
+    } as const;
+    const debt = {
+      type: 'debt-payoff',
+      name: 'Debt',
+      targetDate: null,
+      accountId: 'loan',
+      targetDebt: 0,
+    } as const;
+    const rate = {
+      type: 'savings-rate',
+      name: 'Savings rate',
+      targetPercent: 20,
+      incomeScope: 'own',
+      windowMonths: 6,
+    } as const;
+
+    const invalid = [
+      { ...valid, target: 1.001 },
+      { ...financial, hourlyRate: 20.001 },
+      {
+        ...financial,
+        essentialCosts: [{ label: 'Essentials', monthly: 0.001 }],
+      },
+      { ...debt, targetDebt: 0.001 },
+      { ...rate, targetPercent: 0.001 },
+    ];
+    for (const schema of [goalCreateSchema, goalUpdateSchema]) {
+      for (const body of invalid) expect(schema.safeParse(body).success).toBe(false);
+    }
+
+    expect(goalCreateSchema.safeParse({ ...valid, target: 0.01 }).success).toBe(true);
+    expect(goalCreateSchema.safeParse({ ...financial, hourlyRate: 0.01 }).success).toBe(true);
+    expect(goalCreateSchema.safeParse(debt).success).toBe(true);
+    expect(goalCreateSchema.safeParse({ ...rate, targetPercent: 0.01 }).success).toBe(true);
+  });
 });
 
 describe('every declared JSON body is strict all the way down', () => {

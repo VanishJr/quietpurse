@@ -7,6 +7,7 @@ import {
   getGoal,
   initDb,
   insertTransactions,
+  replaceGoal,
   seedDefaults,
   setCategoryOverride,
   setSetting,
@@ -16,6 +17,7 @@ import {
 } from '../src/db';
 import { getGoalProgress } from '../src/goals';
 import type { NewTransaction } from '../src/types';
+import type { GoalCreate } from '../src/wire';
 import { findTx } from './helpers';
 import { freshTestDb } from './pglite';
 
@@ -68,25 +70,25 @@ describe('server-owned goal progress', () => {
         }),
       ]);
     }
-    const goal = await createGoal(
-      {
-        type: 'financial-independence',
-        name: 'Independence',
-        basis: 'essential-costs',
-        bufferPct: 10,
-        windowMonths: 6,
-        hourlyRate: 20,
-        hoursPerWeek: 20,
-        essentialCosts: [{ label: 'Essentials', monthly: 1000 }],
-      },
-      NOW,
-    );
+    const input: Extract<GoalCreate, { type: 'financial-independence' }> = {
+      type: 'financial-independence',
+      name: 'Independence',
+      basis: 'essential-costs',
+      bufferPct: 10,
+      windowMonths: 6,
+      hourlyRate: 20,
+      hoursPerWeek: 20,
+      essentialCosts: [{ label: 'Essentials', monthly: 1000 }],
+    };
+    const goal = await createGoal(input, NOW);
 
     const detail = await getGoalProgress(goal.id, NOW);
     expect(detail).toMatchObject({
       type: 'financial-independence',
       supportExcluded: 300,
       workHoursLeft: 10,
+      workHoursCapacityPerMonth: 86.67,
+      workHoursCapacityExceeded: false,
       progress: {
         target: 1100,
         current: 900,
@@ -95,6 +97,14 @@ describe('server-owned goal progress', () => {
         status: 'tracking',
         period: { monthsUsed: 2 },
       },
+    });
+
+    await replaceGoal(goal.id, { ...input, hoursPerWeek: 1 }, NOW);
+    expect(await getGoalProgress(goal.id, NOW)).toMatchObject({
+      type: 'financial-independence',
+      workHoursLeft: 10,
+      workHoursCapacityPerMonth: 4.33,
+      workHoursCapacityExceeded: true,
     });
   });
 

@@ -5,6 +5,27 @@ import { fail, mockFetch, ok, renderThemed, requests } from '../test/harness';
 import type { GoalSummary } from '../types';
 import { GoalsScreen } from './GoalsScreen';
 
+const financialGoal = {
+  ...SAVINGS_GOAL,
+  id: 'goal-independence',
+  type: 'financial-independence',
+  name: 'Financial independence',
+  source: '2 complete months · Essential costs + 10% buffer',
+  supportExcluded: 0,
+  workHoursLeft: 10,
+  workHoursCapacityPerMonth: 4.33,
+  workHoursCapacityExceeded: true,
+  progress: {
+    ...SAVINGS_GOAL.progress,
+    unit: 'money-per-month',
+    target: 1100,
+    current: 900,
+    remaining: 200,
+    percentage: 81.82,
+    period: { kind: 'complete-months', from: '2025-11-01', to: '2026-04-30', monthsUsed: 2 },
+  },
+} satisfies GoalSummary;
+
 const categoryGoal: GoalSummary = {
   ...SAVINGS_GOAL,
   id: 'goal-food',
@@ -82,6 +103,17 @@ describe('GoalsScreen', () => {
     expect(within(cards[0]).getByText('60% of target')).toBeVisible();
     expect(within(cards[1]).getByText('75% used')).toBeVisible();
     expect(within(cards[1]).getByText('Forecast to exceed the limit this month.')).toBeVisible();
+  });
+
+  it('renders the server-computed work-hours capacity without deriving it', async () => {
+    mockFetch({ 'GET /api/goals': () => ok({ goals: [financialGoal] }) });
+    renderThemed(<GoalsScreen />);
+
+    expect(
+      await screen.findByText(
+        'Left: 200 EUR/mo · about 10 work hours/month · exceeds 4.33 available hours/month',
+      ),
+    ).toBeVisible();
   });
 
   it('keeps an unavailable goal and its actions visible', async () => {
