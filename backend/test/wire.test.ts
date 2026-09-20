@@ -11,7 +11,14 @@ import path from 'path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ANSWERS, type Declared, refusalSchema } from '../src/wire';
+import {
+  ANSWERS,
+  type Declared,
+  GOAL_TYPES,
+  goalCreateSchema,
+  goalUpdateSchema,
+  refusalSchema,
+} from '../src/wire';
 
 const WIRE_DIR = path.resolve(process.cwd(), 'src/wire');
 
@@ -157,6 +164,41 @@ const objectNodes = (schema: z.ZodType, at: string, walk: Walk): number => {
       throw new Error(`${at}: unhandled schema type "${def.type}" - teach the walk before trusting it`);
   }
 };
+
+describe('the Goals write contract', () => {
+  const valid = {
+    type: 'monthly-income',
+    name: 'Stable income',
+    target: 3000,
+    incomeScope: 'own',
+    windowMonths: 6,
+  } as const;
+
+  it('is exhaustive and refuses undeclared fields for create and replacement', () => {
+    expect(GOAL_TYPES).toEqual([
+      'financial-independence',
+      'emergency-fund',
+      'savings-balance',
+      'debt-payoff',
+      'monthly-income',
+      'savings-rate',
+      'category-spending-limit',
+    ]);
+    expect(goalCreateSchema.parse(valid)).toEqual(valid);
+    expect(goalUpdateSchema.parse(valid)).toEqual(valid);
+    expect(goalCreateSchema.safeParse({ ...valid, surprise: true }).success).toBe(false);
+  });
+
+  it('keeps type-specific fields on their own discriminated arm', () => {
+    expect(
+      goalCreateSchema.safeParse({
+        ...valid,
+        type: 'savings-rate',
+        targetPercent: 20,
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('every declared JSON body is strict all the way down', () => {
   const entries = Object.entries(ANSWERS as Record<string, Declared>);

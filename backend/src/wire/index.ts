@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './goals';
+
 /**
  * 'upload' is the only value anything writes. The other two stay in the union because
  * rows carrying them exist, in databases that ran those integrations and in every
