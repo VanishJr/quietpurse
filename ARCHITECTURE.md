@@ -79,12 +79,11 @@ every clause in it was paid for by a document that broke the previous one.
 | `backend/src/classify.ts` | Transfer pairing between the user's own accounts, and re-classification when rules change |
 | `backend/src/transaction-description.ts` | The second reading of a stored description: the value-date suffix, the similarity key, and the one predicate each kind of rule is matched by — in the classifier, the previews and the counts alike |
 | `backend/src/goals.ts` | Goal persistence orchestration and every current-progress computation |
-| `backend/src/independence.ts` | The Financial independence calculation used by the goals engine |
 | `backend/src/fxrates.ts` / `backend/src/rates.ts` | ECB and NBU providers, rate resolution, backfill of base-currency amounts |
 | `backend/src/money.ts` | Cents in, cents out. Money is integer cents everywhere below the API |
 | `backend/src/documents.ts` | Uploaded statements as plain files in the statements folder: the name a file gets, `putDocument`/`getDocument`/`deleteDocument`, and the hash check on read |
 | `backend/src/storage.ts` | The object store underneath `backend/src/documents.ts`: an atomic write, and a key shape that refuses rather than cleans |
-| `backend/src/settings.ts` / `backend/src/appsettings.ts` | The person's settings in the database |
+| `backend/src/appsettings.ts` | The person's global settings in the database |
 
 `web/src/screens/` holds Overview, Transactions, Analytics, Goals and Settings;
 `web/src/api.ts` is the only place that talks to the API, and it also owns how a failed request

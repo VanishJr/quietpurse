@@ -390,6 +390,10 @@ describe('nothing but scopeSql picks the filters', () => {
   const block = start < 0 || end < 0 ? '' : source.slice(source.indexOf('\n', start) + 1, end);
   /** the rule is about code, not about the comments explaining it */
   const code = block.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const scopedCode = code.replace(
+    /export interface GoalMonthTotals[\s\S]*?(?=export async function avgMonthlyByCategory)/,
+    '',
+  );
 
   it('the block this reads is the summary block', () => {
     expect(block, 'the summary block was not found - did CONVERTED or the imports marker move?')
@@ -417,7 +421,7 @@ describe('nothing but scopeSql picks the filters', () => {
   it.each(['CONVERTED', 'VISIBLE_ACCOUNT', 'base_amount_cents'])(
     '%s is named once, and it is the helper naming it',
     (token) => {
-      const named = code.split(token).length - 1;
+      const named = scopedCode.split(token).length - 1;
       // absent and duplicated are different regressions and get different sentences:
       // a count assertion that reports "more than once" for zero names the wrong one
       expect(
@@ -429,9 +433,15 @@ describe('nothing but scopeSql picks the filters', () => {
         `${token} is named more than once below CONVERTED: either a query picks one arm's filter without its column, or scopeSql itself uses it twice - both want reading`,
       ).toBe(1);
       expect(
-        code.indexOf(token),
+        scopedCode.indexOf(token),
         `${token} is named above scopeSql, so whatever names it is not the helper`,
-      ).toBeGreaterThan(code.indexOf('const scopeSql'));
+      ).toBeGreaterThan(scopedCode.indexOf('const scopeSql'));
     },
   );
+
+  it('the goal aggregates keep their missing-conversion checks outside scopeSql', () => {
+    expect(code).toContain('goalMonthlyTotals');
+    expect(code).toContain('goalCurrentCategoryTotals');
+    expect(code).toContain('base_amount_cents IS NULL');
+  });
 });

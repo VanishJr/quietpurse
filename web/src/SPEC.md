@@ -140,7 +140,7 @@ the client shows the whole diagnostic budget, because the importer orders a refu
 premise that all of it is read, so a smaller cap deletes the clause it put last. The six
 vocabularies are held twice on this side — as the wire's union types and as the def records a picker
 renders, four in `analytics.ts` for the chart kinds, measures, breakdowns and ranges, one in
-`web/src/goals.ts` for the goal types and bases and one in
+the Goals presentation model for the goal types and bases and one in
 `web/src/components/IncomeSourcesBlock.tsx` for the income source kinds — and each record is written
 `satisfies` a `Record` over the wire's union, never annotated as one, with the array a picker
 renders derived from it by `defs()`: a member the wire lacks and a wire member the record omits are

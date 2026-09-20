@@ -581,6 +581,8 @@ describe('deleting an account', () => {
   it('accounts for every account-scoped table in the schema', () => {
     expect([...ACCOUNT_CASCADE_TABLES].sort()).toEqual([
       'analyticsCharts',
+      'debtPayoffGoals',
+      'goalAccounts',
       'imports',
       'stagedTransactions',
       'transactions',

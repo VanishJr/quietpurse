@@ -571,7 +571,7 @@ and this document says only that it exists.** Each is stated once and in one pla
 
 - the goal progress formulas — including Financial independence's two bases, buffered progress,
   whole-month window and one-off amortisation — in `backend/src/goals.ts` and
-  `backend/src/independence.ts`. They cross the goal configuration rows, the data layer's account and
+  `backend/src/goals.ts`. They cross the goal configuration rows, the data layer's account and
   monthly aggregates, and the wire answer that lets every client render without recomputing an
   outcome.
 - the decimal-to-minor-unit rounding, beside `toCents` in `backend/src/money.ts`.
