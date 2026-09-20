@@ -102,7 +102,15 @@ describe('GoalsScreen', () => {
     expect(within(cards[0]).getByRole('heading', { name: 'Emergency savings' })).toBeVisible();
     expect(within(cards[0]).getByText('9,000 EUR')).toBeVisible();
     expect(within(cards[0]).getByText('60% of target')).toBeVisible();
+    const savingsProgress = within(cards[0]).getByRole('progressbar', { name: '60% of target' });
+    expect(savingsProgress).toHaveAttribute('aria-valuemin', '0');
+    expect(savingsProgress).toHaveAttribute('aria-valuemax', '100');
+    expect(savingsProgress).toHaveAttribute('aria-valuenow', '60');
     expect(within(cards[1]).getByText('75% used')).toBeVisible();
+    expect(within(cards[1]).getByRole('progressbar', { name: '75% used' })).toHaveAttribute(
+      'aria-valuenow',
+      '75',
+    );
     expect(within(cards[1]).getByText('Forecast to exceed the limit this month.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Edit Emergency savings' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Delete Emergency savings' })).toBeVisible();
@@ -138,9 +146,36 @@ describe('GoalsScreen', () => {
 
     expect(await screen.findByRole('heading', { name: 'Emergency savings' })).toBeVisible();
     expect(screen.getByText('Account unavailable')).toBeVisible();
+    expect(screen.getByRole('progressbar', { name: 'Account unavailable' })).not.toHaveAttribute(
+      'aria-valuenow',
+    );
     expect(screen.getByText(/Edit this goal/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Edit Emergency savings' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Delete Emergency savings' })).toBeEnabled();
+  });
+
+  it('gives an unavailable debt goal a recovery action the editor can perform', async () => {
+    const unavailableDebt: GoalSummary = {
+      ...SAVINGS_GOAL,
+      id: 'goal-debt',
+      type: 'debt-payoff',
+      name: 'Card balance',
+      progress: {
+        ...SAVINGS_GOAL.progress,
+        current: null,
+        remaining: null,
+        overBy: null,
+        percentage: null,
+        status: 'account-unavailable',
+      },
+    };
+    mockFetch({ 'GET /api/goals': () => ok({ goals: [unavailableDebt] }) });
+    renderThemed(<GoalsScreen />);
+
+    expect(
+      await screen.findByText('The debt account was removed. Create a new goal to track another debt.'),
+    ).toBeVisible();
+    expect(screen.queryByText(/Edit this goal/)).not.toBeInTheDocument();
   });
 
   it('keeps the confirmation open with the server error when delete fails', async () => {
