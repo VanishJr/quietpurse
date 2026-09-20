@@ -53,22 +53,22 @@ import {
   previewCategoryRule,
   type ImportDocumentInfo,
   INCOME_SOURCE_LABEL_MAX,
+  listGoals,
   listIncomeSources,
+  replaceGoal,
   resetBaseAmounts,
   upsertIncomeSource,
   listAccounts,
-  baselineTotal,
   createAccount,
-  deleteBaselineItem,
-  listBaselineItems,
-  listBudgets,
+  createGoal,
+  deleteGoal,
+  GoalWriteError,
   listCategoryRules,
   listRecurringGroups,
   listTransactions,
   listTransferRules,
   listCharts,
   replaceCharts,
-  setBudget,
   setCategoryOverride,
   setIncomeSourceOverride,
   setOneOff,
@@ -80,7 +80,6 @@ import {
   summaryMonthlyTotals,
   summaryTotals,
   updateAccount,
-  upsertBaselineItem,
 } from './db';
 import {
   DOCUMENT_DELETE_REFUSED,
@@ -91,17 +90,19 @@ import {
   getDocument,
 } from './documents';
 import { backfillBaseAmounts } from './fxrates';
-import { computeIndependence } from './independence';
+import { getGoalProgress, listGoalProgress } from './goals';
 import { causeChain, logHttp, logImport, logger, reasonFirst } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
 import { type StatementDestination, importStatement } from './providers/statement';
 import { getAppSettings, parseAppSettingsPatch, updateAppSettings } from './appsettings';
-import { getSettings, updateSettings } from './settings';
 import { Account, AccountMonthlySummary, AccountSummary, MonthlySummary, Summary } from './types';
 import {
   ANSWERS,
   type AnswerBody,
   type Declared,
+  GOALS_MAX,
+  goalCreateSchema,
+  type GoalCreate,
   INCOME_SOURCE_KINDS,
   type JsonRoute,
   refusalSchema,
@@ -1098,18 +1099,111 @@ app.post('/api/recurring/ignore', async (req, res) => {
   answer(res, 'POST /api/recurring/ignore', await recurringPayload());
 });
 
-app.get('/api/independence', async (_req, res) => {
-  answer(res, 'GET /api/independence', await computeIndependence());
+const parseGoalBody = (
+  body: Record<string, unknown>,
+  res: express.Response,
+): GoalCreate | undefined => {
+  const parsed = goalCreateSchema.safeParse(body);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  const at = issue?.path.length ? `${issue.path.join('.')}: ` : '';
+  res.status(400).json({ error: `${at}${issue?.message ?? 'invalid goal'}` });
+  return undefined;
+};
+
+const goalConstraint = (error: unknown): string | undefined => {
+  let current = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const value = current as { constraint?: unknown; cause?: unknown };
+    if (typeof value.constraint === 'string') return value.constraint;
+    current = value.cause;
+  }
+  return undefined;
+};
+
+const answerGoalWriteError = (error: unknown, res: express.Response): boolean => {
+  if (error instanceof GoalWriteError) {
+    const conflict = new Set([
+      'account-unavailable',
+      'currency-mismatch',
+      'debt-account-immutable',
+      'duplicate-category',
+      'not-debt',
+      'target-debt-invalid',
+    ]).has(error.code);
+    res.status(conflict ? 409 : 400).json({ error: error.message });
+    return true;
+  }
+  if (goalConstraint(error) === 'category_spending_goals_category_unique') {
+    res.status(409).json({ error: 'a category spending limit already tracks this category' });
+    return true;
+  }
+  return false;
+};
+
+app.get('/api/goals', async (_req, res) => {
+  answer(res, 'GET /api/goals', await listGoalProgress());
 });
 
-app.get('/api/settings', async (_req, res) => {
-  answer(res, 'GET /api/settings', await getSettings());
-});
-
-app.patch('/api/settings', async (req, res) => {
-  const body = jsonBody(req, res);
+app.post('/api/goals', async (req, res) => {
+  const raw = jsonBody(req, res);
+  if (!raw) return;
+  const body = parseGoalBody(raw, res);
   if (!body) return;
-  answer(res, 'PATCH /api/settings', await updateSettings(body));
+  if ((await listGoals()).length >= GOALS_MAX) {
+    res.status(409).json({ error: `at most ${GOALS_MAX} goals can be saved` });
+    return;
+  }
+  try {
+    const created = await createGoal(body);
+    const detail = await getGoalProgress(created.id);
+    if (!detail) throw new Error(`created goal ${created.id} could not be read back`);
+    answer(res, 'POST /api/goals', detail);
+  } catch (error) {
+    if (!answerGoalWriteError(error, res)) throw error;
+  }
+});
+
+app.get('/api/goals/:id', async (req, res) => {
+  const detail = await getGoalProgress(req.params.id);
+  if (!detail) {
+    res.status(404).json({ error: 'goal not found' });
+    return;
+  }
+  answer(res, 'GET /api/goals/:id', detail);
+});
+
+app.put('/api/goals/:id', async (req, res) => {
+  const raw = jsonBody(req, res);
+  if (!raw) return;
+  const body = parseGoalBody(raw, res);
+  if (!body) return;
+  try {
+    const written = await replaceGoal(req.params.id, body);
+    if (!written.ok) {
+      if (written.reason === 'not-found') {
+        res.status(404).json({ error: 'goal not found' });
+      } else {
+        res.status(409).json({ error: 'a goal type cannot be changed' });
+      }
+      return;
+    }
+    const detail = await getGoalProgress(req.params.id);
+    if (!detail) throw new Error(`updated goal ${req.params.id} could not be read back`);
+    answer(res, 'PUT /api/goals/:id', detail);
+  } catch (error) {
+    if (!answerGoalWriteError(error, res)) throw error;
+  }
+});
+
+app.delete('/api/goals/:id', async (req, res) => {
+  if (!(await deleteGoal(req.params.id))) {
+    res.status(404).json({ error: 'goal not found' });
+    return;
+  }
+  answer(res, 'DELETE /api/goals/:id', { deleted: true, id: req.params.id });
 });
 
 app.get('/api/app-settings', async (_req, res) => {
@@ -1134,39 +1228,6 @@ app.patch('/api/app-settings', async (req, res) => {
   }
   if (ownerNamesChanged) await reclassifyAll();
   answer(res, 'PATCH /api/app-settings', settings);
-});
-
-const baselinePayload = async () => ({
-  baseCurrency: await currentBaseCurrency(),
-  items: await listBaselineItems(),
-  total: await baselineTotal(),
-});
-
-app.get('/api/baseline', async (_req, res) => {
-  answer(res, 'GET /api/baseline', await baselinePayload());
-});
-
-/** monthly: null deletes the line item. */
-app.put('/api/baseline', async (req, res) => {
-  const body = jsonBody(req, res);
-  if (!body) return;
-  const label = typeof body.label === 'string' ? body.label.trim() : '';
-  if (!label) {
-    res.status(400).json({ error: 'label: non-empty string' });
-    return;
-  }
-  if (body.monthly === null) {
-    await deleteBaselineItem(label);
-    answer(res, 'PUT /api/baseline', await baselinePayload());
-    return;
-  }
-  if (typeof body.monthly !== 'number' || !Number.isFinite(body.monthly) || body.monthly <= 0) {
-    res.status(400).json({ error: 'monthly: a positive number or null' });
-    return;
-  }
-  // sort not provided - keep the previous one (editing an amount sends only monthly)
-  await upsertBaselineItem(label, body.monthly, typeof body.sort === 'number' ? body.sort : undefined);
-  answer(res, 'PUT /api/baseline', await baselinePayload());
 });
 
 app.get('/api/category-rules', async (_req, res) => {
@@ -1239,47 +1300,6 @@ app.delete('/api/category-rules/:id', async (req, res) => {
   }
   await reclassifyAll();
   answer(res, 'DELETE /api/category-rules/:id', { deleted: true });
-});
-
-app.get('/api/budgets', async (_req, res) => {
-  const now = new Date();
-  const from = `${now.toISOString().slice(0, 7)}-01T00:00:00.000Z`;
-  const to = now.toISOString();
-  const spent = new Map(
-    (await summaryByCategory({ kind: 'all' }, from, to)).map((c) => [c.category, c.total]),
-  );
-  const dayOfMonth = now.getUTCDate();
-  const daysInMonth = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  answer(res, 'GET /api/budgets', {
-    baseCurrency: await currentBaseCurrency(),
-    budgets: (await listBudgets()).map((b) => {
-      const s = spent.get(b.category) ?? 0;
-      return {
-        ...b,
-        spent: s,
-        forecast: Math.round(((s / dayOfMonth) * daysInMonth) * 100) / 100,
-      };
-    }),
-  });
-});
-
-/** monthly: null removes the budget from the category. */
-app.put('/api/budgets', async (req, res) => {
-  const body = jsonBody(req, res);
-  if (!body) return;
-  const category = typeof body.category === 'string' ? body.category : '';
-  if (!(CATEGORIES as readonly string[]).includes(category)) {
-    res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
-    return;
-  }
-  if (body.monthly !== null && (typeof body.monthly !== 'number' || body.monthly <= 0)) {
-    res.status(400).json({ error: 'monthly: a positive number or null' });
-    return;
-  }
-  await setBudget(category, body.monthly as number | null);
-  answer(res, 'PUT /api/budgets', { budgets: await listBudgets() });
 });
 
 app.get('/api/export.csv', async (req, res) => {

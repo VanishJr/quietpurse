@@ -37,8 +37,6 @@ import {
   TransferRule,
 } from '../types';
 import {
-  type BaselineItem,
-  type Budget,
   CHART_METRICS,
   type CategoryRule,
   type CategoryRuleCounts,
@@ -83,8 +81,6 @@ export {
   ERROR_DETAIL_MAX,
 } from '../wire';
 export type {
-  BaselineItem,
-  Budget,
   CategoryRule,
   Chart,
   ChartBreakdown,
@@ -2630,25 +2626,6 @@ export async function countCategoryRuleMatches(pattern: string): Promise<Categor
   return { matches: matched.length, overridden: matched.filter((r) => r.category_manual !== null).length };
 }
 
-export async function listBudgets(): Promise<Budget[]> {
-  const rows = await rowsOf<{ category: string; monthly_cents: number }>(
-    sql`SELECT category, monthly_cents FROM budgets ORDER BY monthly_cents DESC`,
-  );
-  return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthly_cents) }));
-}
-
-export async function setBudget(category: string, monthly: number | null): Promise<void> {
-  if (monthly === null) {
-    await getDb().execute(sql`DELETE FROM budgets WHERE category = ${category}`);
-  } else {
-    await getDb().execute(sql`
-      INSERT INTO budgets (category, monthly_cents)
-      VALUES (${category}, ${toCents(monthly)})
-      ON CONFLICT (category) DO UPDATE SET monthly_cents = EXCLUDED.monthly_cents
-    `);
-  }
-}
-
 export type ChartsWrite =
   | { ok: true; version: number; charts: Chart[] }
   | { ok: false; reason: 'stale'; version: number; charts: Chart[] };
@@ -3413,90 +3390,7 @@ export async function deleteGoal(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-type BaselineItemRow = typeof s.baselineItems.$inferSelect;
-
-const rowToBaselineItem = (r: BaselineItemRow): BaselineItem => ({
-  id: r.id,
-  label: r.label,
-  monthly: fromCents(r.monthlyCents),
-  sort: r.sort,
-});
-
 const LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID = '00000000-0000-4000-8000-000000000001';
-
-export async function listBaselineItems(
-  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
-): Promise<BaselineItem[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.baselineItems)
-    .where(eq(s.baselineItems.goalId, goalId))
-    .orderBy(s.baselineItems.sort, sql`${s.baselineItems.monthlyCents} DESC`);
-  return rows.map(rowToBaselineItem);
-}
-
-/**
- * The key is the label: a line item is created and edited by its own name.
- * sort is optional: editing an amount from the app sends only monthly, and it must
- * not clobber the item's position - the list would jump under your finger. A new
- * item without sort goes to the end.
- */
-export async function upsertBaselineItem(
-  label: string,
-  monthly: number,
-  sort?: number,
-  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
-): Promise<BaselineItem> {
-  const existing = (
-    await getDb()
-      .select()
-      .from(s.baselineItems)
-      .where(and(eq(s.baselineItems.goalId, goalId), eq(s.baselineItems.label, label)))
-  )[0];
-  const nextSort =
-    sort ??
-    existing?.sort ??
-    Number(
-      (
-        await rowsOf<{ m: number }>(
-          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items WHERE goal_id = ${goalId}`,
-        )
-      )[0].m,
-    ) + 1;
-  const monthlyCents = toCents(monthly);
-  const rows = await getDb()
-    .insert(s.baselineItems)
-    .values({ goalId, label, monthlyCents, sort: nextSort })
-    .onConflictDoUpdate({
-      target: [s.baselineItems.goalId, s.baselineItems.label],
-      set: { monthlyCents, sort: nextSort },
-    })
-    .returning();
-  return rowToBaselineItem(rows[0]);
-}
-
-export async function deleteBaselineItem(
-  label: string,
-  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
-): Promise<boolean> {
-  const rows = await getDb()
-    .delete(s.baselineItems)
-    .where(
-      and(eq(s.baselineItems.goalId, goalId), eq(s.baselineItems.label, label)),
-    )
-    .returning({ id: s.baselineItems.id });
-  return rows.length > 0;
-}
-
-export async function baselineTotal(
-  goalId = LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
-): Promise<number> {
-  const rows = await rowsOf<{ total_cents: string }>(
-    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents
-        FROM baseline_items WHERE goal_id = ${goalId}`,
-  );
-  return fromCents(Number(rows[0].total_cents));
-}
 
 export interface BackupData {
   format: 'finto-backup';

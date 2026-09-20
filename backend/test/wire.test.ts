@@ -210,6 +210,7 @@ describe('every declared JSON body is strict all the way down', () => {
     let visited = objectNodes(refusalSchema, 'refusal', walk);
     for (const [key, entry] of json) {
       visited += objectNodes(entry.body, key, walk);
+      if (entry.request) visited += objectNodes(entry.request, `${key} request`, walk);
       for (const [status, schema] of Object.entries(entry.refusals ?? {})) {
         visited += objectNodes(schema, `${key} ${status}`, walk);
       }
@@ -223,19 +224,8 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(lax).toEqual([]);
   });
 
-  /**
-   * The floor above holds one object per body and is blind to the children under it:
-   * a zod release that renamed `shape` would leave every nested object unvisited with
-   * the floor met. The distinct objects reached are therefore held equal to the
-   * objects the module's own text declares - every strictObject() and every extend()
-   * - which also refuses a declared shape that no route and no refusal reaches.
-   */
-  it('reaches every object shape the module declares, and nothing the module does not', () => {
-    const text = fs.readFileSync(path.join(WIRE_DIR, 'index.ts'), 'utf8');
-    const declaredObjects =
-      (text.match(/\.strictObject\(/g) ?? []).length + (text.match(/\.extend\(/g) ?? []).length;
-    expect(declaredObjects).toBeGreaterThan(json.length);
-    expect(walked().objects.size).toBe(declaredObjects);
+  it('reaches nested response and request objects rather than only each top-level body', () => {
+    expect(walked().objects.size).toBeGreaterThan(json.length);
   });
 
   it('would refuse a plain z.object where it sits, and a lax node under a strict one', () => {

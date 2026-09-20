@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  goalCreateSchema,
+  goalDeletedSchema,
+  goalDetailSchema,
+  goalListSchema,
+  goalUpdateSchema,
+} from './goals';
 
 export * from './goals';
 
@@ -19,8 +26,6 @@ export const IMPORT_STATUSES = [
 ] as const;
 /** Kind of source: own = your own earnings, external = help from outside. */
 export const INCOME_SOURCE_KINDS = ['own', 'external'] as const;
-/** The two modes are derived in full in independence.ts's header. */
-export const GOAL_MODES = ['baseline', 'lifestyle'] as const;
 /**
  * Why no opening/closing pair is shown for a file that DOES state a running balance.
  * Absent together with `balances` means the format states none, and the two must not
@@ -65,8 +70,6 @@ export const importStatusSchema = z.enum(IMPORT_STATUSES);
 export type ImportStatus = z.infer<typeof importStatusSchema>;
 export const incomeSourceKindSchema = z.enum(INCOME_SOURCE_KINDS);
 export type IncomeSourceKind = z.infer<typeof incomeSourceKindSchema>;
-export const goalModeSchema = z.enum(GOAL_MODES);
-export type GoalMode = z.infer<typeof goalModeSchema>;
 export const balancesNotShownSchema = z.enum(BALANCES_NOT_SHOWN);
 export type BalancesNotShown = z.infer<typeof balancesNotShownSchema>;
 
@@ -324,40 +327,12 @@ export const recurringSummarySchema = z.strictObject({
 });
 export type RecurringSummary = z.infer<typeof recurringSummarySchema>;
 
-export const settingsSchema = z.strictObject({
-  /** buffer on top of the minimum/spending, % (threshold = base * (1 + bufferPct/100)) */
-  bufferPct: z.number(),
-  /** averaging window for spending/income, in whole calendar months */
-  windowMonths: z.number(),
-  /** net hourly rate for side work in the base currency; null = not set */
-  hourlyRate: z.number().nullable(),
-  /** how many hours a week the user works - the cap when converting to hours */
-  hoursCapPerWeek: z.number(),
-  goalMode: goalModeSchema,
-});
-export type Settings = z.infer<typeof settingsSchema>;
-
 export const appSettingsSchema = z.strictObject({
   /** base currency of all totals; changing it requires recomputing base_amount */
   baseCurrency: z.string(),
   ownerNames: z.array(z.string()),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
-
-export const baselineItemSchema = z.strictObject({
-  id: z.number(),
-  label: z.string(),
-  monthly: z.number(),
-  sort: z.number(),
-});
-export type BaselineItem = z.infer<typeof baselineItemSchema>;
-
-export const baselineResponseSchema = z.strictObject({
-  baseCurrency: z.string(),
-  items: z.array(baselineItemSchema),
-  total: z.number(),
-});
-export type BaselineResponse = z.infer<typeof baselineResponseSchema>;
 
 export const categoryRuleSchema = z.strictObject({
   id: z.number(),
@@ -388,89 +363,6 @@ export const categoryRulePreviewSchema = z.strictObject({
   previewToken: z.string(),
 });
 export type CategoryRulePreview = z.infer<typeof categoryRulePreviewSchema>;
-
-export const budgetSchema = z.strictObject({
-  category: z.string(),
-  monthly: z.number(),
-});
-export type Budget = z.infer<typeof budgetSchema>;
-
-export const budgetProgressSchema = budgetSchema.extend({
-  spent: z.number(),
-  forecast: z.number(),
-});
-export type BudgetProgress = z.infer<typeof budgetProgressSchema>;
-
-export const budgetsResponseSchema = z.strictObject({
-  baseCurrency: z.string(),
-  budgets: z.array(budgetProgressSchema),
-});
-export type BudgetsResponse = z.infer<typeof budgetsResponseSchema>;
-
-export const budgetsWrittenSchema = z.strictObject({
-  budgets: z.array(budgetSchema),
-});
-export type BudgetsWritten = z.infer<typeof budgetsWrittenSchema>;
-
-export const independenceMonthSchema = z.strictObject({
-  /** YYYY-MM */
-  month: z.string(),
-  /** the month's spending without one-offs, plus the one-off amortization */
-  spend: z.number(),
-  ownIncome: z.number(),
-  external: z.number(),
-});
-export type IndependenceMonth = z.infer<typeof independenceMonthSchema>;
-
-export const independenceSchema = z.strictObject({
-  baseCurrency: z.string(),
-  settings: settingsSchema,
-  /** [from, to] of the averaging window (whole months) */
-  from: z.string(),
-  to: z.string(),
-  /** median monthly spending over the window (one-offs amortized) */
-  avgSpend: z.number(),
-  /** one-off amortization: the sum of one_off over 12 months / 12 */
-  oneOffMonthly: z.number(),
-  /** average own income (kind = own) over the window */
-  ownIncomeAvg: z.number(),
-  /** average help from external sources (kind = external) over the window */
-  externalAvg: z.number(),
-  /** the sum of the baseline minimum line items (before the buffer) */
-  baselineSum: z.number(),
-  baselineItems: z.array(baselineItemSchema),
-  baselineThreshold: z.number(),
-  lifestyleThreshold: z.number(),
-  /**
-   * the mode the figures below were actually computed in, against settings.goalMode
-   * which is the mode that was asked for - the two differ when the fallback fires
-   */
-  effectiveMode: goalModeSchema,
-  /** the active threshold: baselineThreshold or lifestyleThreshold per effectiveMode */
-  threshold: z.number(),
-  /** threshold minus own income (never negative) */
-  deficit: z.number(),
-  /** own income / the active mode's base */
-  selfSufficiency: z.number(),
-  months: z.array(independenceMonthSchema),
-  /** what the threshold is made of: average monthly spending by category */
-  byCategory: z.array(categorySummarySchema),
-  /** the shortfall expressed in side-work hours; null if no rate is set */
-  hours: z
-    .strictObject({
-      hourlyRate: z.number(),
-      /** how many MORE hours a month are needed to close the shortfall */
-      extraHoursPerMonth: z.number(),
-      /** how many hours a month the whole threshold would cost */
-      totalHoursPerMonth: z.number(),
-      /** the monthly hours ceiling from hoursCapPerWeek */
-      capPerMonth: z.number(),
-      /** the threshold doesn't fit under the ceiling - side work alone won't do it */
-      capExceeded: z.boolean(),
-    })
-    .nullable(),
-});
-export type Independence = z.infer<typeof independenceSchema>;
 
 export const importPresetsSchema = z.strictObject({
   presets: z.array(z.strictObject({ key: z.string(), title: z.string() })),
@@ -657,6 +549,7 @@ export type Declared =
       kind: 'json';
       status: 200 | 201;
       body: z.ZodType;
+      request?: z.ZodType;
       refusals?: Readonly<Record<number, z.ZodType>>;
     }
   | { kind: 'not-json'; content: string }
@@ -696,19 +589,17 @@ export const ANSWERS = {
   'DELETE /api/income-sources/:id': json(deletedSchema),
   'GET /api/recurring': json(recurringSummarySchema),
   'POST /api/recurring/ignore': json(recurringSummarySchema),
-  'GET /api/independence': json(independenceSchema),
-  'GET /api/settings': json(settingsSchema),
-  'PATCH /api/settings': json(settingsSchema),
+  'GET /api/goals': json(goalListSchema),
+  'POST /api/goals': { ...json(goalDetailSchema, 201), request: goalCreateSchema },
+  'GET /api/goals/:id': json(goalDetailSchema),
+  'PUT /api/goals/:id': { ...json(goalDetailSchema), request: goalUpdateSchema },
+  'DELETE /api/goals/:id': json(goalDeletedSchema),
   'GET /api/app-settings': json(appSettingsSchema),
   'PATCH /api/app-settings': json(appSettingsSchema),
-  'GET /api/baseline': json(baselineResponseSchema),
-  'PUT /api/baseline': json(baselineResponseSchema),
   'GET /api/category-rules': json(z.array(categoryRuleWithCountsSchema)),
   'POST /api/category-rules/preview': json(categoryRulePreviewSchema),
   'POST /api/category-rules': json(categoryRuleCreatedSchema),
   'DELETE /api/category-rules/:id': json(deletedSchema),
-  'GET /api/budgets': json(budgetsResponseSchema),
-  'PUT /api/budgets': json(budgetsWrittenSchema),
   'GET /api/export.csv': { kind: 'not-json', content: 'text/csv' },
   'GET /api/imports/presets': json(importPresetsSchema),
   'POST /api/imports': json(statementImportResultSchema),

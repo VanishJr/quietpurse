@@ -24,6 +24,7 @@ export const GOAL_STATUSES = [
 ] as const;
 export const GOAL_PERIODS = ['current-month', 'complete-months', 'current-balances'] as const;
 
+export const GOALS_MAX = 100;
 export const GOAL_NAME_MAX = 120;
 export const GOAL_ACCOUNT_MAX = 20;
 export const GOAL_WINDOW_MAX = 24;
