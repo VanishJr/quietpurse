@@ -326,7 +326,7 @@ const AUTO_FOOD = 10;
 const OVERRIDDEN_INCOME = 150;
 const FOOD_BUDGET = 500;
 const PAST_RENT = 400;
-/** Three whole months of rent, so the detector fires and independence can see them. */
+/** Whole months behind today, so the recurring detector can see them. */
 const PAST_MONTHS = 3;
 
 const statement = Buffer.from(

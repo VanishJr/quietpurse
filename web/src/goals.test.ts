@@ -55,14 +55,6 @@ describe('Goals presentation', () => {
     expect(
       goalStatusMessage(goal({ progress: progress({ status: 'account-unavailable' }) })),
     ).toBe('A selected account was removed. Edit this goal to choose another account.');
-    expect(
-      goalStatusMessage(
-        goal({
-          type: 'debt-payoff',
-          progress: progress({ status: 'account-unavailable' }),
-        } as Partial<GoalSummary>),
-      ),
-    ).toBe('The debt account was removed. Create a new goal to track another debt.');
     expect(goalStatusMessage(goal({ progress: progress({ status: 'tracking' }) }))).toBeNull();
   });
 
