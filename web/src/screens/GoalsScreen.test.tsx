@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { SAVINGS_GOAL } from '../test/fixtures';
+import { ACCOUNTS, APP_SETTINGS, SAVINGS_GOAL } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests } from '../test/harness';
 import type { GoalSummary } from '../types';
 import { GoalsScreen } from './GoalsScreen';
@@ -57,7 +57,11 @@ describe('GoalsScreen', () => {
   });
 
   it('renders the dedicated empty state and writes the create location', async () => {
-    mockFetch({ 'GET /api/goals': () => ok({ goals: [] }) });
+    mockFetch({
+      'GET /api/goals': () => ok({ goals: [] }),
+      'GET /api/accounts': () => ok(ACCOUNTS),
+      'GET /api/app-settings': () => ok(APP_SETTINGS),
+    });
     renderThemed(<GoalsScreen />);
 
     expect(await screen.findByText('No goals yet.')).toBeVisible();

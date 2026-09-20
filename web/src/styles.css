@@ -2544,7 +2544,92 @@ textarea {
   margin-top: 20px;
 }
 
+.goal-editor {
+  max-height: min(80vh, 760px);
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.goal-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.goal-type-tile {
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+  background: var(--ink-surface);
+  color: var(--ink-primary);
+  text-align: left;
+}
+
+.goal-type-tile:hover,
+.goal-type-tile:focus-visible {
+  border-color: var(--ink-accent);
+}
+
+.goal-type-tile strong,
+.goal-type-tile span {
+  display: block;
+}
+
+.goal-type-tile span,
+.goal-currency,
+.goal-account-list p {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.goal-editor form,
+.goal-costs,
+.goal-account-list {
+  display: grid;
+  gap: 12px;
+}
+
+.goal-editor form {
+  margin-top: 14px;
+}
+
+.goal-costs,
+.goal-account-list {
+  padding: 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+}
+
+.goal-cost-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(100px, 0.8fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.goal-account-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
 @media (max-width: 599px) {
+  .goal-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-cost-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-actions {
+    flex-wrap: wrap;
+  }
+
   .goal-card {
     padding: 16px;
   }

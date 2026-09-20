@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { GoalCard } from '../components/GoalCard';
+import { GoalEditor } from '../components/GoalEditor';
 import { Sheet } from '../components/Sheet';
 import type { GoalSummary } from '../types';
 import { setUrl, useUrl } from '../url';
@@ -99,6 +100,15 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
           ))}
         </div>
       )}
+
+      <GoalEditor
+        goalId={url.goal}
+        onClose={() => setUrl({ goal: null }, 'replace')}
+        onSaved={() => {
+          setUrl({ goal: null }, 'replace');
+          void load();
+        }}
+      />
 
       <Sheet
         open={deleteTarget !== null}
