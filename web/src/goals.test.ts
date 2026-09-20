@@ -48,13 +48,13 @@ describe('Goals presentation', () => {
     expect(remainingLabel(progress({ remaining: 0, overBy: 50 }))).toBe('Over by');
   });
 
-  it('maps actionable statuses to concise recovery text', () => {
-    expect(goalStatusMessage(goal({ progress: progress({ status: 'needs-setup' }) }))).toContain(
-      'Add essential costs',
+  it('maps actionable statuses to accurate complete recovery text', () => {
+    expect(goalStatusMessage(goal({ progress: progress({ status: 'needs-setup' }) }))).toBe(
+      'Add essential costs to calculate progress.',
     );
     expect(
       goalStatusMessage(goal({ progress: progress({ status: 'account-unavailable' }) })),
-    ).toContain('Edit this goal');
+    ).toBe('A selected account was removed. Edit this goal to choose another account.');
     expect(
       goalStatusMessage(
         goal({
@@ -62,7 +62,24 @@ describe('Goals presentation', () => {
           progress: progress({ status: 'account-unavailable' }),
         } as Partial<GoalSummary>),
       ),
-    ).toContain('Create a new goal');
+    ).toBe('The debt account was removed. Create a new goal to track another debt.');
     expect(goalStatusMessage(goal({ progress: progress({ status: 'tracking' }) }))).toBeNull();
+  });
+
+  it('does not prescribe another import when existing data may be unconverted', () => {
+    const unconverted = goal({
+      source: '6 complete months · Earnings',
+      progress: progress({
+        status: 'not-enough-data',
+        current: null,
+        remaining: null,
+        overBy: null,
+        percentage: null,
+      }),
+    });
+
+    expect(goalStatusMessage(unconverted)).toBe(
+      'There isn’t enough usable data in the selected period to calculate progress.',
+    );
   });
 });

@@ -94,8 +94,12 @@ the target, current value, remainder, status, percentage semantics and source li
 goal. The list may format money and choose copy from closed dictionaries, but it may not derive a
 fallback basis, progress, forecast, work-hours result or account total. Required monthly work
 hours, configured monthly capacity and whether that capacity is exceeded all arrive from the server.
-Editing reads the complete configuration from `/api/goals/:id`; the goal type is fixed after creation, and Financial
-independence costs are replaced atomically with that configuration.
+Goal-unit and progress-semantic formatters are exhaustive switches, so a wider server vocabulary is
+a type error rather than plausible fallback copy. Status guidance names an action only when the
+status has one cause: `needs-setup` can name essential costs, while `not-enough-data` stays neutral
+because it can mean missing history or an unconverted row. Editing reads the complete configuration
+from `/api/goals/:id`; the goal type is fixed after creation, and Financial independence costs are
+replaced atomically with that configuration.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
