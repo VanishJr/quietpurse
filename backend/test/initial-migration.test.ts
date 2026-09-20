@@ -40,7 +40,7 @@ describe('0000_initial', () => {
     ]);
   });
 
-  it('creates the current normalized schema without legacy data', async () => {
+  it('creates the current normalized schema without a legacy upgrade phase', async () => {
     const client = new PGlite();
     try {
       const db = drizzle(client);
@@ -62,11 +62,19 @@ describe('0000_initial', () => {
       const budgets = await db.execute<{ name: string | null }>(
         sql`SELECT to_regclass('budgets')::text AS name`,
       );
+      const baselineGoal = await db.execute<{ is_nullable: string }>(sql`
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'baseline_items'
+          AND column_name = 'goal_id'
+      `);
 
       expect(tables.rows.map((row) => row.tablename)).toEqual([...goalTables].sort());
       expect(goals.rows[0].count).toBe(0);
       expect(baseline.rows[0].count).toBe(0);
       expect(budgets.rows[0].name).toBeNull();
+      expect(baselineGoal.rows).toEqual([{ is_nullable: 'NO' }]);
     } finally {
       await client.close();
     }
