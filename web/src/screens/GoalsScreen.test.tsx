@@ -50,8 +50,9 @@ const categoryGoal: GoalSummary = {
 describe('GoalsScreen', () => {
   it('keeps the heading visible and New goal disabled while the list is unresolved', () => {
     mockFetch({ 'GET /api/goals': () => new Promise<Response>(() => {}) });
-    renderThemed(<GoalsScreen />);
+    const { container } = renderThemed(<GoalsScreen />);
 
+    expect(container.querySelector('section.screen-inner')).not.toBeNull();
     expect(screen.getByRole('heading', { name: 'Goals' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'New goal' })).toBeDisabled();
     expect(screen.getByText('Loading goals…')).toBeVisible();
@@ -103,6 +104,10 @@ describe('GoalsScreen', () => {
     expect(within(cards[0]).getByText('60% of target')).toBeVisible();
     expect(within(cards[1]).getByText('75% used')).toBeVisible();
     expect(within(cards[1]).getByText('Forecast to exceed the limit this month.')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Edit Emergency savings' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete Emergency savings' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Edit Food limit' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete Food limit' })).toBeVisible();
   });
 
   it('renders the server-computed work-hours capacity without deriving it', async () => {
@@ -134,8 +139,8 @@ describe('GoalsScreen', () => {
     expect(await screen.findByRole('heading', { name: 'Emergency savings' })).toBeVisible();
     expect(screen.getByText('Account unavailable')).toBeVisible();
     expect(screen.getByText(/Edit this goal/)).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Edit' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Edit Emergency savings' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Delete Emergency savings' })).toBeEnabled();
   });
 
   it('keeps the confirmation open with the server error when delete fails', async () => {
@@ -145,7 +150,7 @@ describe('GoalsScreen', () => {
     });
     renderThemed(<GoalsScreen />);
     await screen.findByRole('heading', { name: 'Emergency savings' });
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Emergency savings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete goal' }));
 
     expect(await screen.findByText('database busy')).toBeVisible();
@@ -161,7 +166,7 @@ describe('GoalsScreen', () => {
     });
     renderThemed(<GoalsScreen />);
     await screen.findByRole('heading', { name: 'Emergency savings' });
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Emergency savings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete goal' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());

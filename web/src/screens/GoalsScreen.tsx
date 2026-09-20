@@ -49,7 +49,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   };
 
   return (
-    <section>
+    <section className="screen-inner">
       <header className="header goals-header">
         <div>
           <h1>Goals</h1>

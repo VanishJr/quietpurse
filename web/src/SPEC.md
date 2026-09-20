@@ -99,7 +99,9 @@ a type error rather than plausible fallback copy. Status guidance names an actio
 status has one cause: `needs-setup` can name essential costs, while `not-enough-data` stays neutral
 because it can mean missing history or an unconverted row. Editing reads the complete configuration
 from `/api/goals/:id`; the goal type is fixed after creation, and Financial independence costs are
-replaced atomically with that configuration.
+replaced atomically with that configuration. The screen uses the shared `screen-inner` gutter at
+its root, and each card's Edit and Delete controls include the goal name in their accessible name,
+so narrow layouts and assistive action lists keep the card context.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A

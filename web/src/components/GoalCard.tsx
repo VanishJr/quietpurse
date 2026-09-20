@@ -31,10 +31,20 @@ export function GoalCard({ goal, busy = false, onEdit, onDelete }: Props) {
           {category && <p className="goal-card-kind">{category}</p>}
         </div>
         <div className="goal-card-actions">
-          <button className="btn btn-small btn-ghost" disabled={busy} onClick={() => onEdit(goal)}>
+          <button
+            className="btn btn-small btn-ghost"
+            aria-label={`Edit ${goal.name}`}
+            disabled={busy}
+            onClick={() => onEdit(goal)}
+          >
             Edit
           </button>
-          <button className="btn btn-small btn-ghost" disabled={busy} onClick={() => onDelete(goal)}>
+          <button
+            className="btn btn-small btn-ghost"
+            aria-label={`Delete ${goal.name}`}
+            disabled={busy}
+            onClick={() => onDelete(goal)}
+          >
             Delete
           </button>
         </div>
