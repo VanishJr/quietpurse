@@ -4,7 +4,7 @@
  *
  * Driven through supertest, because what is worth asserting here
  * is the wire: the status codes, the sentence each refusal composes, and the id the
- * route mints from a label the client never sees. Before Settings had a control for
+ * route mints from a label the client never sees. Before the Goal screen had a control for
  * them nothing in web/src called three of these four routes, so every refusal below was
  * unreachable and therefore unwritten; that control is what makes them a door.
  */

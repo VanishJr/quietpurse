@@ -2,7 +2,8 @@
  * Hiding a recurring group over HTTP. The detector and the data
  * layer's hide are held in db.test.ts; what is worth asserting here is the payload
  * the route answers with - the group still listed once hidden, and the monthly total
- * that stops counting it - because Settings renders that answer directly.
+ * that stops counting it - because the Goal screen reads that total and nothing on it
+ * says which groups went into it.
  *
  * The dates are built from today: the route reads a fixed window back from now, so
  * a literal year is green until it is not, for a reason nobody connects to this file.

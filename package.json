@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "A personal finance tracker that runs on your own machine: bank statements in, clear financial goals out",
+  "description": "A personal finance tracker that runs on your own machine: bank statements in, one self-sufficiency number out",
   "engines": {
     "node": ">=22.13"
   },

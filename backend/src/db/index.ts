@@ -193,7 +193,7 @@ export async function seedDefaults(): Promise<void> {
         id: 'family',
         // the id is data and stays; the label is what a stranger reads, and a
         // scholarship is not family. A database seeded earlier keeps its label - the
-        // insert ends onConflictDoNothing - and renames it through Settings.
+        // insert ends onConflictDoNothing - and renames it through the Goal screen.
         label: 'Support',
         kind: 'external',
         patterns: JSON.stringify(config.familyNames),

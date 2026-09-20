@@ -341,8 +341,10 @@ const statement = Buffer.from(
 );
 
 /**
- * Whole months, and behind us: GET /api/recurring needs the same description in
- * several of them. A fixture in the current month is invisible to that detector.
+ * Whole months, and behind us: GET /api/independence ends its window at the end of
+ * last month and GET /api/recurring needs the same description in three of them. A
+ * fixture in the current month is invisible to both, and an assertion over the empty
+ * payload that produces is green whether the sweep landed or not.
  */
 const pastStatement = Buffer.from(
   [
