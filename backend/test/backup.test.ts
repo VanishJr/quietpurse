@@ -365,6 +365,71 @@ describe('backup and restore (JSON)', () => {
     expect(oldSettings).toEqual([]);
   });
 
+  it('a sparse version-one restore preserves omitted tables but replaces the goal family', async () => {
+    await insertTransactions([tx('sparse restore survivor', -17)]);
+    await dbInstance().execute(sql`
+      INSERT INTO settings (key, value) VALUES ('sparse_restore_survivor', 'kept')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `);
+    const stamp = '2026-05-01T00:00:00.000Z';
+    await dbInstance().execute(sql`
+      INSERT INTO goals (id, type, name, target_date, created_at, updated_at)
+      VALUES ('sparse-stale-goal', 'monthly-income', 'Stale', NULL, ${stamp}, ${stamp})
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO monthly_income_goals
+        (goal_id, goal_type, target_monthly_cents, income_scope, window_months, base_currency)
+      VALUES ('sparse-stale-goal', 'monthly-income', 100000, 'own', 6, 'EUR')
+    `);
+
+    const restored = await restoreBackup(
+      parseBackup({
+        format: 'finto-backup',
+        version: 1,
+        tables: {
+          transfer_rules: [
+            {
+              id: 7,
+              description: 'Sparse legacy rule',
+              accountId: 'old',
+              createdAt: '2026-05-01',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(restored).toEqual({ tables: 1, rows: 1 });
+    expect((await listTransactions({ accountId: 'acc1' })).map((row) => row.description)).toContain(
+      'sparse restore survivor',
+    );
+    expect(
+      await queryRows<{ value: string }>(
+        sql`SELECT value FROM settings WHERE key = 'sparse_restore_survivor'`,
+      ),
+    ).toEqual([{ value: 'kept' }]);
+    expect(await queryRows(sql`SELECT id FROM goals WHERE id = 'sparse-stale-goal'`)).toEqual([]);
+  });
+
+  it('refuses malformed legacy rows and settings instead of dropping them during conversion', async () => {
+    const malformed: Array<[Record<string, unknown[]>, RegExp]> = [
+      [{ meta: [null] }, /meta: a row is not an object/],
+      [{ baseline_items: ['bad'] }, /baseline_items: a row is not an object/],
+      [{ meta: [{ key: 'settings', value: '{' }] }, /meta\.settings: invalid JSON/],
+      [
+        { meta: [{ key: 'settings', value: '{"windowMonths":"six"}' }] },
+        /meta\.settings\.windowMonths: expected a finite number/,
+      ],
+      [{ budgets: [{ category: 'food', monthlyCents: 0 }] }, /budgets: invalid category/],
+    ];
+
+    for (const [tables, message] of malformed) {
+      await expect(
+        restoreBackup(parseBackup({ format: 'finto-backup', version: 1, tables })),
+      ).rejects.toThrow(message);
+    }
+  });
+
   it('version two round-trips every goal subtype and its owned rows', async () => {
     await dbInstance().execute(sql`DELETE FROM goals`);
     const stamp = '2026-05-01T00:00:00.000Z';

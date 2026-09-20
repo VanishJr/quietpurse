@@ -3510,21 +3510,47 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
   for (const name of GOAL_BACKUP_TABLES) tables[name] = [];
 
   const records = (name: string): Record<string, unknown>[] =>
-    (data.tables[name] ?? []).filter(
-      (row): row is Record<string, unknown> =>
-        row !== null && typeof row === 'object' && !Array.isArray(row),
-    );
+    (data.tables[name] ?? []).map((row) => {
+      if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+        throw new Error(`${name}: a row is not an object`);
+      }
+      return row as Record<string, unknown>;
+    });
   const legacyMeta = records('meta');
   const legacySettingsRow = legacyMeta.find((row) => row.key === 'settings');
   let settings: Record<string, unknown> = {};
-  if (typeof legacySettingsRow?.value === 'string') {
+  if (legacySettingsRow !== undefined) {
+    if (typeof legacySettingsRow.value !== 'string') {
+      throw new Error('meta.settings: expected a JSON string');
+    }
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(legacySettingsRow.value);
-      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        settings = parsed as Record<string, unknown>;
-      }
+      parsed = JSON.parse(legacySettingsRow.value);
     } catch {
-      settings = {};
+      throw new Error('meta.settings: invalid JSON');
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('meta.settings: expected a JSON object');
+    }
+    settings = parsed as Record<string, unknown>;
+    for (const key of ['bufferPct', 'windowMonths', 'hoursCapPerWeek'] as const) {
+      if (key in settings && (typeof settings[key] !== 'number' || !Number.isFinite(settings[key]))) {
+        throw new Error(`meta.settings.${key}: expected a finite number`);
+      }
+    }
+    if (
+      'hourlyRate' in settings &&
+      settings.hourlyRate !== null &&
+      (typeof settings.hourlyRate !== 'number' || !Number.isFinite(settings.hourlyRate))
+    ) {
+      throw new Error('meta.settings.hourlyRate: expected a finite number or null');
+    }
+    if (
+      'goalMode' in settings &&
+      settings.goalMode !== 'baseline' &&
+      settings.goalMode !== 'lifestyle'
+    ) {
+      throw new Error('meta.settings.goalMode: expected baseline or lifestyle');
     }
   }
 
@@ -3573,11 +3599,12 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
   for (const budget of budgets) {
     if (
       typeof budget.category !== 'string' ||
+      budget.category.trim() === '' ||
       typeof budget.monthlyCents !== 'number' ||
       !Number.isSafeInteger(budget.monthlyCents) ||
       budget.monthlyCents <= 0
     ) {
-      continue;
+      throw new Error('budgets: invalid category or monthly cents');
     }
     const id = `legacy-budget-${crypto.createHash('md5').update(budget.category).digest('hex')}`;
     tables.goals.push({

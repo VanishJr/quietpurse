@@ -224,10 +224,12 @@ row recorded are refused whoever wrote them.
 it moves between machines freely. The stored statements are not in it; they are files in a folder
 the person can copy on their own.
 
-**A restore clears the tables and loads the dump in one transaction**, skipping tables the current
-schema does not know, so a future version's backup restores what this version understands. Goal and
-subtype tables are cleared and loaded in dependency order with the rest. A version-one backup is
-accepted through a standalone compatibility conversion of its singleton Goal settings, baseline
+**A restore clears each table the dump provides and loads it in one transaction**, skipping tables
+the current schema does not know and preserving current tables an older or sparse dump omits. The
+Goal family is the exception: it is cleared as one unit even for a version-one dump, because legacy
+Goal settings, baseline lines and budgets replace rather than merge with saved goals. Goal and
+subtype tables are loaded in dependency order with the rest. A version-one backup is accepted
+through a standalone compatibility conversion of its singleton Goal settings, baseline
 lines and budgets; it cannot retain goals that were in the workspace before the restore. Two things it leaves behind are accepted rather than unnoticed: the source
 documents of the import rows it deletes stay on disk, and of those, the ones whose import id comes
 back in the file are still removable through the delete path while the ones whose row is not
@@ -247,8 +249,9 @@ key is built from the uploaded filename, the id and the format now, and a backup
 Stripped, every import on a restored database read as having no document while the statements sat
 in the folder untouched.
 
-**A restore file is otherwise a direct write path into the database**, so the rows are filtered down
-to real columns of the target table holding values the column accepts. Without that, a string where
+**A restore file is otherwise a direct write path into the database**, so every supplied row must be
+an object before legacy conversion, then is filtered down to real columns of the target table
+holding values the column accepts. Without that, a string where
 an integer lives becomes a driver error mid-transaction, which reaches the user as a server failure
 where they should have been told the file was bad — and a JSON object smuggled into a text column
 reappears everywhere that value is displayed. Anything unrecognised is dropped rather than
