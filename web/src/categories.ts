@@ -15,8 +15,6 @@ export const CATEGORY_LABELS: Record<string, string> = {
   support: 'Support',
   cashback: 'Cashback',
   other: 'Other',
-  // pseudo-category on the Goal screen: amortized one-off purchases
-  'one-off-avg': 'One-off (avg)',
 };
 
 /** In the picker's order. */

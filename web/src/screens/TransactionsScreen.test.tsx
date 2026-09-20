@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { ACCOUNTS, INCOME_SOURCES } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
@@ -834,7 +835,7 @@ describe('the income source', () => {
     mount();
     await openSheet('ZZ Income');
     fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
-    expect(await screen.findByText('Support is included in income, but excluded from your own earnings on the Goal screen.')).toBeInTheDocument();
+    expect(await screen.findByText('Support counts as income, but not as earnings for income-based goals.')).toBeInTheDocument();
     expect(sent).toEqual([{ category: 'support' }]);
     expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Salary' })).toBeNull();
@@ -941,6 +942,47 @@ describe('the income source', () => {
     expect(lists[2]).toContain('category=food');
   });
 
+  it('clears a stale catalog on revision failure and offers a retry', async () => {
+    const fromFamily = row({
+      id: 'tx-fam',
+      description: 'From family',
+      amount: 200,
+      incomeSource: 'family',
+    });
+    let sourceReads = 0;
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => {
+        sourceReads += 1;
+        if (sourceReads === 1) return ok([{ ...SOURCES[1], label: 'Old support' }]);
+        if (sourceReads === 2) return fail(500, { error: 'catalog unavailable' });
+        return ok([{ ...SOURCES[1], label: 'Fresh support' }]);
+      },
+      'GET /api/transactions': () => ok([fromFamily]),
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <TransactionsScreen dataRevision={revision} />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    expect(await screen.findByText('Old support', { selector: '.badge' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load income sources: catalog unavailable',
+    );
+    expect(screen.queryByText('Old support')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry income sources' }));
+    expect(await screen.findByText('Fresh support', { selector: '.badge' })).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('badges outside help with the catalogue’s own word, and reads the derived source as its category', async () => {
     const fromFamily = row({ id: 'tx-fam', description: 'From family', amount: 200, incomeSource: 'family' });
     const derived = row({ id: 'tx-sup', description: 'Support row', amount: 300, category: 'support', incomeSource: 'category:support' });
@@ -981,14 +1023,18 @@ describe('the income source', () => {
 
     await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'true'));
     expect(sourceChip('Support')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByText(/sources are added and renamed · set manually/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Manage income sources in Settings\. Set manually\./),
+    ).toBeInTheDocument();
     expect(sent).toEqual([{ source: 'salary' }]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Source: back to auto-detection' }));
 
     await waitFor(() => expect(sent).toEqual([{ source: 'salary' }, { source: null }]));
     await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'false'));
-    expect(screen.getByText(/sources are added and renamed · auto-detected/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Manage income sources in Settings\. Auto-detected\./),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Source: back to auto-detection' })).toBeNull();
   });
 

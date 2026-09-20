@@ -2,14 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  NO_FIGURE,
-  TOOLTIP_CHIP,
-  TooltipGround,
-  tooltipMoney,
-  tooltipPercent,
-  tooltipProps,
-} from './chartTooltip';
+import { TOOLTIP_CHIP, TooltipGround, tooltipMoney, tooltipProps } from './chartTooltip';
 import { darkInk, Ink, lightInk } from './theme';
 
 const PALETTES: [string, Ink][] = [
@@ -80,10 +73,6 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
     }
   });
 
-  it('surface and page take the same chip, which is what lets ChartPlot pass one of them', () => {
-    expect(TOOLTIP_CHIP.surface).toEqual(TOOLTIP_CHIP.page);
-  });
-
   /*
    * The fill sits a step off its ground on purpose and the border is what makes the box
    * a box, so the string inequality above is the only other hold on the tightest live
@@ -128,29 +117,9 @@ describe('the props the module hands recharts', () => {
     },
   );
 
-  const entry = (payload: unknown) =>
-    ({ payload }) as Parameters<ReturnType<typeof tooltipProps>['formatter']>[2];
-
   it('prints money in the chart’s own currency', () => {
     const props = tooltipProps(lightInk, 'surface', tooltipMoney('UAH'));
-    expect(props.formatter(-2690.5, 'Expenses', entry({}))).toBe('−2,690.50 UAH');
-  });
-
-  it('reads the figure off the datum, not off the value the series was drawn at', () => {
-    const props = tooltipProps<{ actual: number }>(lightInk, 'page', (_value, m) =>
-      m ? tooltipPercent(m.actual) : NO_FIGURE,
-    );
-    expect(props.formatter(150, 'drawn', entry({ actual: 340 }))).toBe('340%');
-  });
-
-  it('says nothing rather than throwing when there is no datum', () => {
-    const props = tooltipProps<{ actual: number }>(lightInk, 'page', (_value, m) =>
-      m ? tooltipPercent(m.actual) : NO_FIGURE,
-    );
-    // the literal and not the constant: the claim is that the fallback is not a
-    // number, and `NO_FIGURE` on both sides is green over a `'0%'` that says a month
-    // recharts handed no datum for was 0% self-sufficient
-    expect(props.formatter(150, 'drawn', entry(undefined))).toBe('—');
+    expect(props.formatter(-2690.5)).toBe('−2,690.50 UAH');
   });
 });
 
@@ -163,16 +132,6 @@ describe('what a reader is told when they point, which lives only in a JSX attri
       'components/SpendingByCategory.tsx',
       'nameKey="label"',
       'the Overview ring prints the slug — `food`, not `Food`',
-    ],
-    [
-      'screens/IndependenceScreen.tsx',
-      'dataKey="drawn"',
-      'the Goal bars draw the uncapped ratio, and one 1298% month flattens the rest into the axis',
-    ],
-    [
-      'screens/IndependenceScreen.tsx',
-      'name="Self-sufficiency"',
-      'the Goal tooltip prints `drawn : 340%`, a field name of ours in front of the reader',
     ],
     [
       'components/ChartPlot.tsx',

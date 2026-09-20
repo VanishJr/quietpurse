@@ -2,8 +2,8 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
-import { allTransactions, insertTransactions, seedDefaults, setBaseForBaseCurrency, upsertBaselineItem } from '../src/db';
-import { computeIndependence } from '../src/independence';
+import { allTransactions, createGoal, insertTransactions, seedDefaults, setBaseForBaseCurrency } from '../src/db';
+import { getGoalProgress } from '../src/goals';
 import type { NewTransaction } from '../src/types';
 import { freshTestDb } from './pglite';
 
@@ -43,10 +43,24 @@ describe('Support category', () => {
       expect(result.incomeByCategory).toContainEqual({ category: 'support', total: 300 });
       expect(result.incomeBySource).toContainEqual({ source: res.body.incomeSource, label: 'category:support', kind: 'external', total: 300 });
     }
-    await upsertBaselineItem('Living costs', 1000);
-    const goal = await computeIndependence(new Date('2026-09-16T00:00:00Z'));
-    expect(goal).toMatchObject({ ownIncomeAvg: 1200, externalAvg: 300, selfSufficiency: 1.2 });
-    expect(goal.months).toContainEqual({ month: '2026-08', spend: 500, ownIncome: 1200, external: 300 });
+    const saved = await createGoal(
+      {
+        type: 'financial-independence',
+        name: 'Independence',
+        basis: 'essential-costs',
+        bufferPct: 0,
+        windowMonths: 6,
+        hourlyRate: null,
+        hoursPerWeek: null,
+        essentialCosts: [{ label: 'Living costs', monthly: 1000 }],
+      },
+      new Date('2026-09-16T00:00:00Z'),
+    );
+    const goal = await getGoalProgress(saved.id, new Date('2026-09-16T00:00:00Z'));
+    expect(goal).toMatchObject({
+      supportExcluded: 300,
+      progress: { current: 1200, target: 1000, percentage: 120 },
+    });
   });
 
   it('overrides a previous salary source while selected and restores that choice when the category is cleared', async () => {
@@ -103,8 +117,19 @@ describe('Support category', () => {
     const result = await summary();
     expect(result.totals).toMatchObject({ income: 0, expense: 80 });
     expect(result.incomeBySource).toEqual([]);
-    const goal = await computeIndependence(new Date('2026-09-16T00:00:00Z'));
-    expect(goal).toMatchObject({ ownIncomeAvg: 0, externalAvg: 0 });
+    const saved = await createGoal(
+      {
+        type: 'monthly-income',
+        name: 'Income',
+        target: 100,
+        incomeScope: 'own',
+        windowMonths: 6,
+      },
+      new Date('2026-09-16T00:00:00Z'),
+    );
+    expect(await getGoalProgress(saved.id, new Date('2026-09-16T00:00:00Z'))).toMatchObject({
+      progress: { current: 0 },
+    });
   });
 
   it('does not depend on an editable income source having its original name or kind', async () => {
@@ -115,6 +140,16 @@ describe('Support category', () => {
     const changed = await agent.put('/api/income-sources/family').send({ label: 'Repurposed source', kind: 'own' });
     expect(changed.status).toBe(200);
     expect((await summary()).incomeBySource).toMatchObject([{ label: 'category:support', kind: 'external', total: 300 }]);
-    expect((await computeIndependence(new Date('2026-09-16T00:00:00Z'))).ownIncomeAvg).toBe(0);
+    const saved = await createGoal(
+      {
+        type: 'monthly-income',
+        name: 'Own income',
+        target: 100,
+        incomeScope: 'own',
+        windowMonths: 6,
+      },
+      new Date('2026-09-16T00:00:00Z'),
+    );
+    expect((await getGoalProgress(saved.id, new Date('2026-09-16T00:00:00Z')))?.progress.current).toBe(0);
   });
 });

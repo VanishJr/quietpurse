@@ -25,6 +25,9 @@ import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
 import { accountFor, idOf, importAndConfirm, markImportCommitted } from './helpers';
 
+const queryRows = async <T>(query: ReturnType<typeof sql>): Promise<T[]> =>
+  ((await dbInstance().execute(query)) as unknown as { rows: T[] }).rows;
+
 const tx = (description: string, amount: number): NewTransaction => ({
   accountId: 'acc1',
   provider: 'monobank',
@@ -44,6 +47,7 @@ describe('backup and restore (JSON)', () => {
 
     const data = await exportBackup();
     expect(data.format).toBe('finto-backup');
+    expect(data.version).toBe(2);
     expect(data.tables.transactions.length).toBeGreaterThanOrEqual(2);
 
     // the file survives a JSON round-trip (that is exactly what the endpoint sends)
@@ -270,6 +274,299 @@ describe('backup and restore (JSON)', () => {
       balance: 1234.56,
       provider: 'monobank',
     });
+  });
+
+  it('a version-one restore replaces stale goals and converts Goal data and budgets', async () => {
+    await dbInstance().execute(sql`
+      INSERT INTO goals (id, type, name, target_date, created_at, updated_at)
+      VALUES ('stale-goal', 'monthly-income', 'Stale', NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO monthly_income_goals
+        (goal_id, goal_type, target_monthly_cents, income_scope, window_months, base_currency)
+      VALUES ('stale-goal', 'monthly-income', 100000, 'own', 6, 'EUR')
+    `);
+
+    const legacy = parseBackup({
+      format: 'finto-backup',
+      version: 1,
+      exportedAt: '2026-05-01T00:00:00.000Z',
+      tables: {
+        settings: [{ key: 'base_currency', value: 'GBP' }],
+        meta: [
+          {
+            key: 'settings',
+            value: JSON.stringify({
+              goalMode: 'lifestyle',
+              bufferPct: 15,
+              windowMonths: 12,
+              hourlyRate: 25,
+              hoursCapPerWeek: 30,
+            }),
+          },
+        ],
+        baseline_items: [{ id: 9, label: 'Rent', monthlyCents: 90000, sort: 0 }],
+        budgets: [{ category: 'food', monthlyCents: 45000 }],
+      },
+    });
+
+    await restoreBackup(legacy);
+
+    const goals = await queryRows<{ id: string; type: string }>(
+      sql`SELECT id, type FROM goals ORDER BY type`,
+    );
+    expect(goals).toEqual([
+      expect.objectContaining({ type: 'category-spending-limit' }),
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        type: 'financial-independence',
+      },
+    ]);
+    expect(goals).not.toContainEqual(expect.objectContaining({ id: 'stale-goal' }));
+
+    const financial = await queryRows<{
+      basis: string;
+      buffer_pct: number;
+      window_months: number;
+      base_currency: string;
+      hourly_rate_cents: number | null;
+      hours_per_week: number;
+    }>(sql`
+      SELECT basis, buffer_pct, window_months, base_currency, hourly_rate_cents, hours_per_week
+      FROM financial_independence_goals
+    `);
+    expect(financial[0]).toEqual({
+      basis: 'current-spending',
+      buffer_pct: 15,
+      window_months: 12,
+      base_currency: 'GBP',
+      hourly_rate_cents: 2500,
+      hours_per_week: 30,
+    });
+    const baseline = await queryRows<{ goal_id: string; label: string; monthly_cents: number }>(
+      sql`SELECT goal_id, label, monthly_cents FROM baseline_items`,
+    );
+    expect(baseline).toEqual([
+      {
+        goal_id: '00000000-0000-4000-8000-000000000001',
+        label: 'Rent',
+        monthly_cents: 90000,
+      },
+    ]);
+    const category = await queryRows<{
+      category: string;
+      monthly_limit_cents: number;
+      base_currency: string;
+    }>(sql`SELECT category, monthly_limit_cents, base_currency FROM category_spending_goals`);
+    expect(category).toEqual([
+      { category: 'food', monthly_limit_cents: 45000, base_currency: 'GBP' },
+    ]);
+    const oldSettings = await queryRows<{ key: string }>(
+      sql`SELECT key FROM meta WHERE key = 'settings'`,
+    );
+    expect(oldSettings).toEqual([]);
+  });
+
+  it('a sparse version-one restore preserves omitted tables but replaces the goal family', async () => {
+    await insertTransactions([tx('sparse restore survivor', -17)]);
+    await dbInstance().execute(sql`
+      INSERT INTO settings (key, value) VALUES ('sparse_restore_survivor', 'kept')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO meta (key, value) VALUES ('sparse_restore_meta_survivor', 'kept')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `);
+    const stamp = '2026-05-01T00:00:00.000Z';
+    await dbInstance().execute(sql`
+      INSERT INTO goals (id, type, name, target_date, created_at, updated_at)
+      VALUES ('sparse-stale-goal', 'monthly-income', 'Stale', NULL, ${stamp}, ${stamp})
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO monthly_income_goals
+        (goal_id, goal_type, target_monthly_cents, income_scope, window_months, base_currency)
+      VALUES ('sparse-stale-goal', 'monthly-income', 100000, 'own', 6, 'EUR')
+    `);
+
+    const restored = await restoreBackup(
+      parseBackup({
+        format: 'finto-backup',
+        version: 1,
+        tables: {
+          transfer_rules: [
+            {
+              id: 7,
+              description: 'Sparse legacy rule',
+              accountId: 'old',
+              createdAt: '2026-05-01',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(restored).toEqual({ tables: 1, rows: 1 });
+    expect((await listTransactions({ accountId: 'acc1' })).map((row) => row.description)).toContain(
+      'sparse restore survivor',
+    );
+    expect(
+      await queryRows<{ value: string }>(
+        sql`SELECT value FROM settings WHERE key = 'sparse_restore_survivor'`,
+      ),
+    ).toEqual([{ value: 'kept' }]);
+    expect(
+      await queryRows<{ value: string }>(
+        sql`SELECT value FROM meta WHERE key = 'sparse_restore_meta_survivor'`,
+      ),
+    ).toEqual([{ value: 'kept' }]);
+    expect(await queryRows(sql`SELECT id FROM goals WHERE id = 'sparse-stale-goal'`)).toEqual([]);
+  });
+
+  it('refuses imports without transactions before their cascade can delete omitted rows', async () => {
+    const record = await createImport({
+      fileHash: 'sparse-import-hash',
+      sourceType: 'csv',
+      parserVersion: 1,
+    });
+    await markImportCommitted(record.id, 1, 0);
+    await insertTransactions([tx('sparse import survivor', -23)], record.id);
+
+    await expect(
+      restoreBackup(
+        parseBackup({
+          format: 'finto-backup',
+          version: 1,
+          tables: { imports: [] },
+        }),
+      ),
+    ).rejects.toThrow('backup table imports requires transactions');
+
+    expect((await listImports()).imports.map((row) => row.id)).toContain(record.id);
+    expect((await listTransactions({ accountId: 'acc1' })).map((row) => row.description)).toContain(
+      'sparse import survivor',
+    );
+  });
+
+  it('refuses malformed legacy rows and settings instead of dropping them during conversion', async () => {
+    const withSettings = (settings: Record<string, unknown>): Record<string, unknown[]> => ({
+      meta: [{ key: 'settings', value: JSON.stringify(settings) }],
+    });
+    const malformed: Array<[Record<string, unknown[]>, RegExp]> = [
+      [{ meta: [null] }, /meta: a row is not an object/],
+      [{ baseline_items: ['bad'] }, /baseline_items: a row is not an object/],
+      [{ meta: [{ key: 'settings', value: '{' }] }, /meta\.settings: invalid JSON/],
+      [
+        {
+          meta: [
+            { key: 'settings', value: '{"bufferPct":10}' },
+            { key: 'settings', value: '{"bufferPct":20}' },
+          ],
+        },
+        /meta\.settings: duplicate singleton rows/,
+      ],
+      [withSettings({ windowMonths: 'six' }), /windowMonths: expected a whole number/],
+      [withSettings({ windowMonths: 6.5 }), /windowMonths: expected a whole number/],
+      [withSettings({ bufferPct: -20 }), /bufferPct: expected a finite number/],
+      [withSettings({ hourlyRate: -5 }), /hourlyRate: expected a finite number/],
+      [withSettings({ hourlyRate: 12.345 }), /hourlyRate: expected a number with at most two decimal places/],
+      [withSettings({ hoursCapPerWeek: 0 }), /hoursCapPerWeek: expected a finite number/],
+      [{ budgets: [{ category: 'food', monthlyCents: 0 }] }, /budgets: invalid category/],
+      [{ budgets: [{ category: 'groceriez', monthlyCents: 45000 }] }, /budgets: invalid category/],
+    ];
+
+    for (const [tables, message] of malformed) {
+      await expect(
+        restoreBackup(parseBackup({ format: 'finto-backup', version: 1, tables })),
+      ).rejects.toThrow(message);
+    }
+  });
+
+  it('version two round-trips every goal subtype and its owned rows', async () => {
+    await dbInstance().execute(sql`DELETE FROM goals`);
+    const stamp = '2026-05-01T00:00:00.000Z';
+    await dbInstance().execute(sql`
+      INSERT INTO goals (id, type, name, target_date, created_at, updated_at) VALUES
+        ('g-fi', 'financial-independence', 'FI', NULL, ${stamp}, ${stamp}),
+        ('g-ef', 'emergency-fund', 'Emergency', '2027-01-01', ${stamp}, ${stamp}),
+        ('g-sb', 'savings-balance', 'Savings', NULL, ${stamp}, ${stamp}),
+        ('g-dp', 'debt-payoff', 'Debt', NULL, ${stamp}, ${stamp}),
+        ('g-mi', 'monthly-income', 'Income', NULL, ${stamp}, ${stamp}),
+        ('g-sr', 'savings-rate', 'Rate', NULL, ${stamp}, ${stamp}),
+        ('g-cs', 'category-spending-limit', 'Food', NULL, ${stamp}, ${stamp})
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO financial_independence_goals
+        (goal_id, goal_type, basis, buffer_pct, window_months, base_currency, hourly_rate_cents, hours_per_week)
+      VALUES ('g-fi', 'financial-independence', 'essential-costs', 10, 6, 'EUR', 2500, 20)
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO emergency_fund_goals
+        (goal_id, goal_type, monthly_essentials_cents, coverage_months, currency)
+      VALUES ('g-ef', 'emergency-fund', 100000, 6, 'EUR')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO savings_balance_goals (goal_id, goal_type, target_cents, currency)
+      VALUES ('g-sb', 'savings-balance', 500000, 'EUR')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO debt_payoff_goals
+        (goal_id, goal_type, account_id, starting_debt_cents, target_debt_cents, currency)
+      VALUES ('g-dp', 'debt-payoff', 'debt-account', 400000, 0, 'EUR')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO monthly_income_goals
+        (goal_id, goal_type, target_monthly_cents, income_scope, window_months, base_currency)
+      VALUES ('g-mi', 'monthly-income', 300000, 'own', 6, 'EUR')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO savings_rate_goals
+        (goal_id, goal_type, target_basis_points, income_scope, window_months)
+      VALUES ('g-sr', 'savings-rate', 2000, 'all', 12)
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO category_spending_goals
+        (goal_id, goal_type, category, monthly_limit_cents, base_currency)
+      VALUES ('g-cs', 'category-spending-limit', 'groceries', 45000, 'EUR')
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO goal_accounts (goal_id, account_id, position) VALUES
+        ('g-ef', 'cash-a', 0), ('g-ef', 'cash-b', 1), ('g-sb', 'cash-a', 0)
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO baseline_items (goal_id, label, monthly_cents, sort)
+      VALUES ('g-fi', 'Rent', 90000, 0)
+    `);
+
+    const data = parseBackup(JSON.parse(JSON.stringify(await exportBackup())));
+    await dbInstance().execute(sql`DELETE FROM goals`);
+    await restoreBackup(data);
+
+    const restored = await queryRows<{ type: string }>(sql`SELECT type FROM goals ORDER BY type`);
+    expect(restored.map((row) => row.type)).toEqual([
+      'category-spending-limit',
+      'debt-payoff',
+      'emergency-fund',
+      'financial-independence',
+      'monthly-income',
+      'savings-balance',
+      'savings-rate',
+    ]);
+    const links = await queryRows<{ goal_id: string; account_id: string; position: number }>(
+      sql`SELECT goal_id, account_id, position FROM goal_accounts ORDER BY goal_id, position`,
+    );
+    expect(links).toEqual([
+      { goal_id: 'g-ef', account_id: 'cash-a', position: 0 },
+      { goal_id: 'g-ef', account_id: 'cash-b', position: 1 },
+      { goal_id: 'g-sb', account_id: 'cash-a', position: 0 },
+    ]);
+    const costs = await queryRows<{ goal_id: string; label: string; monthly_cents: number }>(
+      sql`SELECT goal_id, label, monthly_cents FROM baseline_items`,
+    );
+    expect(costs).toEqual([{ goal_id: 'g-fi', label: 'Rent', monthly_cents: 90000 }]);
+    const financial = await queryRows<{ base_currency: string }>(
+      sql`SELECT base_currency FROM financial_independence_goals`,
+    );
+    expect(financial).toEqual([{ base_currency: 'EUR' }]);
   });
 
   /**

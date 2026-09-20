@@ -8,8 +8,7 @@ import { AccountDialog, COUNT_LIMIT } from './AccountDialog';
 /**
  * The delete panel, mounted on its own. Reaching its hidden-account branch through
  * OverviewScreen is four interactions and a fixture change, and that branch is the
- * only place `totals.transactions` is ever printed — the precedent for mounting a
- * component directly rather than through its screen is BudgetsBlock.test.tsx.
+ * only place `totals.transactions` is ever printed, so the component is mounted directly.
  *
  * What is asserted here is what the panel does: which numbers it prints, what it
  * offers and when, and what it hands back. What happens to the screen afterwards —

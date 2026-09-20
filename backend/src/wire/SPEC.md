@@ -35,11 +35,18 @@ is a second declaration, and a declaration that exists twice agrees with the rou
 **The vocabularies and bounds the client composes against.** The chart kinds, ranges, breakdowns
 and measures, the chart length bounds, the id charset — as a string source beside the
 `RegExp` built from it, because a type can carry the string and not the pattern — the import
-source types and statuses, the income-source kinds, the goal modes, the reasons a balance pair is
-not shown, and the diagnostic budget `ERROR_DETAIL_MAX`. `backend/src/db` imports the tuples for
-its column options and its check constraints and never the reverse; the request schemas in
-`backend/src/app.ts` compose over the same tuples with their own refusal sentences and never meet
-the answer schemas.
+source types and statuses, the income-source kinds, the goal types, bases, income scopes, progress
+semantics, units, statuses, periods and bounds, the reasons a balance pair is not shown, and the
+diagnostic budget `ERROR_DETAIL_MAX`. `backend/src/db` imports the tuples for its column options and
+its check constraints and never the reverse. The strict discriminated Goals create and replacement
+schemas live here because they are the public REST contract shared by future clients; route-local
+request schemas in `backend/src/app.ts` compose over the remaining tuples with their own refusal
+sentences. Monetary writes are accepted only at cent precision, and savings-rate targets only at
+basis-point precision, because a value the integer columns would round is not a valid request.
+Financial independence summaries carry both required work hours and the server-computed monthly
+capacity and whether the requirement exceeds it, so weekly availability is not inert configuration.
+The client re-exports every goal union from this module, pins each union to its wire tuple, and
+formats progress from the answer's semantic and unit rather than inferring either from goal type.
 
 ## Boundary
 
@@ -166,8 +173,9 @@ landed. The next move re-reads them; age is not evidence.
 
 **What the client builds on.** The client reaches this module by type only and through one door,
 `web/src/types.ts`: the shapes and the union types under this module's own names — the chart
-vocabularies', the goal modes' and the income source kinds' among them, which its picker records are
-keyed by — and `typeof` of the constants its runtime copies are pinned to: `CHARTS_MAX`,
+vocabularies', the goal types', bases', income scopes', progress semantics', units', statuses' and
+periods', and the income source kinds' among them — and `typeof` of the constants its runtime copies
+are pinned to: `CHARTS_MAX`,
 `CHART_TITLE_MAX`, `CHART_ID_MAX`, `CHART_ACCOUNT_ID_MAX`, `CHART_ID_SHAPE_SOURCE` and
 `ERROR_DETAIL_MAX`. It never names the tuples and imports no value, so it carries no runtime
 dependency it would have to bundle; `web/src/types.test.ts` refuses a value import and a second

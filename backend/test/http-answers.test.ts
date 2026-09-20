@@ -61,13 +61,13 @@ describe('what the wrapper records', () => {
 
   it('a field the declaration has under another name, with the path', async () => {
     const { app: t, drain } = throwaway();
-    t.get('/api/settings', (_req, res) => {
-      res.json({ bufferPct: 10, windowMonths: 6, hourlyRate: null, hoursCapPerWeek: 20, mode: 'baseline' });
+    t.get('/api/goals', (_req, res) => {
+      res.json({ items: [] });
     });
-    await request(t).get('/api/settings');
+    await request(t).get('/api/goals');
     const [only] = drain();
-    expect(only).toContain('goalMode:');
-    expect(only).toContain('Unrecognized key: "mode"');
+    expect(only).toContain('goals:');
+    expect(only).toContain('Unrecognized key: "items"');
   });
 
   it('a status other than the declared one', async () => {

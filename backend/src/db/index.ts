@@ -10,7 +10,7 @@ import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { type Category, recurringKey } from '../categorizer';
+import { CATEGORIES, type Category, recurringKey } from '../categorizer';
 import { config } from '../config';
 import { type DocumentLocator, type DocumentRef, deleteDocument } from '../documents';
 import { causeChain, logDb } from '../logger';
@@ -37,8 +37,6 @@ import {
   TransferRule,
 } from '../types';
 import {
-  type BaselineItem,
-  type Budget,
   CHART_METRICS,
   type CategoryRule,
   type CategoryRuleCounts,
@@ -51,6 +49,10 @@ import {
   type ImportRecord,
   type ImportSourceType,
   type ImportStatus,
+  type GoalCost,
+  type GoalCreate,
+  GOALS_MAX,
+  type GoalType,
   type ImportTotals,
   type RecurringGroup,
   type TransferRulePreview,
@@ -80,8 +82,6 @@ export {
   ERROR_DETAIL_MAX,
 } from '../wire';
 export type {
-  BaselineItem,
-  Budget,
   CategoryRule,
   Chart,
   ChartBreakdown,
@@ -194,7 +194,7 @@ export async function seedDefaults(): Promise<void> {
         id: 'family',
         // the id is data and stays; the label is what a stranger reads, and a
         // scholarship is not family. A database seeded earlier keeps its label - the
-        // insert ends onConflictDoNothing - and renames it through the Goal screen.
+        // insert ends onConflictDoNothing - and renames it through Settings.
         label: 'Support',
         kind: 'external',
         patterns: JSON.stringify(config.familyNames),
@@ -949,6 +949,96 @@ export function summaryMonthlyTotals(
 ): Promise<AccountMonthTotals[]>;
 export function summaryMonthlyTotals(scope: SummaryScope, from: string, to: string) {
   return scope.kind === 'account' ? accountMonths(scope, from, to) : allAccountsMonths(from, to);
+}
+
+export interface GoalMonthTotals extends MonthTotals {
+  rows: number;
+  unconverted: number;
+}
+
+export async function goalMonthlyTotals(from: string, to: string): Promise<GoalMonthTotals[]> {
+  const rows = await rowsOf<{
+    month: string;
+    rows: number;
+    unconverted: number;
+    expense: string;
+    expenseOneOff: string;
+    income: string;
+    incomeOwn: string;
+    incomeExternal: string;
+  }>(sql`
+    SELECT SUBSTR(date, 1, 7) AS month,
+      COUNT(*)::int AS rows,
+      COUNT(*) FILTER (WHERE base_amount_cents IS NULL)::int AS unconverted,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund)
+        THEN -base_amount_cents ELSE 0 END) AS expense,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund) AND one_off
+        THEN -base_amount_cents ELSE 0 END) AS "expenseOneOff",
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        THEN base_amount_cents ELSE 0 END) AS income,
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        AND NOT ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeOwn",
+      SUM(CASE WHEN base_amount_cents IS NOT NULL AND amount_cents > 0 AND NOT refund
+        AND ${IS_EXTERNAL()} THEN base_amount_cents ELSE 0 END) AS "incomeExternal"
+    FROM transactions
+    WHERE ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND date >= ${from} AND date <= ${to}
+    GROUP BY 1
+    ORDER BY 1
+  `);
+  return rows.map((row) => ({
+    month: row.month,
+    rows: Number(row.rows),
+    unconverted: Number(row.unconverted),
+    expense: fromCents(Number(row.expense)),
+    expenseOneOff: fromCents(Number(row.expenseOneOff)),
+    income: fromCents(Number(row.income)),
+    incomeOwn: fromCents(Number(row.incomeOwn)),
+    incomeExternal: fromCents(Number(row.incomeExternal)),
+  }));
+}
+
+export interface GoalCategorySpend {
+  category: string;
+  total: number;
+  rows: number;
+  unconverted: number;
+  totalRows: number;
+}
+
+export async function goalCurrentCategoryTotals(
+  from: string,
+  to: string,
+): Promise<GoalCategorySpend[]> {
+  const rows = await rowsOf<{
+    category: string;
+    total_cents: string;
+    rows: number;
+    unconverted: number;
+    total_rows: number;
+  }>(sql`
+    WITH grouped AS (
+      SELECT ${CATEGORY} AS category,
+        SUM(CASE WHEN base_amount_cents IS NOT NULL AND (amount_cents < 0 OR refund)
+          THEN -base_amount_cents ELSE 0 END) AS total_cents,
+        COUNT(*)::int AS rows,
+        COUNT(*) FILTER (
+          WHERE (amount_cents < 0 OR refund) AND base_amount_cents IS NULL
+        )::int AS unconverted
+      FROM transactions
+      WHERE ${NOT_TRANSFER} AND ${VISIBLE_ACCOUNT()} AND date >= ${from} AND date <= ${to}
+      GROUP BY 1
+    )
+    SELECT category, total_cents, rows, unconverted,
+      SUM(rows) OVER ()::int AS total_rows
+    FROM grouped
+  `);
+  return rows.map((row) => ({
+    category: row.category,
+    total: fromCents(Number(row.total_cents)),
+    rows: Number(row.rows),
+    unconverted: Number(row.unconverted),
+    totalRows: Number(row.total_rows),
+  }));
 }
 
 export async function avgMonthlyByCategory(
@@ -1821,6 +1911,8 @@ const ACCOUNT_CASCADE = {
   transferRules: (id: string): SQL =>
     sql`DELETE FROM transfer_rules WHERE account_id = ${id}`,
   analyticsCharts: OUTLIVES_THE_ACCOUNT,
+  debtPayoffGoals: OUTLIVES_THE_ACCOUNT,
+  goalAccounts: OUTLIVES_THE_ACCOUNT,
 } satisfies Record<
   AccountScoped,
   ((id: string) => SQL) | typeof CASCADES_FROM_IMPORTS | typeof OUTLIVES_THE_ACCOUNT
@@ -2535,31 +2627,6 @@ export async function countCategoryRuleMatches(pattern: string): Promise<Categor
   return { matches: matched.length, overridden: matched.filter((r) => r.category_manual !== null).length };
 }
 
-export async function listBudgets(): Promise<Budget[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.budgets)
-    .orderBy(sql`${s.budgets.monthlyCents} DESC`);
-  return rows.map((r) => ({ category: r.category, monthly: fromCents(r.monthlyCents) }));
-}
-
-export async function setBudget(category: string, monthly: number | null): Promise<void> {
-  if (monthly === null) {
-    await getDb()
-      .delete(s.budgets)
-      .where(eq(s.budgets.category, category));
-  } else {
-    const monthlyCents = toCents(monthly);
-    await getDb()
-      .insert(s.budgets)
-      .values({ category, monthlyCents })
-      .onConflictDoUpdate({
-        target: [s.budgets.category],
-        set: { monthlyCents },
-      });
-  }
-}
-
 export type ChartsWrite =
   | { ok: true; version: number; charts: Chart[] }
   | { ok: false; reason: 'stale'; version: number; charts: Chart[] };
@@ -2680,82 +2747,682 @@ export async function replaceCharts(expected: number, charts: Chart[]): Promise<
   });
 }
 
-type BaselineItemRow = typeof s.baselineItems.$inferSelect;
+type StoredGoal<T extends GoalType> = Extract<GoalCreate, { type: T }>;
+type GoalRecordCommon = {
+  id: string;
+  name: string;
+  targetDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
-const rowToBaselineItem = (r: BaselineItemRow): BaselineItem => ({
-  id: r.id,
-  label: r.label,
-  monthly: fromCents(r.monthlyCents),
-  sort: r.sort,
-});
-
-export async function listBaselineItems(): Promise<BaselineItem[]> {
-  const rows = await getDb()
-    .select()
-    .from(s.baselineItems)
-    .orderBy(s.baselineItems.sort, sql`${s.baselineItems.monthlyCents} DESC`);
-  return rows.map(rowToBaselineItem);
-}
-
-/**
- * The key is the label: a line item is created and edited by its own name.
- * sort is optional: editing an amount from the app sends only monthly, and it must
- * not clobber the item's position - the list would jump under your finger. A new
- * item without sort goes to the end.
- */
-export async function upsertBaselineItem(
-  label: string,
-  monthly: number,
-  sort?: number,
-): Promise<BaselineItem> {
-  const existing = (
-    await getDb()
-      .select()
-      .from(s.baselineItems)
-      .where(eq(s.baselineItems.label, label))
-  )[0];
-  const nextSort =
-    sort ??
-    existing?.sort ??
-    Number(
-      (
-        await rowsOf<{ m: number }>(
-          sql`SELECT COALESCE(MAX(sort), -1) AS m FROM baseline_items`,
-        )
-      )[0].m,
-    ) + 1;
-  const monthlyCents = toCents(monthly);
-  const rows = await getDb()
-    .insert(s.baselineItems)
-    .values({ label, monthlyCents, sort: nextSort })
-    .onConflictDoUpdate({
-      target: [s.baselineItems.label],
-      set: { monthlyCents, sort: nextSort },
+export type GoalRecord =
+  | (GoalRecordCommon &
+      Omit<StoredGoal<'financial-independence'>, 'name' | 'essentialCosts'> & {
+        essentialCosts: GoalCost[];
+        baseCurrency: string;
+      })
+  | (GoalRecordCommon & Omit<StoredGoal<'emergency-fund'>, 'name' | 'targetDate'> & {
+      currency: string;
     })
-    .returning();
-  return rowToBaselineItem(rows[0]);
+  | (GoalRecordCommon & Omit<StoredGoal<'savings-balance'>, 'name' | 'targetDate'> & {
+      currency: string;
+    })
+  | (GoalRecordCommon & Omit<StoredGoal<'debt-payoff'>, 'name' | 'targetDate'> & {
+      startingDebt: number;
+      currency: string;
+    })
+  | (GoalRecordCommon & Omit<StoredGoal<'monthly-income'>, 'name'> & {
+      baseCurrency: string;
+    })
+  | (GoalRecordCommon & Omit<StoredGoal<'savings-rate'>, 'name'>)
+  | (GoalRecordCommon & Omit<StoredGoal<'category-spending-limit'>, 'name'> & {
+      baseCurrency: string;
+    });
+
+type GoalJoinRow = {
+  id: string;
+  type: GoalType;
+  name: string;
+  target_date: string | null;
+  created_at: string;
+  updated_at: string;
+  fi_basis: 'essential-costs' | 'current-spending' | null;
+  fi_buffer_pct: number | null;
+  fi_window_months: number | null;
+  fi_base_currency: string | null;
+  fi_hourly_rate_cents: number | null;
+  fi_hours_per_week: number | null;
+  ef_monthly_essentials_cents: number | null;
+  ef_coverage_months: number | null;
+  ef_currency: string | null;
+  sb_target_cents: number | null;
+  sb_currency: string | null;
+  dp_account_id: string | null;
+  dp_starting_debt_cents: number | null;
+  dp_target_debt_cents: number | null;
+  dp_currency: string | null;
+  mi_target_monthly_cents: number | null;
+  mi_income_scope: 'own' | 'all' | null;
+  mi_window_months: number | null;
+  mi_base_currency: string | null;
+  sr_target_basis_points: number | null;
+  sr_income_scope: 'own' | 'all' | null;
+  sr_window_months: number | null;
+  cs_category: string | null;
+  cs_monthly_limit_cents: number | null;
+  cs_base_currency: string | null;
+};
+
+const goalRowsOn = async (d: Executor, id?: string): Promise<GoalJoinRow[]> =>
+  rowsVia<GoalJoinRow>(d, sql`
+    SELECT g.id, g.type, g.name, g.target_date, g.created_at, g.updated_at,
+      fi.basis AS fi_basis, fi.buffer_pct AS fi_buffer_pct,
+      fi.window_months AS fi_window_months, fi.base_currency AS fi_base_currency,
+      fi.hourly_rate_cents AS fi_hourly_rate_cents,
+      fi.hours_per_week AS fi_hours_per_week,
+      ef.monthly_essentials_cents AS ef_monthly_essentials_cents,
+      ef.coverage_months AS ef_coverage_months, ef.currency AS ef_currency,
+      sb.target_cents AS sb_target_cents, sb.currency AS sb_currency,
+      dp.account_id AS dp_account_id, dp.starting_debt_cents AS dp_starting_debt_cents,
+      dp.target_debt_cents AS dp_target_debt_cents, dp.currency AS dp_currency,
+      mi.target_monthly_cents AS mi_target_monthly_cents,
+      mi.income_scope AS mi_income_scope, mi.window_months AS mi_window_months,
+      mi.base_currency AS mi_base_currency,
+      sr.target_basis_points AS sr_target_basis_points,
+      sr.income_scope AS sr_income_scope, sr.window_months AS sr_window_months,
+      cs.category AS cs_category, cs.monthly_limit_cents AS cs_monthly_limit_cents,
+      cs.base_currency AS cs_base_currency
+    FROM goals g
+    LEFT JOIN financial_independence_goals fi ON fi.goal_id = g.id AND fi.goal_type = g.type
+    LEFT JOIN emergency_fund_goals ef ON ef.goal_id = g.id AND ef.goal_type = g.type
+    LEFT JOIN savings_balance_goals sb ON sb.goal_id = g.id AND sb.goal_type = g.type
+    LEFT JOIN debt_payoff_goals dp ON dp.goal_id = g.id AND dp.goal_type = g.type
+    LEFT JOIN monthly_income_goals mi ON mi.goal_id = g.id AND mi.goal_type = g.type
+    LEFT JOIN savings_rate_goals sr ON sr.goal_id = g.id AND sr.goal_type = g.type
+    LEFT JOIN category_spending_goals cs ON cs.goal_id = g.id AND cs.goal_type = g.type
+    ${id === undefined ? sql`` : sql`WHERE g.id = ${id}`}
+    ORDER BY g.created_at, g.id
+  `);
+
+const requiredGoalField = <T>(
+  value: T | null | undefined,
+  goalId: string,
+  field: string,
+): T => {
+  if (value === null || value === undefined) throw new Error(`goal ${goalId} has no ${field}`);
+  return value;
+};
+
+const recordsFromGoalRows = async (d: Executor, rows: GoalJoinRow[]): Promise<GoalRecord[]> => {
+  if (rows.length === 0) return [];
+  const ids = rows.map((row) => row.id);
+  const accountRows = await rowsVia<{ goal_id: string; account_id: string }>(d, sql`
+    SELECT goal_id, account_id FROM goal_accounts
+    WHERE goal_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+    ORDER BY goal_id, position
+  `);
+  const costRows = await rowsVia<{
+    id: number;
+    goal_id: string;
+    label: string;
+    monthly_cents: number;
+    sort: number;
+  }>(d, sql`
+    SELECT id, goal_id, label, monthly_cents, sort FROM baseline_items
+    WHERE goal_id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+    ORDER BY goal_id, sort, id
+  `);
+  const accounts = new Map<string, string[]>();
+  for (const row of accountRows) {
+    const list = accounts.get(row.goal_id) ?? [];
+    list.push(row.account_id);
+    accounts.set(row.goal_id, list);
+  }
+  const costs = new Map<string, GoalCost[]>();
+  for (const row of costRows) {
+    const list = costs.get(row.goal_id) ?? [];
+    list.push({ id: row.id, label: row.label, monthly: fromCents(row.monthly_cents), sort: row.sort });
+    costs.set(row.goal_id, list);
+  }
+  return rows.map((row): GoalRecord => {
+    const common: GoalRecordCommon = {
+      id: row.id,
+      name: row.name,
+      targetDate: row.target_date,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+    switch (row.type) {
+      case 'financial-independence':
+        return {
+          ...common,
+          type: row.type,
+          basis: requiredGoalField(row.fi_basis, row.id, 'basis'),
+          bufferPct: requiredGoalField(row.fi_buffer_pct, row.id, 'buffer percentage'),
+          windowMonths: requiredGoalField(row.fi_window_months, row.id, 'window'),
+          baseCurrency: requiredGoalField(row.fi_base_currency, row.id, 'base currency'),
+          hourlyRate:
+            row.fi_hourly_rate_cents === null ? null : fromCents(row.fi_hourly_rate_cents),
+          hoursPerWeek: row.fi_hours_per_week,
+          essentialCosts: costs.get(row.id) ?? [],
+        };
+      case 'emergency-fund':
+        return {
+          ...common,
+          type: row.type,
+          coverageMonths: requiredGoalField(row.ef_coverage_months, row.id, 'coverage'),
+          monthlyEssentials: fromCents(
+            requiredGoalField(row.ef_monthly_essentials_cents, row.id, 'monthly essentials'),
+          ),
+          accountIds: accounts.get(row.id) ?? [],
+          currency: requiredGoalField(row.ef_currency, row.id, 'currency'),
+        };
+      case 'savings-balance':
+        return {
+          ...common,
+          type: row.type,
+          target: fromCents(requiredGoalField(row.sb_target_cents, row.id, 'target')),
+          accountIds: accounts.get(row.id) ?? [],
+          currency: requiredGoalField(row.sb_currency, row.id, 'currency'),
+        };
+      case 'debt-payoff':
+        return {
+          ...common,
+          type: row.type,
+          accountId: requiredGoalField(row.dp_account_id, row.id, 'account'),
+          startingDebt: fromCents(
+            requiredGoalField(row.dp_starting_debt_cents, row.id, 'starting debt'),
+          ),
+          targetDebt: fromCents(requiredGoalField(row.dp_target_debt_cents, row.id, 'target debt')),
+          currency: requiredGoalField(row.dp_currency, row.id, 'currency'),
+        };
+      case 'monthly-income':
+        return {
+          ...common,
+          type: row.type,
+          target: fromCents(requiredGoalField(row.mi_target_monthly_cents, row.id, 'target')),
+          incomeScope: requiredGoalField(row.mi_income_scope, row.id, 'income scope'),
+          windowMonths: requiredGoalField(row.mi_window_months, row.id, 'window'),
+          baseCurrency: requiredGoalField(row.mi_base_currency, row.id, 'base currency'),
+        };
+      case 'savings-rate':
+        return {
+          ...common,
+          type: row.type,
+          targetPercent:
+            requiredGoalField(row.sr_target_basis_points, row.id, 'target percentage') / 100,
+          incomeScope: requiredGoalField(row.sr_income_scope, row.id, 'income scope'),
+          windowMonths: requiredGoalField(row.sr_window_months, row.id, 'window'),
+        };
+      case 'category-spending-limit':
+        return {
+          ...common,
+          type: row.type,
+          category: requiredGoalField(row.cs_category, row.id, 'category'),
+          monthlyLimit: fromCents(
+            requiredGoalField(row.cs_monthly_limit_cents, row.id, 'monthly limit'),
+          ),
+          baseCurrency: requiredGoalField(row.cs_base_currency, row.id, 'base currency'),
+        };
+    }
+  });
+};
+
+const goalRecordsOn = async (d: Executor, id?: string): Promise<GoalRecord[]> =>
+  recordsFromGoalRows(d, await goalRowsOn(d, id));
+
+export async function listGoals(): Promise<GoalRecord[]> {
+  return getDb().transaction(
+    (tx) => goalRecordsOn(tx),
+    { isolationLevel: 'repeatable read' },
+  );
 }
 
-export async function deleteBaselineItem(label: string): Promise<boolean> {
+export async function getGoal(id: string): Promise<GoalRecord | undefined> {
+  return getDb().transaction(
+    async (tx) => (await goalRecordsOn(tx, id))[0],
+    { isolationLevel: 'repeatable read' },
+  );
+}
+
+export type GoalWriteErrorCode =
+  | 'account-unavailable'
+  | 'currency-mismatch'
+  | 'debt-account-immutable'
+  | 'duplicate-account'
+  | 'duplicate-category'
+  | 'duplicate-cost'
+  | 'essential-costs-required'
+  | 'goal-capacity'
+  | 'invalid-target-date'
+  | 'not-debt'
+  | 'target-debt-invalid'
+  | 'unknown-category';
+
+export class GoalWriteError extends Error {
+  constructor(
+    readonly code: GoalWriteErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+const withGoalWriteErrors = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isUniqueViolation(error, 'category_spending_goals_category_unique')) throw error;
+    throw new GoalWriteError(
+      'duplicate-category',
+      'a category spending limit already tracks this category',
+    );
+  }
+};
+
+/** The self-conflicting lock makes the count and insert one capacity decision. */
+const reserveGoalSlot = async (d: Executor): Promise<void> => {
+  await d.execute(sql`LOCK TABLE goals IN SHARE ROW EXCLUSIVE MODE`);
+  const [row] = await rowsVia<{ count: number | string }>(d, sql`SELECT COUNT(*) AS count FROM goals`);
+  if (Number(row.count) >= GOALS_MAX) {
+    throw new GoalWriteError('goal-capacity', `at most ${GOALS_MAX} goals can be saved`);
+  }
+};
+
+type GoalAccountRow = {
+  id: string;
+  name: string;
+  currency: string;
+  balance_cents: number;
+};
+
+type PreparedGoal = {
+  baseCurrency: string;
+  currency?: string;
+  startingDebtCents?: number;
+};
+
+const goalBaseCurrencyOn = async (d: Executor): Promise<string> => {
+  const rows = await rowsVia<{ value: string }>(
+    d,
+    sql`SELECT value FROM settings WHERE key = 'base_currency'`,
+  );
+  return rows[0]?.value ?? config.baseCurrency;
+};
+
+const selectedGoalAccounts = async (d: Executor, ids: string[]): Promise<GoalAccountRow[]> => {
+  const rows = await rowsVia<GoalAccountRow>(d, sql`
+    SELECT id, name, currency, balance_cents FROM accounts
+    WHERE hidden = false AND id IN (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})
+  `);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+};
+
+const validDateOnly = (value: string): boolean => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
+
+const prepareGoalWrite = async (
+  d: Executor,
+  input: GoalCreate,
+  today: string,
+  existing?: GoalRecord,
+): Promise<PreparedGoal> => {
+  const targetDate = 'targetDate' in input ? input.targetDate : null;
+  if (targetDate !== null && (!validDateOnly(targetDate) || targetDate < today)) {
+    throw new GoalWriteError('invalid-target-date', 'target date must be today or later');
+  }
+  const baseCurrency = await goalBaseCurrencyOn(d);
+  if (input.type === 'financial-independence') {
+    const labels = input.essentialCosts.map((cost) => cost.label.trim().toLocaleLowerCase());
+    if (new Set(labels).size !== labels.length) {
+      throw new GoalWriteError('duplicate-cost', 'essential cost names must be unique');
+    }
+    if (input.basis === 'essential-costs' && input.essentialCosts.length === 0) {
+      throw new GoalWriteError(
+        'essential-costs-required',
+        'add at least one essential monthly cost',
+      );
+    }
+    return { baseCurrency };
+  }
+  if (input.type === 'category-spending-limit') {
+    if (!(CATEGORIES as readonly string[]).includes(input.category)) {
+      throw new GoalWriteError('unknown-category', 'choose a known category');
+    }
+    return { baseCurrency };
+  }
+  if (input.type === 'monthly-income' || input.type === 'savings-rate') {
+    return { baseCurrency };
+  }
+  if (input.type === 'debt-payoff' && existing?.type === 'debt-payoff') {
+    if (input.accountId !== existing.accountId) {
+      throw new GoalWriteError(
+        'debt-account-immutable',
+        'the debt account cannot change; create a new goal for another account',
+      );
+    }
+    if (input.targetDebt >= existing.startingDebt) {
+      throw new GoalWriteError(
+        'target-debt-invalid',
+        'target debt must be below the captured starting debt',
+      );
+    }
+    return {
+      baseCurrency,
+      currency: existing.currency,
+      startingDebtCents: toCents(existing.startingDebt),
+    };
+  }
+
+  const ids = input.type === 'debt-payoff' ? [input.accountId] : input.accountIds;
+  if (new Set(ids).size !== ids.length) {
+    throw new GoalWriteError('duplicate-account', 'select each account only once');
+  }
+  const accounts = await selectedGoalAccounts(d, ids);
+  if (accounts.length !== ids.length) {
+    throw new GoalWriteError(
+      'account-unavailable',
+      'choose an account that is still visible',
+    );
+  }
+  const currencies = new Set(accounts.map((account) => account.currency));
+  if (currencies.size !== 1) {
+    throw new GoalWriteError('currency-mismatch', 'selected accounts must use one currency');
+  }
+  const currency = accounts[0].currency;
+  if (input.type === 'emergency-fund' && currency !== baseCurrency) {
+    throw new GoalWriteError(
+      'currency-mismatch',
+      `emergency-fund accounts must use the base currency ${baseCurrency}`,
+    );
+  }
+  if (input.type === 'debt-payoff') {
+    const startingDebtCents = -accounts[0].balance_cents;
+    if (startingDebtCents <= 0) {
+      throw new GoalWriteError('not-debt', 'the selected account does not currently show debt');
+    }
+    if (toCents(input.targetDebt) >= startingDebtCents) {
+      throw new GoalWriteError(
+        'target-debt-invalid',
+        'target debt must be below the current debt',
+      );
+    }
+    return { baseCurrency, currency, startingDebtCents };
+  }
+  return { baseCurrency, currency };
+};
+
+type GoalWriteDb = Pick<Db, 'delete' | 'insert' | 'update'>;
+
+const insertGoalAccounts = async (
+  d: Pick<Db, 'insert'>,
+  goalId: string,
+  accountIds: string[],
+): Promise<void> => {
+  if (accountIds.length === 0) return;
+  await d.insert(s.goalAccounts).values(
+    accountIds.map((accountId, position) => ({ goalId, accountId, position })),
+  );
+};
+
+const insertGoalConfig = async (
+  d: Pick<Db, 'insert'>,
+  goalId: string,
+  input: GoalCreate,
+  prepared: PreparedGoal,
+): Promise<void> => {
+  switch (input.type) {
+    case 'financial-independence':
+      await d.insert(s.financialIndependenceGoals).values({
+        goalId,
+        goalType: input.type,
+        basis: input.basis,
+        bufferPct: input.bufferPct,
+        windowMonths: input.windowMonths,
+        baseCurrency: prepared.baseCurrency,
+        hourlyRateCents: input.hourlyRate === null ? null : toCents(input.hourlyRate),
+        hoursPerWeek: input.hoursPerWeek,
+      });
+      if (input.essentialCosts.length > 0) {
+        await d.insert(s.baselineItems).values(
+          input.essentialCosts.map((cost, sort) => ({
+            goalId,
+            label: cost.label,
+            monthlyCents: toCents(cost.monthly),
+            sort,
+          })),
+        );
+      }
+      return;
+    case 'emergency-fund':
+      await d.insert(s.emergencyFundGoals).values({
+        goalId,
+        goalType: input.type,
+        monthlyEssentialsCents: toCents(input.monthlyEssentials),
+        coverageMonths: input.coverageMonths,
+        currency: requiredGoalField(prepared.currency, goalId, 'currency'),
+      });
+      await insertGoalAccounts(d, goalId, input.accountIds);
+      return;
+    case 'savings-balance':
+      await d.insert(s.savingsBalanceGoals).values({
+        goalId,
+        goalType: input.type,
+        targetCents: toCents(input.target),
+        currency: requiredGoalField(prepared.currency, goalId, 'currency'),
+      });
+      await insertGoalAccounts(d, goalId, input.accountIds);
+      return;
+    case 'debt-payoff':
+      await d.insert(s.debtPayoffGoals).values({
+        goalId,
+        goalType: input.type,
+        accountId: input.accountId,
+        startingDebtCents: requiredGoalField(
+          prepared.startingDebtCents,
+          goalId,
+          'starting debt',
+        ),
+        targetDebtCents: toCents(input.targetDebt),
+        currency: requiredGoalField(prepared.currency, goalId, 'currency'),
+      });
+      return;
+    case 'monthly-income':
+      await d.insert(s.monthlyIncomeGoals).values({
+        goalId,
+        goalType: input.type,
+        targetMonthlyCents: toCents(input.target),
+        incomeScope: input.incomeScope,
+        windowMonths: input.windowMonths,
+        baseCurrency: prepared.baseCurrency,
+      });
+      return;
+    case 'savings-rate':
+      await d.insert(s.savingsRateGoals).values({
+        goalId,
+        goalType: input.type,
+        targetBasisPoints: Math.round(input.targetPercent * 100),
+        incomeScope: input.incomeScope,
+        windowMonths: input.windowMonths,
+      });
+      return;
+    case 'category-spending-limit':
+      await d.insert(s.categorySpendingGoals).values({
+        goalId,
+        goalType: input.type,
+        category: input.category,
+        monthlyLimitCents: toCents(input.monthlyLimit),
+        baseCurrency: prepared.baseCurrency,
+      });
+  }
+};
+
+const replaceGoalConfig = async (
+  d: GoalWriteDb,
+  goalId: string,
+  input: GoalCreate,
+  prepared: PreparedGoal,
+): Promise<void> => {
+  switch (input.type) {
+    case 'financial-independence':
+      await d
+        .update(s.financialIndependenceGoals)
+        .set({
+          basis: input.basis,
+          bufferPct: input.bufferPct,
+          windowMonths: input.windowMonths,
+          baseCurrency: prepared.baseCurrency,
+          hourlyRateCents: input.hourlyRate === null ? null : toCents(input.hourlyRate),
+          hoursPerWeek: input.hoursPerWeek,
+        })
+        .where(eq(s.financialIndependenceGoals.goalId, goalId));
+      await d.delete(s.baselineItems).where(eq(s.baselineItems.goalId, goalId));
+      if (input.essentialCosts.length > 0) {
+        await d.insert(s.baselineItems).values(
+          input.essentialCosts.map((cost, sort) => ({
+            goalId,
+            label: cost.label,
+            monthlyCents: toCents(cost.monthly),
+            sort,
+          })),
+        );
+      }
+      return;
+    case 'emergency-fund':
+      await d
+        .update(s.emergencyFundGoals)
+        .set({
+          monthlyEssentialsCents: toCents(input.monthlyEssentials),
+          coverageMonths: input.coverageMonths,
+          currency: requiredGoalField(prepared.currency, goalId, 'currency'),
+        })
+        .where(eq(s.emergencyFundGoals.goalId, goalId));
+      await d.delete(s.goalAccounts).where(eq(s.goalAccounts.goalId, goalId));
+      await insertGoalAccounts(d, goalId, input.accountIds);
+      return;
+    case 'savings-balance':
+      await d
+        .update(s.savingsBalanceGoals)
+        .set({
+          targetCents: toCents(input.target),
+          currency: requiredGoalField(prepared.currency, goalId, 'currency'),
+        })
+        .where(eq(s.savingsBalanceGoals.goalId, goalId));
+      await d.delete(s.goalAccounts).where(eq(s.goalAccounts.goalId, goalId));
+      await insertGoalAccounts(d, goalId, input.accountIds);
+      return;
+    case 'debt-payoff':
+      await d
+        .update(s.debtPayoffGoals)
+        .set({ targetDebtCents: toCents(input.targetDebt) })
+        .where(eq(s.debtPayoffGoals.goalId, goalId));
+      return;
+    case 'monthly-income':
+      await d
+        .update(s.monthlyIncomeGoals)
+        .set({
+          targetMonthlyCents: toCents(input.target),
+          incomeScope: input.incomeScope,
+          windowMonths: input.windowMonths,
+          baseCurrency: prepared.baseCurrency,
+        })
+        .where(eq(s.monthlyIncomeGoals.goalId, goalId));
+      return;
+    case 'savings-rate':
+      await d
+        .update(s.savingsRateGoals)
+        .set({
+          targetBasisPoints: Math.round(input.targetPercent * 100),
+          incomeScope: input.incomeScope,
+          windowMonths: input.windowMonths,
+        })
+        .where(eq(s.savingsRateGoals.goalId, goalId));
+      return;
+    case 'category-spending-limit':
+      await d
+        .update(s.categorySpendingGoals)
+        .set({
+          category: input.category,
+          monthlyLimitCents: toCents(input.monthlyLimit),
+          baseCurrency: prepared.baseCurrency,
+        })
+        .where(eq(s.categorySpendingGoals.goalId, goalId));
+  }
+};
+
+export async function createGoal(input: GoalCreate, now = new Date()): Promise<GoalRecord> {
+  const id = crypto.randomUUID();
+  const stamp = now.toISOString();
+  const today = stamp.slice(0, 10);
+  return withGoalWriteErrors(() =>
+    getDb().transaction(async (tx) => {
+      await reserveGoalSlot(tx);
+      const prepared = await prepareGoalWrite(tx, input, today);
+      await tx.insert(s.goals).values({
+        id,
+        type: input.type,
+        name: input.name,
+        targetDate: 'targetDate' in input ? input.targetDate : null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      });
+      await insertGoalConfig(tx, id, input, prepared);
+      return requiredGoalField((await goalRecordsOn(tx, id))[0], id, 'stored row');
+    }),
+  );
+}
+
+export type GoalReplaceResult =
+  | { ok: true; goal: GoalRecord }
+  | { ok: false; reason: 'not-found' | 'type-mismatch' };
+
+export async function replaceGoal(
+  id: string,
+  input: GoalCreate,
+  now = new Date(),
+): Promise<GoalReplaceResult> {
+  const stamp = now.toISOString();
+  const today = stamp.slice(0, 10);
+  return withGoalWriteErrors(() =>
+    getDb().transaction(async (tx): Promise<GoalReplaceResult> => {
+      const existing = (await goalRecordsOn(tx, id))[0];
+      if (!existing) return { ok: false, reason: 'not-found' };
+      if (existing.type !== input.type) return { ok: false, reason: 'type-mismatch' };
+      const prepared = await prepareGoalWrite(tx, input, today, existing);
+      await tx
+        .update(s.goals)
+        .set({
+          name: input.name,
+          targetDate: 'targetDate' in input ? input.targetDate : null,
+          updatedAt: stamp,
+        })
+        .where(eq(s.goals.id, id));
+      await replaceGoalConfig(tx, id, input, prepared);
+      return {
+        ok: true,
+        goal: requiredGoalField((await goalRecordsOn(tx, id))[0], id, 'stored row'),
+      };
+    }),
+  );
+}
+
+export async function deleteGoal(id: string): Promise<boolean> {
   const rows = await getDb()
-    .delete(s.baselineItems)
-    .where(
-      eq(s.baselineItems.label, label),
-    )
-    .returning({ id: s.baselineItems.id });
+    .delete(s.goals)
+    .where(eq(s.goals.id, id))
+    .returning({ id: s.goals.id });
   return rows.length > 0;
 }
 
-export async function baselineTotal(): Promise<number> {
-  const rows = await rowsOf<{ total_cents: string }>(
-    sql`SELECT COALESCE(SUM(monthly_cents), 0) AS total_cents FROM baseline_items`,
-  );
-  return fromCents(Number(rows[0].total_cents));
-}
+const LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID = '00000000-0000-4000-8000-000000000001';
 
 export interface BackupData {
   format: 'finto-backup';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   tables: Record<string, unknown[]>;
 }
@@ -2770,7 +3437,15 @@ const BACKUP_TABLES = {
   category_rules: s.categoryRules,
   transfer_rules: s.transferRules,
   recurring_ignores: s.recurringIgnores,
-  budgets: s.budgets,
+  goals: s.goals,
+  financial_independence_goals: s.financialIndependenceGoals,
+  emergency_fund_goals: s.emergencyFundGoals,
+  savings_balance_goals: s.savingsBalanceGoals,
+  debt_payoff_goals: s.debtPayoffGoals,
+  monthly_income_goals: s.monthlyIncomeGoals,
+  savings_rate_goals: s.savingsRateGoals,
+  category_spending_goals: s.categorySpendingGoals,
+  goal_accounts: s.goalAccounts,
   baseline_items: s.baselineItems,
   income_sources: s.incomeSources,
   settings: s.settings,
@@ -2781,16 +3456,21 @@ const BACKUP_TABLES = {
 const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
 
 export async function exportBackup(): Promise<BackupData> {
-  const tables: Record<string, unknown[]> = {};
-  for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-    tables[name] = (await getDb().select().from(table)) as Record<string, unknown>[];
-  }
-  return {
-    format: 'finto-backup',
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    tables,
-  };
+  return getDb().transaction(
+    async (tx) => {
+      const tables: Record<string, unknown[]> = {};
+      for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+        tables[name] = (await tx.select().from(table)) as Record<string, unknown>[];
+      }
+      return {
+        format: 'finto-backup' as const,
+        version: 2 as const,
+        exportedAt: new Date().toISOString(),
+        tables,
+      };
+    },
+    { isolationLevel: 'repeatable read' },
+  );
 }
 
 /**
@@ -2802,7 +3482,9 @@ const backupEnvelope = z.object({
   format: z.literal('finto-backup', {
     error: 'not a Finto backup file (expected JSON with format: "finto-backup")',
   }),
-  version: z.literal(1, { error: (issue) => `unsupported backup version: ${String(issue.input)}` }),
+  version: z.union([z.literal(1), z.literal(2)], {
+    error: (issue) => `unsupported backup version: ${String(issue.input)}`,
+  }),
   exportedAt: z.string().optional(),
   tables: z.record(z.string(), z.unknown(), { error: 'backup file has no tables' }),
 });
@@ -2820,6 +3502,177 @@ export function parseBackup(input: unknown): BackupData {
   }
   return { exportedAt: '', ...parsed.data } as BackupData;
 }
+
+const GOAL_BACKUP_TABLES = [
+  'goals',
+  'financial_independence_goals',
+  'emergency_fund_goals',
+  'savings_balance_goals',
+  'debt_payoff_goals',
+  'monthly_income_goals',
+  'savings_rate_goals',
+  'category_spending_goals',
+  'goal_accounts',
+  'baseline_items',
+] as const;
+
+const legacyNumber = (
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+  whole = false,
+): number => {
+  const value = settings[key];
+  if (value === undefined) return fallback;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < min ||
+    value > max ||
+    (whole && !Number.isInteger(value))
+  ) {
+    throw new Error(
+      `meta.settings.${key}: expected ${whole ? 'a whole' : 'a finite'} number between ${min} and ${max}`,
+    );
+  }
+  return value;
+};
+
+const migrateLegacyBackup = (data: BackupData): BackupData => {
+  if (data.version === 2) {
+    for (const name of GOAL_BACKUP_TABLES) {
+      if (!(name in data.tables)) throw new Error(`backup is missing required goal table ${name}`);
+    }
+    return data;
+  }
+  if (GOAL_BACKUP_TABLES.some((name) => name !== 'baseline_items' && name in data.tables)) {
+    throw new Error('backup version 1 contains unsupported goal tables');
+  }
+
+  const tables = Object.fromEntries(
+    Object.entries(data.tables).map(([name, rows]) => [name, [...rows]]),
+  );
+  for (const name of GOAL_BACKUP_TABLES) tables[name] = [];
+
+  const records = (name: string): Record<string, unknown>[] =>
+    (data.tables[name] ?? []).map((row) => {
+      if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+        throw new Error(`${name}: a row is not an object`);
+      }
+      return row as Record<string, unknown>;
+    });
+  const legacyMeta = records('meta');
+  const legacySettingsRows = legacyMeta.filter((row) => row.key === 'settings');
+  if (legacySettingsRows.length > 1) {
+    throw new Error('meta.settings: duplicate singleton rows');
+  }
+  const [legacySettingsRow] = legacySettingsRows;
+  let settings: Record<string, unknown> = {};
+  if (legacySettingsRow !== undefined) {
+    if (typeof legacySettingsRow.value !== 'string') {
+      throw new Error('meta.settings: expected a JSON string');
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(legacySettingsRow.value);
+    } catch {
+      throw new Error('meta.settings: invalid JSON');
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('meta.settings: expected a JSON object');
+    }
+    settings = parsed as Record<string, unknown>;
+    if (
+      'goalMode' in settings &&
+      settings.goalMode !== 'baseline' &&
+      settings.goalMode !== 'lifestyle'
+    ) {
+      throw new Error('meta.settings.goalMode: expected baseline or lifestyle');
+    }
+  }
+
+  const transactions = data.tables.transactions ?? [];
+  const baseline = records('baseline_items');
+  const budgets = records('budgets');
+  const hasLegacyGoal =
+    transactions.length > 0 || legacySettingsRow !== undefined || baseline.length > 0 || budgets.length > 0;
+  const stamp = Number.isNaN(new Date(data.exportedAt).getTime())
+    ? new Date().toISOString()
+    : new Date(data.exportedAt).toISOString();
+  const baseCurrency =
+    records('settings').find((row) => row.key === 'base_currency')?.value ?? 'EUR';
+
+  if (hasLegacyGoal) {
+    const bufferPct = legacyNumber(settings, 'bufferPct', 10, 0, 100);
+    const windowMonths = legacyNumber(settings, 'windowMonths', 6, 1, 24, true);
+    const hourlyRate =
+      settings.hourlyRate === undefined || settings.hourlyRate === null
+        ? null
+        : legacyNumber(settings, 'hourlyRate', 0, 0.01, 10_000);
+    const hoursPerWeek = legacyNumber(settings, 'hoursCapPerWeek', 20, 0.01, 168);
+    if (hourlyRate !== null && fromCents(toCents(hourlyRate)) !== hourlyRate) {
+      throw new Error('meta.settings.hourlyRate: expected a number with at most two decimal places');
+    }
+    tables.goals.push({
+      id: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+      type: 'financial-independence',
+      name: 'Financial independence',
+      targetDate: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    tables.financial_independence_goals.push({
+      goalId: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+      goalType: 'financial-independence',
+      basis: settings.goalMode === 'lifestyle' ? 'current-spending' : 'essential-costs',
+      bufferPct,
+      windowMonths,
+      baseCurrency: typeof baseCurrency === 'string' ? baseCurrency : 'EUR',
+      hourlyRateCents: hourlyRate === null ? null : toCents(hourlyRate),
+      hoursPerWeek,
+    });
+    tables.baseline_items = baseline.map((row) => ({
+      ...row,
+      goalId: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
+    }));
+  }
+
+  for (const budget of budgets) {
+    if (
+      typeof budget.category !== 'string' ||
+      !(CATEGORIES as readonly string[]).includes(budget.category) ||
+      typeof budget.monthlyCents !== 'number' ||
+      !Number.isSafeInteger(budget.monthlyCents) ||
+      budget.monthlyCents <= 0
+    ) {
+      throw new Error('budgets: invalid category or monthly cents');
+    }
+    const id = `legacy-budget-${crypto.createHash('md5').update(budget.category).digest('hex')}`;
+    tables.goals.push({
+      id,
+      type: 'category-spending-limit',
+      name: `${budget.category.replace(/-/g, ' ')} spending limit`,
+      targetDate: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+    });
+    tables.category_spending_goals.push({
+      goalId: id,
+      goalType: 'category-spending-limit',
+      category: budget.category,
+      monthlyLimitCents: budget.monthlyCents,
+      baseCurrency: typeof baseCurrency === 'string' ? baseCurrency : 'EUR',
+    });
+  }
+
+  if ('meta' in data.tables) {
+    tables.meta = legacyMeta.filter((row) => row.key !== 'settings');
+  }
+  delete tables.budgets;
+  return { ...data, version: 2, tables };
+};
 
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
@@ -2879,15 +3732,25 @@ function sanitizeRow(
  * import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
+  const provided = new Set(Object.keys(data.tables));
+  if (provided.has('imports') && !provided.has('transactions')) {
+    throw new Error('backup table imports requires transactions');
+  }
+  const migrated = migrateLegacyBackup(data);
   let tables = 0;
   let rows = 0;
   await getDb().transaction(async (tx) => {
-    for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-      const incoming = data.tables[name];
-      if (!incoming) continue; // an older backup without this table keeps it empty
+    const goalTables = new Set<string>(GOAL_BACKUP_TABLES);
+    for (const name of [...GOAL_BACKUP_TABLES].reverse()) {
       await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
+    }
+    for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+      const incoming = migrated.tables[name];
+      if (!incoming && !goalTables.has(name)) continue;
+      if (!goalTables.has(name)) await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
+      const valuesIn = incoming ?? [];
       const dropId = IDENTITY_TABLES.has(name);
-      const values = incoming.map((row) => {
+      const values = valuesIn.map((row) => {
         const clean = sanitizeRow(table, row, name);
         const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
         return dropId ? rest : { ...rest, id };
@@ -2895,8 +3758,8 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
       for (const chunk of chunked(values, 500)) {
         await tx.insert(table).values(chunk as never[]);
       }
-      tables++;
-      rows += incoming.length;
+      if (provided.has(name) || valuesIn.length > 0) tables++;
+      rows += valuesIn.length;
     }
   });
   return { tables, rows };

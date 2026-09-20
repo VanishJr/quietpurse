@@ -26,10 +26,11 @@ The door owns what crosses it and nothing behind it.
 - **The wire vocabulary** — the field names, the shapes a body may take, the status codes, and the
   sentences a refusal is written in. A schema at the door is the only thing between a hand-written
   request and a writer that takes a typed value, so the door narrows rather than casts: a predicate
-  that answers a boolean leaves a caller's string a string. The request schemas stay here; what a
-  route *answers* is declared once in `backend/src/wire`, whose spec carries the rule and the three
-  holds — the typed reply helper, the wrapper under the suite and the walk at import — that keep
-  every answer to its declaration.
+  that answers a boolean leaves a caller's string a string. Route-local request schemas stay here;
+  the discriminated Goals create and replacement bodies live with their response contract in
+  `backend/src/wire` because the client composes the same closed type vocabulary. Every route
+  answer is declared there too, whose spec carries the three holds — the typed reply helper, the
+  wrapper under the suite and the walk at import — that keep every answer to its declaration.
 - **The refusal sentences themselves.** They are read by a person who is stuck, so each one says
   what to do next rather than what went wrong, and where two states refuse the same write the two
   sentences differ because the ways out differ. A refusal that has to quote something quotes what is
@@ -351,12 +352,26 @@ available. What makes that structural rather than a habit is that the update tak
 and cannot be called with an unchecked body at all — a guard at the route would only move the defect
 to the next caller, which is where it was found the first time.
 
-**The Goal screen's settings are one JSON string rather than a table, and the shape has a cost.**
-There are few of them and a table would not pay for itself; what that buys in ceremony it takes back
-in checking, because no column type bounds anything. The unit a field is denominated in, and the
-meaning of a sentinel where a field has one, are therefore stated on the field in
-`backend/src/wire`, where the shape is declared; the numeric bounds are in the update's own clamping, which is also the
-only thing between a hand-written body and a threshold computed from a window nobody could live in.
+**Goals are rows, not settings.** Common identity belongs to `goals`; each goal type has one
+matching configuration row whose columns and checks hold the units and bounds. Financial
+independence owns its essential-cost lines, while income-source classification stays global because
+changing a source changes every income-based goal. The API replaces a goal's full type-specific
+configuration atomically and never changes its type. The debt account is immutable too: its captured
+starting debt describes that account and cannot be carried to another one honestly.
+
+**Saved base-currency goal inputs keep the unit in which they were entered.** Financial
+independence configuration, monthly-income targets and category limits capture the base currency at
+their write. They are comparable with aggregate transaction values only while the current base
+currency matches that saved unit. A later setting change leaves saved amounts and their label
+intact, makes unlike-currency current values unavailable, and suppresses Financial independence
+support and work-hours results rather than relabelling them. A current-spending target is unavailable
+too because it is derived in the new unit rather than saved in the old one. Replacing the goal is the
+explicit point at which the person can enter its monetary configuration in the new unit.
+
+**Deleting an account does not delete or retarget a goal.** Goal-account links deliberately carry no
+account foreign key. The progress engine resolves them against the visible account list on every
+read and returns an actionable unavailable status when a saved account is gone. This is the
+opposite of the account-owned rows the delete path removes and must not be folded into that list.
 
 ## What is kept of an upload, and what a crash may leave behind
 
@@ -563,10 +578,11 @@ cost of guessing is not.
 **A derivation whose content is its arithmetic is written whole in the code, at the site it governs,
 and this document says only that it exists.** Each is stated once and in one place:
 
-- the independence thresholds — the two bases, the buffer, the shortfall, the self-sufficiency
-  ratio, the whole-months window and the one-off amortisation — in `backend/src/independence.ts`'s
-  header. It crosses `backend/src/settings.ts`'s bounds, `backend/src/db`'s baseline and monthly
-  totals, and `web/src`, which answers for which of the two modes a figure was actually computed in.
+- the goal progress formulas — including Financial independence's two bases, buffered progress,
+  whole-month window, one-off amortisation and work-hours capacity — in `backend/src/goals.ts`.
+  They cross the goal configuration rows, the data layer's account and
+  monthly aggregates, and the wire answer that lets every client render without recomputing an
+  outcome.
 - the decimal-to-minor-unit rounding, beside `toCents` in `backend/src/money.ts`.
 - the two transfer-pairing windows, beside each constant in `backend/src/classify.ts` — a wide one
   where the amounts have to match exactly, a narrow one where they cannot.

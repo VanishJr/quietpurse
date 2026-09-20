@@ -64,15 +64,6 @@
  * and changing one are all things you do to the LIST, and the list is one strip at the
  * foot of the screen rather than three controls in three places.
  *
- * ---------------------------------------------------------------------------
- * Budgets is pinned, and is not a chart
- *
- * Monthly budgets is a per-category limit with an editor behind it, and it lived on this
- * screen because the old fixed view had somewhere to put it. It is not something the
- * wizard could build — there is nothing to configure and no series to plot — so it is a
- * pinned tab at the end of the dock rather than a seventh shape in the picker, and it is
- * unchanged. Deleting it along with the layout it happened to sit in would have been a
- * feature removed by accident.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ChartList, ChartsStaleError } from '../api';
@@ -88,19 +79,12 @@ import {
   readLegacyCharts,
   suggestedTitle,
 } from '../analytics';
-import { BudgetsBlock } from '../components/BudgetsBlock';
 import { ChartCard } from '../components/ChartCard';
 import { ChartDock, DockTab } from '../components/ChartDock';
 import { BlankPlotGlyph } from '../components/ChartGlyphs';
 import { ChartWizard } from '../components/ChartWizard';
 import { setUrl, useUrl } from '../url';
 import { Account, Chart } from '../types';
-
-/**
- * The pinned tab's id. A `#` in it so that no chart id can ever collide with it —
- * `newChartId` builds from base-36 digits and cannot produce one.
- */
-const BUDGETS_TAB = '#budgets';
 
 /**
  * What a refusal for staleness says here, which is not what the route says.
@@ -155,7 +139,7 @@ function editsSentence(cleaned: Normalised): string | null {
   return said.length === 0 ? null : said.join(' ');
 }
 
-export function AnalyticsScreen() {
+export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number }) {
   const [charts, setCharts] = useState<ChartsState>({ phase: 'loading' });
   /** null while the list is in flight — `useChartData` needs the two apart. */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -385,7 +369,7 @@ export function AnalyticsScreen() {
    * being rewritten to nothing while the list is still in flight: `specs` is empty
    * then, the fallback is only READ, and the id is found the moment the list lands.
    */
-  const known = urlChart === BUDGETS_TAB || specs.some((c) => c.id === urlChart);
+  const known = specs.some((c) => c.id === urlChart);
   const activeId = known ? urlChart : (specs[0]?.id ?? null);
   const active = specs.find((c) => c.id === activeId) ?? null;
 
@@ -471,14 +455,11 @@ export function AnalyticsScreen() {
     setUrl({ chart: neighbour ? neighbour.id : null }, 'replace');
   };
 
-  const tabs: DockTab[] = [
-    ...specs.map((c) => ({
-      id: c.id,
-      label: c.title || suggestedTitle(c),
-      glyph: c.kind,
-    })),
-    { id: BUDGETS_TAB, label: 'Budgets', pinned: true as const },
-  ];
+  const tabs: DockTab[] = specs.map((c) => ({
+    id: c.id,
+    label: c.title || suggestedTitle(c),
+    glyph: c.kind,
+  }));
 
   return (
     <div className="screen-inner analytics-screen">
@@ -524,10 +505,7 @@ export function AnalyticsScreen() {
       </div>
 
       <div className="chart-stage">
-        {activeId === BUDGETS_TAB ? (
-          // reachable whatever the chart list is doing: budgets are not one of them
-          <BudgetsBlock />
-        ) : charts.phase === 'loading' ? (
+        {charts.phase === 'loading' ? (
           <p className="empty">Reading your charts…</p>
         ) : charts.phase === 'failed' ? (
           <p className="error">
@@ -544,6 +522,7 @@ export function AnalyticsScreen() {
             spec={active}
             accounts={accounts}
             accountsError={accountsError}
+            dataRevision={dataRevision}
           />
         ) : (
           <Blank onNew={() => setWizard({ editing: null })} />
@@ -567,6 +546,7 @@ export function AnalyticsScreen() {
         editing={wizard?.editing ?? null}
         accounts={accounts}
         accountsError={accountsError}
+        dataRevision={dataRevision}
         onClose={() => setWizard(null)}
         onSave={onSave}
       />

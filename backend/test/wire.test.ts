@@ -11,7 +11,14 @@ import path from 'path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { ANSWERS, type Declared, refusalSchema } from '../src/wire';
+import {
+  ANSWERS,
+  type Declared,
+  GOAL_TYPES,
+  goalCreateSchema,
+  goalUpdateSchema,
+  refusalSchema,
+} from '../src/wire';
 
 const WIRE_DIR = path.resolve(process.cwd(), 'src/wire');
 
@@ -144,7 +151,10 @@ const objectNodes = (schema: z.ZodType, at: string, walk: Walk): number => {
     case 'array':
       return objectNodes(def.element!, `${at}[]`, walk);
     case 'union':
-      return (def.options ?? []).reduce((n, o, i) => n + objectNodes(o, `${at}|${i}`, walk), 0);
+      if (!def.options?.length) {
+        throw new Error(`${at}: union options are unreadable - teach the walk before trusting it`);
+      }
+      return def.options.reduce((n, o, i) => n + objectNodes(o, `${at}|${i}`, walk), 0);
     case 'optional':
     case 'nullable':
     case 'readonly':
@@ -158,6 +168,90 @@ const objectNodes = (schema: z.ZodType, at: string, walk: Walk): number => {
   }
 };
 
+describe('the Goals write contract', () => {
+  const valid = {
+    type: 'monthly-income',
+    name: 'Stable income',
+    target: 3000,
+    incomeScope: 'own',
+    windowMonths: 6,
+  } as const;
+
+  it('is exhaustive and refuses undeclared fields for create and replacement', () => {
+    expect(GOAL_TYPES).toEqual([
+      'financial-independence',
+      'emergency-fund',
+      'savings-balance',
+      'debt-payoff',
+      'monthly-income',
+      'savings-rate',
+      'category-spending-limit',
+    ]);
+    expect(goalCreateSchema.parse(valid)).toEqual(valid);
+    expect(goalUpdateSchema.parse(valid)).toEqual(valid);
+    expect(goalCreateSchema.safeParse({ ...valid, surprise: true }).success).toBe(false);
+  });
+
+  it('keeps type-specific fields on their own discriminated arm', () => {
+    expect(
+      goalCreateSchema.safeParse({
+        ...valid,
+        type: 'savings-rate',
+        targetPercent: 20,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('refuses money and percentage values that their integer storage cannot represent', () => {
+    const financial = {
+      type: 'financial-independence',
+      name: 'Independent',
+      basis: 'essential-costs',
+      bufferPct: 10,
+      windowMonths: 6,
+      hourlyRate: 20,
+      hoursPerWeek: 20,
+      essentialCosts: [{ label: 'Essentials', monthly: 1000 }],
+    } as const;
+    const debt = {
+      type: 'debt-payoff',
+      name: 'Debt',
+      targetDate: null,
+      accountId: 'loan',
+      targetDebt: 0,
+    } as const;
+    const rate = {
+      type: 'savings-rate',
+      name: 'Savings rate',
+      targetPercent: 20,
+      incomeScope: 'own',
+      windowMonths: 6,
+    } as const;
+
+    const invalid = [
+      { ...valid, target: 1.001 },
+      { ...valid, target: 100.00000000000001 },
+      { ...financial, hourlyRate: 20.001 },
+      { ...financial, hourlyRate: 20.000000000000004 },
+      {
+        ...financial,
+        essentialCosts: [{ label: 'Essentials', monthly: 0.001 }],
+      },
+      { ...debt, targetDebt: 0.001 },
+      { ...rate, targetPercent: 0.001 },
+      { ...rate, targetPercent: 20.000000000000004 },
+    ];
+    for (const schema of [goalCreateSchema, goalUpdateSchema]) {
+      for (const body of invalid) expect(schema.safeParse(body).success).toBe(false);
+    }
+
+    expect(goalCreateSchema.safeParse({ ...valid, target: 0.01 }).success).toBe(true);
+    expect(goalCreateSchema.safeParse({ ...financial, hourlyRate: 0.01 }).success).toBe(true);
+    expect(goalCreateSchema.safeParse(debt).success).toBe(true);
+    expect(goalCreateSchema.safeParse({ ...rate, targetPercent: 0.01 }).success).toBe(true);
+  });
+});
+
 describe('every declared JSON body is strict all the way down', () => {
   const entries = Object.entries(ANSWERS as Record<string, Declared>);
   const json = entries.filter(
@@ -168,6 +262,7 @@ describe('every declared JSON body is strict all the way down', () => {
     let visited = objectNodes(refusalSchema, 'refusal', walk);
     for (const [key, entry] of json) {
       visited += objectNodes(entry.body, key, walk);
+      if (entry.request) visited += objectNodes(entry.request, `${key} request`, walk);
       for (const [status, schema] of Object.entries(entry.refusals ?? {})) {
         visited += objectNodes(schema, `${key} ${status}`, walk);
       }
@@ -181,17 +276,15 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(lax).toEqual([]);
   });
 
-  /**
-   * The floor above holds one object per body and is blind to the children under it:
-   * a zod release that renamed `shape` would leave every nested object unvisited with
-   * the floor met. The distinct objects reached are therefore held equal to the
-   * objects the module's own text declares - every strictObject() and every extend()
-   * - which also refuses a declared shape that no route and no refusal reaches.
-   */
-  it('reaches every object shape the module declares, and nothing the module does not', () => {
-    const text = fs.readFileSync(path.join(WIRE_DIR, 'index.ts'), 'utf8');
-    const declaredObjects =
-      (text.match(/\.strictObject\(/g) ?? []).length + (text.match(/\.extend\(/g) ?? []).length;
+  it('reaches every object shape declared across the wire module tree', () => {
+    const declaredObjects = sourcesOf(WIRE_DIR).reduce((count, file) => {
+      const text = fs.readFileSync(file, 'utf8');
+      return (
+        count +
+        (text.match(/\.strictObject\(/g) ?? []).length +
+        (text.match(/\.extend\(/g) ?? []).length
+      );
+    }, 0);
     expect(declaredObjects).toBeGreaterThan(json.length);
     expect(walked().objects.size).toBe(declaredObjects);
   });
@@ -206,6 +299,12 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(() => objectNodes({} as z.ZodType, 'crafted', { lax: [], objects: new Set() })).toThrow(
       /unhandled schema type "\(unreadable\)"/,
     );
+    const unionWithoutOptions = {
+      _zod: { def: { type: 'union' } },
+    } as unknown as z.ZodType;
+    expect(() =>
+      objectNodes(unionWithoutOptions, 'crafted union', { lax: [], objects: new Set() }),
+    ).toThrow(/union options are unreadable/);
   });
 
   it('declares every route once, under a method the registry keys by', () => {

@@ -1,6 +1,7 @@
 import { act, fireEvent, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_SETTINGS, importsResponse, RECURRING } from '../test/fixtures';
+import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { setUrl } from '../url';
 import { SettingsScreen } from './SettingsScreen';
@@ -18,12 +19,13 @@ import { SettingsScreen } from './SettingsScreen';
 const BASE: Routes = {
   'GET /api/recurring': () => ok(RECURRING),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
+  'GET /api/income-sources': () => ok(INCOME_SOURCES),
 };
 
 const mount = () => renderThemed(<SettingsScreen onOpenImport={vi.fn()} />);
 
 describe('the screen itself', () => {
-  it('asks for the two reads that moved here, and nothing else', async () => {
+  it('asks for the global settings reads and nothing else', async () => {
     // It is always mounted behind `hidden`, so a load here is a load on the app's first
     // paint. Both of these already were one - they were the Overview's - so what moved
     // is which screen asks, not how many requests the app makes when it starts. The
@@ -35,8 +37,10 @@ describe('the screen itself', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect([...new Set(requests())].sort()).toEqual([
       'GET /api/app-settings',
+      'GET /api/income-sources',
       'GET /api/recurring',
     ]);
+    expect(screen.getByRole('heading', { name: 'Income sources' })).toBeInTheDocument();
   });
 
   it('carries no password, no address and no sign-out, since there is no account', async () => {
@@ -269,5 +273,55 @@ describe('recurring payments', () => {
     expect(
       await screen.findByRole('button', { name: 'Restore payment Spotify' }),
     ).toBeInTheDocument();
+  });
+
+  it('keeps the newest recurring answer when a revision overtakes an older read', async () => {
+    const group = (description: string) => ({
+      description,
+      category: 'subscriptions',
+      months: 3,
+      count: 3,
+      avgAmount: -10,
+      monthlyAvg: -10,
+      lastDate: '2026-07-01',
+      ignored: false,
+    });
+    let releaseOld: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => {
+        reads += 1;
+        if (reads === 1) {
+          return new Promise<Response>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group('Fresh')] });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <SettingsScreen
+            onOpenImport={vi.fn()}
+            dataRevision={revision}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    await vi.waitFor(() => expect(reads).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    expect(await screen.findByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
+
+    await act(async () => {
+      releaseOld(ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group('Stale')] }));
+    });
+    expect(screen.getByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Hide payment Stale' })).not.toBeInTheDocument();
   });
 });

@@ -168,6 +168,7 @@ export function useChartData(
   accounts: Account[] | null,
   /** Why the list is null, when it is null because reading it failed. */
   accountsError: string | null = null,
+  dataRevision = 0,
 ): ChartLoad {
   const [state, setState] = useState<ChartLoad>({ data: null, error: null, loading: true });
 
@@ -244,7 +245,7 @@ export function useChartData(
     };
     // `spec` itself is deliberately not a dependency — see `fetchKey` above; every
     // field the loaders read is either inside `key` or listed here in its own right.
-  }, [key, spec.accountId, known, waiting, accountsError]);
+  }, [key, spec.accountId, known, waiting, accountsError, dataRevision]);
 
   return state;
 }

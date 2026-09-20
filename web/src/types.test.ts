@@ -15,7 +15,7 @@ import type {
 } from './analytics';
 import type { MAX_ERROR_CHARS } from './api';
 import type { KIND_DEFS as INCOME_SOURCE_KIND_DEFS } from './components/IncomeSourcesBlock';
-import type { GOAL_MODE_DEFS } from './screens/IndependenceScreen';
+import type { GOAL_BASIS_DEFS, GOAL_INCOME_SCOPE_DEFS, GOAL_TYPE_DEFS } from './goals';
 import type {
   CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
   CHART_ID_MAX as WIRE_CHART_ID_MAX,
@@ -27,7 +27,20 @@ import type {
   ChartMetric,
   ChartRange,
   ERROR_DETAIL_MAX,
-  GoalMode,
+  GOAL_BASES,
+  GOAL_INCOME_SCOPES,
+  GOAL_PERIODS,
+  GOAL_PROGRESS_SEMANTICS,
+  GOAL_STATUSES,
+  GOAL_TYPES,
+  GOAL_UNITS,
+  GoalBasis,
+  GoalIncomeScope,
+  GoalPeriodKind,
+  GoalProgressSemantic,
+  GoalStatus,
+  GoalType,
+  GoalUnit,
   IncomeSourceKind,
 } from './types';
 
@@ -382,6 +395,15 @@ describe('the pins stand on literal types, and tsc is what holds this block', ()
     expectTypeOf<typeof WIRE_CHART_ACCOUNT_ID_MAX>().toEqualTypeOf<typeof CHART_ACCOUNT_ID_MAX>();
     expectTypeOf<typeof WIRE_CHART_ID_SHAPE_SOURCE>().toEqualTypeOf<typeof CHART_ID_SHAPE_SOURCE>();
     expectTypeOf<typeof ERROR_DETAIL_MAX>().toEqualTypeOf<typeof MAX_ERROR_CHARS>();
+    expectTypeOf<GoalType>().toEqualTypeOf<(typeof GOAL_TYPES)[number]>();
+    expectTypeOf<GoalBasis>().toEqualTypeOf<(typeof GOAL_BASES)[number]>();
+    expectTypeOf<GoalIncomeScope>().toEqualTypeOf<(typeof GOAL_INCOME_SCOPES)[number]>();
+    expectTypeOf<GoalProgressSemantic>().toEqualTypeOf<
+      (typeof GOAL_PROGRESS_SEMANTICS)[number]
+    >();
+    expectTypeOf<GoalUnit>().toEqualTypeOf<(typeof GOAL_UNITS)[number]>();
+    expectTypeOf<GoalStatus>().toEqualTypeOf<(typeof GOAL_STATUSES)[number]>();
+    expectTypeOf<GoalPeriodKind>().toEqualTypeOf<(typeof GOAL_PERIODS)[number]>();
   });
 
   it('each vocabulary record is keyed by exactly the wire union it is typed over', () => {
@@ -389,7 +411,9 @@ describe('the pins stand on literal types, and tsc is what holds this block', ()
     expectTypeOf<ChartMetric>().toEqualTypeOf<keyof typeof METRIC_DEFS>();
     expectTypeOf<ChartBreakdown>().toEqualTypeOf<keyof typeof BREAKDOWN_DEFS>();
     expectTypeOf<ChartRange>().toEqualTypeOf<keyof typeof RANGE_DEFS>();
-    expectTypeOf<GoalMode>().toEqualTypeOf<keyof typeof GOAL_MODE_DEFS>();
+    expectTypeOf<GoalType>().toEqualTypeOf<keyof typeof GOAL_TYPE_DEFS>();
+    expectTypeOf<GoalBasis>().toEqualTypeOf<keyof typeof GOAL_BASIS_DEFS>();
+    expectTypeOf<GoalIncomeScope>().toEqualTypeOf<keyof typeof GOAL_INCOME_SCOPE_DEFS>();
     expectTypeOf<IncomeSourceKind>().toEqualTypeOf<keyof typeof INCOME_SOURCE_KIND_DEFS>();
   });
 });

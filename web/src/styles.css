@@ -834,27 +834,6 @@ textarea {
   font-weight: 800;
 }
 
-/* ---------- progress / budget bars ---------- */
-
-.track {
-  height: 8px;
-  border-radius: 4px;
-  background: var(--ink-grid);
-  overflow: hidden;
-  margin-top: 14px;
-}
-
-.track-fill {
-  height: 100%;
-  border-radius: 4px;
-}
-
-.track-sm {
-  height: 6px;
-  border-radius: 3px;
-  margin-top: 6px;
-}
-
 /* ---------- modal / sheet ---------- */
 
 .backdrop {
@@ -2104,17 +2083,6 @@ textarea {
   color: var(--ink-onBrand);
 }
 
-/* built-in rather than one the reader made: set apart, and drawn in a broken line
-   until it is the one showing */
-.dock-tab.is-pinned {
-  margin-left: 12px;
-  border-style: dashed;
-}
-
-.dock-tab.is-pinned.is-current {
-  border-style: solid;
-}
-
 .dock-open {
   display: inline-flex;
   align-items: center;
@@ -2124,12 +2092,6 @@ textarea {
   color: inherit;
   font: inherit;
   border-radius: var(--r-sm) 0 0 var(--r-sm);
-}
-
-/* nothing to the right of the name on a tab with no ⋮ */
-.dock-tab.is-pinned .dock-open {
-  padding-right: 13px;
-  border-radius: var(--r-sm);
 }
 
 .dock-glyph {
@@ -2399,42 +2361,257 @@ textarea {
   margin-bottom: 6px;
 }
 
-/* ---------- goal (independence) ---------- */
+/* ---------- goals ---------- */
 
-.hero-label {
-  font-size: 13px;
+.goals-header,
+.goals-list,
+.goals-empty,
+.state-note,
+.error-row {
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.goals-header {
+  margin-bottom: 18px;
+}
+
+.goals-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.goals-empty {
+  padding: 56px 20px;
+  text-align: center;
+  border: 1px dashed var(--ink-grid);
+  border-radius: var(--r-lg);
+}
+
+.goals-empty p {
   color: var(--ink-secondary);
+  margin: 8px 0 20px;
 }
 
-.hero-value {
-  font-size: 30px;
-  font-weight: 800;
-  margin-top: 6px;
-}
-
-.hero-permonth {
-  font-size: 15px;
-  font-weight: 400;
+.state-note {
   color: var(--ink-muted);
+  padding: 28px 0;
 }
 
-.hero-sub {
-  font-size: 13px;
-  color: var(--ink-secondary);
-  margin-top: 6px;
+.error-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-bad);
+  padding: 14px 16px;
+  border: 1px solid var(--ink-bad);
+  border-radius: var(--r-md);
 }
 
-.hero-compare {
+.goal-card {
+  padding: 20px;
+}
+
+.goal-card-header,
+.goal-card-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.goal-card-header h2 {
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.goal-card-actions {
+  flex: none;
+}
+
+.goal-card-kind,
+.goal-source,
+.goal-support,
+.goal-progress-label {
+  color: var(--ink-muted);
   font-size: 12px;
+}
+
+.goal-card-kind {
+  margin-top: 3px;
+}
+
+.goal-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 16px;
+}
+
+.goal-figures dt {
   color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.goal-figures dd {
+  margin: 5px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.goal-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ink-grid);
+}
+
+.goal-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ink-accent);
+}
+
+.goal-card-at-risk .goal-progress span,
+.goal-card-over-limit .goal-progress span {
+  background: var(--ink-bad);
+}
+
+.goal-progress-label {
+  margin-top: 7px;
+}
+
+.goal-source,
+.goal-support,
+.goal-status {
   margin-top: 10px;
-  line-height: 1.35;
 }
 
-.progress-label {
-  font-size: 12px;
-  color: var(--ink-muted);
+.goal-status {
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.goal-editor {
+  max-height: min(80vh, 760px);
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.goal-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.goal-type-tile {
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+  background: var(--ink-surface);
+  color: var(--ink-primary);
+  text-align: left;
+}
+
+.goal-type-tile:hover,
+.goal-type-tile:focus-visible {
+  border-color: var(--ink-accent);
+}
+
+.goal-type-tile strong,
+.goal-type-tile span {
+  display: block;
+}
+
+.goal-type-tile span,
+.goal-currency,
+.goal-account-list p {
   margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.goal-editor form,
+.goal-costs,
+.goal-account-list {
+  display: grid;
+  gap: 12px;
+}
+
+.goal-editor form {
+  margin-top: 14px;
+}
+
+.goal-costs,
+.goal-account-list {
+  padding: 14px;
+  border: 1px solid var(--ink-grid);
+  border-radius: var(--r-md);
+}
+
+.goal-cost-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(100px, 0.8fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.goal-account-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+@media (max-width: 599px) {
+  .goal-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-cost-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sheet-actions {
+    flex-wrap: wrap;
+  }
+
+  .goal-card {
+    padding: 16px;
+  }
+
+  .goal-card-header {
+    align-items: flex-start;
+  }
+
+  .goal-card-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .goal-figures {
+    gap: 8px;
+  }
+
+  .goal-figures dd {
+    font-size: 15px;
+  }
 }
 
 /* on a <label> too, which would otherwise stay inline and run into the control before it */
@@ -2443,21 +2620,6 @@ textarea {
   font-size: 12px;
   color: var(--ink-muted);
   margin-top: 8px;
-}
-
-.inline-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.inline-row .input {
-  flex: 1;
-}
-
-.input-narrow {
-  width: 96px;
-  flex: none;
 }
 
 .input-code {
@@ -2470,10 +2632,6 @@ textarea {
   color: var(--ink-secondary);
   margin-top: 8px;
   line-height: 1.4;
-}
-
-.bottom-pad {
-  height: 32px;
 }
 
 .csv-input {
@@ -2582,14 +2740,6 @@ details > summary::marker {
 
   .backdrop-center .sheet-wide {
     max-width: 900px;
-  }
-
-  /* the goal screen's hero and its month chart, likewise */
-  .goal-split {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 24px;
-    align-items: start;
   }
 
   .backdrop-bottom {

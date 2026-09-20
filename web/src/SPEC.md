@@ -89,17 +89,34 @@ between two choices — the chips enforce no minimum — and a chart in that sta
 together, which is what the summary endpoints answer without an id; an id that names no account is
 not that, and `chartData.ts` refuses it rather than answering the whole under one account's title.
 
-**Which of the two goal modes a figure was computed in comes off the body.** `/api/independence`
-answers the mode it actually used beside the mode that was asked for, and
-`web/src/screens/IndependenceScreen.tsx` reads it rather than working it out. The rule it replaced
-was the same expression written once here and once in `backend/src/independence.ts`, agreeing by
-coincidence: either side moving put every heading, hint, legend and what-if label on the screen into
-one mode while the threshold, the shortfall and the self-sufficiency figure were computed in the
-other, with nothing red in either package. Re-deriving it on this side — from the requested mode and
-the line-item total, or by comparing the active threshold against the two the body also carries —
-restores exactly that. Reading the requested mode is a different question and stays: it is what
-decides whether the minimum's line items and their add form are on screen, so the state that cannot
-create its own first item does not exist.
+**A goal card renders the server's answer and never computes an outcome.** `/api/goals` supplies
+the target, current value, remainder, status, percentage semantics and source line for every saved
+goal. The list may format money and choose copy from closed dictionaries, but it may not derive a
+fallback basis, progress, forecast, work-hours result or account total. Required monthly work
+hours, configured monthly capacity and whether that capacity is exceeded all arrive from the server.
+Goal-unit and progress-semantic formatters are exhaustive switches, so a wider server vocabulary is
+a type error rather than plausible fallback copy. Status guidance names an action only when the
+status has one cause: `needs-setup` can name essential costs, while `not-enough-data` stays neutral
+because it can mean missing history or an unconverted row. Editing reads the complete configuration
+from `/api/goals/:id`; the goal type is fixed after creation, and Financial independence costs are
+replaced atomically with that configuration. The screen uses the shared `screen-inner` gutter at
+its root, and each card's Edit and Delete controls include the goal name in their accessible name,
+so narrow layouts and assistive action lists keep the card context.
+
+**A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
+goal are one retryable load; a new attempt clears the previous account list and currency before any
+form or type choice is enabled. Account-backed edits retain the goal's persisted currency when a
+saved account is gone or no longer uses that currency. Savings selection locks to one currency
+until the current selection is cleared; incompatible saved accounts remain removable and cannot
+silently retarget the goal. A debt edit continues naming its saved account after the balance reaches
+zero. Form refusals stay with their draft, but Back or a new type clears them; repeated
+essential-cost controls carry their row ordinal in every accessible name.
+
+**Goal selection is location, not product state.** The stable navigation key remains
+`screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
+missing id, including one that disappears before an edit is saved, falls back to the list with an
+explicit unavailable message rather than choosing another goal. A new installation's empty list is
+a real empty state and is never shown while the request is unresolved or failed.
 
 **The wire types are the server's declaration, reached by type only and through one door.**
 `web/src/types.ts` declares nothing of its own but `TxFocus`: every wire shape in it is an `export
@@ -136,19 +153,20 @@ refuses a whole list and not one chart in it, so a client bound under the server
 the server would have taken, one over it composes a list the server refuses whole, and a client
 re-minting ids against a charset the route has narrowed is refused on every save from then on; and
 the client shows the whole diagnostic budget, because the importer orders a refusal's clauses on the
-premise that all of it is read, so a smaller cap deletes the clause it put last. The six
-vocabularies are held twice on this side — as the wire's union types and as the def records a picker
-renders, four in `analytics.ts` for the chart kinds, measures, breakdowns and ranges, one in
-`web/src/screens/IndependenceScreen.tsx` for the goal modes and one in
-`web/src/components/IncomeSourcesBlock.tsx` for the income source kinds — and each record is written
-`satisfies` a `Record` over the wire's union, never annotated as one, with the array a picker
-renders derived from it by `defs()`: a member the wire lacks and a wire member the record omits are
-both compile errors whether or not the literal sits on the declaration, where an annotated record
-holds the extra-member direction on a fresh literal alone. A client narrower than the door cannot
+premise that all of it is read, so a smaller cap deletes the clause it put last. Client-side
+vocabularies are held twice — as the wire's union types and as exhaustive presentation records:
+`analytics.ts` holds chart kinds, measures, breakdowns and ranges; the Goals presentation model
+holds goal types, bases, income scopes and statuses; and
+`web/src/components/IncomeSourcesBlock.tsx` holds income-source kinds. Each record is written
+`satisfies` a `Record` over the wire's union, never annotated as one, and picker options are derived
+from the applicable records rather than restating their members: a member the wire lacks and a wire
+member the record omits are both compile errors whether or not the literal sits on the declaration,
+where an annotated record holds the extra-member direction on a fresh literal alone. A client
+narrower than the door cannot
 draw a kind the server accepts: `parseChart` refuses the row, `chartEntry` keeps it as unreadable,
-`entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal mode it
-lacks is a screen with no chip selected and no way to pick it, and an income source kind it lacks is
-a label read off a record by a key that is not there, which throws inside render and takes the Goal
+`entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal type it
+lacks is a picker with no tile and no way to create it, and an income source kind it lacks is
+a label read off a record by a key that is not there, which throws inside render and takes the Settings
 screen down with it; one wider composes a list nobody can save. Every pin assumes the wire's export
 carries a literal type, and `web/src/types.test.ts` holds that premise under `tsc`: each client
 constant is asserted equal to the wire export's type and each union equal to its record's keys, so a
@@ -210,8 +228,8 @@ matches the filter restores the row. Group changes return to the detail and rest
 **The word for money somebody else gives you is written in more than one place, across both
 packages, and nothing holds the copies to each other.** In this package it is the `support` entry
 of `CATEGORY_LABELS`, which the picker, the category filter, the rule captions and the Transactions
-list print; the prose that explains it in the Goal screen's hero, in the income sources block beside
-it and in the Transactions detail sheet's hint; and the *Support from outside* kind name in
+list print; the prose that explains it in the Goals cards, in the income sources block under Settings
+and in the Transactions detail sheet's hint; and the *Support* kind name in
 `IncomeSourcesBlock`. One package over it is the label `seedDefaults` gives the seeded external
 source in `backend/src/db/index.ts`. The packages share no build, `copy.test.ts` walks this side
 looking for something else entirely, and no check compares them — so any copy can drift and every
@@ -225,6 +243,16 @@ and the category's word coincide, so a period with income under both draws two s
 word on the income-by-source share, and the chart tells the two apart by colour and figure. The
 Transactions list badges outside help with the catalogue's label and gives a derived-source row no
 badge, because that row's category already says what the money is.
+
+**An income-source write invalidates every mounted reader before Settings re-reads its catalog.**
+The Shell keeps its screens mounted while hidden, so one shared data revision reloads Overview's
+account rows and figures, the transaction rows and source catalog, chart data, goal progress and
+Settings' recurring groups. The last reader matters because a source pattern can break a transfer
+pair, which can turn the surviving expense into a recurring payment. The invalidation runs as soon
+as the write succeeds: a failed follow-up catalog GET cannot suppress it. Transactions clears its
+old source catalog during that reload and exposes a failed read with a retry rather than combining
+freshly classified rows with stale names. Revision-driven loads are latest-request-wins, so a slow
+pre-mutation response cannot replace the newer answer.
 
 **The account delete's counts — transactions, imports, documents — are what the delete destroyed,
 which for a hidden account is legitimately not what the panel previewed.** The preview counts a
@@ -412,12 +440,12 @@ written twice on purpose: the two sit on two sides of a wire neither can import 
 count in an importer's refusal and a row count on a screen should read alike. Each copy is broken
 only by an edit to itself, which is what makes two copies correct here.
 
-`selfSufficiencyBars`, `tooltipProps` and the arithmetic in `analytics.ts` live in modules with no
-JSX rather than in the screens that draw them, because a chart in jsdom is a box with no size —
-recharts draws nothing there — so a screen test can mount a chart and assert nothing about it. What
-lives there is held by `unit` cases, against both palettes or a fixed date; what recharts reads off
-a datum by name and never checks is pinned as text by `chartTooltip.test.ts`, as a list of named
-attributes and not as a boundary.
+`tooltipProps` and the arithmetic in `analytics.ts` live in modules with no JSX rather than in the
+screens that draw them, because a chart in jsdom is a box with no size — recharts draws nothing
+there — so a screen test can mount a chart and assert nothing about it. What lives there is held by
+`unit` cases, against both palettes or a fixed date; what recharts reads off a datum by name and
+never checks is pinned as text by `chartTooltip.test.ts`, as a list of named attributes and not as a
+boundary.
 
 ## The palette, and what leaves the page
 
@@ -426,15 +454,13 @@ document root are the styling truth, and `ink` exists because recharts wants rea
 Where the theme is kept is *Boundary*'s ruling and is not restated here.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
-one value, because the ground decides the tooltip's colours and one shared object is what keeps the
-surfaces from diverging — a reader who learns that pointing at a chart works on one screen would
-otherwise learn it wrongly for the next. A ground is named for the `Ink` key of its own fill, so
-nothing states twice what colour a card is, and a ground added to the union without a chip does not
-compile. The one chip every ground takes fills the box with `raised`, which sits a step off each
-ground on purpose; the border is what makes the box a box, not the fill. `chartTooltip.test.ts` pins
-the tightest live fill-on-ground pair in each palette with the border's separation beside it, at
-the measured figures rather than under a floor, and reds when a figure written down is no longer
-the measurement.
+one value. A ground is named for the `Ink` key of its own fill, so nothing states twice what colour a
+card is, and a ground added to the union without a chip does not compile. Each caller tells
+`ChartPlot` whether it is on a card surface or the wizard's page preview. The chip fills the box with
+`raised`, which sits a step off each ground on purpose; the border is what makes the box a box, not
+the fill. `chartTooltip.test.ts` pins the tightest live fill-on-ground pair in each palette with the
+border's separation beside it, at the measured figures rather than under a floor, and reds when a
+figure written down is no longer the measurement.
 
 `tooltipProps` is checked in `unit` against both palettes at once because `chartTooltip.ts` is a
 `.ts` file and not a `.tsx` one on purpose: `web/vitest.config.ts` binds the project to the

@@ -4,26 +4,26 @@ import {
   AccountMonthlySummary,
   AccountSummary,
   AppSettings,
-  BaselineResponse,
-  BudgetsResponse,
-  BudgetsWritten,
   CategoryRuleCreated,
   CategoryRulePreview,
   CategoryRuleWithCounts,
   Deleted,
   DocumentDeleted,
+  GoalCreate,
+  GoalDeleted,
+  GoalDetail,
+  GoalList,
+  GoalUpdate,
   ImportConfirmed,
   ImportDeleted,
   ImportDiscarded,
   ImportList,
   ImportPresets,
-  Independence,
   IncomeSource,
   IncomeSourceDef,
   IncomeSourceKind,
   MonthlySummary,
   RecurringSummary,
-  Settings,
   StatementImportResult,
   Summary,
   Transaction,
@@ -49,6 +49,16 @@ export const MAX_RAW_BODY_CHARS = 200;
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 /**
  * Shared by every caller below rather than written into each: a download that skipped
  * it would write the refusal to disk under the name of a statement.
@@ -63,7 +73,7 @@ async function refuse(res: Response): Promise<never> {
   } catch {
     // not JSON — the status and the body are all there is
   }
-  throw new Error(message);
+  throw new ApiError(res.status, message);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -302,17 +312,18 @@ export const api = {
   setRecurringIgnored: (description: string, ignored: boolean) =>
     request<RecurringSummary>('/api/recurring/ignore', json('POST', { description, ignored })),
 
-  independence: () => request<Independence>('/api/independence'),
+  goals: () => request<GoalList>('/api/goals'),
 
-  settings: () => request<Settings>('/api/settings'),
-  updateSettings: (patch: Partial<Settings>) =>
-    request<Settings>('/api/settings', json('PATCH', patch)),
+  goal: (id: string) => request<GoalDetail>(`/api/goals/${encodeURIComponent(id)}`),
 
-  baseline: () => request<BaselineResponse>('/api/baseline'),
+  createGoal: (goal: GoalCreate) =>
+    request<GoalDetail>('/api/goals', json('POST', goal)),
 
-  /** monthly = null deletes the line item. */
-  setBaselineItem: (label: string, monthly: number | null) =>
-    request<BaselineResponse>('/api/baseline', json('PUT', { label, monthly })),
+  updateGoal: (id: string, goal: GoalUpdate) =>
+    request<GoalDetail>(`/api/goals/${encodeURIComponent(id)}`, json('PUT', goal)),
+
+  deleteGoal: (id: string) =>
+    request<GoalDeleted>(`/api/goals/${encodeURIComponent(id)}`, json('DELETE')),
 
   categoryRules: () => request<CategoryRuleWithCounts[]>('/api/category-rules'),
 
@@ -324,12 +335,6 @@ export const api = {
 
   deleteCategoryRule: (id: number) =>
     request<Deleted>(`/api/category-rules/${id}`, json('DELETE')),
-
-  budgets: () => request<BudgetsResponse>('/api/budgets'),
-
-  /** monthly = null removes the budget from the category. */
-  setBudget: (category: string, monthly: number | null) =>
-    request<BudgetsWritten>('/api/budgets', json('PUT', { category, monthly })),
 
   incomeSources: () => request<IncomeSourceDef[]>('/api/income-sources'),
 

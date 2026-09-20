@@ -64,13 +64,8 @@ import { ChartGlyph, GlyphName } from './ChartGlyphs';
 export interface DockTab {
   id: string;
   label: string;
-  /** Its shape, drawn small — or absent for a tab that is not a chart. */
-  glyph?: GlyphName;
-  /**
-   * A built-in view rather than one the reader made. It sits after the charts, is
-   * marked, and carries no ⋮: there is nothing to edit, duplicate or delete about it.
-   */
-  pinned?: true;
+  /** Its shape, drawn small. */
+  glyph: GlyphName;
 }
 
 /** Which tab's popover is up, and where the anchor put it. */
@@ -92,20 +87,7 @@ interface Props {
   onEdit: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
-  /**
-   * The list is not the reader's to change yet — it has not arrived, or it could not
-   * be read. Choosing a tab still works, because the pinned one is not a chart and
-   * has nothing to do with the list: rendering no dock at all would take Budgets away
-   * every time the charts are slow. `New chart` is disabled rather than absent, and
-   * the ⋮ goes, because a control that is there and does nothing is what a disabled
-   * one exists to avoid.
-   *
-   * The ⋮ half is the contract rather than the delivered behaviour: the one caller
-   * passes an empty `tabs` whenever this is true, so no unpinned tab is on screen to
-   * carry one. It is here because a prop called `actionsDisabled` that left an action
-   * enabled would be a lie in its own name — do not write a test for a state this app
-   * cannot reach, and do not delete it as dead.
-   */
+  /** The chart list has not arrived or could not be read, so no mutation may start. */
   actionsDisabled?: boolean;
 }
 
@@ -375,7 +357,7 @@ export function ChartDock({
             <div
               key={t.id}
               ref={current ? currentRef : undefined}
-              className={`dock-tab${current ? ' is-current' : ''}${t.pinned ? ' is-pinned' : ''}`}
+              className={`dock-tab${current ? ' is-current' : ''}`}
             >
               <button
                 className="dock-open"
@@ -385,15 +367,13 @@ export function ChartDock({
                 // reachable as the tooltip and as the accessible name
                 title={t.label}
               >
-                {t.glyph && (
-                  <span className="dock-glyph">
-                    <ChartGlyph kind={t.glyph} />
-                  </span>
-                )}
+                <span className="dock-glyph">
+                  <ChartGlyph kind={t.glyph} />
+                </span>
                 <span className="dock-name">{t.label}</span>
               </button>
 
-              {!t.pinned && !actionsDisabled && (
+              {!actionsDisabled && (
                 <button
                   className="dock-more"
                   aria-expanded={popover?.id === t.id}

@@ -318,7 +318,7 @@ const monthStartAt = (delta: number): Date =>
 const dayIn = (delta: number, day: number): string =>
   `${monthStartAt(delta).toISOString().slice(0, 8)}${String(day).padStart(2, '0')}`;
 
-/** The current calendar month: what GET /api/budgets and GET /api/summary default to. */
+/** The current calendar month: what category goals and GET /api/summary use. */
 const THIS_MONTH = dayIn(0, 1);
 
 const OVERRIDDEN_SPEND = 40;
@@ -326,7 +326,7 @@ const AUTO_FOOD = 10;
 const OVERRIDDEN_INCOME = 150;
 const FOOD_BUDGET = 500;
 const PAST_RENT = 400;
-/** Three whole months of rent, so the detector fires and independence can see them. */
+/** Whole months behind today, so the recurring detector can see them. */
 const PAST_MONTHS = 3;
 
 const statement = Buffer.from(
@@ -341,10 +341,8 @@ const statement = Buffer.from(
 );
 
 /**
- * Whole months, and behind us: GET /api/independence ends its window at the end of
- * last month and GET /api/recurring needs the same description in three of them. A
- * fixture in the current month is invisible to both, and an assertion over the empty
- * payload that produces is green whether the sweep landed or not.
+ * Whole months, and behind us: GET /api/recurring needs the same description in
+ * several of them. A fixture in the current month is invisible to that detector.
  */
 const pastStatement = Buffer.from(
   [
@@ -423,8 +421,13 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     expect((await patchCategory(agent, rent[PAST_MONTHS - 1].id, { category: 'housing' })).status)
       .toBe(200);
 
-    const budget = await agent.put('/api/budgets').send({ category: 'food', monthly: FOOD_BUDGET });
-    expect(budget.status, JSON.stringify(budget.body)).toBe(200);
+    const budget = await agent.post('/api/goals').send({
+      type: 'category-spending-limit',
+      name: 'Food limit',
+      category: 'food',
+      monthlyLimit: FOOD_BUDGET,
+    });
+    expect(budget.status, JSON.stringify(budget.body)).toBe(201);
   });
 
   describe('PATCH /api/transactions/:id/category', () => {
@@ -558,35 +561,20 @@ describe('over HTTP: the route, and every surface that reports a category', () =
       });
     });
 
-    /**
-     * The payload has one entry per budget row, not per category with spending, so the
-     * budget for the category the user moved the row INTO is the fixture that can see
-     * it at all.
-     */
-    it('GET /api/budgets: the spend counted against the limit', async () => {
-      const res = await agent.get('/api/budgets');
+    it('GET /api/goals: the spend counted against the category limit', async () => {
+      const res = await agent.get('/api/goals');
       expect(res.status).toBe(200);
-      expect(res.body.budgets).toHaveLength(1);
-      expect(res.body.budgets[0]).toMatchObject({
+      const goal = res.body.goals.find(
+        (item: { type: string; category?: string }) =>
+          item.type === 'category-spending-limit' && item.category === 'food',
+      );
+      expect(goal).toMatchObject({
         category: 'food',
-        monthly: FOOD_BUDGET,
-        spent: OVERRIDDEN_SPEND + AUTO_FOOD,
-      });
-    });
-
-    /** avgMonthlyByCategory, through the Goal screen's own window. */
-    it('GET /api/independence: the average per month by category', async () => {
-      const res = await agent.get('/api/independence');
-      expect(res.status).toBe(200);
-      const byCategory = res.body.byCategory as { category: string; total: number }[];
-      expect(byCategory).toContainEqual({
-        category: 'housing',
-        total: Math.round((PAST_RENT * 100) / PAST_MONTHS) / 100,
-      });
-      // the two months still on the categorizer's answer, in their own bucket
-      expect(byCategory).toContainEqual({
-        category: 'other',
-        total: Math.round((PAST_RENT * (PAST_MONTHS - 1) * 100) / PAST_MONTHS) / 100,
+        progress: {
+          target: FOOD_BUDGET,
+          current: OVERRIDDEN_SPEND + AUTO_FOOD,
+          semantic: 'used',
+        },
       });
     });
 

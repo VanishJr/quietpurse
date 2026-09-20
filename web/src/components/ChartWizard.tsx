@@ -65,6 +65,7 @@ interface Props {
   accounts: Account[] | null;
   /** Why the list is null, when it is null because the read failed. */
   accountsError: string | null;
+  dataRevision?: number;
   onClose: () => void;
   onSave: (spec: Chart) => void;
 }
@@ -74,6 +75,7 @@ export function ChartWizard({
   editing,
   accounts,
   accountsError,
+  dataRevision = 0,
   onClose,
   onSave,
 }: Props) {
@@ -152,6 +154,7 @@ export function ChartWizard({
           draft={draft}
           accounts={accounts}
           accountsError={accountsError}
+          dataRevision={dataRevision}
           patch={patch}
           onName={(title) => {
             setNamed(true);
@@ -217,6 +220,7 @@ function DetailStep({
   draft,
   accounts,
   accountsError,
+  dataRevision,
   patch,
   onName,
   onBack,
@@ -227,6 +231,7 @@ function DetailStep({
   draft: Chart;
   accounts: Account[] | null;
   accountsError: string | null;
+  dataRevision: number;
   patch: (change: Partial<Chart>) => void;
   onName: (title: string) => void;
   onBack: () => void;
@@ -368,7 +373,12 @@ function DetailStep({
 
         <div className="wiz-preview">
           <p className="wiz-preview-label">Preview</p>
-          <Preview draft={draft} accounts={accounts} accountsError={accountsError} />
+          <Preview
+            draft={draft}
+            accounts={accounts}
+            accountsError={accountsError}
+            dataRevision={dataRevision}
+          />
         </div>
       </div>
 
@@ -396,15 +406,22 @@ function Preview({
   draft,
   accounts,
   accountsError,
+  dataRevision,
 }: {
   draft: Chart;
   accounts: Account[] | null;
   accountsError: string | null;
+  dataRevision: number;
 }) {
-  const { data, error, loading } = useChartData(draft, accounts, accountsError);
+  const { data, error, loading } = useChartData(
+    draft,
+    accounts,
+    accountsError,
+    dataRevision,
+  );
   if (error) return <p className="error wiz-preview-note">{error}</p>;
   if (loading || !data) return <p className="hint wiz-preview-note">Reading the numbers…</p>;
-  return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} />;
+  return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} ground="page" />;
 }
 
 /**

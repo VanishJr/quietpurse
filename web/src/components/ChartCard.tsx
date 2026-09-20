@@ -49,10 +49,16 @@ interface Props {
   accounts: Account[] | null;
   /** ...and why, when it is null because the read failed rather than not finished. */
   accountsError: string | null;
+  dataRevision?: number;
 }
 
-export function ChartCard({ spec, accounts, accountsError }: Props) {
-  const { data, error, loading } = useChartData(spec, accounts, accountsError);
+export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: Props) {
+  const { data, error, loading } = useChartData(
+    spec,
+    accounts,
+    accountsError,
+    dataRevision,
+  );
 
   /*
    * The id and not "some account": a chart whose account has been deleted is a state
@@ -72,7 +78,7 @@ export function ChartCard({ spec, accounts, accountsError }: Props) {
       {data && (
         <>
           <Figures spec={spec} data={data} />
-          <ChartPlot spec={spec} data={data} height={CHART_HEIGHT} />
+          <ChartPlot spec={spec} data={data} height={CHART_HEIGHT} ground="surface" />
           <DataTable spec={spec} data={data} title={title} />
         </>
       )}

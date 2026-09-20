@@ -66,7 +66,13 @@ function periodBounds(p: PeriodKey): { from?: string; to: string } {
   return { from: isoDay(new Date(now.getTime() - days * 86_400_000)), to };
 }
 
-export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
+export function TransactionsScreen({
+  focus,
+  dataRevision = 0,
+}: {
+  focus?: TxFocus | null;
+  dataRevision?: number;
+}) {
   const { categoryColor } = useTheme();
 
   const [period, setPeriod] = useState<PeriodKey>('30d');
@@ -79,15 +85,60 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
+  const [refreshingSelected, setRefreshingSelected] = useState(false);
   const [ruleEditor, setRuleEditor] = useState<'transfer' | 'category' | null>(null);
   const transferButton = useRef<HTMLButtonElement>(null);
   const categoryButton = useRef<HTMLButtonElement>(null);
+  const selectedRef = useRef<Transaction | null>(null);
+  selectedRef.current = selected;
+  const selectedRevision = useRef(dataRevision);
   /** income source catalog — chips in the sheet and badges in the list */
-  const [sources, setSources] = useState<IncomeSourceDef[]>([]);
+  const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceLoadAttempt, setSourceLoadAttempt] = useState(0);
+  const loadGeneration = useRef(0);
   useEffect(() => {
     api.accounts(true).then(setAccounts).catch(() => {});
-    api.incomeSources().then(setSources).catch(() => {});
   }, []);
+  useEffect(() => {
+    let live = true;
+    setSources(null);
+    setSourceError(null);
+    api.incomeSources().then((next) => {
+      if (live) setSources(next);
+    }).catch((caught) => {
+      if (live) setSourceError((caught as Error).message);
+    });
+    return () => {
+      live = false;
+    };
+  }, [dataRevision, sourceLoadAttempt]);
+
+  useEffect(() => {
+    if (selectedRevision.current === dataRevision) return;
+    selectedRevision.current = dataRevision;
+    const current = selectedRef.current;
+    if (!current) return;
+    let live = true;
+    setRuleEditor(null);
+    setRefreshingSelected(true);
+    setError(null);
+    api.transaction(current.id).then((next) => {
+      if (live && selectedRef.current?.id === current.id) setSelected(next);
+    }).catch((caught) => {
+      if (!live || selectedRef.current?.id !== current.id) return;
+      setSelected(null);
+      setRuleEditor(null);
+      setError(`Couldn’t refresh the open transaction: ${(caught as Error).message}`);
+    }).finally(() => {
+      if (live) setRefreshingSelected(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [dataRevision]);
+
+  const busy = saving || refreshingSelected;
 
   /**
    * Arrived from an account's "All transactions". The link says all of them, so the
@@ -102,32 +153,34 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
     setPeriod(PERIODS[PERIODS.length - 1].key);
   }, [focus]);
 
-  const sourceById = (id?: IncomeSource) => sources.find((s) => s.id === id);
+  const sourceById = (id?: IncomeSource) => sources?.find((s) => s.id === id);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       setError(null);
+      setTxs(null);
       const { from, to } = periodBounds(period);
-      setTxs(
-        await api.transactions({
-          from,
-          to,
-          accountId: accountId === 'all' ? undefined : accountId,
-          category: category === 'all' ? undefined : category,
-          // an unbounded window can exceed the backend's default limit (1000), and it
-          // truncates with nothing on the wire saying so. Tied to the missing lower
-          // bound rather than to a key, so a later arm cannot inherit that silently.
-          limit: from === undefined ? 5000 : undefined,
-        }),
-      );
+      const next = await api.transactions({
+        from,
+        to,
+        accountId: accountId === 'all' ? undefined : accountId,
+        category: category === 'all' ? undefined : category,
+        // an unbounded window can exceed the backend's default limit (1000), and it
+        // truncates with nothing on the wire saying so. Tied to the missing lower
+        // bound rather than to a key, so a later arm cannot inherit that silently.
+        limit: from === undefined ? 5000 : undefined,
+      });
+      if (generation === loadGeneration.current) setTxs(next);
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       // Overview's load takes no arguments, so its stale list still answers the same
       // question. This one is filtered: rows kept from before a refused reload sit
       // under a filter they were never an answer to.
       setTxs(null);
       setError((e as Error).message);
     }
-  }, [period, accountId, category]);
+  }, [period, accountId, category, dataRevision]);
 
   useEffect(() => {
     load();
@@ -270,6 +323,18 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
 
       <div aria-live="polite">
         {!selected && error && <p className="error">Error: {error}</p>}
+        {!selected && sourceError && (
+          <p className="error" role="alert">
+            Couldn’t load income sources: {sourceError}{' '}
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => setSourceLoadAttempt((value) => value + 1)}
+            >
+              Retry income sources
+            </button>
+          </p>
+        )}
         {!selected && notice && <p className="hint">{notice}</p>}
       </div>
 
@@ -330,7 +395,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
 
       <Sheet
         open={selected !== null}
-        onClose={() => { if (!saving) setSelected(null); }}
+        onClose={() => { if (!busy) setSelected(null); }}
         position="bottom"
         title={ruleEditor === 'transfer' ? 'Transfer rules' : ruleEditor === 'category' ? 'Apply category' : 'Transaction'}
       >
@@ -371,7 +436,20 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 <p>{selected.description}</p>
               </details>
             )}
+            {refreshingSelected && <p className="state-note" role="status">Refreshing transaction…</p>}
             {error && <p className="error" role="alert">Error: {error}</p>}
+            {sourceError && (
+              <p className="error" role="alert">
+                Couldn’t load income sources: {sourceError}{' '}
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => setSourceLoadAttempt((value) => value + 1)}
+                >
+                  Retry income sources
+                </button>
+              </p>
+            )}
             {notice && <p className="hint" role="status">{notice}</p>}
 
             {/* this row alone. Outside the description gate below it: a rule needs a
@@ -385,7 +463,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               </div>
               {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category === 'support' && (
                 <p className="hint" role="status" style={{ marginTop: 6 }}>
-                  Support is included in income, but excluded from your own earnings on the Goal screen.
+                  Support counts as income, but not as earnings for income-based goals.
                 </p>
               )}
               <div className="chip-wrap">
@@ -395,7 +473,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                     className="chip-cat"
                     aria-label={`${categoryLabel(c)}, this transaction only`}
                     aria-pressed={c === selected.category}
-                    disabled={saving}
+                    disabled={busy}
                     onClick={() => applyCategory(selected, c)}
                   >
                     <span className="dot" style={{ background: categoryColor(c) }} />
@@ -406,7 +484,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               {selected.categoryManual && (
                 <button
                   className="btn-ghost transaction-secondary-button"
-                  disabled={saving}
+                  disabled={busy}
                   onClick={() => applyCategory(selected, null)}
                 >
                   Category: back to auto-detection
@@ -418,7 +496,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               <button
                 ref={categoryButton}
                 className="btn-ghost transaction-rule-button"
-                disabled={saving || !CATEGORIES.includes(selected.category as Category)}
+                disabled={busy || !CATEGORIES.includes(selected.category as Category)}
                 onClick={() => setRuleEditor('category')}
               >
                 Apply to similar transactions <span aria-hidden="true">›</span>
@@ -434,7 +512,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 type="checkbox"
                 className="switch"
                 checked={selected.transfer}
-                disabled={saving}
+                disabled={busy}
                 onChange={(e) => applyTransfer(selected, e.target.checked)}
               />
             </div>
@@ -443,7 +521,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               <button
                 ref={transferButton}
                 className="btn-ghost transaction-rule-button"
-                disabled={saving}
+                disabled={busy}
                 onClick={() => setRuleEditor('transfer')}
               >
                 Manage transfer rules <span aria-hidden="true">›</span>
@@ -461,13 +539,13 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                   type="checkbox"
                   className="switch"
                   checked={selected.oneOff}
-                  disabled={saving}
+                  disabled={busy}
                   onChange={(e) => applyOneOff(selected, e.target.checked)}
                 />
               </div>
             )}
 
-            {/* income: the source — the Goal screen depends on it */}
+            {/* income: the source — income-based goals depend on it */}
             {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
               <div
                 style={{
@@ -478,17 +556,16 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               >
                 <div className="switch-label">Income source</div>
                 <div className="switch-hint">
-                  Support isn't counted as your own earnings on the Goal screen, where these
-                  sources are added and renamed
-                  {selected.incomeSourceManual ? ' · set manually' : ' · auto-detected'}
+                  Support does not count toward earnings goals. Manage income sources in Settings.
+                  {selected.incomeSourceManual ? ' Set manually.' : ' Auto-detected.'}
                 </div>
                 <div className="chip-wrap">
-                  {sources.map((o) => (
+                  {(sources ?? []).map((o) => (
                     <button
                       key={o.id}
                       className="chip"
                       aria-pressed={selected.incomeSource === o.id}
-                      disabled={saving}
+                      disabled={busy}
                       onClick={() => applySource(selected, o.id)}
                     >
                       {o.label}
@@ -498,7 +575,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
                 {selected.incomeSourceManual && (
                   <button
                     className="btn-ghost transaction-secondary-button"
-                    disabled={saving}
+                    disabled={busy}
                     onClick={() => applySource(selected, null)}
                   >
                     Source: back to auto-detection
@@ -510,7 +587,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             {selected.transferManual !== null && (
               <button
                 className="btn-ghost transaction-secondary-button"
-                disabled={saving}
+                disabled={busy}
                 onClick={() => applyTransfer(selected, null)}
               >
                 Back to auto-detection
@@ -518,7 +595,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
             )}
 
             <button
-              disabled={saving}
+              disabled={busy}
               className="btn-ghost transaction-close-button"
               onClick={() => setSelected(null)}
             >

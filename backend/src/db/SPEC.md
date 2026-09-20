@@ -8,7 +8,7 @@ parent: module-backend
 
 What this module is for, where it stops, and the rules about it that no type and no test holds.
 Everything already enforced beside the code it governs stays there: `AGENTS.md`'s *Invariants*
-carry transaction identity, import provenance and the migration-squash rule, and nothing below
+carry transaction identity, import provenance and the pre-release migration rule, and nothing below
 repeats them. The reasoning behind the constraints the schema declares used to sit in the headers of
 those files; it is here now. What stayed beside the code is what an edit to its own line would break.
 
@@ -224,13 +224,19 @@ row recorded are refused whoever wrote them.
 it moves between machines freely. The stored statements are not in it; they are files in a folder
 the person can copy on their own.
 
-**A restore clears the tables and loads the dump in one transaction**, skipping tables the current
-schema does not know, so a future version's backup restores what this version understands. Two
-things it leaves behind are accepted rather than unnoticed: the source documents of the import rows
-it deletes stay on disk, and of those, the ones whose import id comes back in the file are still
-removable through the delete path while the ones whose row is not reinstated are referenced by
-nothing but the folder. Both are lines about a folder the person can open, not bugs to fix in the
-restore.
+**A restore clears each table the dump provides and loads it in one transaction**, skipping tables
+the current schema does not know and preserving current tables an older or sparse dump omits. A
+sparse dump that provides imports must also provide transactions: deleting imports cascades into
+their transactions, so accepting only the parent table would erase a table the dump omitted. The
+Goal family is the exception: it is cleared as one unit even for a version-one dump, because legacy
+Goal settings, baseline lines and budgets replace rather than merge with saved goals. Goal and
+subtype tables are loaded in dependency order with the rest. A version-one backup is accepted
+through a standalone compatibility conversion of its singleton Goal settings, baseline
+lines and budgets; it cannot retain goals that were in the workspace before the restore. Two things it leaves behind are accepted rather than unnoticed: the source
+documents of the import rows it deletes stay on disk, and of those, the ones whose import id comes
+back in the file are still removable through the delete path while the ones whose row is not
+reinstated are referenced by nothing but the folder. Both are lines about a folder the person can
+open, not bugs to fix in the restore.
 
 **One status may never survive a restore, and it is typed rather than listed as a string.** A
 renamed status value is then a compile error instead of a set that quietly stops matching — the
@@ -245,8 +251,9 @@ key is built from the uploaded filename, the id and the format now, and a backup
 Stripped, every import on a restored database read as having no document while the statements sat
 in the folder untouched.
 
-**A restore file is otherwise a direct write path into the database**, so the rows are filtered down
-to real columns of the target table holding values the column accepts. Without that, a string where
+**A restore file is otherwise a direct write path into the database**, so every supplied row must be
+an object before legacy conversion, then is filtered down to real columns of the target table
+holding values the column accepts. Without that, a string where
 an integer lives becomes a driver error mid-transaction, which reaches the user as a server failure
 where they should have been told the file was bad — and a JSON object smuggled into a text column
 reappears everywhere that value is displayed. Anything unrecognised is dropped rather than
@@ -302,14 +309,21 @@ direction that matters: the export succeeds, the restore succeeds, and what the 
 neither.
 
 **The tables a deleted account leaves rows in are derived from the schema rather than remembered.**
-Every table carrying an account id is one of them. No foreign key runs from any of those tables to
-`accounts`, so nothing in the database would catch a table this derivation missed. Not every table a
-deleted account touches loses its rows, and which of them outlive the account is stated beside each
-of them rather than here.
+Every account-owned table carrying an account id is one of them. Goal-account links and debt-goal
+configuration are the deliberate exception: they have no account foreign key and outlive the row so
+the goal can report which saved source became unavailable. No database constraint catches a delete
+path that removes them or silently chooses another account.
 
 **`settings` and `meta` are the same shape, and which one a value belongs in is a convention with
 no enforcement.** `settings` holds what a person edits, such as `base_currency` and `owner_names`.
 `meta` holds what the app keeps about itself, a stamp it compares against on the next start or the
-next write. The exception is the one a reader adding a value will get wrong: the Goal screen's
-configuration is a person's, and it lives in `meta` as one JSON blob under the key `settings`. A new
-setting written to the table of that name is not where the existing ones are.
+next write. Goal configuration belongs to neither: it is normalized into the goal tables. The
+legacy `meta.settings` key is read only by version-one restore conversion, then removed.
+
+**A Financial independence goal owns its baseline lines.** Their identity and label uniqueness are
+scoped by goal, and deleting the goal cascades them. The write that replaces that goal's
+configuration and costs is one transaction; an invalid edited amount can therefore refuse the
+replacement but can never be interpreted as deletion.
+
+**Goal capacity is a write invariant, not a route preflight.** A create serializes the count and
+insert inside one transaction, so concurrent requests cannot each claim the final available slot.

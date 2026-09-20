@@ -3,13 +3,13 @@ import {
   AccountMonthlySummary,
   AccountSummary,
   AppSettings,
-  BudgetsResponse,
+  GoalList,
+  GoalSummary,
   ImportConfirmed,
   ImportList,
   ImportRecord,
   ImportSummary,
   ImportTotals,
-  Independence,
   IncomeSourceDef,
   RecurringSummary,
   StatementImportResult,
@@ -112,7 +112,31 @@ export const accountMonths = (
   ...patch,
 });
 
-export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
+export const SAVINGS_GOAL = {
+  id: 'goal-savings',
+  type: 'savings-balance',
+  name: 'Emergency savings',
+  targetDate: null,
+  createdAt: '2026-05-01T00:00:00.000Z',
+  updatedAt: '2026-05-01T00:00:00.000Z',
+  currency: 'EUR',
+  source: 'Imported balances · Cash',
+  progress: {
+    semantic: 'completion',
+    unit: 'money',
+    target: 9000,
+    current: 5400,
+    remaining: 3600,
+    overBy: 0,
+    percentage: 60,
+    forecast: null,
+    status: 'tracking',
+    asOf: '2026-05-15T12:00:00.000Z',
+    period: { kind: 'current-balances', from: null, to: null, monthsUsed: null },
+  },
+} satisfies GoalSummary;
+
+export const GOALS: GoalList = { goals: [] };
 
 /**
  * A database that has never saved a chart, which is what the charts route answers a
@@ -120,34 +144,6 @@ export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
  * test that seeds `finto.analytics.charts` against this fixture gets a PUT.
  */
 export const NO_CHARTS = { version: 0, charts: [] };
-
-export const INDEPENDENCE: Independence = {
-  baseCurrency: 'EUR',
-  settings: {
-    bufferPct: 10,
-    windowMonths: 6,
-    hourlyRate: null,
-    hoursCapPerWeek: 40,
-    goalMode: 'baseline',
-  },
-  from: '2026-01-01',
-  to: '2026-07-31',
-  avgSpend: 1000,
-  oneOffMonthly: 0,
-  ownIncomeAvg: 900,
-  externalAvg: 0,
-  baselineSum: 800,
-  baselineItems: [],
-  baselineThreshold: 880,
-  lifestyleThreshold: 1100,
-  effectiveMode: 'baseline',
-  threshold: 880,
-  deficit: 0,
-  selfSufficiency: 1,
-  months: [],
-  byCategory: [],
-  hours: null,
-};
 
 /**
  * `revolut` is here so one case can assert that the title the summary names and the

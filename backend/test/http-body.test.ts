@@ -48,12 +48,11 @@ const JSON_ROUTES: [Method, string][] = [
   ['patch', '/api/transactions/nope/one-off'],
   ['post', '/api/transfer-rules'],
   ['post', '/api/recurring/ignore'],
-  ['patch', '/api/settings'],
+  ['post', '/api/goals'],
+  ['put', '/api/goals/nope'],
   ['patch', '/api/app-settings'],
-  ['put', '/api/baseline'],
   ['post', '/api/category-rules'],
   ['post', '/api/category-rules/preview'],
-  ['put', '/api/budgets'],
 ];
 
 let agent: request.Agent;
@@ -136,7 +135,7 @@ describe('what the last handler answers', () => {
    */
   it('one byte over the ceiling on a JSON route is a 413 that names the ceiling', async () => {
     const res = await agent
-      .patch('/api/settings')
+      .post('/api/goals')
       .set('Content-Type', 'application/json')
       .send(paddedPatch(CEILING + 1));
     expect(res.status, JSON.stringify(res.body)).toBe(413);

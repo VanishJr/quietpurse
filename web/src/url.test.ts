@@ -39,7 +39,7 @@ Object.assign(globalThis, {
 
 const { urlFor, setUrl } = await import('./url');
 
-const KEYS = ['screen', 'account', 'panel', 'chart'] as const;
+const KEYS = ['screen', 'account', 'panel', 'chart', 'goal'] as const;
 
 const at = (href: string): void => {
   current = new URL(href, ORIGIN);
@@ -53,11 +53,18 @@ const parse = (href: string): AppUrl => {
     account: params.get('account'),
     panel: params.get('panel'),
     chart: params.get('chart'),
+    goal: params.get('goal'),
   };
 };
 
-const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null };
-const FULL: AppUrl = { screen: 'overview', account: 'acc-1', panel: 'import', chart: 'c1' };
+const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null, goal: null };
+const FULL: AppUrl = {
+  screen: 'overview',
+  account: 'acc-1',
+  panel: 'import',
+  chart: 'c1',
+  goal: 'g1',
+};
 
 beforeEach(() => {
   at('/');
@@ -79,13 +86,19 @@ describe('urlFor', () => {
 
   it('writes every field it is given and keeps a parameter it does not own', () => {
     at('/?ref=newsletter');
-    expect(urlFor({ screen: 'analytics', account: 'acc-1', panel: 'history', chart: 'c1' })).toBe(
-      '/?ref=newsletter&screen=analytics&account=acc-1&panel=history&chart=c1',
-    );
+    expect(
+      urlFor({
+        screen: 'analytics',
+        account: 'acc-1',
+        panel: 'history',
+        chart: 'c1',
+        goal: 'g1',
+      }),
+    ).toBe('/?ref=newsletter&screen=analytics&account=acc-1&panel=history&chart=c1&goal=g1');
   });
 
-  it.each(KEYS)('null removes %s and leaves the other three', (key) => {
-    at('/?screen=overview&account=acc-1&panel=import&chart=c1');
+  it.each(KEYS)('null removes %s and leaves the other keys', (key) => {
+    at('/?screen=overview&account=acc-1&panel=import&chart=c1&goal=g1');
     const patch: Partial<AppUrl> = {};
     patch[key] = null;
     expect(parse(urlFor(patch))).toEqual({ ...FULL, [key]: null });
