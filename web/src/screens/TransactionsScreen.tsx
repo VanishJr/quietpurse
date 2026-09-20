@@ -385,7 +385,7 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               </div>
               {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category === 'support' && (
                 <p className="hint" role="status" style={{ marginTop: 6 }}>
-                  Support is included in income, but excluded from your own earnings on the Goal screen.
+                  Support counts as income, but not as earnings for income-based goals.
                 </p>
               )}
               <div className="chip-wrap">
@@ -478,9 +478,8 @@ export function TransactionsScreen({ focus }: { focus?: TxFocus | null }) {
               >
                 <div className="switch-label">Income source</div>
                 <div className="switch-hint">
-                  Support isn't counted as your own earnings on the Goal screen, where these
-                  sources are added and renamed
-                  {selected.incomeSourceManual ? ' · set manually' : ' · auto-detected'}
+                  Support does not count toward earnings goals. Manage income sources in Settings.
+                  {selected.incomeSourceManual ? ' Set manually.' : ' Auto-detected.'}
                 </div>
                 <div className="chip-wrap">
                   {sources.map((o) => (

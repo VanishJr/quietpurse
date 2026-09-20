@@ -162,12 +162,14 @@ const writeOf = (draft: Draft): { goal?: GoalCreate; error?: string } => {
       if (draft.basis === 'essential-costs' && essentialCosts.length === 0) {
         return { error: 'Add at least one essential monthly cost.' };
       }
-      const hourly = draft.hourlyRate ? positive(draft.hourlyRate, 'Net hourly rate') : { value: null };
-      if (hourly.error) return hourly;
-      const hours = draft.hoursPerWeek
-        ? positive(draft.hoursPerWeek, 'Hours available per week')
+      const hourly: { value: number | null; error?: string } = draft.hourlyRate
+        ? positive(draft.hourlyRate, 'Net hourly rate') as { value: number; error?: string }
         : { value: null };
-      if (hours.error) return hours;
+      if (hourly.error) return { error: hourly.error };
+      const hours: { value: number | null; error?: string } = draft.hoursPerWeek
+        ? positive(draft.hoursPerWeek, 'Hours available per week') as { value: number; error?: string }
+        : { value: null };
+      if (hours.error) return { error: hours.error };
       return {
         goal: {
           type: draft.type,

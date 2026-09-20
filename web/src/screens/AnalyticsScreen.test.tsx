@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { ThemeProvider } from '../theme';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ACCOUNTS, accountMonths, accountSummary, BUDGETS, SUMMARY } from '../test/fixtures';
+import { ACCOUNTS, accountMonths, accountSummary, SUMMARY } from '../test/fixtures';
 import {
   askedFor,
   fail,
@@ -201,18 +201,8 @@ describe('the empty workspace', () => {
     expect(screen.getByRole('button', { name: 'Build your first chart' })).toBeInTheDocument();
     // the dock is there from the start: the way in is a control, not a blank screen
     expect(screen.getByRole('button', { name: /New chart/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Budgets' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Budgets' })).not.toBeInTheDocument();
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
-  });
-
-  it('reaches the budgets block, which is a tab and not a chart', async () => {
-    mockFetch({ ...ROUTES, 'GET /api/budgets': () => ok(BUDGETS) });
-    mount();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Budgets' }));
-
-    expect(await screen.findByRole('heading', { name: 'Monthly budgets' })).toBeInTheDocument();
-    expect(screen.queryByText('Nothing plotted yet')).not.toBeInTheDocument();
   });
 });
 
@@ -354,8 +344,6 @@ describe('a chart that was already there', () => {
     }
     // ...and "New chart" is the dock's alone, not a second one beside the heading
     expect(screen.getAllByRole('button', { name: 'New chart' })).toHaveLength(1);
-    // nothing to edit, duplicate or delete about the built-in view
-    expect(screen.queryByRole('button', { name: 'Actions for Budgets' })).not.toBeInTheDocument();
   });
 
   it('edits the chart its own ⋮ belongs to', async () => {
@@ -1193,22 +1181,6 @@ describe('a workspace that has not been read yet', () => {
 
     expect(await screen.findByRole('heading', { name: 'Groceries' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /New chart/ })).toBeEnabled();
-  });
-
-  it('leaves Budgets reachable, which has nothing to do with the chart list', async () => {
-    mockFetch({
-      ...ROUTES,
-      'GET /api/budgets': () => ok(BUDGETS),
-      'GET /api/analytics/charts': () => fail(500, { error: 'the charts could not be read' }),
-    });
-    mount();
-    await screen.findByText(/the charts could not be read/);
-
-    // rendering no dock at all would keep every mutation unreachable and take a whole
-    // feature away with it
-    fireEvent.click(screen.getByRole('button', { name: 'Budgets' }));
-
-    expect(await screen.findByRole('heading', { name: 'Monthly budgets' })).toBeInTheDocument();
   });
 
   it('keeps the chart the reader arrived at, through a load that had not finished', async () => {

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_SETTINGS, importsResponse, RECURRING } from '../test/fixtures';
+import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { setUrl } from '../url';
 import { SettingsScreen } from './SettingsScreen';
@@ -18,12 +18,13 @@ import { SettingsScreen } from './SettingsScreen';
 const BASE: Routes = {
   'GET /api/recurring': () => ok(RECURRING),
   'GET /api/app-settings': () => ok(APP_SETTINGS),
+  'GET /api/income-sources': () => ok(INCOME_SOURCES),
 };
 
 const mount = () => renderThemed(<SettingsScreen onOpenImport={vi.fn()} />);
 
 describe('the screen itself', () => {
-  it('asks for the two reads that moved here, and nothing else', async () => {
+  it('asks for the global settings reads and nothing else', async () => {
     // It is always mounted behind `hidden`, so a load here is a load on the app's first
     // paint. Both of these already were one - they were the Overview's - so what moved
     // is which screen asks, not how many requests the app makes when it starts. The
@@ -35,8 +36,10 @@ describe('the screen itself', () => {
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect([...new Set(requests())].sort()).toEqual([
       'GET /api/app-settings',
+      'GET /api/income-sources',
       'GET /api/recurring',
     ]);
+    expect(screen.getByRole('heading', { name: 'Income sources' })).toBeInTheDocument();
   });
 
   it('carries no password, no address and no sign-out, since there is no account', async () => {

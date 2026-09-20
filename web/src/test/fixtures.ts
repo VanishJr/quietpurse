@@ -3,7 +3,6 @@ import {
   AccountMonthlySummary,
   AccountSummary,
   AppSettings,
-  BudgetsResponse,
   GoalList,
   GoalSummary,
   ImportConfirmed,
@@ -113,8 +112,6 @@ export const accountMonths = (
   months: [],
   ...patch,
 });
-
-export const BUDGETS: BudgetsResponse = { baseCurrency: 'EUR', budgets: [] };
 
 export const SAVINGS_GOAL = {
   id: 'goal-savings',

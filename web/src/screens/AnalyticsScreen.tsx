@@ -88,19 +88,12 @@ import {
   readLegacyCharts,
   suggestedTitle,
 } from '../analytics';
-import { BudgetsBlock } from '../components/BudgetsBlock';
 import { ChartCard } from '../components/ChartCard';
 import { ChartDock, DockTab } from '../components/ChartDock';
 import { BlankPlotGlyph } from '../components/ChartGlyphs';
 import { ChartWizard } from '../components/ChartWizard';
 import { setUrl, useUrl } from '../url';
 import { Account, Chart } from '../types';
-
-/**
- * The pinned tab's id. A `#` in it so that no chart id can ever collide with it —
- * `newChartId` builds from base-36 digits and cannot produce one.
- */
-const BUDGETS_TAB = '#budgets';
 
 /**
  * What a refusal for staleness says here, which is not what the route says.
@@ -385,7 +378,7 @@ export function AnalyticsScreen() {
    * being rewritten to nothing while the list is still in flight: `specs` is empty
    * then, the fallback is only READ, and the id is found the moment the list lands.
    */
-  const known = urlChart === BUDGETS_TAB || specs.some((c) => c.id === urlChart);
+  const known = specs.some((c) => c.id === urlChart);
   const activeId = known ? urlChart : (specs[0]?.id ?? null);
   const active = specs.find((c) => c.id === activeId) ?? null;
 
@@ -471,14 +464,11 @@ export function AnalyticsScreen() {
     setUrl({ chart: neighbour ? neighbour.id : null }, 'replace');
   };
 
-  const tabs: DockTab[] = [
-    ...specs.map((c) => ({
-      id: c.id,
-      label: c.title || suggestedTitle(c),
-      glyph: c.kind,
-    })),
-    { id: BUDGETS_TAB, label: 'Budgets', pinned: true as const },
-  ];
+  const tabs: DockTab[] = specs.map((c) => ({
+    id: c.id,
+    label: c.title || suggestedTitle(c),
+    glyph: c.kind,
+  }));
 
   return (
     <div className="screen-inner analytics-screen">
@@ -524,10 +514,7 @@ export function AnalyticsScreen() {
       </div>
 
       <div className="chart-stage">
-        {activeId === BUDGETS_TAB ? (
-          // reachable whatever the chart list is doing: budgets are not one of them
-          <BudgetsBlock />
-        ) : charts.phase === 'loading' ? (
+        {charts.phase === 'loading' ? (
           <p className="empty">Reading your charts…</p>
         ) : charts.phase === 'failed' ? (
           <p className="error">

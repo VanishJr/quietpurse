@@ -834,7 +834,7 @@ describe('the income source', () => {
     mount();
     await openSheet('ZZ Income');
     fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
-    expect(await screen.findByText('Support is included in income, but excluded from your own earnings on the Goal screen.')).toBeInTheDocument();
+    expect(await screen.findByText('Support counts as income, but not as earnings for income-based goals.')).toBeInTheDocument();
     expect(sent).toEqual([{ category: 'support' }]);
     expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Salary' })).toBeNull();
@@ -981,14 +981,18 @@ describe('the income source', () => {
 
     await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'true'));
     expect(sourceChip('Support')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByText(/sources are added and renamed · set manually/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Manage income sources in Settings\. Set manually\./),
+    ).toBeInTheDocument();
     expect(sent).toEqual([{ source: 'salary' }]);
 
     fireEvent.click(screen.getByRole('button', { name: 'Source: back to auto-detection' }));
 
     await waitFor(() => expect(sent).toEqual([{ source: 'salary' }, { source: null }]));
     await waitFor(() => expect(sourceChip('Salary')).toHaveAttribute('aria-pressed', 'false'));
-    expect(screen.getByText(/sources are added and renamed · auto-detected/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Manage income sources in Settings\. Auto-detected\./),
+    ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Source: back to auto-detection' })).toBeNull();
   });
 

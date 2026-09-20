@@ -21,6 +21,7 @@ import { api, apiLabel } from '../api';
 import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
+import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { RecurringSummary } from '../types';
@@ -32,9 +33,10 @@ const RECURRING_LIMIT = 8;
 interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
   onOpenImport: () => void;
+  onGoalsChanged?: () => void;
 }
 
-export function SettingsScreen({ onOpenImport }: Props) {
+export function SettingsScreen({ onOpenImport, onGoalsChanged = () => {} }: Props) {
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringError, setRecurringError] = useState<string | null>(null);
 
@@ -125,10 +127,12 @@ export function SettingsScreen({ onOpenImport }: Props) {
       <section className="settings-section">
         <h2 className="settings-title">How Finto counts</h2>
         <p className="settings-lead">
-          These two decide what every total in the app means. They are about all of your
-          accounts together, not any one of them.
+          These settings decide what totals and income-based goals mean across all accounts.
         </p>
         <AppSettingsBlock />
+        <div className="settings-subsection">
+          <IncomeSourcesBlock onChanged={onGoalsChanged} />
+        </div>
       </section>
 
       {/* 2. what it found */}
