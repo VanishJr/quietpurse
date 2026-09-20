@@ -33,9 +33,7 @@ the loopback interface unless told otherwise.
 
 A goal is persisted configuration plus a server-computed answer. The API owns every target,
 current value, remainder, status and percentage; the web client only formats those answers. A new
-installation has no goals until the person creates one. An upgraded installation receives a
-Financial independence goal for the former singleton configuration and a category-spending goal
-for each former budget.
+installation has no goals until the person creates one.
 
 Out of scope, stated as the products it is not: no hosted copy, no account, no tenant and no
 server to rent.

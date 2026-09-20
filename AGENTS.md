@@ -106,11 +106,11 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
   backup gets to choose. So those three fields are written once and updated by nothing, and a
   delete carries all three. The reduction of the filename, and why `CON.txt` is the shape to
   worry about, is in `src/SPEC.md`.
-- **Migrations are append-only.** The goals migration ended the pre-release squash policy because
-  it carries a person's singleton Goal settings, baseline items and budgets into normalized goals.
-  An applied migration is never edited or folded back into `0000_initial.sql`; a schema change gets
-  the next migration and must upgrade an existing database in place. CI's fresh databases are not
-  evidence that this path works, so migrations that transform data need an explicit upgrade test.
+- **Migrations stay squashed until the first release.** There are no released databases to upgrade,
+  so `backend/drizzle/` carries one initial migration and one matching snapshot. Before release, a
+  schema change is regenerated into that migration rather than appended as another file. The first
+  release ends this policy: from then on, applied migrations become immutable and every change gets
+  the next migration.
 - **Categories are slugs** in the database and over the API; display names live in the client
   dictionary. The slug is a stable contract.
 - **Goals survive missing accounts.** A goal-to-account row deliberately has no account foreign

@@ -134,11 +134,10 @@ the database.
 ## Migrations
 
 `backend/src/db/schema.ts` is the source; SQL is generated from it with `npm run db:generate` into
-`backend/drizzle/` and applied when the database is opened. Migration history is append-only: an
-applied migration is never edited. The goals migration is the boundary that ended pre-release
-squashing because it upgrades a person's singleton Goal settings, baseline items and budgets in
-place; invalidating that database would discard exactly the configuration the migration exists to
-preserve.
+`backend/drizzle/` and applied when the database is opened. Before the first release there is no
+installed database contract, so every schema change is squashed back into the single initial
+migration and its matching snapshot. Once a release can have a person's database behind it, that
+history becomes append-only and applied migrations are never edited.
 
 ## Adding a statement format
 

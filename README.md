@@ -80,16 +80,6 @@ guesses are seeded into a new installation.
 
 Stop it with Ctrl+C. Start it again the same way; your data is where you left it.
 
-### Coming from an earlier checkout
-
-Start Finto normally. Database migrations are append-only and upgrade existing data in place. The
-Goals migration converts the former singleton Goal configuration and baseline costs into one
-Financial independence goal, and converts Analytics budgets into category-spending goals. A fresh
-installation starts with no goals.
-
-Copy `~/Finto` before upgrading if you want an additional filesystem backup. Do not delete the
-database: preserving it is the purpose of the migration.
-
 ## Where your data is
 
 ```
@@ -144,9 +134,8 @@ order is load-bearing: reversed, the client's typecheck fails on `zod`.
 The database schema lives in `backend/src/db/schema.ts`. SQL migrations are generated from
 it (`npm run db:generate`) into `backend/drizzle/` and applied when the app starts.
 
-> Migrations are append-only. Never edit or fold an applied migration into
-> `0000_initial.sql`; generate the next migration and verify that it upgrades an existing database
-> as well as creating a fresh one.
+> Before the first release, keep one initial migration: regenerate it from the current schema
+> instead of appending another file. Once databases have shipped, migrations become append-only.
 
 ## Documentation
 

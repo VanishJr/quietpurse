@@ -8,7 +8,7 @@ parent: module-backend
 
 What this module is for, where it stops, and the rules about it that no type and no test holds.
 Everything already enforced beside the code it governs stays there: `AGENTS.md`'s *Invariants*
-carry transaction identity, import provenance and the append-only migration rule, and nothing below
+carry transaction identity, import provenance and the pre-release migration rule, and nothing below
 repeats them. The reasoning behind the constraints the schema declares used to sit in the headers of
 those files; it is here now. What stayed beside the code is what an edit to its own line would break.
 
@@ -227,9 +227,8 @@ the person can copy on their own.
 **A restore clears the tables and loads the dump in one transaction**, skipping tables the current
 schema does not know, so a future version's backup restores what this version understands. Goal and
 subtype tables are cleared and loaded in dependency order with the rest. A version-one backup is
-accepted by converting its singleton Goal settings, baseline lines and budgets through the same
-legacy conversion as the database migration; it cannot retain goals that were in the workspace
-before the restore. Two things it leaves behind are accepted rather than unnoticed: the source
+accepted through a standalone compatibility conversion of its singleton Goal settings, baseline
+lines and budgets; it cannot retain goals that were in the workspace before the restore. Two things it leaves behind are accepted rather than unnoticed: the source
 documents of the import rows it deletes stay on disk, and of those, the ones whose import id comes
 back in the file are still removable through the delete path while the ones whose row is not
 reinstated are referenced by nothing but the folder. Both are lines about a folder the person can
@@ -314,7 +313,7 @@ path that removes them or silently chooses another account.
 no enforcement.** `settings` holds what a person edits, such as `base_currency` and `owner_names`.
 `meta` holds what the app keeps about itself, a stamp it compares against on the next start or the
 next write. Goal configuration belongs to neither: it is normalized into the goal tables. The
-legacy `meta.settings` key is read only by upgrade and version-one restore conversion, then removed.
+legacy `meta.settings` key is read only by version-one restore conversion, then removed.
 
 **A Financial independence goal owns its baseline lines.** Their identity and label uniqueness are
 scoped by goal, and deleting the goal cascades them. The write that replaces that goal's
