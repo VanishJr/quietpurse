@@ -359,11 +359,14 @@ changing a source changes every income-based goal. The API replaces a goal's ful
 configuration atomically and never changes its type. The debt account is immutable too: its captured
 starting debt describes that account and cannot be carried to another one honestly.
 
-**A saved base-currency target keeps the unit in which it was entered.** Monthly-income targets and
-category limits are comparable with aggregate transaction values only while the current base
-currency matches that saved unit. A later setting change leaves the target and its label intact and
-makes the current value unavailable instead of comparing or relabelling unlike currencies; saving a
-replacement goal is the explicit point at which the person can enter a target in the new unit.
+**Saved base-currency goal inputs keep the unit in which they were entered.** Financial
+independence configuration, monthly-income targets and category limits capture the base currency at
+their write. They are comparable with aggregate transaction values only while the current base
+currency matches that saved unit. A later setting change leaves saved amounts and their label
+intact, makes unlike-currency current values unavailable, and suppresses Financial independence
+support and work-hours results rather than relabelling them. A current-spending target is unavailable
+too because it is derived in the new unit rather than saved in the old one. Replacing the goal is the
+explicit point at which the person can enter its monetary configuration in the new unit.
 
 **Deleting an account does not delete or retarget a goal.** Goal-account links deliberately carry no
 account foreign key. The progress engine resolves them against the visible account list on every

@@ -790,10 +790,15 @@ describe('backup and restore', () => {
     );
     expect(await stagedCount(record.id)).toBe(1);
 
-    // a backup carrying an empty imports table: the restore's DELETE FROM imports is
-    // all there is, and the staged rows have to go with it. No new delete is written
-    // anywhere - the composite foreign key is what does this
-    await restoreBackup(parseBackup({ format: 'finto-backup', version: 1, tables: { imports: [] } }));
+    // the staged rows are not backup data; the imports delete reaches them through
+    // the composite foreign key, with no separate staged-table restore path
+    await restoreBackup(
+      parseBackup({
+        format: 'finto-backup',
+        version: 1,
+        tables: { imports: [], transactions: [] },
+      }),
+    );
     expect(await stagedCount(record.id)).toBe(0);
   });
 });

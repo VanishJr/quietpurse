@@ -104,9 +104,14 @@ interface Props {
   onOpenTransactions: (accountId: string) => void;
   /** Opens the Analytics screen — the spending card over every account. */
   onOpenAnalytics: () => void;
+  dataRevision?: number;
 }
 
-export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
+export function OverviewScreen({
+  onOpenTransactions,
+  onOpenAnalytics,
+  dataRevision = 0,
+}: Props) {
   /**
    * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
    * is how a failed request came to render as "you have no accounts".
@@ -245,7 +250,7 @@ export function OverviewScreen({ onOpenTransactions, onOpenAnalytics }: Props) {
 
   useEffect(() => {
     if (selected) loadAccount(selected);
-  }, [selected, loadAccount]);
+  }, [selected, loadAccount, dataRevision]);
 
   /** The account's row moved on the server — put the new one in the list as it is. */
   const applyAccount = (updated: Account) => {

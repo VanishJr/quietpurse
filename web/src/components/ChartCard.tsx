@@ -78,7 +78,7 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: P
       {data && (
         <>
           <Figures spec={spec} data={data} />
-          <ChartPlot spec={spec} data={data} height={CHART_HEIGHT} />
+          <ChartPlot spec={spec} data={data} height={CHART_HEIGHT} ground="surface" />
           <DataTable spec={spec} data={data} title={title} />
         </>
       )}

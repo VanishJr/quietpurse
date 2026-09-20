@@ -16,7 +16,7 @@
  * recurring list is read here; both were already first-paint requests when they were
  * on the Overview, so the app's first paint is unchanged.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiLabel } from '../api';
 import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
@@ -34,11 +34,17 @@ interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
   onOpenImport: () => void;
   onDataChanged?: () => void;
+  dataRevision?: number;
 }
 
-export function SettingsScreen({ onOpenImport, onDataChanged = () => {} }: Props) {
+export function SettingsScreen({
+  onOpenImport,
+  onDataChanged = () => {},
+  dataRevision = 0,
+}: Props) {
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringError, setRecurringError] = useState<string | null>(null);
+  const recurringRequest = useRef(0);
 
   /**
    * The import history takes the screen over, so it is a place the reader can BE -
@@ -67,25 +73,30 @@ export function SettingsScreen({ onOpenImport, onDataChanged = () => {} }: Props
   const [exporting, setExporting] = useState(false);
 
   const loadRecurring = useCallback(async () => {
+    const request = ++recurringRequest.current;
+    setRecurring(null);
     try {
       setRecurringError(null);
-      setRecurring(await api.recurring());
+      const next = await api.recurring();
+      if (request === recurringRequest.current) setRecurring(next);
     } catch (e) {
-      setRecurringError((e as Error).message);
+      if (request === recurringRequest.current) setRecurringError((e as Error).message);
     }
   }, []);
 
   useEffect(() => {
     loadRecurring();
-  }, [loadRecurring]);
+  }, [dataRevision, loadRecurring]);
 
   /** Hide/restore a group of recurring payments (the backend replies with a fresh list). */
   const toggleRecurring = async (description: string, ignored: boolean) => {
+    const request = ++recurringRequest.current;
     try {
       setRecurringError(null);
-      setRecurring(await api.setRecurringIgnored(description, ignored));
+      const next = await api.setRecurringIgnored(description, ignored);
+      if (request === recurringRequest.current) setRecurring(next);
     } catch (e) {
-      setRecurringError((e as Error).message);
+      if (request === recurringRequest.current) setRecurringError((e as Error).message);
     }
   };
 

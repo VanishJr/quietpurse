@@ -47,10 +47,20 @@ export const goalPeriodKindSchema = z.enum(GOAL_PERIODS);
 export type GoalPeriodKind = z.infer<typeof goalPeriodKindSchema>;
 
 const name = z.string().trim().min(1).max(GOAL_NAME_MAX);
-const centValue = z.number().finite().multipleOf(0.01);
+const exactHundredth = (value: number): boolean =>
+  value === Math.round(value * 100) / 100;
+const centValue = z
+  .number()
+  .finite()
+  .refine(exactHundredth, 'must be a whole number of cents');
 const amount = centValue.min(0.01).max(GOAL_AMOUNT_MAX);
 const nonNegativeAmount = centValue.min(0).max(GOAL_AMOUNT_MAX);
-const percentage = z.number().finite().multipleOf(0.01).min(0.01).max(100);
+const percentage = z
+  .number()
+  .finite()
+  .refine(exactHundredth, 'must be a whole number of basis points')
+  .min(0.01)
+  .max(100);
 const windowMonths = z.number().int().min(1).max(GOAL_WINDOW_MAX);
 const accountId = z.string().trim().min(1);
 const accountIds = z.array(accountId).min(1).max(GOAL_ACCOUNT_MAX);
@@ -165,7 +175,7 @@ const goalSummaryFields = {
 export const financialIndependenceGoalSummarySchema = z.strictObject({
   ...goalSummaryFields,
   type: z.literal('financial-independence'),
-  supportExcluded: z.number(),
+  supportExcluded: z.number().nullable(),
   workHoursLeft: z.number().nullable(),
   workHoursCapacityPerMonth: z.number().nullable(),
   workHoursCapacityExceeded: z.boolean().nullable(),

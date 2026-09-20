@@ -12,6 +12,7 @@ import {
   setCategoryOverride,
   setSetting,
   setOneOff,
+  updateAccount,
   updateAccountBalance,
   upsertAccount,
 } from '../src/db';
@@ -116,8 +117,8 @@ describe('server-owned goal progress', () => {
     `);
     await dbInstance().execute(sql`
       INSERT INTO financial_independence_goals
-        (goal_id, goal_type, basis, buffer_pct, window_months, hourly_rate_cents, hours_per_week)
-      VALUES ('legacy-empty', 'financial-independence', 'essential-costs', 10, 6, NULL, NULL)
+        (goal_id, goal_type, basis, buffer_pct, window_months, base_currency, hourly_rate_cents, hours_per_week)
+      VALUES ('legacy-empty', 'financial-independence', 'essential-costs', 10, 6, 'EUR', NULL, NULL)
     `);
     await insertTransactions([
       transaction({ amount: -1000, description: 'Lifestyle spend' }),
@@ -290,12 +291,50 @@ describe('server-owned goal progress', () => {
         category: 'salary',
       }),
       transaction({
+        amount: 300,
+        date: '2026-04-11T12:00:00.000Z',
+        description: 'April support',
+        category: 'support',
+      }),
+      transaction({
+        amount: -800,
+        date: '2026-04-12T12:00:00.000Z',
+        description: 'April spending',
+        category: 'housing',
+      }),
+      transaction({
         amount: -100,
         date: '2026-05-05T12:00:00.000Z',
         description: 'May food',
         category: 'food',
       }),
     ]);
+    const financialEssential = await createGoal(
+      {
+        type: 'financial-independence',
+        name: 'Essential independence',
+        basis: 'essential-costs',
+        bufferPct: 10,
+        windowMonths: 6,
+        hourlyRate: 20,
+        hoursPerWeek: 20,
+        essentialCosts: [{ label: 'Essentials', monthly: 1000 }],
+      },
+      NOW,
+    );
+    const financialSpending = await createGoal(
+      {
+        type: 'financial-independence',
+        name: 'Spending independence',
+        basis: 'current-spending',
+        bufferPct: 10,
+        windowMonths: 6,
+        hourlyRate: 20,
+        hoursPerWeek: 20,
+        essentialCosts: [],
+      },
+      NOW,
+    );
     const income = await createGoal(
       {
         type: 'monthly-income',
@@ -316,6 +355,17 @@ describe('server-owned goal progress', () => {
       NOW,
     );
 
+    expect(await getGoalProgress(financialEssential.id, NOW)).toMatchObject({
+      currency: 'EUR',
+      supportExcluded: 300,
+      workHoursLeft: 5,
+      progress: { target: 1100, current: 1000 },
+    });
+    expect(await getGoalProgress(financialSpending.id, NOW)).toMatchObject({
+      currency: 'EUR',
+      supportExcluded: 300,
+      progress: { target: 880, current: 1000 },
+    });
     expect(await getGoalProgress(income.id, NOW)).toMatchObject({
       currency: 'EUR',
       progress: { target: 1200, current: 1000 },
@@ -334,6 +384,24 @@ describe('server-owned goal progress', () => {
       expect(await getGoalProgress(goal.id, NOW)).toMatchObject({
         currency: 'EUR',
         source: 'Saved in EUR · Base currency is USD',
+        progress: {
+          target,
+          current: null,
+          percentage: null,
+          status: 'not-enough-data',
+        },
+      });
+    }
+    for (const [goal, target] of [
+      [financialEssential, 1100],
+      [financialSpending, null],
+    ] as const) {
+      expect(await getGoalProgress(goal.id, NOW)).toMatchObject({
+        currency: 'EUR',
+        source: 'Saved in EUR · Base currency is USD',
+        supportExcluded: null,
+        workHoursLeft: null,
+        workHoursCapacityExceeded: null,
         progress: {
           target,
           current: null,
@@ -391,6 +459,62 @@ describe('server-owned goal progress', () => {
       current: null,
       status: 'not-enough-data',
     });
+  });
+
+  it('excludes hidden accounts from monthly and current-category progress', async () => {
+    await addAccount('visible-progress', 'Visible progress', 0);
+    await addAccount('hidden-progress', 'Hidden progress', 0);
+    await insertTransactions([
+      transaction({
+        accountId: 'visible-progress',
+        amount: 1000,
+        description: 'Visible income',
+        category: 'salary',
+      }),
+      transaction({
+        accountId: 'hidden-progress',
+        amount: 9000,
+        description: 'Hidden income',
+        category: 'salary',
+      }),
+      transaction({
+        accountId: 'visible-progress',
+        amount: -100,
+        date: '2026-05-05T12:00:00.000Z',
+        description: 'Visible food',
+        category: 'food',
+      }),
+      transaction({
+        accountId: 'hidden-progress',
+        amount: -900,
+        date: '2026-05-05T12:00:00.000Z',
+        description: 'Hidden food',
+        category: 'food',
+      }),
+    ]);
+    expect((await updateAccount('hidden-progress', { hidden: true })).ok).toBe(true);
+    const income = await createGoal(
+      {
+        type: 'monthly-income',
+        name: 'Visible income',
+        target: 1200,
+        incomeScope: 'all',
+        windowMonths: 6,
+      },
+      NOW,
+    );
+    const category = await createGoal(
+      {
+        type: 'category-spending-limit',
+        name: 'Visible food',
+        category: 'food',
+        monthlyLimit: 500,
+      },
+      NOW,
+    );
+
+    expect((await getGoalProgress(income.id, NOW))?.progress.current).toBe(1000);
+    expect((await getGoalProgress(category.id, NOW))?.progress.current).toBe(100);
   });
 
   it('reports category spending as percentage used with forecast and manual overrides', async () => {
@@ -452,12 +576,25 @@ describe('server-owned goal progress', () => {
     await insertTransactions([
       transaction({ amount: 1000, description: 'Converted income', category: 'salary' }),
       transaction({ amount: 500, description: 'Missing rate', currency: 'USD', category: 'salary' }),
+      transaction({
+        amount: -100,
+        date: '2026-05-05T12:00:00.000Z',
+        description: 'Converted food',
+        category: 'food',
+      }),
+      transaction({
+        amount: -50,
+        currency: 'USD',
+        date: '2026-05-06T12:00:00.000Z',
+        description: 'Missing food rate',
+        category: 'food',
+      }),
     ]);
-    const missing = await findTx((row) => row.description === 'Missing rate');
-    await dbInstance().execute(
-      sql`UPDATE transactions SET base_amount_cents = NULL WHERE id = ${missing.id}`,
-    );
-    const goal = await createGoal(
+    await dbInstance().execute(sql`
+      UPDATE transactions SET base_amount_cents = NULL
+      WHERE description IN ('Missing rate', 'Missing food rate')
+    `);
+    const income = await createGoal(
       {
         type: 'monthly-income',
         name: 'Income',
@@ -467,10 +604,21 @@ describe('server-owned goal progress', () => {
       },
       NOW,
     );
-    expect((await getGoalProgress(goal.id, NOW))?.progress).toMatchObject({
-      current: null,
-      percentage: null,
-      status: 'not-enough-data',
-    });
+    const category = await createGoal(
+      {
+        type: 'category-spending-limit',
+        name: 'Food limit',
+        category: 'food',
+        monthlyLimit: 200,
+      },
+      NOW,
+    );
+    for (const goal of [income, category]) {
+      expect((await getGoalProgress(goal.id, NOW))?.progress).toMatchObject({
+        current: null,
+        percentage: null,
+        status: 'not-enough-data',
+      });
+    }
   });
 });

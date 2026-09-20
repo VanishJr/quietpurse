@@ -1,4 +1,5 @@
 import { act, fireEvent, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
@@ -272,5 +273,55 @@ describe('recurring payments', () => {
     expect(
       await screen.findByRole('button', { name: 'Restore payment Spotify' }),
     ).toBeInTheDocument();
+  });
+
+  it('keeps the newest recurring answer when a revision overtakes an older read', async () => {
+    const group = (description: string) => ({
+      description,
+      category: 'subscriptions',
+      months: 3,
+      count: 3,
+      avgAmount: -10,
+      monthlyAvg: -10,
+      lastDate: '2026-07-01',
+      ignored: false,
+    });
+    let releaseOld: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => {
+        reads += 1;
+        if (reads === 1) {
+          return new Promise<Response>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group('Fresh')] });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <SettingsScreen
+            onOpenImport={vi.fn()}
+            dataRevision={revision}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    await vi.waitFor(() => expect(reads).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    expect(await screen.findByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
+
+    await act(async () => {
+      releaseOld(ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group('Stale')] }));
+    });
+    expect(screen.getByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Hide payment Stale' })).not.toBeInTheDocument();
   });
 });

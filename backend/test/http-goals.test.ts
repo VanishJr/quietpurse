@@ -1,8 +1,8 @@
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { dbInstance, seedDefaults, upsertAccount } from '../src/db';
-import type { GoalCreate } from '../src/wire';
+import { createGoal, dbInstance, listGoals, seedDefaults, upsertAccount } from '../src/db';
+import { GOALS_MAX, type GoalCreate } from '../src/wire';
 import { freshTestDb } from './pglite';
 import { sql } from 'drizzle-orm';
 
@@ -94,6 +94,13 @@ describe('Goals HTTP API', () => {
           status: expect.any(String),
         },
       });
+      if (type === 'financial-independence') {
+        expect(created.body).toMatchObject({
+          workHoursLeft: null,
+          workHoursCapacityPerMonth: 86.67,
+          workHoursCapacityExceeded: null,
+        });
+      }
       ids.set(type, created.body.id as string);
       const read = await agent.get(`/api/goals/${created.body.id}`);
       expect(read.status, JSON.stringify(read.body)).toBe(200);
@@ -163,16 +170,21 @@ describe('Goals HTTP API', () => {
     expect(incomplete.body.error).toContain('target:');
   });
 
-  it('refuses values below storage precision before reaching the database', async () => {
+  it('refuses values that storage would round before reaching the database', async () => {
     for (const body of [
       { ...writes[0], hourlyRate: 20.001 },
+      { ...writes[0], hourlyRate: 20.000000000000004 },
       { ...writes[0], essentialCosts: [{ label: 'Essentials', monthly: 0.001 }] },
       { ...writes[3], targetDebt: 0.001 },
+      { ...writes[4], target: 100.00000000000001 },
       { ...writes[5], targetPercent: 0.001 },
+      { ...writes[5], targetPercent: 20.000000000000004 },
       { ...writes[6], monthlyLimit: 0.001 },
     ]) {
-      const res = await agent.post('/api/goals').send(body);
-      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      const created = await agent.post('/api/goals').send(body);
+      expect(created.status, JSON.stringify(created.body)).toBe(400);
+      const replaced = await agent.put(`/api/goals/${ids.get(body.type)}`).send(body);
+      expect(replaced.status, JSON.stringify(replaced.body)).toBe(400);
     }
   });
 
@@ -206,6 +218,24 @@ describe('Goals HTTP API', () => {
     expect((await agent.get('/api/accounts')).body).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: 'cash' }), expect.objectContaining({ id: 'debt' })]),
     );
+  });
+
+  it('returns a conflict when goal capacity is exhausted', async () => {
+    const input: GoalCreate = {
+      type: 'monthly-income',
+      name: 'Capacity filler',
+      target: 3000,
+      incomeScope: 'own',
+      windowMonths: 6,
+    };
+    const existing = (await listGoals()).length;
+    for (let index = existing; index < GOALS_MAX; index++) {
+      await createGoal({ ...input, name: `Capacity filler ${index}` });
+    }
+
+    const res = await agent.post('/api/goals').send(input);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body).toEqual({ error: `at most ${GOALS_MAX} goals can be saved` });
   });
 
   it.each([

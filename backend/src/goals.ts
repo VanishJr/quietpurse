@@ -136,6 +136,7 @@ const financialDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const rows = completeRows(context.months, context.now, goal.windowMonths);
+  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
   const hasUnconverted = rows.some((row) => row.unconverted > 0);
   const oneOffRows = completeRows(context.months, context.now, 12);
   const oneOffMonthly = oneOffRows.reduce((sum, row) => sum + row.expenseOneOff, 0) / 12;
@@ -144,12 +145,18 @@ const financialDetail = (
   const spendingBase = median(spendByMonth);
   const base = goal.basis === 'essential-costs' ? essentialBase : spendingBase;
   const configured = goal.basis === 'essential-costs' ? essentialBase > 0 : spendingBase > 0;
-  const target = configured ? round2(base * (1 + goal.bufferPct / 100)) : null;
+  const target =
+    configured && !(currencyChanged && goal.basis === 'current-spending')
+      ? round2(base * (1 + goal.bufferPct / 100))
+      : null;
   const ownIncome = rows.length === 0 ? null : round2(mean(rows.map((row) => row.incomeOwn)));
-  const supportExcluded = rows.length === 0 ? 0 : round2(mean(rows.map((row) => row.incomeExternal)));
+  const supportExcluded =
+    currencyChanged || rows.length === 0
+      ? null
+      : round2(mean(rows.map((row) => row.incomeExternal)));
   let status: GoalStatus;
   if (!configured) status = goal.basis === 'essential-costs' ? 'needs-setup' : 'not-enough-data';
-  else if (rows.length === 0 || hasUnconverted) status = 'not-enough-data';
+  else if (currencyChanged || rows.length === 0 || hasUnconverted) status = 'not-enough-data';
   else status = ownIncome !== null && target !== null && ownIncome >= target ? 'reached' : 'tracking';
   const current = status === 'needs-setup' || status === 'not-enough-data' ? null : ownIncome;
   const progress = completionProgress(
@@ -171,10 +178,13 @@ const financialDetail = (
       ? null
       : workHoursLeft > workHoursCapacityPerMonth;
   const basis = goal.basis === 'essential-costs' ? 'Essential costs' : 'Current spending';
+  const { baseCurrency: currency, ...publicGoal } = goal;
   return {
-    ...goal,
-    currency: context.baseCurrency,
-    source: `${monthsText(rows.length)} · ${basis} + ${goal.bufferPct}% buffer`,
+    ...publicGoal,
+    currency,
+    source: currencyChanged
+      ? `Saved in ${goal.baseCurrency} · Base currency is ${context.baseCurrency}`
+      : `${monthsText(rows.length)} · ${basis} + ${goal.bufferPct}% buffer`,
     supportExcluded,
     workHoursLeft,
     workHoursCapacityPerMonth,

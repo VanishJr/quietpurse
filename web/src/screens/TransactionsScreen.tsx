@@ -85,24 +85,60 @@ export function TransactionsScreen({
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
+  const [refreshingSelected, setRefreshingSelected] = useState(false);
   const [ruleEditor, setRuleEditor] = useState<'transfer' | 'category' | null>(null);
   const transferButton = useRef<HTMLButtonElement>(null);
   const categoryButton = useRef<HTMLButtonElement>(null);
+  const selectedRef = useRef<Transaction | null>(null);
+  selectedRef.current = selected;
+  const selectedRevision = useRef(dataRevision);
   /** income source catalog — chips in the sheet and badges in the list */
-  const [sources, setSources] = useState<IncomeSourceDef[]>([]);
+  const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceLoadAttempt, setSourceLoadAttempt] = useState(0);
   const loadGeneration = useRef(0);
   useEffect(() => {
     api.accounts(true).then(setAccounts).catch(() => {});
   }, []);
   useEffect(() => {
     let live = true;
+    setSources(null);
+    setSourceError(null);
     api.incomeSources().then((next) => {
       if (live) setSources(next);
-    }).catch(() => {});
+    }).catch((caught) => {
+      if (live) setSourceError((caught as Error).message);
+    });
+    return () => {
+      live = false;
+    };
+  }, [dataRevision, sourceLoadAttempt]);
+
+  useEffect(() => {
+    if (selectedRevision.current === dataRevision) return;
+    selectedRevision.current = dataRevision;
+    const current = selectedRef.current;
+    if (!current) return;
+    let live = true;
+    setRuleEditor(null);
+    setRefreshingSelected(true);
+    setError(null);
+    api.transaction(current.id).then((next) => {
+      if (live && selectedRef.current?.id === current.id) setSelected(next);
+    }).catch((caught) => {
+      if (!live || selectedRef.current?.id !== current.id) return;
+      setSelected(null);
+      setRuleEditor(null);
+      setError(`Couldn’t refresh the open transaction: ${(caught as Error).message}`);
+    }).finally(() => {
+      if (live) setRefreshingSelected(false);
+    });
     return () => {
       live = false;
     };
   }, [dataRevision]);
+
+  const busy = saving || refreshingSelected;
 
   /**
    * Arrived from an account's "All transactions". The link says all of them, so the
@@ -117,12 +153,13 @@ export function TransactionsScreen({
     setPeriod(PERIODS[PERIODS.length - 1].key);
   }, [focus]);
 
-  const sourceById = (id?: IncomeSource) => sources.find((s) => s.id === id);
+  const sourceById = (id?: IncomeSource) => sources?.find((s) => s.id === id);
 
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
     try {
       setError(null);
+      setTxs(null);
       const { from, to } = periodBounds(period);
       const next = await api.transactions({
         from,
@@ -286,6 +323,18 @@ export function TransactionsScreen({
 
       <div aria-live="polite">
         {!selected && error && <p className="error">Error: {error}</p>}
+        {!selected && sourceError && (
+          <p className="error" role="alert">
+            Couldn’t load income sources: {sourceError}{' '}
+            <button
+              type="button"
+              className="btn-link"
+              onClick={() => setSourceLoadAttempt((value) => value + 1)}
+            >
+              Retry income sources
+            </button>
+          </p>
+        )}
         {!selected && notice && <p className="hint">{notice}</p>}
       </div>
 
@@ -346,7 +395,7 @@ export function TransactionsScreen({
 
       <Sheet
         open={selected !== null}
-        onClose={() => { if (!saving) setSelected(null); }}
+        onClose={() => { if (!busy) setSelected(null); }}
         position="bottom"
         title={ruleEditor === 'transfer' ? 'Transfer rules' : ruleEditor === 'category' ? 'Apply category' : 'Transaction'}
       >
@@ -387,7 +436,20 @@ export function TransactionsScreen({
                 <p>{selected.description}</p>
               </details>
             )}
+            {refreshingSelected && <p className="state-note" role="status">Refreshing transaction…</p>}
             {error && <p className="error" role="alert">Error: {error}</p>}
+            {sourceError && (
+              <p className="error" role="alert">
+                Couldn’t load income sources: {sourceError}{' '}
+                <button
+                  type="button"
+                  className="btn-link"
+                  onClick={() => setSourceLoadAttempt((value) => value + 1)}
+                >
+                  Retry income sources
+                </button>
+              </p>
+            )}
             {notice && <p className="hint" role="status">{notice}</p>}
 
             {/* this row alone. Outside the description gate below it: a rule needs a
@@ -411,7 +473,7 @@ export function TransactionsScreen({
                     className="chip-cat"
                     aria-label={`${categoryLabel(c)}, this transaction only`}
                     aria-pressed={c === selected.category}
-                    disabled={saving}
+                    disabled={busy}
                     onClick={() => applyCategory(selected, c)}
                   >
                     <span className="dot" style={{ background: categoryColor(c) }} />
@@ -422,7 +484,7 @@ export function TransactionsScreen({
               {selected.categoryManual && (
                 <button
                   className="btn-ghost transaction-secondary-button"
-                  disabled={saving}
+                  disabled={busy}
                   onClick={() => applyCategory(selected, null)}
                 >
                   Category: back to auto-detection
@@ -434,7 +496,7 @@ export function TransactionsScreen({
               <button
                 ref={categoryButton}
                 className="btn-ghost transaction-rule-button"
-                disabled={saving || !CATEGORIES.includes(selected.category as Category)}
+                disabled={busy || !CATEGORIES.includes(selected.category as Category)}
                 onClick={() => setRuleEditor('category')}
               >
                 Apply to similar transactions <span aria-hidden="true">›</span>
@@ -450,7 +512,7 @@ export function TransactionsScreen({
                 type="checkbox"
                 className="switch"
                 checked={selected.transfer}
-                disabled={saving}
+                disabled={busy}
                 onChange={(e) => applyTransfer(selected, e.target.checked)}
               />
             </div>
@@ -459,7 +521,7 @@ export function TransactionsScreen({
               <button
                 ref={transferButton}
                 className="btn-ghost transaction-rule-button"
-                disabled={saving}
+                disabled={busy}
                 onClick={() => setRuleEditor('transfer')}
               >
                 Manage transfer rules <span aria-hidden="true">›</span>
@@ -477,7 +539,7 @@ export function TransactionsScreen({
                   type="checkbox"
                   className="switch"
                   checked={selected.oneOff}
-                  disabled={saving}
+                  disabled={busy}
                   onChange={(e) => applyOneOff(selected, e.target.checked)}
                 />
               </div>
@@ -498,12 +560,12 @@ export function TransactionsScreen({
                   {selected.incomeSourceManual ? ' Set manually.' : ' Auto-detected.'}
                 </div>
                 <div className="chip-wrap">
-                  {sources.map((o) => (
+                  {(sources ?? []).map((o) => (
                     <button
                       key={o.id}
                       className="chip"
                       aria-pressed={selected.incomeSource === o.id}
-                      disabled={saving}
+                      disabled={busy}
                       onClick={() => applySource(selected, o.id)}
                     >
                       {o.label}
@@ -513,7 +575,7 @@ export function TransactionsScreen({
                 {selected.incomeSourceManual && (
                   <button
                     className="btn-ghost transaction-secondary-button"
-                    disabled={saving}
+                    disabled={busy}
                     onClick={() => applySource(selected, null)}
                   >
                     Source: back to auto-detection
@@ -525,7 +587,7 @@ export function TransactionsScreen({
             {selected.transferManual !== null && (
               <button
                 className="btn-ghost transaction-secondary-button"
-                disabled={saving}
+                disabled={busy}
                 onClick={() => applyTransfer(selected, null)}
               >
                 Back to auto-detection
@@ -533,7 +595,7 @@ export function TransactionsScreen({
             )}
 
             <button
-              disabled={saving}
+              disabled={busy}
               className="btn-ghost transaction-close-button"
               onClick={() => setSelected(null)}
             >

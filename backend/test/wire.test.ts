@@ -151,7 +151,10 @@ const objectNodes = (schema: z.ZodType, at: string, walk: Walk): number => {
     case 'array':
       return objectNodes(def.element!, `${at}[]`, walk);
     case 'union':
-      return (def.options ?? []).reduce((n, o, i) => n + objectNodes(o, `${at}|${i}`, walk), 0);
+      if (!def.options?.length) {
+        throw new Error(`${at}: union options are unreadable - teach the walk before trusting it`);
+      }
+      return def.options.reduce((n, o, i) => n + objectNodes(o, `${at}|${i}`, walk), 0);
     case 'optional':
     case 'nullable':
     case 'readonly':
@@ -227,13 +230,16 @@ describe('the Goals write contract', () => {
 
     const invalid = [
       { ...valid, target: 1.001 },
+      { ...valid, target: 100.00000000000001 },
       { ...financial, hourlyRate: 20.001 },
+      { ...financial, hourlyRate: 20.000000000000004 },
       {
         ...financial,
         essentialCosts: [{ label: 'Essentials', monthly: 0.001 }],
       },
       { ...debt, targetDebt: 0.001 },
       { ...rate, targetPercent: 0.001 },
+      { ...rate, targetPercent: 20.000000000000004 },
     ];
     for (const schema of [goalCreateSchema, goalUpdateSchema]) {
       for (const body of invalid) expect(schema.safeParse(body).success).toBe(false);
@@ -270,8 +276,17 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(lax).toEqual([]);
   });
 
-  it('reaches nested response and request objects rather than only each top-level body', () => {
-    expect(walked().objects.size).toBeGreaterThan(json.length);
+  it('reaches every object shape declared across the wire module tree', () => {
+    const declaredObjects = sourcesOf(WIRE_DIR).reduce((count, file) => {
+      const text = fs.readFileSync(file, 'utf8');
+      return (
+        count +
+        (text.match(/\.strictObject\(/g) ?? []).length +
+        (text.match(/\.extend\(/g) ?? []).length
+      );
+    }, 0);
+    expect(declaredObjects).toBeGreaterThan(json.length);
+    expect(walked().objects.size).toBe(declaredObjects);
   });
 
   it('would refuse a plain z.object where it sits, and a lax node under a strict one', () => {
@@ -284,6 +299,12 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(() => objectNodes({} as z.ZodType, 'crafted', { lax: [], objects: new Set() })).toThrow(
       /unhandled schema type "\(unreadable\)"/,
     );
+    const unionWithoutOptions = {
+      _zod: { def: { type: 'union' } },
+    } as unknown as z.ZodType;
+    expect(() =>
+      objectNodes(unionWithoutOptions, 'crafted union', { lax: [], objects: new Set() }),
+    ).toThrow(/union options are unreadable/);
   });
 
   it('declares every route once, under a method the registry keys by', () => {

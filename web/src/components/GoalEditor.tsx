@@ -44,6 +44,7 @@ interface Draft {
   category: string;
   monthlyLimit: string;
   savedCurrency: string | null;
+  savedAccountIds: string[];
 }
 
 let nextCostKey = 1;
@@ -70,6 +71,7 @@ const emptyDraft = (): Draft => ({
   category: 'food',
   monthlyLimit: '',
   savedCurrency: null,
+  savedAccountIds: [],
 });
 
 const draftOf = (goal: GoalDetail): Draft => {
@@ -102,7 +104,12 @@ const draftOf = (goal: GoalDetail): Draft => {
         accountIds: goal.accountIds,
       };
     case 'savings-balance':
-      return { ...draft, target: String(goal.target), accountIds: goal.accountIds };
+      return {
+        ...draft,
+        target: String(goal.target),
+        accountIds: goal.accountIds,
+        savedAccountIds: goal.accountIds,
+      };
     case 'debt-payoff':
       return { ...draft, accountId: goal.accountId, targetDebt: String(goal.targetDebt) };
     case 'monthly-income':
@@ -324,6 +331,10 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
       setError(parsed.error ?? 'Check the goal fields.');
       return;
     }
+    if (hasMismatchedSavingsSelection) {
+      setError(`Remove accounts that no longer use this goal’s ${draft.savedCurrency} currency.`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -332,17 +343,36 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
         : await api.createGoal(parsed.goal);
       onSaved(saved);
     } catch (caught) {
+      if (editing && caught instanceof ApiError && caught.status === 404) {
+        onMissing();
+        return;
+      }
       setError((caught as Error).message);
     } finally {
       setSaving(false);
     }
   };
 
-  const selectedAvailableAccount = accounts.find((account) =>
-    draft.accountIds.includes(account.id),
+  const isMismatchedSavedSavingsAccount = (account: Account) =>
+    draft.type === 'savings-balance' &&
+    draft.savedCurrency !== null &&
+    draft.savedAccountIds.includes(account.id) &&
+    account.currency !== draft.savedCurrency;
+  const hasMismatchedSavingsSelection = draft.accountIds.some((id) => {
+    const account = accounts.find((candidate) => candidate.id === id);
+    return account !== undefined && isMismatchedSavedSavingsAccount(account);
+  });
+  const selectedAvailableAccount = accounts.find(
+    (account) =>
+      draft.accountIds.includes(account.id) && !isMismatchedSavedSavingsAccount(account),
   );
-  const hasUnavailableSelection = draft.accountIds.some(
-    (id) => !accounts.some((account) => account.id === id),
+  const hasUnavailableSelection = draft.accountIds.some((id) => {
+    const account = accounts.find((candidate) => candidate.id === id);
+    return account === undefined || isMismatchedSavedSavingsAccount(account);
+  });
+  const selectableSavingsAccounts = accounts.filter(
+    (account) =>
+      !draft.accountIds.includes(account.id) || !isMismatchedSavedSavingsAccount(account),
   );
   const savingsCurrencyLock =
     draft.type === 'savings-balance'
@@ -351,8 +381,8 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
       : null;
   const selectedCurrency =
     draft.type === 'debt-payoff'
-      ? accounts.find((account) => account.id === draft.accountId)?.currency ??
-        draft.savedCurrency ??
+      ? draft.savedCurrency ??
+        accounts.find((account) => account.id === draft.accountId)?.currency ??
         baseCurrency ??
         ''
       : draft.type === 'savings-balance' || draft.type === 'emergency-fund'
@@ -370,12 +400,15 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
     ) {
       return;
     }
-    update(
-      'accountIds',
-      selected
-        ? draft.accountIds.filter((accountId) => accountId !== id)
-        : [...draft.accountIds, id],
-    );
+    setDraft((current) => ({
+      ...current,
+      accountIds: selected
+        ? current.accountIds.filter((accountId) => accountId !== id)
+        : [...current.accountIds, id],
+      savedAccountIds: selected
+        ? current.savedAccountIds.filter((accountId) => accountId !== id)
+        : current.savedAccountIds,
+    }));
   };
 
   const money = (label: string, key: 'monthlyEssentials' | 'target' | 'targetDebt' | 'monthlyLimit') => (
@@ -432,7 +465,8 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
               <fieldset className="goal-costs">
                 <legend>Essential monthly costs</legend>
                 {draft.costs.map((item, index) => {
-                  const rowName = item.label.trim() || `cost ${index + 1}`;
+                  const rowName = item.label.trim();
+                  const rowContext = rowName ? `${rowName}, row ${index + 1}` : `row ${index + 1}`;
                   return (
                     <div className="goal-cost-row" key={item.key}>
                       <input
@@ -444,7 +478,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                       />
                       <input
                         className="input"
-                        aria-label={`Monthly cost for ${rowName}`}
+                        aria-label={`Monthly cost for ${rowContext}`}
                         inputMode="decimal"
                         placeholder={baseCurrency ?? ''}
                         value={item.monthly}
@@ -453,7 +487,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                       <button
                         type="button"
                         className="btn btn-small btn-ghost"
-                        aria-label={`Delete ${rowName}`}
+                        aria-label={`Delete ${rowContext}`}
                         onClick={() => update('costs', draft.costs.filter((costItem) => costItem.key !== item.key))}
                       >
                         Delete
@@ -482,9 +516,12 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
           </>
         );
       case 'savings-balance':
-        return <>{money('Target amount', 'target')}{accountChecks(accounts, savingsCurrencyLock)}<DateField value={draft.targetDate} onChange={(value) => update('targetDate', value)} /></>;
+        return <>{money('Target amount', 'target')}{accountChecks(selectableSavingsAccounts, savingsCurrencyLock)}<DateField value={draft.targetDate} onChange={(value) => update('targetDate', value)} /></>;
       case 'debt-payoff': {
         const unavailable = draft.accountId && !accounts.some((account) => account.id === draft.accountId);
+        const debtAccounts = accounts.filter(
+          (account) => account.balance < 0 || (editing && account.id === draft.accountId),
+        );
         return (
           <>
             <label className="field">
@@ -492,7 +529,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
               <select className="input" value={draft.accountId} disabled={editing} onChange={(event) => update('accountId', event.target.value)}>
                 <option value="">Choose an account</option>
                 {unavailable && <option value={draft.accountId}>Unavailable account</option>}
-                {accounts.filter((account) => account.balance < 0).map((account) => <option key={account.id} value={account.id}>{account.name} · {account.currency}</option>)}
+                {debtAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.currency}</option>)}
               </select>
             </label>
             {money('Target remaining debt', 'targetDebt')}

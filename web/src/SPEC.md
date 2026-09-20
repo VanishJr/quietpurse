@@ -106,16 +106,17 @@ so narrow layouts and assistive action lists keep the card context.
 **A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
 goal are one retryable load; a new attempt clears the previous account list and currency before any
 form or type choice is enabled. Account-backed edits retain the goal's persisted currency when a
-saved account is gone. Savings selection locks to one currency until the current selection is
-cleared, and unavailable saved ids remain removable. Form refusals stay with their draft, but Back
-or a new type clears them; repeated essential-cost controls carry row context in their accessible
-names.
+saved account is gone or no longer uses that currency. Savings selection locks to one currency
+until the current selection is cleared; incompatible saved accounts remain removable and cannot
+silently retarget the goal. A debt edit continues naming its saved account after the balance reaches
+zero. Form refusals stay with their draft, but Back or a new type clears them; repeated
+essential-cost controls carry their row ordinal in every accessible name.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
-missing id falls back to the list with an explicit unavailable message rather than choosing another
-goal. A new installation's empty list is a real empty state and is never shown while the request is
-unresolved or failed.
+missing id, including one that disappears before an edit is saved, falls back to the list with an
+explicit unavailable message rather than choosing another goal. A new installation's empty list is
+a real empty state and is never shown while the request is unresolved or failed.
 
 **The wire types are the server's declaration, reached by type only and through one door.**
 `web/src/types.ts` declares nothing of its own but `TxFocus`: every wire shape in it is an `export
@@ -244,10 +245,14 @@ Transactions list badges outside help with the catalogue's label and gives a der
 badge, because that row's category already says what the money is.
 
 **An income-source write invalidates every mounted reader before Settings re-reads its catalog.**
-The Shell keeps Transactions, Analytics and Goals mounted while hidden, so one shared data revision
-reloads the transaction rows and source catalog, chart data and goal progress. The invalidation runs
-as soon as the write succeeds: a failed follow-up catalog GET cannot suppress it. Revision-driven
-loads are latest-request-wins, so a slow pre-mutation response cannot replace the newer answer.
+The Shell keeps its screens mounted while hidden, so one shared data revision reloads Overview's
+account rows and figures, the transaction rows and source catalog, chart data, goal progress and
+Settings' recurring groups. The last reader matters because a source pattern can break a transfer
+pair, which can turn the surviving expense into a recurring payment. The invalidation runs as soon
+as the write succeeds: a failed follow-up catalog GET cannot suppress it. Transactions clears its
+old source catalog during that reload and exposes a failed read with a retry rather than combining
+freshly classified rows with stale names. Revision-driven loads are latest-request-wins, so a slow
+pre-mutation response cannot replace the newer answer.
 
 **The account delete's counts — transactions, imports, documents — are what the delete destroyed,
 which for a hidden account is legitimately not what the panel previewed.** The preview counts a
@@ -449,15 +454,13 @@ document root are the styling truth, and `ink` exists because recharts wants rea
 Where the theme is kept is *Boundary*'s ruling and is not restated here.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
-one value, because the ground decides the tooltip's colours and one shared object is what keeps the
-surfaces from diverging — a reader who learns that pointing at a chart works on one screen would
-otherwise learn it wrongly for the next. A ground is named for the `Ink` key of its own fill, so
-nothing states twice what colour a card is, and a ground added to the union without a chip does not
-compile. The one chip every ground takes fills the box with `raised`, which sits a step off each
-ground on purpose; the border is what makes the box a box, not the fill. `chartTooltip.test.ts` pins
-the tightest live fill-on-ground pair in each palette with the border's separation beside it, at
-the measured figures rather than under a floor, and reds when a figure written down is no longer
-the measurement.
+one value. A ground is named for the `Ink` key of its own fill, so nothing states twice what colour a
+card is, and a ground added to the union without a chip does not compile. Each caller tells
+`ChartPlot` whether it is on a card surface or the wizard's page preview. The chip fills the box with
+`raised`, which sits a step off each ground on purpose; the border is what makes the box a box, not
+the fill. `chartTooltip.test.ts` pins the tightest live fill-on-ground pair in each palette with the
+border's separation beside it, at the measured figures rather than under a floor, and reds when a
+figure written down is no longer the measurement.
 
 `tooltipProps` is checked in `unit` against both palettes at once because `chartTooltip.ts` is a
 `.ts` file and not a `.tsx` one on purpose: `web/vitest.config.ts` binds the project to the

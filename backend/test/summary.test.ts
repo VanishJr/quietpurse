@@ -438,10 +438,4 @@ describe('nothing but scopeSql picks the filters', () => {
       ).toBeGreaterThan(scopedCode.indexOf('const scopeSql'));
     },
   );
-
-  it('the goal aggregates keep their missing-conversion checks outside scopeSql', () => {
-    expect(code).toContain('goalMonthlyTotals');
-    expect(code).toContain('goalCurrentCategoryTotals');
-    expect(code).toContain('base_amount_cents IS NULL');
-  });
 });

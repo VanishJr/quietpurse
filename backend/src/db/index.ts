@@ -51,6 +51,7 @@ import {
   type ImportStatus,
   type GoalCost,
   type GoalCreate,
+  GOALS_MAX,
   type GoalType,
   type ImportTotals,
   type RecurringGroup,
@@ -2759,6 +2760,7 @@ export type GoalRecord =
   | (GoalRecordCommon &
       Omit<StoredGoal<'financial-independence'>, 'name' | 'essentialCosts'> & {
         essentialCosts: GoalCost[];
+        baseCurrency: string;
       })
   | (GoalRecordCommon & Omit<StoredGoal<'emergency-fund'>, 'name' | 'targetDate'> & {
       currency: string;
@@ -2788,6 +2790,7 @@ type GoalJoinRow = {
   fi_basis: 'essential-costs' | 'current-spending' | null;
   fi_buffer_pct: number | null;
   fi_window_months: number | null;
+  fi_base_currency: string | null;
   fi_hourly_rate_cents: number | null;
   fi_hours_per_week: number | null;
   ef_monthly_essentials_cents: number | null;
@@ -2815,7 +2818,7 @@ const goalRowsOn = async (d: Executor, id?: string): Promise<GoalJoinRow[]> =>
   rowsVia<GoalJoinRow>(d, sql`
     SELECT g.id, g.type, g.name, g.target_date, g.created_at, g.updated_at,
       fi.basis AS fi_basis, fi.buffer_pct AS fi_buffer_pct,
-      fi.window_months AS fi_window_months,
+      fi.window_months AS fi_window_months, fi.base_currency AS fi_base_currency,
       fi.hourly_rate_cents AS fi_hourly_rate_cents,
       fi.hours_per_week AS fi_hours_per_week,
       ef.monthly_essentials_cents AS ef_monthly_essentials_cents,
@@ -2898,6 +2901,7 @@ const recordsFromGoalRows = async (d: Executor, rows: GoalJoinRow[]): Promise<Go
           basis: requiredGoalField(row.fi_basis, row.id, 'basis'),
           bufferPct: requiredGoalField(row.fi_buffer_pct, row.id, 'buffer percentage'),
           windowMonths: requiredGoalField(row.fi_window_months, row.id, 'window'),
+          baseCurrency: requiredGoalField(row.fi_base_currency, row.id, 'base currency'),
           hourlyRate:
             row.fi_hourly_rate_cents === null ? null : fromCents(row.fi_hourly_rate_cents),
           hoursPerWeek: row.fi_hours_per_week,
@@ -2965,14 +2969,21 @@ const recordsFromGoalRows = async (d: Executor, rows: GoalJoinRow[]): Promise<Go
   });
 };
 
+const goalRecordsOn = async (d: Executor, id?: string): Promise<GoalRecord[]> =>
+  recordsFromGoalRows(d, await goalRowsOn(d, id));
+
 export async function listGoals(): Promise<GoalRecord[]> {
-  const rows = await goalRowsOn(getDb());
-  return recordsFromGoalRows(getDb(), rows);
+  return getDb().transaction(
+    (tx) => goalRecordsOn(tx),
+    { isolationLevel: 'repeatable read' },
+  );
 }
 
 export async function getGoal(id: string): Promise<GoalRecord | undefined> {
-  const rows = await goalRowsOn(getDb(), id);
-  return (await recordsFromGoalRows(getDb(), rows))[0];
+  return getDb().transaction(
+    async (tx) => (await goalRecordsOn(tx, id))[0],
+    { isolationLevel: 'repeatable read' },
+  );
 }
 
 export type GoalWriteErrorCode =
@@ -2983,6 +2994,7 @@ export type GoalWriteErrorCode =
   | 'duplicate-category'
   | 'duplicate-cost'
   | 'essential-costs-required'
+  | 'goal-capacity'
   | 'invalid-target-date'
   | 'not-debt'
   | 'target-debt-invalid'
@@ -2996,6 +3008,27 @@ export class GoalWriteError extends Error {
     super(message);
   }
 }
+
+const withGoalWriteErrors = async <T>(write: () => Promise<T>): Promise<T> => {
+  try {
+    return await write();
+  } catch (error) {
+    if (!isUniqueViolation(error, 'category_spending_goals_category_unique')) throw error;
+    throw new GoalWriteError(
+      'duplicate-category',
+      'a category spending limit already tracks this category',
+    );
+  }
+};
+
+/** The self-conflicting lock makes the count and insert one capacity decision. */
+const reserveGoalSlot = async (d: Executor): Promise<void> => {
+  await d.execute(sql`LOCK TABLE goals IN SHARE ROW EXCLUSIVE MODE`);
+  const [row] = await rowsVia<{ count: number | string }>(d, sql`SELECT COUNT(*) AS count FROM goals`);
+  if (Number(row.count) >= GOALS_MAX) {
+    throw new GoalWriteError('goal-capacity', `at most ${GOALS_MAX} goals can be saved`);
+  }
+};
 
 type GoalAccountRow = {
   id: string;
@@ -3059,16 +3092,6 @@ const prepareGoalWrite = async (
   if (input.type === 'category-spending-limit') {
     if (!(CATEGORIES as readonly string[]).includes(input.category)) {
       throw new GoalWriteError('unknown-category', 'choose a known category');
-    }
-    const rows = await rowsVia<{ goal_id: string }>(d, sql`
-      SELECT goal_id FROM category_spending_goals WHERE category = ${input.category}
-      ${existing ? sql`AND goal_id <> ${existing.id}` : sql``}
-    `);
-    if (rows.length > 0) {
-      throw new GoalWriteError(
-        'duplicate-category',
-        'a category spending limit already tracks this category',
-      );
     }
     return { baseCurrency };
   }
@@ -3160,6 +3183,7 @@ const insertGoalConfig = async (
         basis: input.basis,
         bufferPct: input.bufferPct,
         windowMonths: input.windowMonths,
+        baseCurrency: prepared.baseCurrency,
         hourlyRateCents: input.hourlyRate === null ? null : toCents(input.hourlyRate),
         hoursPerWeek: input.hoursPerWeek,
       });
@@ -3251,6 +3275,7 @@ const replaceGoalConfig = async (
           basis: input.basis,
           bufferPct: input.bufferPct,
           windowMonths: input.windowMonths,
+          baseCurrency: prepared.baseCurrency,
           hourlyRateCents: input.hourlyRate === null ? null : toCents(input.hourlyRate),
           hoursPerWeek: input.hoursPerWeek,
         })
@@ -3333,19 +3358,22 @@ export async function createGoal(input: GoalCreate, now = new Date()): Promise<G
   const id = crypto.randomUUID();
   const stamp = now.toISOString();
   const today = stamp.slice(0, 10);
-  await getDb().transaction(async (tx) => {
-    const prepared = await prepareGoalWrite(tx, input, today);
-    await tx.insert(s.goals).values({
-      id,
-      type: input.type,
-      name: input.name,
-      targetDate: 'targetDate' in input ? input.targetDate : null,
-      createdAt: stamp,
-      updatedAt: stamp,
-    });
-    await insertGoalConfig(tx, id, input, prepared);
-  });
-  return requiredGoalField(await getGoal(id), id, 'stored row');
+  return withGoalWriteErrors(() =>
+    getDb().transaction(async (tx) => {
+      await reserveGoalSlot(tx);
+      const prepared = await prepareGoalWrite(tx, input, today);
+      await tx.insert(s.goals).values({
+        id,
+        type: input.type,
+        name: input.name,
+        targetDate: 'targetDate' in input ? input.targetDate : null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      });
+      await insertGoalConfig(tx, id, input, prepared);
+      return requiredGoalField((await goalRecordsOn(tx, id))[0], id, 'stored row');
+    }),
+  );
 }
 
 export type GoalReplaceResult =
@@ -3359,12 +3387,11 @@ export async function replaceGoal(
 ): Promise<GoalReplaceResult> {
   const stamp = now.toISOString();
   const today = stamp.slice(0, 10);
-  const result = await getDb().transaction(
-    async (tx): Promise<'not-found' | 'type-mismatch' | null> => {
-      const rows = await goalRowsOn(tx, id);
-      const existing = (await recordsFromGoalRows(tx, rows))[0];
-      if (!existing) return 'not-found';
-      if (existing.type !== input.type) return 'type-mismatch';
+  return withGoalWriteErrors(() =>
+    getDb().transaction(async (tx): Promise<GoalReplaceResult> => {
+      const existing = (await goalRecordsOn(tx, id))[0];
+      if (!existing) return { ok: false, reason: 'not-found' };
+      if (existing.type !== input.type) return { ok: false, reason: 'type-mismatch' };
       const prepared = await prepareGoalWrite(tx, input, today, existing);
       await tx
         .update(s.goals)
@@ -3375,11 +3402,12 @@ export async function replaceGoal(
         })
         .where(eq(s.goals.id, id));
       await replaceGoalConfig(tx, id, input, prepared);
-      return null;
-    },
+      return {
+        ok: true,
+        goal: requiredGoalField((await goalRecordsOn(tx, id))[0], id, 'stored row'),
+      };
+    }),
   );
-  if (result) return { ok: false, reason: result };
-  return { ok: true, goal: requiredGoalField(await getGoal(id), id, 'stored row') };
 }
 
 export async function deleteGoal(id: string): Promise<boolean> {
@@ -3488,10 +3516,29 @@ const GOAL_BACKUP_TABLES = [
   'baseline_items',
 ] as const;
 
-const legacyNumber = (value: unknown, fallback: number, min: number, max: number): number =>
-  typeof value === 'number' && Number.isFinite(value)
-    ? Math.min(max, Math.max(min, value))
-    : fallback;
+const legacyNumber = (
+  settings: Record<string, unknown>,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+  whole = false,
+): number => {
+  const value = settings[key];
+  if (value === undefined) return fallback;
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < min ||
+    value > max ||
+    (whole && !Number.isInteger(value))
+  ) {
+    throw new Error(
+      `meta.settings.${key}: expected ${whole ? 'a whole' : 'a finite'} number between ${min} and ${max}`,
+    );
+  }
+  return value;
+};
 
 const migrateLegacyBackup = (data: BackupData): BackupData => {
   if (data.version === 2) {
@@ -3517,7 +3564,11 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
       return row as Record<string, unknown>;
     });
   const legacyMeta = records('meta');
-  const legacySettingsRow = legacyMeta.find((row) => row.key === 'settings');
+  const legacySettingsRows = legacyMeta.filter((row) => row.key === 'settings');
+  if (legacySettingsRows.length > 1) {
+    throw new Error('meta.settings: duplicate singleton rows');
+  }
+  const [legacySettingsRow] = legacySettingsRows;
   let settings: Record<string, unknown> = {};
   if (legacySettingsRow !== undefined) {
     if (typeof legacySettingsRow.value !== 'string') {
@@ -3533,18 +3584,6 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
       throw new Error('meta.settings: expected a JSON object');
     }
     settings = parsed as Record<string, unknown>;
-    for (const key of ['bufferPct', 'windowMonths', 'hoursCapPerWeek'] as const) {
-      if (key in settings && (typeof settings[key] !== 'number' || !Number.isFinite(settings[key]))) {
-        throw new Error(`meta.settings.${key}: expected a finite number`);
-      }
-    }
-    if (
-      'hourlyRate' in settings &&
-      settings.hourlyRate !== null &&
-      (typeof settings.hourlyRate !== 'number' || !Number.isFinite(settings.hourlyRate))
-    ) {
-      throw new Error('meta.settings.hourlyRate: expected a finite number or null');
-    }
     if (
       'goalMode' in settings &&
       settings.goalMode !== 'baseline' &&
@@ -3566,13 +3605,16 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
     records('settings').find((row) => row.key === 'base_currency')?.value ?? 'EUR';
 
   if (hasLegacyGoal) {
-    const bufferPct = legacyNumber(settings.bufferPct, 10, 0, 100);
-    const windowMonths = Math.round(legacyNumber(settings.windowMonths, 6, 1, 24));
+    const bufferPct = legacyNumber(settings, 'bufferPct', 10, 0, 100);
+    const windowMonths = legacyNumber(settings, 'windowMonths', 6, 1, 24, true);
     const hourlyRate =
-      settings.hourlyRate === null
+      settings.hourlyRate === undefined || settings.hourlyRate === null
         ? null
-        : legacyNumber(settings.hourlyRate, 0, 0, 10_000) || null;
-    const hoursPerWeek = legacyNumber(settings.hoursCapPerWeek, 20, 0.01, 168);
+        : legacyNumber(settings, 'hourlyRate', 0, 0.01, 10_000);
+    const hoursPerWeek = legacyNumber(settings, 'hoursCapPerWeek', 20, 0.01, 168);
+    if (hourlyRate !== null && fromCents(toCents(hourlyRate)) !== hourlyRate) {
+      throw new Error('meta.settings.hourlyRate: expected a number with at most two decimal places');
+    }
     tables.goals.push({
       id: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
       type: 'financial-independence',
@@ -3587,6 +3629,7 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
       basis: settings.goalMode === 'lifestyle' ? 'current-spending' : 'essential-costs',
       bufferPct,
       windowMonths,
+      baseCurrency: typeof baseCurrency === 'string' ? baseCurrency : 'EUR',
       hourlyRateCents: hourlyRate === null ? null : toCents(hourlyRate),
       hoursPerWeek,
     });
@@ -3599,7 +3642,7 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
   for (const budget of budgets) {
     if (
       typeof budget.category !== 'string' ||
-      budget.category.trim() === '' ||
+      !(CATEGORIES as readonly string[]).includes(budget.category) ||
       typeof budget.monthlyCents !== 'number' ||
       !Number.isSafeInteger(budget.monthlyCents) ||
       budget.monthlyCents <= 0
@@ -3624,7 +3667,9 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
     });
   }
 
-  tables.meta = legacyMeta.filter((row) => row.key !== 'settings');
+  if ('meta' in data.tables) {
+    tables.meta = legacyMeta.filter((row) => row.key !== 'settings');
+  }
   delete tables.budgets;
   return { ...data, version: 2, tables };
 };
@@ -3688,6 +3733,9 @@ function sanitizeRow(
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const provided = new Set(Object.keys(data.tables));
+  if (provided.has('imports') && !provided.has('transactions')) {
+    throw new Error('backup table imports requires transactions');
+  }
   const migrated = migrateLegacyBackup(data);
   let tables = 0;
   let rows = 0;

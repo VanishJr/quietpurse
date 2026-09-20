@@ -53,7 +53,6 @@ import {
   previewCategoryRule,
   type ImportDocumentInfo,
   INCOME_SOURCE_LABEL_MAX,
-  listGoals,
   listIncomeSources,
   replaceGoal,
   resetBaseAmounts,
@@ -100,7 +99,6 @@ import {
   ANSWERS,
   type AnswerBody,
   type Declared,
-  GOALS_MAX,
   goalCreateSchema,
   type GoalCreate,
   INCOME_SOURCE_KINDS,
@@ -1130,6 +1128,7 @@ const answerGoalWriteError = (error: unknown, res: express.Response): boolean =>
       'currency-mismatch',
       'debt-account-immutable',
       'duplicate-category',
+      'goal-capacity',
       'not-debt',
       'target-debt-invalid',
     ]).has(error.code);
@@ -1152,10 +1151,6 @@ app.post('/api/goals', async (req, res) => {
   if (!raw) return;
   const body = parseGoalBody(raw, res);
   if (!body) return;
-  if ((await listGoals()).length >= GOALS_MAX) {
-    res.status(409).json({ error: `at most ${GOALS_MAX} goals can be saved` });
-    return;
-  }
   try {
     const created = await createGoal(body);
     const detail = await getGoalProgress(created.id);

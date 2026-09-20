@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
 import { RECENT_LIMIT } from '../components/RecentTransactions';
@@ -648,6 +649,49 @@ describe('switching tabs while a read is in flight', () => {
     release(ok(TXS));
     await panel('Balance of Sparkasse Giro');
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('drops a pre-revision answer after reclassification starts a newer read', async () => {
+    let releaseOld: (response: Response) => void = () => {};
+    let reads = 0;
+    window.history.replaceState(null, '', '/');
+    mockFetch({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => {
+        reads += 1;
+        if (reads === 1) {
+          return new Promise<Response>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return ok(TXS);
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <OverviewScreen
+            onOpenTransactions={onOpenTransactions}
+            onOpenAnalytics={onOpenAnalytics}
+            dataRevision={revision}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    await waitFor(() => expect(reads).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    await panel('Balance of Sparkasse Giro');
+
+    releaseOld(ok([txn('2026-09-01T00:00:00.000Z', 50)]));
+    await settle();
+
+    expect(requests().filter((request) => request === 'GET /api/transactions')).toHaveLength(2);
+    expect(requests().filter((request) => request === 'GET /api/summary')).toHaveLength(1);
+    expect(screen.getByRole('region', { name: 'Balance of Sparkasse Giro' })).toBeVisible();
   });
 
   it('drops the answer for the tab the reader left', async () => {

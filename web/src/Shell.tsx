@@ -160,6 +160,7 @@ export function Shell() {
           <OverviewScreen
             onOpenTransactions={openTransactions}
             onOpenAnalytics={() => go('analytics')}
+            dataRevision={dataRevision}
           />
         </div>
         <div className="screen" hidden={tab !== 'transactions'}>
@@ -175,6 +176,7 @@ export function Shell() {
           <SettingsScreen
             onOpenImport={openImport}
             onDataChanged={() => setDataRevision((value) => value + 1)}
+            dataRevision={dataRevision}
           />
         </div>
       </main>

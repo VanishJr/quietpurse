@@ -73,10 +73,6 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
     }
   });
 
-  it('surface and page take the same chip, which is what lets ChartPlot pass one of them', () => {
-    expect(TOOLTIP_CHIP.surface).toEqual(TOOLTIP_CHIP.page);
-  });
-
   /*
    * The fill sits a step off its ground on purpose and the border is what makes the box
    * a box, so the string inequality above is the only other hold on the tightest live

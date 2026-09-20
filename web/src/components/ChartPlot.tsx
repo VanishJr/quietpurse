@@ -57,7 +57,7 @@ import {
 import { drawnShares, METRICS, rankingSeriesName, SharePoint } from '../analytics';
 import { ChartData } from '../chartData';
 import { CATEGORY_LABELS } from '../categories';
-import { tooltipMoney, tooltipProps } from '../chartTooltip';
+import { tooltipMoney, tooltipProps, type TooltipGround } from '../chartTooltip';
 import { fmtMoney, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
 import { Chart } from '../types';
@@ -97,16 +97,14 @@ interface Props {
   spec: Chart;
   data: ChartData;
   height: number;
+  ground: TooltipGround;
 }
 
-export function ChartPlot({ spec, data, height }: Props) {
+export function ChartPlot({ spec, data, height, ground }: Props) {
   const { ink, categoryColor } = useTheme();
 
   const axisTick = { fill: ink.muted, fontSize: 11 };
-  /* `'surface'` for both grounds this file is drawn on: a chart card is a surface and
-     the wizard's live preview is the page, and they take the same chip today.
-     `chartTooltip.test.ts` is what says that shortcut is still safe. */
-  const tooltip = tooltipProps(ink, 'surface', tooltipMoney(data.currency));
+  const tooltip = tooltipProps(ink, ground, tooltipMoney(data.currency));
 
   const sliceColor = (key: string, index: number): string =>
     categoryColor(CATEGORY_LABELS[key] ? key : RAMP[index % RAMP.length]);

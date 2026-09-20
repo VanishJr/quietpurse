@@ -225,7 +225,9 @@ it moves between machines freely. The stored statements are not in it; they are 
 the person can copy on their own.
 
 **A restore clears each table the dump provides and loads it in one transaction**, skipping tables
-the current schema does not know and preserving current tables an older or sparse dump omits. The
+the current schema does not know and preserving current tables an older or sparse dump omits. A
+sparse dump that provides imports must also provide transactions: deleting imports cascades into
+their transactions, so accepting only the parent table would erase a table the dump omitted. The
 Goal family is the exception: it is cleared as one unit even for a version-one dump, because legacy
 Goal settings, baseline lines and budgets replace rather than merge with saved goals. Goal and
 subtype tables are loaded in dependency order with the rest. A version-one backup is accepted
@@ -322,3 +324,6 @@ legacy `meta.settings` key is read only by version-one restore conversion, then 
 scoped by goal, and deleting the goal cascades them. The write that replaces that goal's
 configuration and costs is one transaction; an invalid edited amount can therefore refuse the
 replacement but can never be interpreted as deletion.
+
+**Goal capacity is a write invariant, not a route preflight.** A create serializes the count and
+insert inside one transaction, so concurrent requests cannot each claim the final available slot.

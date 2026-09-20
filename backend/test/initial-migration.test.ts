@@ -69,12 +69,20 @@ describe('0000_initial', () => {
           AND table_name = 'baseline_items'
           AND column_name = 'goal_id'
       `);
+      const financialCurrency = await db.execute<{ is_nullable: string }>(sql`
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'financial_independence_goals'
+          AND column_name = 'base_currency'
+      `);
 
       expect(tables.rows.map((row) => row.tablename)).toEqual([...goalTables].sort());
       expect(goals.rows[0].count).toBe(0);
       expect(baseline.rows[0].count).toBe(0);
       expect(budgets.rows[0].name).toBeNull();
       expect(baselineGoal.rows).toEqual([{ is_nullable: 'NO' }]);
+      expect(financialCurrency.rows).toEqual([{ is_nullable: 'NO' }]);
     } finally {
       await client.close();
     }

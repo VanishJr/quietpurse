@@ -564,6 +564,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "base_currency": {
+          "name": "base_currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "hourly_rate_cents": {
           "name": "hourly_rate_cents",
           "type": "integer",

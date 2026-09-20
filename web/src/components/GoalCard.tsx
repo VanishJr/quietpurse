@@ -77,11 +77,13 @@ export function GoalCard({ goal, busy = false, onEdit, onDelete }: Props) {
       </div>
       <p className="goal-progress-label">{progressLabel(progress)}</p>
       <p className="goal-source">{goal.source}</p>
-      {goal.type === 'financial-independence' && goal.supportExcluded > 0 && (
-        <p className="goal-support">
-          Support excluded: {formatGoalValue(goal.supportExcluded, 'money-per-month', goal.currency)}
-        </p>
-      )}
+      {goal.type === 'financial-independence' &&
+        goal.supportExcluded !== null &&
+        goal.supportExcluded > 0 && (
+          <p className="goal-support">
+            Support excluded: {formatGoalValue(goal.supportExcluded, 'money-per-month', goal.currency)}
+          </p>
+        )}
       {goal.type === 'financial-independence' && goal.workHoursLeft !== null && (
         <p className="goal-support">
           Left: {formatGoalValue(progress.remaining, 'money-per-month', goal.currency)} · about{' '}

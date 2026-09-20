@@ -3,7 +3,7 @@ import { Ink } from './theme';
 import type { TooltipProps } from 'recharts';
 
 /** The backgrounds this app paints a chart on. Each is the `Ink` key of its own fill. */
-export type TooltipGround = 'surface' | 'panel' | 'page';
+export type TooltipGround = 'surface' | 'page';
 
 export type TooltipColor = keyof Ink;
 
@@ -20,7 +20,6 @@ const RAISED: TooltipChip = { fill: 'raised', label: 'secondary', item: 'primary
 export const TOOLTIP_CHIP: Record<TooltipGround, TooltipChip> = {
   surface: RAISED,
   page: RAISED,
-  panel: RAISED,
 };
 
 /** The value in the chart's own currency. */
@@ -39,8 +38,8 @@ export function tooltipProps(
     /*
      * One object for two shapes: on a line or area chart only the stroke is ever seen,
      * and on a bar chart the cursor is a filled band whose fill is set here because the
-     * library's own default for it was measured wrong on both grounds — a mid-grey that
-     * is wrong on a white card and a slab on a dark page. It is the grid's colour rather
+     * library's own default for it was measured wrong in both palettes — a mid-grey that
+     * is wrong on a white card and a slab on a dark card. It is the grid's colour rather
      * than a chip's: the band is painted on the plotting area, which is the ground the
      * chart sits on and not the tooltip's own.
      */

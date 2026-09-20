@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 import {
   createGoal,
@@ -6,9 +7,10 @@ import {
   getGoal,
   listGoals,
   replaceGoal,
+  setSetting,
   upsertAccount,
 } from '../src/db';
-import type { GoalCreate } from '../src/wire';
+import { GOALS_MAX, type GoalCreate } from '../src/wire';
 
 const now = new Date('2026-05-01T12:00:00.000Z');
 
@@ -19,6 +21,23 @@ const account = async (
   balance: number,
 ): Promise<void> => {
   await upsertAccount({ id, name, currency, balance, provider: 'upload' });
+};
+
+const waitForBlockedQuery = async (pool: Pool, pattern: string): Promise<void> => {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const result = await pool.query<{ blocked: boolean }>(`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE $1
+      ) AS blocked
+    `, [pattern]);
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for blocked query ${pattern}`);
 };
 
 const financial = (
@@ -118,6 +137,7 @@ describe('goal persistence', () => {
     ]);
     expect(created[0]).toMatchObject({
       type: 'financial-independence',
+      baseCurrency: 'EUR',
       essentialCosts: [
         { label: 'Rent', monthly: 900, sort: 0 },
         { label: 'Food', monthly: 300, sort: 1 },
@@ -131,6 +151,7 @@ describe('goal persistence', () => {
 
   it('replaces Financial independence configuration and costs atomically', async () => {
     const goal = await createGoal(financial('Original'), now);
+    await setSetting('base_currency', 'USD');
     const replaced = await replaceGoal(
       goal.id,
       {
@@ -154,6 +175,7 @@ describe('goal persistence', () => {
         windowMonths: 12,
         hourlyRate: null,
         hoursPerWeek: null,
+        baseCurrency: 'USD',
         essentialCosts: [{ label: 'Housing', monthly: 1000, sort: 0 }],
       },
     });
@@ -172,6 +194,7 @@ describe('goal persistence', () => {
       ),
     ).rejects.toMatchObject({ code: 'duplicate-cost' });
     expect(await getGoal(goal.id)).toMatchObject({ name: 'Updated', essentialCosts: [{ label: 'Housing' }] });
+    await setSetting('base_currency', 'EUR');
   });
 
   it('keeps account-backed goals after an account is removed', async () => {
@@ -304,6 +327,26 @@ describe('goal persistence', () => {
     ).rejects.toMatchObject({ code: 'debt-account-immutable' });
   });
 
+  it('normalizes concurrent category uniqueness conflicts', async () => {
+    const write = (name: string): Promise<unknown> =>
+      createGoal(
+        {
+          type: 'category-spending-limit',
+          name,
+          category: 'health',
+          monthlyLimit: 250,
+        },
+        now,
+      );
+    const outcomes = await Promise.allSettled([write('Health one'), write('Health two')]);
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'duplicate-category' },
+    });
+  });
+
   it('refuses type changes and cascades only goal-owned rows on delete', async () => {
     const goal = await createGoal(financial(), now);
     expect(
@@ -322,5 +365,93 @@ describe('goal persistence', () => {
     expect(await deleteGoal(goal.id)).toBe(true);
     expect(await getGoal(goal.id)).toBeUndefined();
     expect(await deleteGoal(goal.id)).toBe(false);
+  });
+
+  it('reads configuration and owned rows from one snapshot', async () => {
+    const goal = await createGoal(financial('Snapshot'), now);
+    const url = process.env.TEST_DATABASE_URL;
+    if (!url) {
+      expect(await getGoal(goal.id)).toMatchObject({
+        basis: 'essential-costs',
+        essentialCosts: [{ label: 'Rent' }, { label: 'Food' }],
+      });
+      return;
+    }
+
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: url, allowExitOnIdle: true });
+    const blocker = await pool.connect();
+    let locked = false;
+    let reading: Promise<Awaited<ReturnType<typeof getGoal>>> | undefined;
+    try {
+      await blocker.query('BEGIN');
+      await blocker.query('LOCK TABLE goal_accounts IN ACCESS EXCLUSIVE MODE');
+      locked = true;
+      reading = getGoal(goal.id);
+      await waitForBlockedQuery(pool, '%goal_accounts%');
+
+      const writer = await pool.connect();
+      try {
+        await writer.query('BEGIN');
+        await writer.query(
+          `UPDATE financial_independence_goals
+           SET basis = 'current-spending', buffer_pct = 99
+           WHERE goal_id = $1`,
+          [goal.id],
+        );
+        await writer.query('DELETE FROM baseline_items WHERE goal_id = $1', [goal.id]);
+        await writer.query(
+          `INSERT INTO baseline_items (goal_id, label, monthly_cents, sort)
+           VALUES ($1, 'Replacement', 50000, 0)`,
+          [goal.id],
+        );
+        await writer.query('COMMIT');
+      } catch (error) {
+        await writer.query('ROLLBACK');
+        throw error;
+      } finally {
+        writer.release();
+      }
+
+      await blocker.query('COMMIT');
+      locked = false;
+      expect(await reading).toMatchObject({
+        basis: 'essential-costs',
+        bufferPct: 10,
+        essentialCosts: [{ label: 'Rent' }, { label: 'Food' }],
+      });
+    } finally {
+      if (locked) await blocker.query('ROLLBACK');
+      blocker.release();
+      await reading?.catch(() => undefined);
+      await pool.end();
+    }
+  });
+
+  it('enforces goal capacity across concurrent creates', async () => {
+    const input = (name: string): GoalCreate => ({
+      type: 'monthly-income',
+      name,
+      target: 3000,
+      incomeScope: 'own',
+      windowMonths: 6,
+    });
+    const existing = (await listGoals()).length;
+    expect(existing).toBeLessThan(GOALS_MAX);
+    for (let index = existing; index < GOALS_MAX - 1; index++) {
+      await createGoal(input(`Capacity ${index}`), now);
+    }
+
+    const outcomes = await Promise.allSettled([
+      createGoal(input('Capacity contender one'), now),
+      createGoal(input('Capacity contender two'), now),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.find((outcome) => outcome.status === 'rejected')).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'goal-capacity' },
+    });
+    expect(await listGoals()).toHaveLength(GOALS_MAX);
   });
 });

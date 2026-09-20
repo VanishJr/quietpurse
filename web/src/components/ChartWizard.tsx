@@ -421,7 +421,7 @@ function Preview({
   );
   if (error) return <p className="error wiz-preview-note">{error}</p>;
   if (loading || !data) return <p className="hint wiz-preview-note">Reading the numbers…</p>;
-  return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} />;
+  return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} ground="page" />;
 }
 
 /**

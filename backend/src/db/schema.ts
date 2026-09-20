@@ -251,6 +251,7 @@ export const financialIndependenceGoals = pgTable(
     basis: text('basis', { enum: GOAL_BASES }).notNull(),
     bufferPct: doublePrecision('buffer_pct').notNull(),
     windowMonths: integer('window_months').notNull(),
+    baseCurrency: text('base_currency').notNull(),
     hourlyRateCents: integer('hourly_rate_cents'),
     hoursPerWeek: doublePrecision('hours_per_week'),
   },

@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 import { ACCOUNTS, INCOME_SOURCES } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
@@ -939,6 +940,47 @@ describe('the income source', () => {
     const lists = requestUrls().filter((url) => url.startsWith('GET /api/transactions?'));
     expect(lists).toHaveLength(3);
     expect(lists[2]).toContain('category=food');
+  });
+
+  it('clears a stale catalog on revision failure and offers a retry', async () => {
+    const fromFamily = row({
+      id: 'tx-fam',
+      description: 'From family',
+      amount: 200,
+      incomeSource: 'family',
+    });
+    let sourceReads = 0;
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/income-sources': () => {
+        sourceReads += 1;
+        if (sourceReads === 1) return ok([{ ...SOURCES[1], label: 'Old support' }]);
+        if (sourceReads === 2) return fail(500, { error: 'catalog unavailable' });
+        return ok([{ ...SOURCES[1], label: 'Fresh support' }]);
+      },
+      'GET /api/transactions': () => ok([fromFamily]),
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <TransactionsScreen dataRevision={revision} />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    expect(await screen.findByText('Old support', { selector: '.badge' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load income sources: catalog unavailable',
+    );
+    expect(screen.queryByText('Old support')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry income sources' }));
+    expect(await screen.findByText('Fresh support', { selector: '.badge' })).toBeVisible();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('badges outside help with the catalogue’s own word, and reads the derived source as its category', async () => {

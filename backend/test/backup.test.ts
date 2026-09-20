@@ -306,7 +306,7 @@ describe('backup and restore (JSON)', () => {
           },
         ],
         baseline_items: [{ id: 9, label: 'Rent', monthlyCents: 90000, sort: 0 }],
-        budgets: [{ category: 'groceries', monthlyCents: 45000 }],
+        budgets: [{ category: 'food', monthlyCents: 45000 }],
       },
     });
 
@@ -328,16 +328,18 @@ describe('backup and restore (JSON)', () => {
       basis: string;
       buffer_pct: number;
       window_months: number;
+      base_currency: string;
       hourly_rate_cents: number | null;
       hours_per_week: number;
     }>(sql`
-      SELECT basis, buffer_pct, window_months, hourly_rate_cents, hours_per_week
+      SELECT basis, buffer_pct, window_months, base_currency, hourly_rate_cents, hours_per_week
       FROM financial_independence_goals
     `);
     expect(financial[0]).toEqual({
       basis: 'current-spending',
       buffer_pct: 15,
       window_months: 12,
+      base_currency: 'GBP',
       hourly_rate_cents: 2500,
       hours_per_week: 30,
     });
@@ -357,7 +359,7 @@ describe('backup and restore (JSON)', () => {
       base_currency: string;
     }>(sql`SELECT category, monthly_limit_cents, base_currency FROM category_spending_goals`);
     expect(category).toEqual([
-      { category: 'groceries', monthly_limit_cents: 45000, base_currency: 'GBP' },
+      { category: 'food', monthly_limit_cents: 45000, base_currency: 'GBP' },
     ]);
     const oldSettings = await queryRows<{ key: string }>(
       sql`SELECT key FROM meta WHERE key = 'settings'`,
@@ -369,6 +371,10 @@ describe('backup and restore (JSON)', () => {
     await insertTransactions([tx('sparse restore survivor', -17)]);
     await dbInstance().execute(sql`
       INSERT INTO settings (key, value) VALUES ('sparse_restore_survivor', 'kept')
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `);
+    await dbInstance().execute(sql`
+      INSERT INTO meta (key, value) VALUES ('sparse_restore_meta_survivor', 'kept')
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
     `);
     const stamp = '2026-05-01T00:00:00.000Z';
@@ -408,19 +414,64 @@ describe('backup and restore (JSON)', () => {
         sql`SELECT value FROM settings WHERE key = 'sparse_restore_survivor'`,
       ),
     ).toEqual([{ value: 'kept' }]);
+    expect(
+      await queryRows<{ value: string }>(
+        sql`SELECT value FROM meta WHERE key = 'sparse_restore_meta_survivor'`,
+      ),
+    ).toEqual([{ value: 'kept' }]);
     expect(await queryRows(sql`SELECT id FROM goals WHERE id = 'sparse-stale-goal'`)).toEqual([]);
   });
 
+  it('refuses imports without transactions before their cascade can delete omitted rows', async () => {
+    const record = await createImport({
+      fileHash: 'sparse-import-hash',
+      sourceType: 'csv',
+      parserVersion: 1,
+    });
+    await markImportCommitted(record.id, 1, 0);
+    await insertTransactions([tx('sparse import survivor', -23)], record.id);
+
+    await expect(
+      restoreBackup(
+        parseBackup({
+          format: 'finto-backup',
+          version: 1,
+          tables: { imports: [] },
+        }),
+      ),
+    ).rejects.toThrow('backup table imports requires transactions');
+
+    expect((await listImports()).imports.map((row) => row.id)).toContain(record.id);
+    expect((await listTransactions({ accountId: 'acc1' })).map((row) => row.description)).toContain(
+      'sparse import survivor',
+    );
+  });
+
   it('refuses malformed legacy rows and settings instead of dropping them during conversion', async () => {
+    const withSettings = (settings: Record<string, unknown>): Record<string, unknown[]> => ({
+      meta: [{ key: 'settings', value: JSON.stringify(settings) }],
+    });
     const malformed: Array<[Record<string, unknown[]>, RegExp]> = [
       [{ meta: [null] }, /meta: a row is not an object/],
       [{ baseline_items: ['bad'] }, /baseline_items: a row is not an object/],
       [{ meta: [{ key: 'settings', value: '{' }] }, /meta\.settings: invalid JSON/],
       [
-        { meta: [{ key: 'settings', value: '{"windowMonths":"six"}' }] },
-        /meta\.settings\.windowMonths: expected a finite number/,
+        {
+          meta: [
+            { key: 'settings', value: '{"bufferPct":10}' },
+            { key: 'settings', value: '{"bufferPct":20}' },
+          ],
+        },
+        /meta\.settings: duplicate singleton rows/,
       ],
+      [withSettings({ windowMonths: 'six' }), /windowMonths: expected a whole number/],
+      [withSettings({ windowMonths: 6.5 }), /windowMonths: expected a whole number/],
+      [withSettings({ bufferPct: -20 }), /bufferPct: expected a finite number/],
+      [withSettings({ hourlyRate: -5 }), /hourlyRate: expected a finite number/],
+      [withSettings({ hourlyRate: 12.345 }), /hourlyRate: expected a number with at most two decimal places/],
+      [withSettings({ hoursCapPerWeek: 0 }), /hoursCapPerWeek: expected a finite number/],
       [{ budgets: [{ category: 'food', monthlyCents: 0 }] }, /budgets: invalid category/],
+      [{ budgets: [{ category: 'groceriez', monthlyCents: 45000 }] }, /budgets: invalid category/],
     ];
 
     for (const [tables, message] of malformed) {
@@ -445,8 +496,8 @@ describe('backup and restore (JSON)', () => {
     `);
     await dbInstance().execute(sql`
       INSERT INTO financial_independence_goals
-        (goal_id, goal_type, basis, buffer_pct, window_months, hourly_rate_cents, hours_per_week)
-      VALUES ('g-fi', 'financial-independence', 'essential-costs', 10, 6, 2500, 20)
+        (goal_id, goal_type, basis, buffer_pct, window_months, base_currency, hourly_rate_cents, hours_per_week)
+      VALUES ('g-fi', 'financial-independence', 'essential-costs', 10, 6, 'EUR', 2500, 20)
     `);
     await dbInstance().execute(sql`
       INSERT INTO emergency_fund_goals
@@ -512,6 +563,10 @@ describe('backup and restore (JSON)', () => {
       sql`SELECT goal_id, label, monthly_cents FROM baseline_items`,
     );
     expect(costs).toEqual([{ goal_id: 'g-fi', label: 'Rent', monthly_cents: 90000 }]);
+    const financial = await queryRows<{ base_currency: string }>(
+      sql`SELECT base_currency FROM financial_independence_goals`,
+    );
+    expect(financial).toEqual([{ base_currency: 'EUR' }]);
   });
 
   /**

@@ -79,6 +79,7 @@ CREATE TABLE "financial_independence_goals" (
 	"basis" text NOT NULL,
 	"buffer_pct" double precision NOT NULL,
 	"window_months" integer NOT NULL,
+	"base_currency" text NOT NULL,
 	"hourly_rate_cents" integer,
 	"hours_per_week" double precision,
 	CONSTRAINT "financial_independence_goals_type_check" CHECK ("financial_independence_goals"."goal_type" = 'financial-independence'),

@@ -40,6 +40,28 @@ const SAVINGS_DETAIL: GoalDetail = {
   accountIds: ['acc-1'],
 };
 
+const DEBT_DETAIL: GoalDetail = {
+  id: 'goal-debt',
+  type: 'debt-payoff',
+  name: 'Pay off loan',
+  targetDate: null,
+  createdAt: '2026-05-01T00:00:00.000Z',
+  updatedAt: '2026-05-01T00:00:00.000Z',
+  currency: 'EUR',
+  source: 'Loan',
+  accountId: 'debt',
+  startingDebt: 2000,
+  targetDebt: 0,
+  progress: {
+    ...SAVINGS_GOAL.progress,
+    target: 2000,
+    current: 2000,
+    remaining: 0,
+    percentage: 100,
+    status: 'reached',
+  },
+};
+
 const FINANCIAL_DETAIL: GoalDetail = {
   id: 'goal-fi',
   type: 'financial-independence',
@@ -182,14 +204,14 @@ describe('GoalEditor', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Financial independence/ }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Independence' } });
     fireEvent.change(screen.getByLabelText('Cost 1 name'), { target: { value: 'Rent' } });
-    const amount = screen.getByLabelText('Monthly cost for Rent');
+    const amount = screen.getByLabelText('Monthly cost for Rent, row 1');
     fireEvent.change(amount, { target: { value: 'not a number' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create goal' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Monthly cost for Rent must be a positive number.');
     expect(amount).toHaveValue('not a number');
     expect(requests()).not.toContain('POST /api/goals');
-    expect(screen.getByRole('button', { name: 'Delete Rent' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete Rent, row 1' })).toBeVisible();
   });
 
   it('skips type selection on edit and saves a complete replacement', async () => {
@@ -238,6 +260,29 @@ describe('GoalEditor', () => {
     expect(screen.getByRole('dialog')).toBeVisible();
   });
 
+  it('routes a missing goal during save through the unavailable fallback', async () => {
+    const missing = vi.fn();
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/goals/goal-savings': () => ok(SAVINGS_DETAIL),
+      'PUT /api/goals/goal-savings': () => fail(404, { error: 'goal not found' }),
+    });
+    renderThemed(
+      <GoalEditor
+        goalId="goal-savings"
+        onClose={vi.fn()}
+        onMissing={missing}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Edit goal' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(missing).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('locks savings selections to the first selected account currency', async () => {
     mockFetch(baseRoutes);
     renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={vi.fn()} />);
@@ -267,6 +312,35 @@ describe('GoalEditor', () => {
       expect(screen.getByLabelText(amountLabel)).toBeVisible();
     },
   );
+
+  it('keeps the saved currency and refuses a savings account whose currency changed', async () => {
+    const changedAccounts = ACCOUNTS.map((account) =>
+      account.id === 'acc-1' ? { ...account, currency: 'USD' } : account,
+    );
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/accounts': () => ok(changedAccounts),
+      'GET /api/goals/goal-savings': () => ok(SAVINGS_DETAIL),
+    });
+    renderThemed(<GoalEditor goalId="goal-savings" onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    expect(await screen.findByText('Currency: EUR')).toBeVisible();
+    expect(screen.getByLabelText('Target amount (EUR)')).toBeVisible();
+    const staleAccount = screen.getByRole('checkbox', { name: 'Cash · USD (not eligible)' });
+    expect(staleAccount).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Remove accounts that no longer use this goal’s EUR currency.',
+    );
+    expect(requests()).not.toContain('PUT /api/goals/goal-savings');
+
+    fireEvent.click(staleAccount);
+    const explicitlyReselected = screen.getByRole('checkbox', { name: 'Cash · USD' });
+    expect(explicitlyReselected).toBeEnabled();
+    fireEvent.click(explicitlyReselected);
+    expect(screen.getByText('Currency: USD')).toBeVisible();
+  });
 
   it('keeps dependency failures separate from forms and retries with cleared state', async () => {
     let accountReads = 0;
@@ -319,7 +393,7 @@ describe('GoalEditor', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('gives every essential-cost control stable row context', async () => {
+  it('keeps duplicate essential-cost controls distinct while reporting the duplicate', async () => {
     mockFetch({
       ...baseRoutes,
       'GET /api/goals/goal-fi': () => ok(FINANCIAL_DETAIL),
@@ -327,11 +401,15 @@ describe('GoalEditor', () => {
     renderThemed(<GoalEditor goalId="goal-fi" onClose={vi.fn()} onSaved={vi.fn()} />);
 
     expect(await screen.findByLabelText('Cost 1 name')).toHaveValue('Rent');
-    expect(screen.getByLabelText('Monthly cost for Rent')).toHaveValue('900');
-    expect(screen.getByRole('button', { name: 'Delete Rent' })).toBeVisible();
-    expect(screen.getByLabelText('Cost 2 name')).toHaveValue('Food');
-    expect(screen.getByLabelText('Monthly cost for Food')).toHaveValue('300');
-    expect(screen.getByRole('button', { name: 'Delete Food' })).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Cost 2 name'), { target: { value: 'Rent' } });
+    expect(screen.getByLabelText('Monthly cost for Rent, row 1')).toHaveValue('900');
+    expect(screen.getByLabelText('Monthly cost for Rent, row 2')).toHaveValue('300');
+    expect(screen.getByRole('button', { name: 'Delete Rent, row 1' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Delete Rent, row 2' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Cost names must be unique.');
+    expect(requests()).not.toContain('PUT /api/goals/goal-fi');
   });
 
   it('only offers negative-balance accounts for a new debt goal', async () => {
@@ -341,5 +419,23 @@ describe('GoalEditor', () => {
     const picker = screen.getByLabelText('Debt account');
     expect(within(picker).getByRole('option', { name: /Loan/ })).toBeInTheDocument();
     expect(within(picker).queryByRole('option', { name: /Cash ·/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps a paid-off saved debt account and its saved currency visible while editing', async () => {
+    const paidOffAccounts = ACCOUNTS.map((account) =>
+      account.id === 'debt' ? { ...account, balance: 0, currency: 'USD' } : account,
+    );
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/accounts': () => ok(paidOffAccounts),
+      'GET /api/goals/goal-debt': () => ok(DEBT_DETAIL),
+    });
+    renderThemed(<GoalEditor goalId="goal-debt" onClose={vi.fn()} onSaved={vi.fn()} />);
+
+    const picker = await screen.findByLabelText('Debt account');
+    expect(picker).toHaveValue('debt');
+    expect(within(picker).getByRole('option', { name: 'Loan · USD' })).toBeInTheDocument();
+    expect(screen.getByText('Currency: EUR')).toBeVisible();
+    expect(screen.getByLabelText('Target remaining debt (EUR)')).toBeVisible();
   });
 });
