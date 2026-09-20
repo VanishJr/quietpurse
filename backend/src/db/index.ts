@@ -3029,17 +3029,22 @@ function sanitizeRow(
  * import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
+  const provided = new Set(Object.keys(data.tables));
   const migrated = migrateLegacyBackup(data);
   let tables = 0;
   let rows = 0;
   await getDb().transaction(async (tx) => {
-    for (const name of Object.keys(BACKUP_TABLES).reverse()) {
+    const goalTables = new Set<string>(GOAL_BACKUP_TABLES);
+    for (const name of [...GOAL_BACKUP_TABLES].reverse()) {
       await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
     }
     for (const [name, table] of Object.entries(BACKUP_TABLES)) {
-      const incoming = migrated.tables[name] ?? [];
+      const incoming = migrated.tables[name];
+      if (!incoming && !goalTables.has(name)) continue;
+      if (!goalTables.has(name)) await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
+      const valuesIn = incoming ?? [];
       const dropId = IDENTITY_TABLES.has(name);
-      const values = incoming.map((row) => {
+      const values = valuesIn.map((row) => {
         const clean = sanitizeRow(table, row, name);
         const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
         return dropId ? rest : { ...rest, id };
@@ -3047,8 +3052,8 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
       for (const chunk of chunked(values, 500)) {
         await tx.insert(table).values(chunk as never[]);
       }
-      tables++;
-      rows += incoming.length;
+      if (provided.has(name) || valuesIn.length > 0) tables++;
+      rows += valuesIn.length;
     }
   });
   return { tables, rows };
