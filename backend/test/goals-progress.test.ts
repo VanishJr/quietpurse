@@ -10,6 +10,7 @@ import {
   replaceGoal,
   seedDefaults,
   setCategoryOverride,
+  setSetting,
   setOneOff,
   updateAccountBalance,
   upsertAccount,
@@ -278,6 +279,69 @@ describe('server-owned goal progress', () => {
       status: 'reached',
       period: { monthsUsed: 2 },
     });
+  });
+
+  it('does not compare saved base-currency targets with another currency', async () => {
+    await insertTransactions([
+      transaction({
+        amount: 1000,
+        date: '2026-04-10T12:00:00.000Z',
+        description: 'April income',
+        category: 'salary',
+      }),
+      transaction({
+        amount: -100,
+        date: '2026-05-05T12:00:00.000Z',
+        description: 'May food',
+        category: 'food',
+      }),
+    ]);
+    const income = await createGoal(
+      {
+        type: 'monthly-income',
+        name: 'Income',
+        target: 1200,
+        incomeScope: 'own',
+        windowMonths: 6,
+      },
+      NOW,
+    );
+    const category = await createGoal(
+      {
+        type: 'category-spending-limit',
+        name: 'Food limit',
+        category: 'food',
+        monthlyLimit: 200,
+      },
+      NOW,
+    );
+
+    expect(await getGoalProgress(income.id, NOW)).toMatchObject({
+      currency: 'EUR',
+      progress: { target: 1200, current: 1000 },
+    });
+    expect(await getGoalProgress(category.id, NOW)).toMatchObject({
+      currency: 'EUR',
+      progress: { target: 200, current: 100 },
+    });
+
+    await setSetting('base_currency', 'USD');
+
+    for (const [goal, target] of [
+      [income, 1200],
+      [category, 200],
+    ] as const) {
+      expect(await getGoalProgress(goal.id, NOW)).toMatchObject({
+        currency: 'EUR',
+        source: 'Saved in EUR · Base currency is USD',
+        progress: {
+          target,
+          current: null,
+          percentage: null,
+          status: 'not-enough-data',
+        },
+      });
+    }
   });
 
   it('calculates savings rate with refunds and support scope, and refuses zero income', async () => {

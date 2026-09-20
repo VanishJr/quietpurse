@@ -264,7 +264,9 @@ const monthlyIncomeDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const rows = completeRows(context.months, context.now, goal.windowMonths);
-  const unavailable = rows.length === 0 || rows.some((row) => row.unconverted > 0);
+  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
+  const unavailable =
+    currencyChanged || rows.length === 0 || rows.some((row) => row.unconverted > 0);
   const values = rows.map((row) =>
     goal.incomeScope === 'own' ? row.incomeOwn : row.income,
   );
@@ -275,7 +277,9 @@ const monthlyIncomeDetail = (
   return {
     ...publicGoal,
     currency,
-    source: `${monthsText(rows.length)} · ${goal.incomeScope === 'own' ? 'Earnings' : 'All income'}`,
+    source: currencyChanged
+      ? `Saved in ${goal.baseCurrency} · Base currency is ${context.baseCurrency}`
+      : `${monthsText(rows.length)} · ${goal.incomeScope === 'own' ? 'Earnings' : 'All income'}`,
     progress: completionProgress(
       goal.target,
       current,
@@ -326,7 +330,9 @@ const categoryDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const row = context.categories.get(goal.category);
-  const unavailable = context.currentMonthRows === 0 || (row?.unconverted ?? 0) > 0;
+  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
+  const unavailable =
+    currencyChanged || context.currentMonthRows === 0 || (row?.unconverted ?? 0) > 0;
   const current = unavailable ? null : round2(row?.total ?? 0);
   const elapsed = context.now.getUTCDate();
   const days = endOfMonth(context.now).getUTCDate();
@@ -343,7 +349,9 @@ const categoryDetail = (
   return {
     ...publicGoal,
     currency,
-    source: 'Current calendar month',
+    source: currencyChanged
+      ? `Saved in ${goal.baseCurrency} · Base currency is ${context.baseCurrency}`
+      : 'Current calendar month',
     progress: usedProgress(
       goal.monthlyLimit,
       current,
