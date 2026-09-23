@@ -14,7 +14,6 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
-    "check:stack": "tsx scripts/check-stack.ts",
     "check:comments": "tsx scripts/comment-check.ts"
   },
   "dependencies": {

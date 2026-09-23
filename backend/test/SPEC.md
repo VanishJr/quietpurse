@@ -103,9 +103,6 @@ costs a refusal and never a silence;
 name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
 `import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
 own typecheck will compile that module and pull in whatever it imports;
-`backend/test/check-stack.test.ts` reads the check stack's guards module and requires it to name
-`node:path` and no other module and to run nothing at its top level, because a test that imported the
-entry point beside it would spawn servers to reach one predicate;
 `backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
 the core to name `typescript` alone and run nothing at its top level and the entry to be the
 opposite of both, because a purity check that has only ever been shown a pure file cannot
