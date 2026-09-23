@@ -1,39 +1,16 @@
 /**
- * One chart on the workspace: its name, what it is about, the plot, and the numbers a
- * plot cannot be read off exactly.
+ * One chart on the Analytics screen: its name, what it is about, the plot, and the
+ * numbers a plot cannot be read off exactly. It carries no control, for the reason
+ * `web/src/SPEC.md` gives under *What a chart is, and where its numbers come from*.
  *
- * The card is the chart as a PICTURE and carries no controls at all. Editing,
- * duplicating and deleting it are things you do to the chart as an OBJECT, and they
- * live on its tab in the dock — see the header of `ChartDock`. What is left here is the
- * name, the numbers and the plot.
+ * **A refusal is printed, and no numbers are.** `useChartData` nulls the data before
+ * every load, so there is never a figure on screen from the range the card is no
+ * longer about.
  *
- * Everything that is true of every chart lives here and `ChartPlot` is left drawing.
- * That includes the one thing a chart is not allowed to do quietly: **a refusal is
- * printed, and no numbers are.** `useChartData` nulls the data before every load, so
- * there is never a figure on screen from the range the card is no longer about.
- *
- * ---------------------------------------------------------------------------
- * Nothing else is written on it
- *
- * A subtitle spelling out the spec in words ("All accounts · Income and Expenses · 12
- * monthly ticks") used to sit here, and it was a paragraph restating what the card
- * already shows: the title names the chart, the figures carry the currency code, the
- * legend names the series, and the account — the one fact none of those held — is in
- * the suggested title instead.
- *
- * The screen this replaces also carried a footnote at its foot, saying how amounts are
- * converted and that transfers are not counted while refunds subtract from expenses.
- * That one was NOT a restatement of anything on screen, and it is deliberately not
- * reinstated here: it belonged to a page with one set of figures on it, where this is a
- * strip of charts that do not share a unit — a per-account chart answers in its own
- * account's currency. A rule stated once at the foot would be a rule about whichever
- * chart happened to be showing. Where that sentence belongs now is an open question
- * rather than an oversight.
- *
- * What stays is what a reader cannot see: the refusal above, and the table below.
- * The table is the same idiom `AccountFlows` uses and is there for the same reason: the
- * SVG is not readable, and in jsdom it is not even measurable — recharts sizes itself
- * against a 0x0 box. It is what a screen reader gets, and what a test asserts on.
+ * No footnote says how amounts are converted or what is counted, deliberately: the
+ * screen is a strip of charts that do not share a unit — a per-account chart answers
+ * in its own account's currency — so a rule stated once at the foot would be a rule
+ * about whichever chart happened to be showing.
  */
 import { drawnShares, METRICS, suggestedTitle } from '../analytics';
 import { ChartData, useChartData } from '../chartData';
@@ -87,7 +64,7 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: P
 }
 
 /**
- * The two or three figures the chart is about, above it.
+ * The figures the chart is about, above it.
  *
  * A plot answers "what shape" and these answer "how much", and a card that carries
  * only the first sends the reader to hover over an SVG to find out what a bar is
@@ -119,25 +96,20 @@ function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
 
   /*
    * The parts the PLOT drew, which on a donut or a radar is not all of them — see
-   * `drawnShares`. Summing every slice here put a total on the card that the figure in
-   * the donut's own hole disagreed with, and then divided the largest part by it: food
-   * 500 against a refunded shopping of −450 read "Total 50" over "Largest, Food —
-   * 500 · 1000%". Sorted biggest-first at the source, and a filter keeps that.
+   * `drawnShares`. Sorted biggest-first at the source, and a filter keeps that.
    */
   const drawn = drawnShares(spec.kind, data.slices);
   const total = drawn.reduce((sum, s) => sum + s.value, 0);
   const biggest = drawn[0];
   /*
-   * ...and the ranking is the half of that sentence the filter does not reach. It KEEPS
-   * its negative bars — a bar chart has a baseline and can draw one — so its total is a
-   * NET while the largest part is a gross positive, and the same 500 against −450 went
-   * on printing "Total 50" over "Largest, Food — 500 · 1000%" here long after the donut
-   * had stopped.
+   * ...and the ranking is the part the filter does not reach. It KEEPS its negative
+   * bars — a bar chart has a baseline and can draw one — so its total is a NET while
+   * the largest part is a gross positive.
    *
    * A percentage needs a whole that the part is part of, and a net is not one. So the
    * ranking prints the two figures and says nothing about the share, rather than a
    * number that is arithmetic on two sums that do not belong together. The donut and
-   * the radar reach this with the negatives already gone and are unchanged.
+   * the radar reach this with the negatives already gone.
    */
   const isWhole = total > 0 && drawn.every((s) => s.value >= 0);
   return (

@@ -3,22 +3,17 @@ import { useEffect, useRef } from 'react';
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** 'bottom' — slides up from the bottom edge on a phone; 'center' — a dialog. */
+  /** 'bottom' — on the bottom edge on a phone; 'center' — a dialog. */
   position?: 'bottom' | 'center';
-  /**
-   * A wider card. Every sheet in the app is a question and a couple of controls and
-   * fits the default 420px; the chart wizard is a grid of shapes and a form beside a
-   * live plot, and at that measure the grid is one tile per row.
-   */
+  /** A wider card, for a sheet that carries a grid, or a form beside a live plot. */
   wide?: boolean;
   title?: string;
   children: React.ReactNode;
 }
 
 /**
- * A modal panel. Replaces React Native's <Modal>: closes on Escape and on a click
- * outside the card, and moves focus into the panel on open so keyboard users don't
- * stay behind on the page underneath.
+ * A modal panel. What it does for every caller is stated in `web/src/SPEC.md`, under
+ * *What the shared controls promise*.
  */
 export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -62,14 +57,9 @@ export function Sheet({ open, onClose, position = 'bottom', wide = false, title,
 
   /*
    * Moving the keyboard in happens once, on opening, and is its own effect for exactly
-   * that reason: every caller passes a fresh `onClose` arrow on each render, so while
-   * this sat in the effect above it re-ran — and re-focused the card — every time the
-   * parent rendered for any reason at all.
-   *
-   * Nothing noticed while every sheet in the app was a question and two buttons. The
-   * chart wizard has a name box: open it before the account list has landed, start
-   * typing, and the render that list arrives on took the caret out of the input
-   * mid-word.
+   * that reason: a caller may pass a fresh `onClose` arrow on each render, and in the
+   * effect above this would re-run — and re-focus the card, taking the caret out of an
+   * input mid-word — every time the parent rendered for any reason at all.
    */
   useEffect(() => {
     if (!open) return;

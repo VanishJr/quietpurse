@@ -168,17 +168,17 @@ export function AccountFlows({
       <p className="acct-range">{range}</p>
 
       {otherCurrencies.length > 0 && (
-        // an account has one currency and an import into it carries that currency, so
-        // this is a state nothing should reach - printing one code over a sum of two
-        // is the failure it exists to prevent.
+        // an account has one currency, and a statement's own currency column can still
+        // put rows of another into it - printing one code over a sum of two is the
+        // failure this exists to prevent.
         //
         // The list is all time and the figures beside it are one window, so the two
         // claims below have different strengths and are written as different
         // sentences: the balance is all time too and IS wrong, while a figure on this
         // screen is wrong only if one of those rows falls in a month it covers - which
-        // nothing here was told. The claim is screen-wide and this is the only place it
-        // is made: the donut's total sums the same unconverted rows, and one sentence
-        // said once is worth more than the same paragraph on every card.
+        // nothing here was told. The claim is screen-wide: the donut's total sums the
+        // same unconverted rows, and one sentence said once is worth more than the same
+        // paragraph on every card.
         <p className="error">
           This account holds transactions in {otherCurrencies.join(', ')}, not{' '}
           {account.currency}. The account's balance adds them in as though they were{' '}

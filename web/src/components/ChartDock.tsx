@@ -1,62 +1,7 @@
 /**
  * The strip of chart names along the bottom of the Analytics screen, and the ⋮ that
- * acts on each of them.
- *
- * The workspace shows one chart at a time and this is what chooses it — a row of
- * rectangles, one per chart, the way a spreadsheet names its sheets. At the bottom
- * because that is where a strip of things you switch BETWEEN belongs when the thing
- * above it is the subject: the screen reads top-down as "here is the chart", and the
- * dock is the index under it rather than a filter over it.
- *
- * ---------------------------------------------------------------------------
- * Why the actions are here and not on the card
- *
- * Edit, Duplicate and Delete were three pills across the top of the chart, which put
- * the loudest row on the screen above the quietest thing on it — a reader arrives at
- * Analytics to look at a plot, not to maintain a list. They belong on the tab, which is
- * the handle for the chart as an OBJECT, where the card is the chart as a PICTURE.
- *
- * A popover under the ⋮ and not a `Sheet`. `AccountDialog` gives the reason it chose
- * the other way and it is a reason about that menu: two of its steps are a paragraph
- * apiece and a four-line popover has nowhere to put a paragraph. These three are one
- * word each, and a sheet for them would black out the chart the reader is acting on.
- *
- * The popover is `position: fixed`, measured off the button. The names scroll sideways
- * inside `overflow-x: auto`, which clips an absolutely positioned child — and `fixed`
- * is what escapes that without giving up the scroll. It is closed by anything that
- * would move it out from under its own anchor: Escape, a pointer outside it, a scroll
- * anywhere, a resize.
- *
- * ---------------------------------------------------------------------------
- * The arrows
- *
- * The names scroll, and past four or five charts they scroll off the end of the row.
- * That was reachable by touch and by a trackpad and by nothing else: the strip hides
- * its scrollbar, and a mouse with one wheel has no way to move a horizontal one. So a
- * ‹ and a › appear once there is anything to move to, and disable at each end — the
- * same shape `AccountTabs` draws over the account rail.
- *
- * They scroll rather than page. A tab is as wide as the name on it, so "three per page"
- * is a rule that has no width to be true at: pages would break mid-tab at one set of
- * names and leave a gap at another. A nudge of most of the visible width keeps a
- * partly-seen tab on screen as the anchor for where the row just came from.
- *
- * A keyboard needs none of this — every tab stays in the tab order wherever the strip
- * is scrolled to, and the browser brings a focused one into view by itself. The arrows
- * are for the pointer, which is why they carry no `aria-live` announcement: nothing
- * about what is REACHABLE changes when they are pressed.
- *
- * ---------------------------------------------------------------------------
- * "New chart" is outside the scrolling names deliberately. It is not one of them, and a
- * reader with eight charts should not have to scroll to the end of their own list to
- * add a ninth. The arrows sit outside it for the same reason.
- *
- * Not a `role="tablist"`: the app already has one idiom for "which of these is the
- * current one", and it is `aria-current` on a plain button. A real tablist would also
- * make the strip a composite widget with a roving tabindex, which is a keyboard model
- * nobody asked for on a row that is at most a handful of names — and the same argument
- * keeps the popover a labelled group of buttons rather than a `role="menu"` promising
- * arrow keys it does not implement.
+ * acts on each of them. Why the actions live here and not on the card is in
+ * `web/src/SPEC.md`, under *What a chart is, and where its numbers come from*.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChartGlyph, GlyphName } from './ChartGlyphs';
@@ -64,23 +9,20 @@ import { ChartGlyph, GlyphName } from './ChartGlyphs';
 export interface DockTab {
   id: string;
   label: string;
-  /** Its shape, drawn small. */
   glyph: GlyphName;
 }
 
-/** Which tab's popover is up, and where the anchor put it. */
 interface Popover {
   id: string;
   /** Distances from the viewport's edges, so the menu's corner meets the button's. */
   right: number;
   bottom: number;
-  /** The delete has been asked for and is waiting to be confirmed. */
   confirming: boolean;
 }
 
 interface Props {
   tabs: DockTab[];
-  /** null — nothing is showing, which is the empty workspace. */
+  /** null — nothing is showing. */
   activeId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
@@ -91,30 +33,28 @@ interface Props {
   actionsDisabled?: boolean;
 }
 
-/** The gap between the ⋮ and the popover above it. */
 const ANCHOR_GAP = 6;
 
-/** ...and the gap it keeps from either edge of the window. */
 const EDGE_GAP = 8;
 
 /**
- * `.dock-menu`'s `min-width`, which is what the popover is at the three one-word
- * actions it is usually showing.
- *
- * Here because the menu is placed before it has been rendered — `right` is measured off
- * the button in the click handler — so there is no box to ask. A number that has to
- * agree with a stylesheet is a number that can drift; it is the narrowest the menu ever
- * gets, so a clamp built on it errs towards keeping too much on screen rather than too
- * little.
+ * `.dock-menu`'s `min-width`. Here because the menu is placed before it has been
+ * rendered — `right` is measured off the button in the click handler — so there is no
+ * box to ask. A number that has to agree with a stylesheet is a number that can drift;
+ * it is the narrowest the menu ever gets, so a clamp built on it errs towards keeping
+ * too much on screen rather than too little.
  */
 const MENU_WIDTH = 176;
 
 /**
- * How much of the visible row an arrow moves.
+ * How much of the visible row an arrow moves: it scrolls rather than pages, because a
+ * tab is as wide as the name on it, so a page of tabs has no width to be true at —
+ * pages would break mid-tab at one set of names and leave a gap at another.
  *
  * Not all of it: a whole screenful leaves nothing on either side of the jump for the
  * reader to recognise, and a strip of names has no other landmark. The floor is for a
- * narrow window, where 80% of a small row is a step too small to be worth a click.
+ * narrow window, where a fraction of a small row is a step too small to be worth a
+ * click.
  */
 const NUDGE_FRACTION = 0.8;
 const NUDGE_MIN = 120;
@@ -129,7 +69,6 @@ const NUDGE_MIN = 120;
  */
 const SCROLL_SLACK = 1;
 
-/** How far the strip can be scrolled, and how much of that has been used. */
 interface Reach {
   /** There is anything at all off the end: both arrows appear or neither does. */
   overflows: boolean;
@@ -151,11 +90,9 @@ export function ChartDock({
 }: Props) {
   const [popover, setPopover] = useState<Popover | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  /** The ⋮ the popover came from, so closing it puts the keyboard back where it was. */
   const anchorRef = useRef<HTMLButtonElement | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
   const currentRef = useRef<HTMLDivElement>(null);
-  /** Where the keyboard goes when the ⋮ it was on is deleted out from under it. */
   const newRef = useRef<HTMLButtonElement>(null);
   const [reach, setReach] = useState<Reach>(NO_REACH);
 
@@ -173,15 +110,13 @@ export function ChartDock({
     const box = button.getBoundingClientRect();
     anchorRef.current = button;
     /*
-     * The menu hangs from its RIGHT edge, under the ⋮ it came from, clamped at both
-     * ends of the window.
+     * The menu is `position: fixed`, measured off the ⋮: the names scroll sideways inside
+     * `overflow-x: auto`, which clips an absolutely positioned child, and `fixed` escapes
+     * that without giving up the scroll.
      *
-     * The floor is the easy half and was the only half: it keeps the menu off the right
-     * edge. The ceiling is the one the comment here used to claim and the arithmetic did
-     * not do — a tab at the LEFT edge of a narrow window. The first ⋮ on a 360px phone
-     * sits around x=130, which put the menu's left edge at −46 and Edit, Duplicate and
-     * Delete off the side of the screen with no way to scroll to them.
-     *
+     * It hangs from its RIGHT edge, under the ⋮ it came from, clamped at both ends of the
+     * window: the floor keeps it off the right edge, and the ceiling keeps a ⋮ near the
+     * left edge of a narrow window from putting the menu's own left edge off the screen.
      * Below `MENU_WIDTH + 2 * EDGE_GAP` of window there is no placement that leaves both
      * gaps, and the floor wins: the menu sits against the right edge, which on a window
      * that narrow is where the ⋮ it belongs to is anyway.
@@ -196,9 +131,9 @@ export function ChartDock({
   };
 
   /**
-   * Everything that has to shut it. The pointer listener is in the CAPTURE phase and
-   * lets a press on a ⋮ through, which is what makes the button a toggle: without the
-   * exemption, the press closes the popover and the click that follows opens it again.
+   * The pointer listener is in the CAPTURE phase and lets a press on a ⋮ through, which
+   * is what makes the button a toggle: without the exemption, the press closes the
+   * popover and the click that follows opens it again.
    */
   useEffect(() => {
     if (!popover) return;
@@ -231,26 +166,22 @@ export function ChartDock({
   /*
    * Opened by a click or by Enter on the ⋮ either way, so the keyboard has to be moved
    * into it — otherwise Tab from the ⋮ walks into the rest of the strip and past the
-   * three controls that just appeared.
+   * controls that just appeared.
    *
-   * The confirmation is the same move and not an exception to it. It used to be skipped,
-   * on the reading that focus was already inside the menu — but the Delete that was
-   * holding it is unmounted by the very state change that asks the question, so focus
-   * went to `<body>` and the reader who pressed Delete was answered by silence and a Tab
-   * from the top of the document. The first button either way: Edit when the menu is the
-   * three actions, Keep when it is the question, which is the safe half of the answer.
+   * Keyed on `confirming` too, and not as an exception: the Delete that holds focus is
+   * unmounted by the very state change that asks the question, and focus left on nothing
+   * goes to `<body>`. The first button either way: Edit when the menu is the actions,
+   * Keep when it is the question, which is the safe half of the answer.
    */
   useEffect(() => {
     if (popover) menuRef.current?.querySelector('button')?.focus();
   }, [popover?.id, popover?.confirming]);
 
   /*
-   * The ids and the names of what is on the strip, as one string.
-   *
-   * The array itself is rebuilt by the screen on every render, so anything keyed on its
-   * identity re-runs whenever the parent does — which was true of the popover check
-   * below and of the re-measure further down, and is the reason this string exists at
-   * all. The names are in it because a rename changes the width of the row.
+   * The ids and the names of what is on the strip, as one string for the effects below
+   * to key on: the array itself is rebuilt by the screen on every render, so anything
+   * keyed on its identity re-runs whenever the parent does. The names are in it because
+   * a rename changes the width of the row.
    */
   const shape = tabs.map((t) => `${t.id}:${t.label}`).join('|');
 
@@ -258,10 +189,8 @@ export function ChartDock({
      pointing at something that is no longer on the strip. */
   useEffect(() => {
     if (popover && !tabs.some((t) => t.id === popover.id)) setPopover(null);
-    // `shape` and not `tabs` — see above; the effect reads the current array either way
+    // `shape` and not `tabs`, for `shape`'s reason; the effect reads the current array either way
   }, [shape, popover]);
-
-  /* ------------------------------------------------------------------ the arrows */
 
   const measure = useCallback(() => {
     const strip = stripRef.current;
@@ -275,11 +204,10 @@ export function ChartDock({
   }, []);
 
   /*
-   * Two effects and not one. The listeners are attached once — rebuilding a
-   * ResizeObserver whenever the chart list changes would be a new observer per keystroke
-   * in the wizard's name box — and the re-measure is keyed on the row's own contents,
-   * because that is the half a ResizeObserver cannot see: `.dock-tabs` is `flex: 1` and
-   * keeps its box exactly while a tenth name grows the scroll width underneath it.
+   * Two effects and not one. The listeners are attached once, and the re-measure is
+   * keyed on the row's own contents, because that is the half a ResizeObserver cannot
+   * see: `.dock-tabs` is `flex: 1` and keeps its box exactly while a new name grows the
+   * scroll width underneath it.
    */
   useEffect(() => {
     const strip = stripRef.current;
@@ -296,12 +224,10 @@ export function ChartDock({
   useEffect(measure, [measure, shape]);
 
   /*
-   * The tab that is showing is brought into view when it changes — which is what makes
-   * the ninth chart visible the moment it is created, and what puts the strip back on
-   * the right tab after Back. `scrollIntoView` is optional-called and `block: 'nearest'`
-   * so the page behind the dock is not dragged about: jsdom implements neither this nor
-   * `scrollBy` below, and neither is worth a shim in `setup.ts` for behaviour it has no
-   * layout to have.
+   * The tab that is showing is brought into view when it changes — which is what makes a
+   * new chart visible the moment it is created, and what puts the strip back on the
+   * right tab after Back. `block: 'nearest'` so the page behind the dock is not dragged
+   * about, and optional-called, like `scrollBy` below, because jsdom implements neither.
    */
   useEffect(() => {
     currentRef.current?.scrollIntoView?.({ inline: 'nearest', block: 'nearest' });
@@ -319,17 +245,13 @@ export function ChartDock({
   const open = tabs.find((t) => t.id === popover?.id) ?? null;
 
   /**
-   * Runs the action and leaves the keyboard somewhere real.
-   *
-   * It used to close without returning focus at all, which put it on `<body>` — the top
-   * of the document — after every Edit, Duplicate and Delete alike. Edit and Duplicate
-   * both leave the ⋮ they came from on the strip, so that is where focus belongs; the
-   * wizard Edit opens moves it in from there by itself.
+   * Runs the action and leaves the keyboard somewhere real. Edit and Duplicate both
+   * leave the ⋮ they came from on the strip, so that is where focus belongs; the wizard
+   * Edit opens moves it in from there by itself.
    *
    * A delete takes the anchor away with it, and focusing something about to unmount is
-   * the same as focusing nothing. "New chart" is the one control in the dock that is
-   * always present, it is a step from the strip, and it is the likely next thing to
-   * press on a workspace one chart lighter.
+   * the same as focusing nothing. "New chart" is always rendered, it is a step from the
+   * strip, and it is the likely next thing to press once a chart has gone.
    */
   const act = (fn: (id: string) => void, id: string, keepsAnchor = true) => {
     close(keepsAnchor);
@@ -339,6 +261,11 @@ export function ChartDock({
 
   return (
     <div className="chart-dock">
+      {/* the strip hides its scrollbar, so without these a pointer has no bar to drag and a
+          plain wheel does not move the row. They are for the pointer, which is why they
+          carry no `aria-live`: every tab stays in the tab order wherever the strip is
+          scrolled, the browser brings a focused one into view by itself, and nothing about
+          what is reachable changes when they are pressed */}
       {reach.overflows && (
         <button
           className="dock-arrow"
@@ -350,6 +277,9 @@ export function ChartDock({
         </button>
       )}
 
+      {/* a group and not a `role="tablist"`: `aria-current` on a plain button is the app's
+          idiom for the current one, and a tablist would make the strip a composite widget
+          with a roving tabindex */}
       <div className="dock-tabs" ref={stripRef} role="group" aria-label="Charts">
         {tabs.map((t) => {
           const current = t.id === activeId;
@@ -399,10 +329,15 @@ export function ChartDock({
         </button>
       )}
 
+      {/* outside the scrolling names, like the arrows: it is not one of them, and a reader
+          should not have to scroll to the end of their own list to add to it */}
       <button className="dock-new" ref={newRef} onClick={onNew} disabled={actionsDisabled}>
         <span aria-hidden="true">＋</span> New chart
       </button>
 
+      {/* a popover under the ⋮ and not a `Sheet`: the actions are a word each, and a sheet
+          would black out the chart the reader is acting on. A labelled group of buttons
+          rather than a `role="menu"`, which would promise arrow keys it does not implement */}
       {popover && open && (
         <div
           ref={menuRef}
@@ -437,8 +372,8 @@ export function ChartDock({
               <button className="dock-menu-item" onClick={() => act(onDuplicate, open.id)}>
                 Duplicate
               </button>
-              {/* asks before it acts, in the popover rather than in a sheet over it:
-                  the question is four words and the answer is two buttons */}
+              {/* asks before it acts, in the popover rather than in a sheet over it: the
+                  question and its answer both fit in the popover */}
               <button
                 className="dock-menu-item is-danger"
                 onClick={() => setPopover({ ...popover, confirming: true })}

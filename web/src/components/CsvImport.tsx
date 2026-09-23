@@ -16,11 +16,11 @@ import { Chips } from './Chips';
 const FALLBACK_PRESETS = [{ key: 'generic', title: GENERIC_PRESET_TITLE }];
 
 /**
- * What the file dialog offers, per format. Total over ImportSourceType for the reason
- * SIZE_CAP is: a format the backend learns to read and this map does not name is
- * reachable by drag-and-drop and by nothing else — which is where PDF was. The tuple
- * stops a row being half-written: the dotted extension the dialog filters on first,
- * the MIME type second, because `accept` matches a file on either.
+ * What the file dialog offers, per format. Total over ImportSourceType: a format the
+ * backend learns to read and this map does not name is reachable by drag-and-drop and
+ * by nothing else. The tuple stops a row being half-written: the dotted extension the
+ * dialog filters on first, the MIME type second, because `accept` matches a file on
+ * either.
  */
 const ACCEPT_TOKENS: Record<ImportSourceType, readonly [`.${string}`, string, ...string[]]> = {
   csv: ['.csv', 'text/csv'],
@@ -32,10 +32,9 @@ const ACCEPTED = Object.values(ACCEPT_TOKENS).flat().join(',');
 
 /**
  * Why a statement that does print a running balance got no start-and-end pair out of
- * it. Total over the slug union for ACCEPT_TOKENS' reason: a state the backend learns
- * to send and this map does not name would render as a blank line, and a blank line
- * where a reason belongs is the "no balances" spelling all over again. None of these
- * is a rejected row, so none of them goes anywhere near `problems`.
+ * it. Total over the slug union: a state the backend learns to send and this map does
+ * not name would render as a blank line where a reason belongs. None of these is a
+ * rejected row, so none of them goes anywhere near `problems`.
  */
 const BALANCES_NOT_SHOWN: Record<BalancesNotShown, string> = {
   'rows-outside-the-balance':
@@ -62,8 +61,8 @@ const chipKey = (id: string): string => `id:${id}`;
 /**
  * The upload's body. Outside the component deliberately: the account name is not a
  * binding here, so a client that sends one does not compile. The
- * backend refuses `accountName` and `currency` outright — an account is created at
- * POST /api/accounts and nowhere else — so what this shape buys is that the refusal
+ * backend refuses `accountName` and `currency` outright — an account is created by its
+ * own request and never by an upload — so what this shape buys is that the refusal
  * is never reached: there is no state of this component from which a request the
  * server would reject can be composed.
  */
@@ -75,10 +74,8 @@ const uploadForm = (account: Account, preset: string, file: File): FormData => {
   return form;
 };
 
-/** Above this a file is not read in the browser just to count its lines. */
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
-/** How much of the file is looked at to decide whether counting lines means anything. */
 const SNIFF_BYTES = 8192;
 
 /** Zip (so .xlsx), PDF, the older Excel format, gzip — the backend's own signatures. */
@@ -102,36 +99,36 @@ interface Props {
   onBack: () => void;
   /**
    * Called once rows have actually landed, so the caller can refresh its data —
-   * which is after Confirm, not after the upload: an upload writes nothing.
+   * which is after Confirm, not after the upload: an upload stages the rows and imports
+   * none of them.
    */
   onImported: () => void;
   /**
    * An account was created here, which happens before any row lands and so is not
-   * the event above. Required: the account is on the server and on no screen until
-   * the caller reloads, and onBack reloads nothing.
+   * `onImported`. Required: the account is on the server and on no screen until the
+   * caller reloads, and onBack reloads nothing.
    */
   onAccountCreated: () => void;
   /**
    * What a new account will be created in — printed, not sent, since the server
    * defaults it to the same setting this came from. `null` when that setting could
    * not be read: the sentence is left out, and nothing here is disabled over it —
-   * a cosmetic fetch must not block the only way data enters the product.
+   * a cosmetic fetch must not block an import.
    */
   baseCurrency: string | null;
 }
 
 /**
- * Importing a bank statement — the only way data enters the product. Reached from
- * Overview, and a statement is not a one-off setup step: next month there is another.
+ * Importing a bank statement. Reached from Overview, and a statement is not a one-off
+ * setup step: next month there is another.
  */
 export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }: Props) {
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('generic');
   /**
-   * The workspace's accounts, and `null` means never loaded — never "you have none",
-   * which is the distinction OverviewScreen holds for the same reason. A failed load
-   * that fell through to "create a new one" would manufacture a second account for a
-   * bank the user already has, and pressing Import is what writes it.
+   * `null` means never loaded — never "you have none". A failed load that fell through
+   * to "create a new one" would manufacture a second account for a bank the user
+   * already has, and pressing Import is what writes it.
    */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
@@ -167,12 +164,11 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
   /**
    * No argument, so hidden accounts are absent because the server left them out and
-   * not because this filtered them: the server is what refuses a removed account's
-   * id, and a client-side filter over ?all=1 would render the same list while moving
-   * the decision to the layer that does not hold the contract.
+   * not because this filtered them; `web/src/SPEC.md` gives the reason under *Accounts
+   * and statements, as the client handles them*.
    *
-   * The failure is kept rather than swallowed, unlike the preset load above: presets
-   * have FALLBACK_PRESETS and a person's accounts have no fallback constant.
+   * The failure is kept rather than swallowed, unlike the preset load: presets have
+   * FALLBACK_PRESETS and a person's accounts have no fallback constant.
    */
   const loadAccounts = (): Promise<void> =>
     api.accounts().then(
@@ -195,13 +191,12 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * false, which is what keeps Import disabled after a failed load.
    */
   const creating = accounts !== null && (accounts.length === 0 || pickedKey === NEW_ACCOUNT);
-  /** An account was picked, or a name was typed for a new one. Never both, never neither. */
   const destinationReady = picked !== null || (creating && accountName.trim() !== '');
 
   /**
    * New input, whichever way it arrived: the pending read no longer describes it,
    * and neither does the last import's outcome. One place, so a pick and a paste
-   * cannot come to disagree about which of the three they invalidate.
+   * cannot come to disagree about what they invalidate.
    */
   const newInput = (): number => {
     setFileRows(null);
@@ -225,7 +220,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       const head = new Uint8Array(await chosen.slice(0, SNIFF_BYTES).arrayBuffer());
       if (!looksLikeText(head)) return;
       const rows = (await chosen.text()).trim().split(/\r?\n/).length - 1;
-      // a 1 MB .csv followed at once by a workbook, or by a paste: this read
+      // a large .csv followed at once by a workbook, or by a paste: this read
       // finishes last, and without the check it labels whatever came after it
       if (seq === pickSeq.current) setFileRows(rows);
     } catch {
@@ -317,9 +312,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const summary = result?.outcome === 'awaiting_confirmation' ? result.summary : null;
   const duplicate = result?.outcome === 'duplicate' ? result : null;
   /**
-   * Rows the summary called new that somebody else's import wrote while this one was
-   * waiting. Two numbers that disagree with no explanation read as "the rows I
-   * approved were not written", which is the opposite of what happened.
+   * Rows the summary called new that another import wrote while this one was waiting.
+   * Two numbers that disagree with no explanation read as "the rows I approved were not
+   * written", which is the opposite of what happened.
    */
   const shortfall = summary && confirmed ? summary.newRows - confirmed.inserted : 0;
   /**
@@ -343,10 +338,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * none of them, `undefined > 0` is false, and the card says nothing instead of
    * "undefined rows couldn't be read".
    *
-   * The filtered rows are missing from here on purpose. The backend's own line in
-   * `problems` counts them AND names the status values that did it, which is file text
-   * this client never sees — a second count beside it would describe the same rows
-   * twice, which is what this card did for a fortnight while contradicting itself.
+   * The filtered rows are missing from here on purpose: the backend's own line in
+   * `problems` counts them and names the status values that did it, and a second count
+   * beside it would describe the same rows twice.
    */
   const drops = summary
     ? [
@@ -363,7 +357,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           key: 'noMovement',
           n: summary.noMovement,
           // no cause clause: the movement is what is zero, after the fee, so a row whose
-          // amount cell reads 5.00 against a 5.00 fee lands here with no zero on screen
+          // amount cell is not zero can land here
           say: (n: number) => `${rowCount(n)} moved no money, so there was nothing to import.`,
         },
       ].filter((d) => d.n > 0)
@@ -377,8 +371,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       <h1 className="title">Import a statement</h1>
 
       {/* the drop zone says what is accepted; this says what to go and fetch, and the two
-          stop being the same list the moment coverage is partial — one PDF layout is read
-          today, and every refusal pdf.ts composes ends by asking for CSV or Excel */}
+          are different lists: a PDF is read only in a layout the importer recognises, and
+          one in any other layout is refused with a request for the CSV or Excel export */}
       <p className="hint">
         Any bank that lets you download a statement works here, whether it has an API or
         not. Export it as CSV or Excel — in most banks that's "Export" or "Download" in the
@@ -392,7 +386,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         range than you need.
       </p>
 
-      {/* drop zone */}
       <div
         className={`dropzone${dragging ? ' dropzone-active' : ''}`}
         onDragOver={(e) => {
@@ -473,12 +466,11 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       {accounts !== null && accounts.length > 0 && (
         <>
-          {/* a heading and not a <label>: Chips renders no control to point htmlFor at,
-              and the section above it is headed the same way */}
+          {/* a heading and not a <label>: Chips renders no control to point htmlFor at */}
           <div className="setting-label">Account</div>
           <Chips
-            // not "Account": TransactionsScreen's account filter is a group by that
-            // name, and two groups sharing an accessible name is one ambiguity for a
+            // not "Account": the account filter on the Transactions screen carries that
+            // name, and two controls sharing an accessible name is one ambiguity for a
             // screen reader and another for anything selecting by it
             label="Account for this import"
             options={[
@@ -613,15 +605,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             why the sentence says how many were added. A file that states neither
             gets no line: a "couldn't be reconciled" warning about nothing.
 
-            Both halves of the sentence come from balanceClaim, and the claim is where
-            the two checks part company. A PDF states both ends itself, and "the rows
-            add up" is exactly what was verified. A running balance states neither end
-            — both are derived from these same rows, so a row missing from either END
-            of the statement moves an end instead of breaking the run and is invisible
-            here. The sentence may claim the run, and may not claim the statement is
-            complete. And it may claim only the runs it could have failed on: a series
-            of one row is one link, which no verdict can break, so a pair summed over
-            it rests on a check that could not have caught anything.
+            Both halves of the sentence come from balanceClaim: it may claim the run and
+            never that the statement is complete, and only the runs it could have failed
+            on.
           */}
           {balances && balanceLine && (
             <p className="hint" style={{ marginTop: 6 }}>
@@ -677,10 +663,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           </div>
           {/*
             A count and no cause, and that is the honest limit rather than an omission:
-            this panel reads imports.rows_rejected, which is the undifferentiated total,
-            and the three reasons behind it are not stored. The breakdown was on the
-            summary card seconds ago; repeating a cause from memory here would be a
-            claim about rows this panel cannot see.
+            this panel reads imports.rows_rejected, which keeps no reason; see
+            `web/src/SPEC.md` under *The sentences a person reads, and what is lifted out
+            of a screen to hold them*.
           */}
           {confirmed.skipped > 0 && (
             <p className="hint" style={{ marginTop: 6 }}>

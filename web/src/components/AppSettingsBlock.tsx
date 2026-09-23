@@ -12,8 +12,8 @@ const splitNames = (raw: string): string[] =>
  * The two knobs a new account needs before its first import: what every total is
  * denominated in, and whose name a statement writes on a transfer to yourself.
  *
- * Its own state rather than Overview's: the account and recurring handlers there
- * clear the screen error on success, which would wipe a failed save here.
+ * Its own error rather than the screen's: an error shared with the screen would be
+ * cleared by the screen's other handlers, wiping a failed save here.
  */
 export function AppSettingsBlock() {
   /** null until the GET answered — a prefilled "EUR" nobody stored is a smaller lie, not a truth */
@@ -69,8 +69,8 @@ export function AppSettingsBlock() {
     }
   };
 
-  // No heading of its own: its one mount is inside a section on the Account screen
-  // that already names it, and two headings over one form read as two forms.
+  // No heading of its own: its caller heads the section it sits in, and two headings
+  // over one form read as two forms.
   return (
     <section>
       {error && (

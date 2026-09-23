@@ -5,12 +5,11 @@ import { Chips } from './Chips';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
 
 /**
- * Which money is earned and which is support - the one input every figure on the Goal
- * screen is computed from, and until this block there was no way to say it except one
- * transaction at a time under a noun somebody else picked.
+ * Which money is earned and which is support: the split the income-based goals can
+ * read.
  *
- * Its own state and its own error rather than the screen's: the screen's handlers clear
- * its error on success, which would wipe a failed save here.
+ * Its own state and its own error rather than the screen's: an error shared with the
+ * screen would be cleared by the screen's other handlers, wiping a failed save here.
  */
 
 /** The two buckets, named by what they do to the figures rather than by the wire's word. */
@@ -29,11 +28,9 @@ const splitPatterns = (raw: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-/** Which form is open, and for which row. One at a time. */
 type Open = { form: 'add' } | { form: 'edit'; id: string } | { form: 'delete'; id: string };
 
 interface Props {
-  /** the screen's own load - every figure above this block is computed from these rows */
   onChanged: () => Promise<void> | void;
 }
 
@@ -79,8 +76,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
     }
   };
 
-  // no client-side check on the label: the route composes the sentence, and a button
-  // that silently does nothing is the failure this whole block exists to remove
+  // no client-side check on the label: the route refuses a bad one in its own sentence,
+  // and a button that silently does nothing is the failure to avoid
   const add = () => run(() => api.addIncomeSource(label.trim(), kind, splitPatterns(patterns)));
 
   const save = (id: string) =>
@@ -106,9 +103,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
 
   /**
    * Where a deleted source's income lands, read off the list rather than written out:
-   * both its label and its kind are editable through this block, so a user who renamed
-   * `other` has to read their own word back, and a user who made it support has to be
-   * told what that does.
+   * its label is editable through this block, so a user who renamed `other` has to
+   * read their own word back.
    */
   const destination = sources?.find((s) => s.id === 'other');
 
@@ -145,12 +141,10 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         onChange={(e) => setPatterns(e.target.value)}
         placeholder="Musterstiftung Musterstadt, Leistungsstipendium Beispielstadt"
       />
-      {/* the two-word floor is the matcher's, not this form's: a pattern is cut into
-          words of three letters or more and dropped if fewer than two survive, so a
-          one-word pattern is accepted, stored, and tags nothing. Saying "contains one
-          of these" would be a sentence the product does not keep, and every pattern in
-          the placeholder above has to clear the same floor or the example teaches the
-          input the hint forbids. */}
+      {/* the floor is the matcher's, not this form's, and the hint states it because
+          "contains one of these" would be a sentence the product does not keep. Every
+          pattern in the placeholder above has to clear the same floor, or the example
+          teaches the input the hint forbids. */}
       <p className="hint">
         Comma-separate phrases. Each phrase needs at least two words of 3+ letters; leave blank
         for manual tagging.
@@ -206,10 +200,9 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                   <div className="row-title">{s.label}</div>
                   <div className="row-sub">
                     {kindLabel(s.kind)}
-                    {/* the patterns themselves and not what they tag: the matcher drops a
-                        one-word pattern, so "tags income matching X" is false for exactly
-                        the input the form's hint warns about, and the hint is gone by the
-                        time this row is read */}
+                    {/* the patterns themselves and not what they tag: "tags income matching
+                        X" is false for a pattern under the matcher's floor, and the form's
+                        hint is gone by the time this row is read */}
                     {s.patterns.length > 0
                       ? ` · Auto-match: ${s.patterns.join(', ')}`
                       : ' · Manual only'}
@@ -241,9 +234,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                     >
                       Edit
                     </button>
-                    {/* a builtin has no delete control, and the route refuses one anyway:
-                        deleting salary, support or other would leave the split with no
-                        bucket for a deleted source's income to fall back to */}
+                    {/* a builtin has no delete control, and the route refuses one anyway;
+                        a deleted source's rows move to `other` */}
                     {!s.builtin && (
                       <button
                         className="btn-danger"

@@ -3,16 +3,16 @@
  *
  * They are not icons and they are not thumbnails. An icon would be a symbol standing
  * for "chart"; a thumbnail would be the reader's own data, which nothing knows before
- * the shape has been chosen. These are the SHAPE — six line-drawings of what the plot
+ * the shape has been chosen. These are the SHAPE — a line-drawing of what the plot
  * will look like — because that is the only thing the first step of the wizard is
  * asking about, and a name plus a sentence is a slow way to say "bars" to somebody who
  * would recognise bars.
  *
- * `currentColor` and `aria-hidden`, in the `NavIcons` idiom: each sits inside a button
- * that carries the name in text, so a glyph announced beside it is the word twice, and
- * a tile that is hovered or selected recolours the drawing by changing its own colour.
+ * `currentColor` and `aria-hidden`: each sits inside a button that carries the name in
+ * text, so a glyph announced beside it is the word twice, and a tile that is hovered or
+ * selected recolours the drawing by changing its own colour.
  *
- * One viewBox for all six, so they line up in the grid whatever the tile does to its
+ * One viewBox for all of them, so they line up in the grid whatever the tile does to its
  * width. Wider than it is tall, because a plot is.
  */
 
@@ -26,7 +26,6 @@ const box = {
   'aria-hidden': true,
 };
 
-/** The axis every plot but the donut and the radar is drawn against. */
 const Baseline = () => <path d="M4 27h36" strokeWidth={1.2} opacity={0.4} />;
 
 const Line = () => (
@@ -98,9 +97,9 @@ export const ChartGlyph = ({ kind }: { kind: GlyphName }) => {
 };
 
 /**
- * The empty workspace's mark: an axis with nothing plotted on it. Deliberately not one
- * of the six — the panel it heads is about there being no chart yet, and drawing one of
- * the shapes there would look like a chart that failed to load.
+ * The mark of an Analytics screen with no chart yet: an axis with nothing plotted on it.
+ * Deliberately not one of the shapes — the panel it heads is about there being no chart
+ * yet, and drawing one of the shapes there would look like a chart that failed to load.
  */
 export const BlankPlotGlyph = () => (
   <svg

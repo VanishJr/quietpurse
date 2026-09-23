@@ -3,7 +3,6 @@ import { truncateMiddle } from '../format';
 import { Account } from '../types';
 import { AccountsIcon } from './NavIcons';
 
-/** The line the design draws: three accounts, then an arrow. */
 export const TABS_PER_PAGE = 3;
 
 /**
@@ -25,7 +24,6 @@ interface Props {
   onAdd: () => void;
   /** How many accounts are hidden. None means no toggle: there is nothing to reveal. */
   hiddenCount: number;
-  /** Whether those hidden ones are currently on the rail. */
   showHidden: boolean;
   onToggleHidden: () => void;
 }
@@ -44,20 +42,16 @@ export function AccountTabs({
   const [page, setPage] = useState(0);
 
   /**
-   * The strip follows a NEW selection onto its page — "Add more" appends a fourth
-   * account and the tab it made has to be visible — and it follows the SAME selection
-   * when the list has moved it to a different page. Paging by hand is neither, and is
-   * left alone.
+   * The strip follows a NEW selection onto its page — an account just added has to be
+   * visible wherever the order put it — and it follows the SAME selection when the list
+   * has moved it to a different page. Paging by hand is neither, and is left alone.
    *
    * The ref is what tells the three apart, and it has to remember the page as well as
-   * the id. Keyed on nothing, this effect re-runs on every render the parent causes
-   * (and this screen causes several per tab, loading data) and each run would put the
-   * page back where the selection is: paging forward with the first account still
-   * selected would last until the next render and then snap back. Keyed on the id
-   * alone — which is what it was — a reorder that keeps the selection was early-
-   * returned, and `listAccounts` sorts by provider then name while `applyAccount`
-   * patches the row in place: rename the account on page 2 and reload, and the strip
-   * stayed on page 2 showing one unrelated tab with nothing marked current.
+   * the id. Keyed on nothing, this effect re-runs on every render the parent causes and
+   * each run would put the page back where the selection is: paging forward with the
+   * first account still selected would last until the next render and then snap back.
+   * Keyed on the id alone, a reorder that keeps the selection is missed, and a rename
+   * can carry the selected account to another page on the next load.
    *
    * The page rather than the index, because they are different questions: an account
    * hidden ahead of the selection shifts its index without moving it off the page
@@ -127,9 +121,9 @@ export function AccountTabs({
               title={a.name}
               aria-describedby={`account-currency-${a.id}`}
               // ...and the label has to carry the badge as well, because it REPLACES the
-              // content of the button rather than adding to it: with the name alone, the
-              // one tab on the rail that is only there because the reader asked for the
-              // hidden ones sounded exactly like the accounts that were never off it
+              // content of the button rather than adding to it: with the name alone, a
+              // tab on the rail that is only there because the reader asked for the
+              // hidden ones sounds exactly like the accounts that were never off it
               aria-label={a.hidden ? `${a.name} (hidden)` : a.name}
             >
               <AccountsIcon />
@@ -158,8 +152,8 @@ export function AccountTabs({
 
       <span className="visually-hidden">
         {accounts.length === 1 ? '1 account' : `${accounts.length} accounts`}
-        {/* the region is unconditional and only its text is not: a region rendered with
-            its sentence has nothing for the sentence to be a change to, and paging announces nothing */}
+        {/* the region is unconditional and only its text is not: a region mounted with
+            its sentence has nothing for the sentence to be a change to */}
         <span aria-live="polite">
           {pages > 1 && (
             <>
