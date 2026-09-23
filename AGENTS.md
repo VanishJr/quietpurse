@@ -57,7 +57,6 @@ npm test              vitest run            both packages have this
 npm run coverage      vitest run --coverage the suite plus a per-file reading; not a gate
 npm run dev           tsx watch src/index.ts
 npm run db:generate   drizzle-kit generate
-npm run check:stack   tsx scripts/check-stack.ts   up|status|down: a throwaway stack for a check
 npm run check:comments tsx scripts/comment-check.ts  compare|count: whether a change is comment-only, and how much is comment
 cd web && npm run dev
 cd web && npm run coverage                    the same reading for the client
