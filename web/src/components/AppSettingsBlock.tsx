@@ -9,9 +9,6 @@ const splitNames = (raw: string): string[] =>
     .filter(Boolean);
 
 /**
- * The two knobs a new account needs before its first import: what every total is
- * denominated in, and whose name a statement writes on a transfer to yourself.
- *
  * Its own error rather than the screen's: an error shared with the screen would be
  * cleared by the screen's other handlers, wiping a failed save here.
  */

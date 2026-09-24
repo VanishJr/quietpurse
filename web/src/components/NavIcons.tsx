@@ -55,11 +55,8 @@ export const SettingsIcon = () => (
 );
 
 /**
- * Accounts: two cards, one behind the other.
- *
- * `off` strikes it through. That is the whole of what the control says, so it is a
- * shape and not a colour, and it is drawn corner to corner rather than as a short bar:
- * a slash that stops inside the glyph reads as part of the drawing.
+ * `off` strikes it through, corner to corner rather than as a short bar: a slash that
+ * stops inside the glyph reads as part of the drawing.
  */
 export const AccountsIcon = ({ off = false }: { off?: boolean }) => (
   <svg {...box} width={17} height={17}>

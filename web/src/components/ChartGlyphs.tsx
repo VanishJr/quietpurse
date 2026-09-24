@@ -1,16 +1,10 @@
 /**
- * A drawing of each chart shape, for the picker that offers it.
- *
- * They are not icons and they are not thumbnails. An icon would be a symbol standing
- * for "chart"; a thumbnail would be the reader's own data, which nothing knows before
- * the shape has been chosen. These are the SHAPE — a line-drawing of what the plot
- * will look like — because that is the only thing the first step of the wizard is
- * asking about, and a name plus a sentence is a slow way to say "bars" to somebody who
- * would recognise bars.
- *
- * `currentColor` and `aria-hidden`: each sits inside a button that carries the name in
- * text, so a glyph announced beside it is the word twice, and a tile that is hovered or
- * selected recolours the drawing by changing its own colour.
+ * `ChartGlyph`'s drawings are not icons and they are not thumbnails. An icon would be a
+ * symbol standing for "chart"; a thumbnail would be the reader's own data, which nothing
+ * knows before the shape has been chosen. These are the SHAPE — a line-drawing of what
+ * the plot will look like — because that is the only thing the first step of the wizard
+ * is asking about, and a name plus a sentence is a slow way to say "bars" to somebody
+ * who would recognise bars.
  *
  * One viewBox for every shape, so they line up in the grid whatever the tile does to its
  * width. Wider than it is tall, because a plot is.
@@ -82,7 +76,6 @@ const Ranking = () => (
 const Radar = () => (
   <svg {...box}>
     <polygon points="22,4 31.5,9.5 31.5,20.5 22,26 12.5,20.5 12.5,9.5" strokeWidth={1.2} opacity={0.4} />
-    {/* the period, over the web it is measured on */}
     <polygon points="22,7 29,11 27,20 22,22.5 15.5,19 16,11" fill="currentColor" fillOpacity={0.18} />
   </svg>
 );
@@ -97,7 +90,6 @@ export const ChartGlyph = ({ kind }: { kind: GlyphName }) => {
 };
 
 /**
- * The mark of an Analytics screen with no chart yet: an axis with nothing plotted on it.
  * Deliberately not one of the shapes — the panel it heads is about there being no chart
  * yet, and drawing one of the shapes there would look like a chart that failed to load.
  */

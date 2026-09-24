@@ -1,10 +1,9 @@
 /**
- * "Create chart", in two steps: what shape, then what it is about.
- *
- * The order is the point. A reader who wants a donut of last quarter's spending knows
- * the donut before they know the quarter, and a single form asking for every value at
- * once is a form nobody finishes. Split, the first step is one click and the second is
- * a page of chips with every default already filled in.
+ * A new chart is asked for its shape before what it is about, and the order is the
+ * point. A reader who wants a donut of last quarter's spending knows the donut before
+ * they know the quarter, and a single form asking for every value at once is a form
+ * nobody finishes. Split, the first step is one click and the second is a page of chips
+ * with every default already filled in.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -381,10 +380,6 @@ function DetailStep({
   );
 }
 
-/**
- * The draft, drawn from the reader's own numbers: `web/src/SPEC.md` says why under *What
- * a chart is, and where its numbers come from*.
- */
 function Preview({
   draft,
   accounts,
@@ -408,8 +403,6 @@ function Preview({
 }
 
 /**
- * A labelled block of the form. A `<fieldset>`, because every one of them is a group.
- *
  * A label and its controls, and nothing between them: a caption over a row of chips
  * says what the words on the chips already say.
  */
@@ -423,8 +416,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /**
- * One choice. `aria-pressed` and not a radio: the measures are a multi-select and the
- * others are not, and one control that says "on/off" serves both.
+ * `aria-pressed` and not a radio: the measures are a multi-select and the others are
+ * not, and one control that says "on/off" serves both.
  */
 const Choice = ({ label, on, onPick }: { label: string; on: boolean; onPick: () => void }) => (
   <button className="chip" aria-pressed={on} onClick={onPick}>

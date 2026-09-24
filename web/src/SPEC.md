@@ -613,14 +613,20 @@ case the strip's paging effect follows.
 ## What the shared controls promise
 
 `Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed. Open, it closes
-on Escape and on a click on its backdrop but not on the card, keeps Tab and Shift+Tab among the
-card's focusable controls that are not hidden, or on the card itself when there are none, and turns
-off the page's scroll behind it. Once it has rendered open it moves focus to the card, and when it
-closes it returns focus to whatever held focus at that moment, if that is still in the document —
-so where a child takes focus with `autoFocus` as the sheet opens, the card takes focus from that
-child and, on close, focus returns to nothing. Its Tab trap stands down while the card sits inside
-a `hidden` ancestor, and Escape still closes it there. A caller relies on this rather than
-restating it beside its own sheet.
+on Escape and on a click on its backdrop but not on the card, keeps Tab and Shift+Tab, while focus
+is inside the card, among the card's focusable controls that are not hidden, or on the card itself
+when there are none, and sets `overflow: hidden` on the document's body until it closes. It does
+not bring back focus that has left a card with controls in it — as when a step change unmounts the
+control that held it — so from there Tab and Shift+Tab move as the browser moves them, and
+Shift+Tab can reach the page behind the sheet. Once it has rendered open it calls `focus()` on the
+card, and when it closes it makes the same call on whatever held focus just before, if that is
+still in the document — so where a child takes focus with `autoFocus` as the sheet opens, the card
+takes focus from that child and, on close, focus returns to nothing. The browser ignores that call
+on an element that cannot take focus, and nothing on a screen the Shell has hidden can: a sheet
+that opens on a hidden screen does not take focus, and one that closes on a hidden screen gives
+none back to an element there. Its Tab trap stands down while the card sits inside a `hidden`
+ancestor, and Escape still closes it there. A caller relies on this rather than restating it
+beside its own sheet.
 
 `aria-current` is the app's idiom for which of a set is the current one — on the navigation's
 links, and on plain buttons in `AccountTabs`' account strip and `ChartDock`'s chart strip, neither
@@ -632,4 +638,4 @@ no `role="tablist"`, `role="tab"`, `role="radio"`, `type="radio"`, `role="menu"`
 
 `NavIcons` and `ChartGlyphs` draw in `currentColor` and are `aria-hidden`: where one sits inside a
 control that carries its name in text, a drawing announced beside the name would be the name twice,
-and the control recolours the drawing by changing its own colour.
+and whatever element a drawing sits in sets its colour.

@@ -5,11 +5,9 @@ import { Chips } from './Chips';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
 
 /**
- * Which money is earned and which is support: the split the income-based goals can
- * read.
- *
- * Its own state and its own error rather than the screen's: an error shared with the
- * screen would be cleared by the screen's other handlers, wiping a failed save here.
+ * `IncomeSourcesBlock` keeps its own state and its own error rather than the screen's:
+ * an error shared with the screen would be cleared by the screen's other handlers,
+ * wiping a failed save here.
  */
 
 /** The two buckets, named by what they do to the figures rather than by the wire's word. */

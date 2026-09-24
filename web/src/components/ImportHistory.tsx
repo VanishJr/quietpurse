@@ -84,9 +84,6 @@ const orderingLine = (list: ImportList): string => {
 };
 
 /**
- * What has been uploaded, and the two things that can be removed: the statement file
- * on its own, or the import and the rows it wrote.
- *
  * No Confirm control anywhere, for any status: there is no way to read a staged
  * summary back, and confirming numbers nobody read is what the confirmation step
  * exists to prevent.

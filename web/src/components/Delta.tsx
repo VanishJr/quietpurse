@@ -1,6 +1,4 @@
 /**
- * A comparison with the period before, or nothing at all.
- *
  * `favourable` is the caller's, because the same arrow means opposite things to
  * different callers: income rising is good news and spending rising is not, and
  * colouring both green because both went up is the thing to avoid.

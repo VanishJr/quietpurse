@@ -1,13 +1,11 @@
 /**
- * One `Chart` and its data, drawn.
- *
  * Every kind in one component, because what surrounds a plot — the axis colours, the
  * tooltip, the animation rule, the empty state — is the same whichever kind it is, and
  * a component per kind would be a copy of it per kind, agreeing until one of them was
- * edited. Animation is off on every series. It holds no state and fetches nothing, for
- * the reason `web/src/SPEC.md` gives under *What a chart is, and where its numbers come
- * from*; how a series and a slice are coloured is under *The palette, and what leaves
- * the page*.
+ * edited. Animation is off on every series. `ChartPlot` holds no state and fetches
+ * nothing, for the reason `web/src/SPEC.md` gives under *What a chart is, and where its
+ * numbers come from*; how a series and a slice are coloured is under *The palette, and
+ * what leaves the page*.
  */
 import {
   Area,
@@ -370,10 +368,10 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
 }
 
 /**
- * A sentence where the plot would be. Always a sentence and never an empty axis: axes
- * with no marks on them read as a chart that failed, where "this month was quiet" and
- * "you have not said what to draw" are both ordinary answers — and the three are not
- * the same thing to somebody deciding whether to trust the screen.
+ * Always a sentence and never an empty axis: axes with no marks on them read as a chart
+ * that failed, where "this month was quiet" and "you have not said what to draw" are
+ * both ordinary answers — and the three are not the same thing to somebody deciding
+ * whether to trust the screen.
  */
 const PlotEmpty = ({ text = 'Nothing in this period.' }: { text?: string }) => (
   <p className="empty chart-empty">{text}</p>

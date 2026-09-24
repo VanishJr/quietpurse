@@ -1,11 +1,9 @@
 /**
- * The account menu and the add, rename, hide and delete steps, in one panel.
- *
  * One component and one `kind`, not a boolean per step: "rename and delete both open"
  * would be representable, and render order would decide which of them the user is
  * looking at.
  *
- * A `Sheet` rather than a popover. Two of these steps are a paragraph apiece — hiding
+ * A `Sheet` rather than a popover. Two of the steps are a paragraph apiece — hiding
  * and deleting an account are different things and have to read differently — and a
  * popover has nowhere to put a paragraph.
  */

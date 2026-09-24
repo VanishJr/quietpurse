@@ -1,7 +1,6 @@
 /**
- * One chart on the Analytics screen: its name, what it is about, the plot, and the
- * numbers a plot cannot be read off exactly. It carries no control, for the reason
- * `web/src/SPEC.md` gives under *What a chart is, and where its numbers come from*.
+ * `ChartCard` carries no control, for the reason `web/src/SPEC.md` gives under *What a
+ * chart is, and where its numbers come from*.
  *
  * **A refusal is printed, and no numbers are.** `useChartData` nulls the data before
  * every load, so there is never a figure on screen from the range the card is no
@@ -64,13 +63,9 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: P
 }
 
 /**
- * The figures the chart is about, above it.
- *
- * A plot answers "what shape" and these answer "how much", and a card that carries
- * only the first sends the reader to hover over an SVG to find out what a bar is
- * worth. For a series that is each measure's total across the window; for a share it
- * is the total and the largest part of it, which is the sentence somebody reads a
- * donut to arrive at anyway.
+ * A plot answers "what shape" and the figures answer "how much", and a card that
+ * carries only the first sends the reader to hover over an SVG to find out what a bar
+ * is worth.
  */
 function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
 
@@ -133,7 +128,6 @@ function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
   );
 }
 
-/** The plot's numbers, for a reader who gets no plot. Never on screen. */
 function DataTable({
   spec,
   data,

@@ -118,10 +118,6 @@ interface Props {
   baseCurrency: string | null;
 }
 
-/**
- * Importing a bank statement. Reached from Overview, and a statement is not a one-off
- * setup step: next month there is another.
- */
 export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }: Props) {
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('generic');
@@ -229,7 +225,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   };
 
   /**
-   * The create arm's account, made before the file is read. Every state write lands
+   * The create arm's account, made before the file is uploaded. Every state write lands
    * before the caller awaits the upload, so a rejected upload finds the component
    * already on the picker arm: a second press then uploads into this account instead
    * of asking the server to create a name it created one press ago — which answers
@@ -553,7 +549,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         </p>
       )}
 
-      {/* the write this screen makes before it reads anything, and the one the user did
+      {/* the write this screen makes before it uploads anything, and the one the user did
           not press a button called "Create" for. It stands until rows land in it, which
           covers every way this import can end without any: an error, a duplicate, a
           discard, and the summary card the user is about to discard from */}

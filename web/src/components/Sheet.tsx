@@ -12,8 +12,8 @@ interface Props {
 }
 
 /**
- * A modal panel. What it does for every caller is stated in `web/src/SPEC.md`, under
- * *What the shared controls promise*.
+ * What it does for every caller is stated in `web/src/SPEC.md`, under *What the shared
+ * controls promise*.
  */
 export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);

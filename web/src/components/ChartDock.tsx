@@ -1,7 +1,6 @@
 /**
- * The strip of chart names along the bottom of the Analytics screen, and the ⋮ that
- * acts on each of them. Why the actions live here and not on the card is in
- * `web/src/SPEC.md`, under *What a chart is, and where its numbers come from*.
+ * Why a chart's actions live here and not on its card is in `web/src/SPEC.md`, under
+ * *What a chart is, and where its numbers come from*.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChartGlyph, GlyphName } from './ChartGlyphs';
