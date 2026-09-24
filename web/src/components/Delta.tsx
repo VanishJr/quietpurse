@@ -1,15 +1,10 @@
 /**
- * A comparison with the period before, or nothing at all.
+ * `favourable` is the caller's, because the same arrow means opposite things to
+ * different callers: income rising is good news and spending rising is not, and
+ * colouring both green because both went up is the thing to avoid.
  *
- * `favourable` is the caller's, because the same arrow means opposite things on the
- * three cards that draw one: income rising is good news and spending rising is not,
- * and colouring both green because both went up is the thing the reference screenshot
- * does and the one thing here not copied from it.
- *
- * Its own module because the balance card and the income/expense pair are two
- * components now — they are two cards in the design and they sit in different cells of
- * the same grid — and a second copy of this would be a second answer to which
- * direction is good.
+ * Its own module because more than one component draws it, and a second copy of this
+ * would be a second answer to which direction is good.
  */
 
 interface Props {
@@ -31,10 +26,10 @@ export function Delta({ pct, favourable, note }: Props) {
       {/*
         The direction is drawn twice and read once. The arrow is the whole of it for
         the eye — a shape, so it survives a reader who cannot tell the two colours
-        apart — and it is `aria-hidden`, which left the sign nowhere: the figure is
-        `Math.abs`, so a screen reader was given "100.0% vs Jul" and no way to tell a
-        doubling from a halving. The word is inside the `<strong>` so the two arrive
-        as one phrase rather than as a stray syllable before a number.
+        apart — and it is `aria-hidden`, and the figure is `Math.abs`, so without the
+        hidden word a screen reader could not tell a rise from a fall. The word is
+        inside the `<strong>` so the two arrive as one phrase rather than as a stray
+        syllable before a number.
       */}
       <strong>
         <span className="visually-hidden">{up ? 'up ' : 'down '}</span>

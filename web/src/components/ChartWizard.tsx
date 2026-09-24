@@ -1,31 +1,9 @@
 /**
- * "Create chart", in two steps: what shape, then what it is about.
- *
- * The order is the point. A reader who wants a donut of last quarter's spending knows
- * the donut before they know the quarter, and a single form asking for eleven values at
- * once — kind, account, three measures, a breakdown, a range, a name — is a form nobody
- * finishes. Split, the first step is one click and the second is a page of chips with
- * every default already filled in, so "Create" is reachable from either step.
- *
- * ---------------------------------------------------------------------------
- * The preview is the real chart
- *
- * Step two renders `ChartPlot` on the draft, at a smaller height, from the reader's own
- * data. Not a mock and not one of the glyphs: a preview drawn from something other than
- * the answer is a preview that can be wrong, and the whole reason to show one is that a
- * range is much easier to judge from the plot it produces than from its name.
- *
- * It costs what it looks like it costs — changing the account or the range refetches —
- * and nothing else does: `useChartData` keys on the fields a request depends on, so
- * typing a name or turning a measure on and off redraws from data already in hand.
- *
- * ---------------------------------------------------------------------------
- * Editing is the same dialog
- *
- * An existing chart opens straight at step two with its own values in it, and "Change
- * shape" walks back to step one without losing them. Which is why `Chart` carries
- * both `metrics` and `breakdown` at all times: switching a donut to a line and back
- * must not quietly discard the half that was not being read.
+ * A new chart is asked for its shape before what it is about, and the order is the
+ * point. A reader who wants a donut of last quarter's spending knows the donut before
+ * they know the quarter, and a single form asking for every value at once is a form
+ * nobody finishes. Split, the first step is one click and the second is a page of chips
+ * with every default already filled in.
  */
 import { useEffect, useState } from 'react';
 import {
@@ -102,18 +80,23 @@ export function ChartWizard({
     setDraft(editing);
     setStep(editing ? 'detail' : 'kind');
     setNamed(editing !== null);
-    // `editing` deliberately absent — see above
+    // `editing` deliberately absent: `key` stands in for it
   }, [key]);
 
   if (!open) return null;
 
-  /* The suggested title names the account a chart is about — see `suggestedTitle`, and
-     the card, which no longer says it anywhere else. */
+  /* The suggested title names the account a chart is about — see `suggestedTitle`. */
   const nameOf = (id: string | null): string | null =>
     id ? (accounts?.find((a) => a.id === id)?.name ?? null) : null;
 
   const suggest = (spec: Chart): string => suggestedTitle(spec, nameOf(spec.accountId));
 
+  /*
+   * An existing chart opens straight at step two with its own values in it, and "Change
+   * shape" walks back to step one without losing them: the draft keeps `metrics` and
+   * `breakdown` whatever the kind, so switching a donut to a line and back must not
+   * quietly discard the half that was not being read.
+   */
   const pickKind = (kind: ChartKind) => {
     const next = draft ? { ...draft, kind } : blankChart(kind);
     setDraft(named ? next : { ...next, title: suggest(next) });
@@ -170,7 +153,6 @@ export function ChartWizard({
   );
 }
 
-/** Step one: the six shapes, as shapes. */
 function KindStep({
   chosen,
   onPick,
@@ -187,8 +169,8 @@ function KindStep({
       <h3 className="sheet-title">{editing ? 'Change the shape' : 'What shape?'}</h3>
 
       {/* The drawing IS the description. A sentence per tile explaining what a line
-          chart is for is six paragraphs answering a question the six pictures have
-          already answered — the blurbs are `CHART_KINDS`' still, for a `title`. */}
+          chart is for answers a question the picture has already answered — the blurbs
+          are `CHART_KINDS`' still, for a `title`. */}
       <div className="kind-grid" role="group" aria-label="Chart shapes">
         {CHART_KINDS.map((k) => (
           <button
@@ -215,7 +197,6 @@ function KindStep({
   );
 }
 
-/** Step two: what the chart compares, with the answer drawn beside the question. */
 function DetailStep({
   draft,
   accounts,
@@ -245,13 +226,11 @@ function DetailStep({
    * The accounts on offer, plus the one this chart is already about however it is
    * marked.
    *
-   * Hidden accounts are kept out of the CHOICES — that is what hiding one is for, and
-   * `AnalyticsScreen` says why the list itself still carries them. But filtering the
-   * chart's own subject out of its own editor left "Account" with nothing lit at all:
-   * "All accounts" is not on either, so a reader who hid an account and then opened the
-   * chart built on it was shown a question with no answer to it, under a name box still
-   * reading that account's name. Every chip in front of them retargeted the chart, and
-   * none of them led back.
+   * Hidden accounts are kept out of the CHOICES — that is what hiding one is for. But the
+   * chart's own subject stays: filtered out of its own editor, a chart built on a hidden
+   * account opens with "Account" lit on nothing at all — "All accounts" is not on either
+   * — under a name box still reading that account's name, and every chip in front of the
+   * reader retargets the chart with none leading back.
    */
   const visible = (accounts ?? []).filter((a) => !a.hidden || a.id === draft.accountId);
   const accountName = draft.accountId
@@ -274,9 +253,9 @@ function DetailStep({
 
   const pickAccount = (id: string | null) => {
     const stillOffered = BREAKDOWNS.find((b) => b.key === draft.breakdown);
-    // "by source" is not offered for one account — a product decision left open, not a
-    // limit of the API; see BREAKDOWNS. Moving the reader off it here rather than
-    // leaving the question lit on a choice the chips no longer carry.
+    // "by source" is not offered for one account (see `BreakdownDef.allAccountsOnly`).
+    // Moving the reader off it here rather than leaving the question lit on a choice the
+    // chips no longer carry.
     const breakdown: ChartBreakdown =
       id !== null && stillOffered?.allAccountsOnly ? 'expense-categories' : draft.breakdown;
     patch({ accountId: id, breakdown });
@@ -360,9 +339,9 @@ function DetailStep({
               className="input"
               value={draft.title}
               /* the door's own bound, at the keyboard. `normaliseForSave` would cut
-                 the 121st character on the way out instead, which is a word going
-                 missing from a tab later where this is a keystroke not appearing
-                 under the caret */
+                 what is past it on the way out instead, which is a word going missing
+                 from a tab later where this is a keystroke not appearing under the
+                 caret */
               maxLength={CHART_TITLE_MAX}
               onChange={(e) => onName(e.target.value)}
               placeholder={suggestedTitle(draft, accountName)}
@@ -401,7 +380,6 @@ function DetailStep({
   );
 }
 
-/** The draft, drawn from the reader's own numbers. See the header. */
 function Preview({
   draft,
   accounts,
@@ -425,11 +403,8 @@ function Preview({
 }
 
 /**
- * A labelled block of the form. A `<fieldset>`, because every one of them is a group.
- *
- * A label and its controls, and nothing between them. Each of these carried a line of
- * explanation once — what Net is, what a tick is, what the name is for — and all four
- * were captions for a row of chips that says the same thing in the words on it.
+ * A label and its controls, and nothing between them: a caption over a row of chips
+ * says what the words on the chips already say.
  */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -441,9 +416,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 /**
- * One choice. `aria-pressed` and not a radio: the measures are a multi-select and the
- * others are not, and one control that says "on/off" for both is the idiom `.chip`
- * already carries everywhere else in this app.
+ * `aria-pressed` and not a radio: the measures are a multi-select and the others are
+ * not, and one control that says "on/off" serves both.
  */
 const Choice = ({ label, on, onPick }: { label: string; on: boolean; onPick: () => void }) => (
   <button className="chip" aria-pressed={on} onClick={onPick}>

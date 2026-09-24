@@ -9,14 +9,14 @@ parent: architecture
 What this package's source is for, where it stops, and the rules about it that no type and no test
 holds. `AGENTS.md`'s *Platforms*, *Invariants* and *Verification has a hole* carry the contract, the
 slug rule, the error budget and what a green run does not cover, and nothing below repeats them.
-The reasoning behind the modules at the root of `web/src` lives in this document, `App.tsx` and
-`Shell.tsx` excepted. Their code keeps only what `AGENTS.md`'s *Conventions* names as a keep, and the
-two month rules kept whole beside their functions are named below by symbol. The components and the
-screens under this directory, and the two files excepted above, are described here only where a rule
-above the root reaches into one; their own reasoning is beside their code. The test files under
-`web/src`, `web/src/test/setup.ts` among them, keep their reasoning beside their code as well. The
-sections after *Invariants* open each paragraph on the symbol it is
-about, so a rule is found by the symbol it governs.
+The code of the modules at the root of `web/src` and of the components in `web/src/components/`,
+`App.tsx` and `Shell.tsx` excepted, keeps what `AGENTS.md`'s *Conventions* names as a keep, and the
+two month rules kept whole beside their functions are named below by symbol. The screens in
+`web/src/screens/`, and the two files excepted above, are described here where a rule reaches into
+one, and their code carries the rest of their reasoning. The test files under `web/src`,
+`web/src/test/setup.ts` among them, keep their reasoning beside their code as well. The sections
+after *Invariants*, *Overview presentation* excepted, open each paragraph on the symbol it is about,
+so a rule is found by the symbol it governs.
 
 ## Responsibility
 
@@ -84,7 +84,7 @@ back**, because dropping it deletes it from every device the next time anything 
 **What a `Chart` carries is the wire's; what this package does with three of its fields is its
 own.** The title is the reader's: the wizard suggests one from the draft until the reader types
 their own, and never rewrites a typed one under them. `metrics` may be empty while the reader is
-between two choices — the chips enforce no minimum — and a chart in that state cannot be saved;
+between two choices — the chips enforce no minimum — and a series chart in that state cannot be saved;
 `ChartPlot` says so on the plot rather than drawing nothing. `accountId: null` is every account
 together, which is what the summary endpoints answer without an id; an id that names no account is
 not that, and `chartData.ts` refuses it rather than answering the whole under one account's title.
@@ -105,15 +105,15 @@ so narrow layouts and assistive action lists keep the card context.
 
 **A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
 goal are one retryable load; a new attempt clears the previous account list and currency before any
-form or type choice is enabled. Account-backed edits retain the goal's persisted currency when a
-saved account is gone or no longer uses that currency. Savings selection locks to one currency
+form or type choice is enabled. Debt and savings-balance edits retain the goal's persisted currency
+when a saved account is gone or no longer uses that currency. Savings selection locks to one currency
 until the current selection is cleared; incompatible saved accounts remain removable and cannot
 silently retarget the goal. A debt edit continues naming its saved account after the balance reaches
 zero. Form refusals stay with their draft, but Back or a new type clears them; repeated
 essential-cost controls carry their row ordinal in every accessible name.
 
 **Goal selection is location, not product state.** The stable navigation key remains
-`screen=goal`, while an optional `goal` query key identifies the editor or detail being viewed. A
+`screen=goal`, while an optional `goal` query key opens the editor, for a new goal or a saved one. A
 missing id, including one that disappears before an edit is saved, falls back to the list with an
 explicit unavailable message rather than choosing another goal. A new installation's empty list is
 a real empty state and is never shown while the request is unresolved or failed.
@@ -166,8 +166,8 @@ narrower than the door cannot
 draw a kind the server accepts: `parseChart` refuses the row, `chartEntry` keeps it as unreadable,
 `entryWire` sends it back verbatim, and the screen names it rather than drawing it; a goal type it
 lacks is a picker with no tile and no way to create it, and an income source kind it lacks is
-a label read off a record by a key that is not there, which throws inside render and takes the Settings
-screen down with it; one wider composes a list nobody can save. Every pin assumes the wire's export
+a label read off a record by a key that is not there, which throws inside render and, with no error
+boundary in this app, takes the whole app down with it; one wider composes a list nobody can save. Every pin assumes the wire's export
 carries a literal type, and `web/src/types.test.ts` holds that premise under `tsc`: each client
 constant is asserted equal to the wire export's type and each union equal to its record's keys, so a
 wire constant widened to `number` or a tuple that lost its `as const` reds there rather than making
@@ -234,7 +234,7 @@ and in the Transactions detail sheet's hint; and the *Support* kind name in
 source in `backend/src/db/index.ts`. The packages share no build, `copy.test.ts` walks this side
 looking for something else entirely, and no check compares them — so any copy can drift and every
 test in both packages stays green. The seeded label is the person's own, and one who has renamed it
-reads their own word, which is what the delete confirmation looks up rather than writes out. The
+reads their own word. The
 source the server derives from the Support category is the other way round — the summary answers
 its id as its label and composes no word, and `incomeSourceLabel` in `categories.ts` turns a
 `category:` id into the dictionary's word where the share chart prints the summary's sources, so
@@ -245,8 +245,9 @@ Transactions list badges outside help with the catalogue's label and gives a der
 badge, because that row's category already says what the money is.
 
 **An income-source write invalidates every mounted reader before Settings re-reads its catalog.**
-The Shell keeps its screens mounted while hidden, so one shared data revision reloads Overview's
-account rows and figures, the transaction rows and source catalog, chart data, goal progress and
+The Shell keeps its screens mounted while hidden, so one shared data revision reloads the Overview's
+recent rows and figures for the account it shows, the transaction rows and source catalog, chart
+data, goal progress and
 Settings' recurring groups. The last reader matters because a source pattern can break a transfer
 pair, which can turn the surviving expense into a recurring payment. The invalidation runs as soon
 as the write succeeds: a failed follow-up catalog GET cannot suppress it. Transactions clears its
@@ -254,8 +255,10 @@ old source catalog during that reload and exposes a failed read with a retry rat
 freshly classified rows with stale names. Revision-driven loads are latest-request-wins, so a slow
 pre-mutation response cannot replace the newer answer.
 
-**The account delete's counts — transactions, imports, documents — are what the delete destroyed,
-which for a hidden account is legitimately not what the panel previewed.** The preview counts a
+**The account delete's counts — transactions, imports, documents — are what the delete removed from
+the database, which for a hidden account is legitimately not what the panel previewed.** A document
+in that answer is a removed import that claimed a stored file, counted whether or not its bytes were
+still on disk. The preview counts a
 hidden account by the server's total over its imports, because the transactions endpoint answers
 nothing for one; the delete counts the rows carrying the account id. Transfer rules go too and are
 not in the answer.
@@ -269,7 +272,7 @@ it arrives as a double near the figure and not equal to it, and adding a few hun
 the residue: a base that is zero to the last cent is a tiny residue instead, and a percentage taken
 against it is a number whose size means nothing. So every comparison in `accounts.ts` is made in
 cents, every sum in `analytics.ts` is accumulated as an integer and divided once at the end, and
-`web/src/components/SpendingByCategory.tsx`, which takes a remainder off the same doubles, goes
+`spendRing` in `categories.ts`, which takes the Overview ring's remainder off the same doubles, goes
 through `toCents` rather than keeping a copy of it.
 
 `monthOf`, `fmtDay` and `fmtMonthKey` split a calendar key on the string and never turn it into an
@@ -311,10 +314,10 @@ questions. `chartKind` is the one answer the wizard and the loader both read, so
 list of names.
 
 `useChartData` is the one seam between a chart and the server: `analytics.ts` holds the model and
-the arithmetic — nothing in it fetches or touches React, and the series arithmetic takes `today` as
-an argument rather than reading a clock, so every series it builds can be asserted against a fixed
-date — the components draw, and `chartData.ts` turns a `Chart` into requests and the answers into
-something drawable. A field the reader sets in the wizard decides which shape of body the same two
+the arithmetic that builds a chart's points and parts — nothing in it fetches or touches React, and
+the series arithmetic takes `today` as an argument rather than reading a clock, so every series it
+builds can be asserted against a fixed date — the components draw them and may add up what they
+print, and `chartData.ts` turns a `Chart` into requests and the answers into something drawable. A field the reader sets in the wizard decides which shape of body the same two
 endpoints come back with. Every account together is `/api/summary` and `/api/summary/months` with no
 account named: the whole, converted into the base currency. One account is the same two with an
 `accountId` on them: that account's own rows, in that account's own currency, with nothing
@@ -352,14 +355,15 @@ side that could take the earlier half back out of a doubled window. `loadShare`'
 asks its endpoint twice for the same reason, stated for that arm on its own: both periods in one
 window come back added together, and every category's `before` would be its own `now`.
 
-`drawnShares` decides in one place which parts a kind draws, because the files drawing a chart were
-each answering what it was of and were free to disagree — a card summed every slice for its total
+`drawnShares`, and the `positiveShares` it is built on, write down in `analytics.ts` which parts a
+kind draws, because the files drawing a chart were each answering what it was of and were free to
+disagree — a card summed every slice for its total
 while the donut in the middle of it summed only the positive ones, so one refunded category put two
 totals on the same card. A refund can push a category negative, the purchase in an earlier period
 and the refund in this one, and that is the honest figure: a ranking has a baseline and prints it,
 and a donut or a radar has no such thing as a negative sector and drops it. `SharePoint.key` is the
-backend's slug or the income source's id, and `ChartPlot` takes both the colour and the React key
-from it.
+backend's slug or the income source's id, and `ChartPlot` takes the React key from it, and the
+colour too when the key is a category slug.
 
 `parseChart` reads a stored row field by field and answers null for a shape this version does not
 recognise, because a throw would take the whole screen down on first paint, and a row can have been
@@ -380,6 +384,34 @@ in `backend/src/app.ts` the 200 and the 409 carry the same `version` and `charts
 lets `ChartsStaleError` carry the current list — a client refused for staleness re-syncs from the
 refusal and never asks a second time to find out what happened — and what makes re-syncing from a
 refusal the same code as reading.
+
+`ChartPlot` draws the `Chart` and the `ChartData` it is handed, and holds no state and fetches
+nothing. That is what lets `ChartWizard`'s preview be the chart the card will draw, from the reader's
+own data, rather than a mock that could disagree with it: a range is easier to judge from the plot
+it produces than from its name. A fetch or a piece of state added to `ChartPlot` is one the preview
+and the card would each run for themselves.
+
+`ChartCard` is the chart as a picture and carries no control: editing, duplicating and deleting a
+chart are done to it as an object, from its tab in `ChartDock`, because actions on the card put the
+loudest row on the screen above the plot a reader came to look at. `ChartDock` sits under the chart
+it chooses, as an index under its subject rather than a filter over it.
+
+`ChartCard`, `AccountFlows` and `SpendingByCategory` each draw their plot hidden from a screen reader
+and carry its numbers in a visually hidden table beside it — as measured — because the SVG is not
+readable. `ChartWizard`'s preview draws `ChartPlot` with no table beside it, so its figures reach a
+screen reader only once the chart is saved and drawn on a card. A future chart owes the pair
+wherever it is the thing a reader is reading.
+
+`isAnimationActive` is false on every series `ChartPlot`, `AccountFlows` and `SpendingByCategory`
+draw — as measured, and nothing enforces it.
+
+`DOTTED_UP_TO` is declared in `AccountFlows` and again in `ChartPlot`, one rule and one value, and
+nothing holds the two literals equal; the rule is written beside `ChartPlot`'s copy.
+
+`ChartWizard` keeps `metrics` and `breakdown` in the draft across a change of shape, so switching a
+donut to a line and back does not quietly discard the half that was not being read, and the charts
+route takes both whatever the kind: `chartSchema` in `backend/src/app.ts` couples neither `metrics`
+nor `breakdown` to `kind` and sets no minimum on `metrics`.
 
 ## Where the reader is
 
@@ -425,8 +457,8 @@ cannot name an arm the server does not; but a body can still come from a server 
 than the one this client was built from — the client is a build and the server runs from source, so
 the two are not built together — or through a proxy, and there is no error boundary in this app.
 The confirmation card the sentence is written for is where a staged import is confirmed or
-discarded — as measured, nothing enforces it — so a throw in it would leave the import stuck, with
-nothing on screen to release it.
+discarded — as measured, nothing enforces it — so a throw in it would take the whole app down with
+the import still staged.
 
 `GENERIC_PRESET_TITLE` is the client's name for the generic reader and a prefix of the server's
 title for it, deliberately not equal to it. The server's side of that coupling is held one package
@@ -441,11 +473,34 @@ count in an importer's refusal and a row count on a screen should read alike. Ea
 only by an edit to itself, which is what makes two copies correct here.
 
 `tooltipProps` and the arithmetic in `analytics.ts` live in modules with no JSX rather than in the
-screens that draw them, because a chart in jsdom is a box with no size — recharts draws nothing
+components that draw them, because a chart in jsdom is a box with no size — recharts draws nothing
 there — so a screen test can mount a chart and assert nothing about it. What lives there is held by
 `unit` cases, against both palettes or a fixed date; what recharts reads off a datum by name and
 never checks is pinned as text by `chartTooltip.test.ts`, as a list of named attributes and not as a
 boundary.
+
+`balanceClaim` lets the sentence about a running balance claim the run and never that the statement
+is complete, because of where the balance's two ends come from: `checkSheet` in
+`backend/src/providers/statement.ts` derives both from the rows it read, so a row lost from either
+end of the statement moves that end instead of breaking the run, and nothing on this side can tell.
+A PDF prints its opening and closing balances itself, and the rows adding up to them is what was
+checked there.
+
+`CsvImport`'s confirmed panel and `ImportHistory` print the count of rows that did not import
+without a cause, because none is kept: `rows_rejected` on the import row is the sum of the rows that
+were unreadable, filtered by a status or moved no money — the `DropKind` buckets in
+`backend/src/providers/statement.ts` — and does not say which. The breakdown is on the summary card before
+Confirm, and a cause repeated afterwards would be a claim about rows the panel cannot see.
+
+`drops` in `CsvImport` leaves the filtered rows out of the summary card's sentences because the
+backend's own line in `problems` counts them and names the status values that filtered them, as
+many as fit and a count of the rest; a second count beside it would describe the same rows twice.
+
+`IncomeSourcesBlock`'s pattern hint states the word floor `makeSourceMatcher` in
+`backend/src/classify.ts` applies to a pattern, and nothing holds the two together, the same shape
+as `categoryRuleCaption`'s coupling to that file: a pattern with too few words long enough to count
+is accepted, stored and tags nothing, so the hint, the example in the field above it and the row
+that lists a source's patterns are written against that floor and go wrong together when it moves.
 
 ## The palette, and what leaves the page
 
@@ -480,6 +535,18 @@ The client's cleaning is not the server's `cleanName` for a reason: nothing here
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.
 
+`ChartPlot` colours a series by the `Ink` key its entry in `METRICS` names, so what income or
+expenses look like is not decided in the plot, and colours a share part by `sliceColor`: a key that
+is a category slug takes that category's `categoryColor`, and any other key takes a colour off
+`RAMP` by its position. `RAMP` is a list of category slugs rather than of colours, so the two
+schemes keep answering for themselves. An income source whose id is also a category slug is
+coloured as that category.
+
+`ChartPlot`'s donut key marks each part with the round `.dot` and its series legend with the square
+`.swatch`. As measured, and enforced by nothing, every `.dot` in the product's markup marks a
+category or a sector of a ring — the donut's key, the Overview ring's legend, and the Transactions
+list and its category picker — and every `.swatch` marks a series or a period.
+
 ## Overview presentation
 
 Overview keeps each account's native currency. Its summaries are loaded together after the recent
@@ -505,7 +572,7 @@ Navigation uses the same links for the desktop sidebar and mobile bar. Screens s
 filters survive navigation, with inactive screens excluded through `hidden`. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
-each tab a composite widget with a roving tabindex nobody asked for. The account's import
+the strip a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 
@@ -513,3 +580,66 @@ Dark is the initial theme; an existing saved choice takes precedence. Colours ar
 `theme.tsx` to CSS and chart components together. The action accent and income may share a colour,
 so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
 a raised surface with its own text colours rather than inheriting colours from the plotted series.
+
+## Accounts and statements, as the client handles them
+
+`CsvImport` reads the account list with no argument and filters nothing itself: the server leaves a
+hidden account out of that list, and `POST /api/imports` refuses a hidden account's id, so a filter
+here would render the same list while moving the decision to the layer that does not hold it. An
+account is created by its own request and never by an upload — the upload route refuses
+`accountName` and `currency` outright — so the create arm makes the account before the file is
+uploaded.
+
+`ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
+`api.imports` for that one account by its id and never match on `accountName`: the server filters
+imports on the account id, and the name an import row carries is the account's name when the
+statement was staged, which a later rename leaves behind.
+
+`AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
+server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on
+the lower-cased name: a gate demanding the capitals back would refuse a name the server calls
+identical to the one on the tab.
+
+`COUNT_LIMIT` is what `AccountDialog`'s delete preview asks the transactions endpoint for, because
+that endpoint takes a limit and answers a bare list with nothing about what it cut: the preview asks
+for more than a count could plausibly be and says so when the answer comes back full. A server that
+capped the limit below `COUNT_LIMIT` would make a cut answer read as a whole count.
+
+`AccountTabs` is handed the accounts in the order the Overview puts on the rail — the server's
+order, by provider and then by name, with the hidden accounts after the visible ones when they are
+shown — so a rename can carry the selected account to another page on the next load, which is the
+case the strip's paging effect follows.
+
+## What the shared controls promise
+
+`Sheet` is described here as it behaves while it is the only sheet open, and not while more than one
+sheet is open. `Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed.
+Open, it calls its `onClose` on an Escape keydown that reaches the document and on a click whose
+target is its backdrop, and not on a click inside the card — though a press begun inside the card
+and released over the backdrop can be a click on the backdrop — and whether that call closes it is
+the caller's. It keeps Tab and Shift+Tab, while focus is inside the card, among the card's focusable
+controls that are not hidden, or on the card itself when there are none, and sets `overflow: hidden`
+on the document's body, putting back on close what it found there when it last set it. It does not
+bring back focus that has left a card with controls in it — as when a step change unmounts the
+control that held it — so from there Tab and Shift+Tab move as the browser moves them, and Shift+Tab
+can reach the page behind the sheet. Once it has rendered open it calls `focus()` on the card, and
+when it closes it makes the same call on whatever held focus just before, if that is still in the
+document — so where a child takes focus with `autoFocus` as the sheet opens, the card takes focus
+from that child and, on close, focus returns to nothing. The browser ignores that call on an element
+that cannot take focus, and nothing on a screen the Shell has hidden can: a sheet that opens on a
+hidden screen does not take focus, and one that closes on a hidden screen gives none back to an
+element there. Its Tab trap stands down while the card sits inside a `hidden` ancestor, and such an
+Escape still calls its `onClose` there. A caller relies on this rather than restating it beside its
+own sheet.
+
+`aria-current` is the app's idiom for which of a set is the current one — on the navigation's
+links, and on plain buttons in `AccountTabs`' account strip and `ChartDock`'s chart strip, neither
+of which is a tablist, because a tablist makes a strip a composite widget with a roving tabindex.
+`aria-pressed` on a button is its idiom for a choice, `Chips` and `ChartWizard`'s `Choice` among
+them, rather than a radio group. As measured, and enforced by nothing, the product's markup carries
+no `role="tablist"`, `role="tab"`, `role="radio"`, `type="radio"`, `role="menu"` or
+`role="menuitem"`.
+
+`NavIcons` and `ChartGlyphs` draw in `currentColor` and are `aria-hidden`: where one sits inside a
+control that carries its name in text, a drawing announced beside the name would be the name twice,
+and a drawing inherits its colour from the elements it sits in.

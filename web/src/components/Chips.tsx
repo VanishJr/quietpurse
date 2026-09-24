@@ -11,7 +11,6 @@ interface Props {
   label?: string;
 }
 
-/** A horizontal row of pill filters; scrolls sideways when it doesn't fit. */
 export function Chips({ options, selected, onSelect, label }: Props) {
   return (
     <div className="chips" role="group" aria-label={label}>

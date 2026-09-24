@@ -45,7 +45,6 @@ export const ImportIcon = () => (
   </svg>
 );
 
-/** Settings: three sliders. The one icon here that is drawn on a wide window too. */
 export const SettingsIcon = () => (
   <svg {...box}>
     <path d="M3.25 6h13.5M3.25 10h13.5M3.25 14h13.5" />
@@ -56,12 +55,8 @@ export const SettingsIcon = () => (
 );
 
 /**
- * Accounts: two cards, one behind the other. Not in the navigation — it is the rail's
- * hidden-accounts switch, and the only icon here with two states.
- *
- * `off` strikes it through. That is the whole of what the control says, so it is a
- * shape and not a colour, and it is drawn corner to corner rather than as a short bar:
- * a slash that stops inside the glyph reads as part of the drawing.
+ * `off` strikes it through, corner to corner rather than as a short bar: a slash that
+ * stops inside the glyph reads as part of the drawing.
  */
 export const AccountsIcon = ({ off = false }: { off?: boolean }) => (
   <svg {...box} width={17} height={17}>

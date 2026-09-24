@@ -9,35 +9,37 @@ interface Props {
   /** Required: a mount with no way back strands the user here. */
   onBack: () => void;
   /**
-   * The caller's data moved — the meaning CsvImport's onImported established. A
-   * deleted statement file is not the caller's data, so that does not fire it.
+   * The caller's data moved: rows left with an import. A deleted statement file is not
+   * the caller's data, so that does not fire it.
    */
   onChanged: () => void;
   /**
-   * One account's imports rather than the workspace's, which is what the ⋮ on a tab
-   * opens. The id goes to the server and the filtering happens there, on the id and
-   * never on `accountName`: a rename moves the account and leaves the name recorded
-   * on the row behind, so matching by name would drop every file uploaded before it.
+   * One account's imports rather than every account's, asked for on the id and never
+   * on `accountName`; `web/src/SPEC.md` gives the reason under *Accounts and statements,
+   * as the client handles them*.
    */
   account?: Account;
 }
 
-/** Which row's confirmation is open, and for which of the two deletes. One at a time. */
 type Confirm = { kind: 'import' | 'document'; id: string };
 
 /**
- * A refusal about a row renders in that row. The list runs to a hundred of them, so
- * one shown at the top of the panel is one the reader never sees.
+ * A refusal about a row renders in that row. The list runs long, so one shown at the
+ * top of the panel is one the reader never sees.
  */
 type RowError = { id: string; message: string };
 
-/** Also what the download saves it as, so a nameless row reads as its own file. */
+/**
+ * A nameless row is titled with the same id-derived name `safeFilename` falls back to
+ * for its download, so it reads as the file it saves as; nothing holds the two
+ * spellings together.
+ */
 const titleOf = (r: ImportRecord): string =>
   r.originalFilename ?? `import-${r.id}.${r.sourceType}`;
 
 /**
- * Three numbers from three fields. There is no rows-read total on the record and
- * none is computed here: accepted + rejected is an arithmetic the file never stated.
+ * There is no rows-read total on the record and none is computed here: accepted +
+ * rejected is an arithmetic the file never stated.
  */
 const countsLine = (r: ImportRecord): string => {
   const owned =
@@ -48,9 +50,9 @@ const countsLine = (r: ImportRecord): string => {
         : `${r.transactions} transactions belong`;
   return [
     `${rowCount(r.rowsAccepted)} accepted`,
-    // no cause, because the record has none: rows_rejected is the undifferentiated
-    // total and the three reasons behind it were never stored. "Couldn't be read" was
-    // one of the three, asserted here of all of them
+    // no cause, because the record has none: rows_rejected is one total over every
+    // reason the importer dropped a row, so naming one reason here would assert it of
+    // all of them
     ...(r.rowsRejected > 0 ? [`${r.rowsRejected} not imported`] : []),
     `${owned} to this import`,
   ].join(' · ');
@@ -82,9 +84,6 @@ const orderingLine = (list: ImportList): string => {
 };
 
 /**
- * What has been uploaded, and the two things that can be removed: the statement file
- * on its own, or the import and the rows it wrote.
- *
  * No Confirm control anywhere, for any status: there is no way to read a staged
  * summary back, and confirming numbers nobody read is what the confirmation step
  * exists to prevent.
@@ -185,9 +184,9 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
     }
   };
 
-  // no filter here on purpose: the server was asked for one account and answered
-  // one account's. A second filter would hide a server that ignored the parameter,
-  // leaving the totals as the only symptom
+  // no filter here on purpose: when an account is given, the server was asked for that
+  // one account and answered its imports. A second filter would hide a server that
+  // ignored the parameter, leaving the totals as the only symptom
   const shown = list?.imports;
 
   return (
@@ -243,8 +242,8 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
                   none of them belong to this import.
                 </p>
               )}
-              {/* whole, never cut: the backend composes it against a 500-character
-                  budget on the premise that all of it is read */}
+              {/* whole, never cut: the backend composes it against a budget on the
+                  premise that all of it is read */}
               {r.errorDetail && <p className="hint">{r.errorDetail}</p>}
               {!r.documentAvailable && (
                 <p className="hint">No stored file this server can read.</p>
@@ -305,10 +304,10 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
                     Download
                   </button>
                 )}
-                {/* ungated on purpose: documentAvailable is READABLE, not
-                    "bytes exist", and a row whose pointer was stripped is the likeliest
-                    of all to still have a statement on disk. Hiding this button leaves
-                    Delete import as the only way to reach it. */}
+                {/* ungated on purpose: documentAvailable is the row's claim to a stored
+                    file, not "bytes exist", and a crash between storing a statement and
+                    recording the claim leaves bytes no row claims. Hiding this button
+                    leaves Delete import as the only way to reach them. */}
                 <button
                   className="btn-danger"
                   disabled={busy}
