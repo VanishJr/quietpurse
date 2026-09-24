@@ -55,8 +55,7 @@ export const SettingsIcon = () => (
 );
 
 /**
- * Accounts: two cards, one behind the other. Not in the navigation — the account rail
- * draws it on its tabs and on its hidden-accounts switch, where it has two states.
+ * Accounts: two cards, one behind the other.
  *
  * `off` strikes it through. That is the whole of what the control says, so it is a
  * shape and not a colour, and it is drawn corner to corner rather than as a short bar:

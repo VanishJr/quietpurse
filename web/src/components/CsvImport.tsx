@@ -338,9 +338,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * none of them, `undefined > 0` is false, and the card says nothing instead of
    * "undefined rows couldn't be read".
    *
-   * The filtered rows are missing from here on purpose: the backend's own line in
-   * `problems` counts them and names the status values that did it, and a second count
-   * beside it would describe the same rows twice.
+   * The filtered rows are missing from here on purpose, for the reason `web/src/SPEC.md`
+   * gives under *The sentences a person reads, and what is lifted out of a screen to
+   * hold them*.
    */
   const drops = summary
     ? [

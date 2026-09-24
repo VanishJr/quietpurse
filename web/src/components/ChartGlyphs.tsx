@@ -12,7 +12,7 @@
  * text, so a glyph announced beside it is the word twice, and a tile that is hovered or
  * selected recolours the drawing by changing its own colour.
  *
- * One viewBox for all of them, so they line up in the grid whatever the tile does to its
+ * One viewBox for every shape, so they line up in the grid whatever the tile does to its
  * width. Wider than it is tall, because a plot is.
  */
 

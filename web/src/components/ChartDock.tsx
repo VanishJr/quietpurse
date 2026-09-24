@@ -114,7 +114,7 @@ export function ChartDock({
      * `overflow-x: auto`, which clips an absolutely positioned child, and `fixed` escapes
      * that without giving up the scroll.
      *
-     * It hangs from its RIGHT edge, under the ⋮ it came from, clamped at both ends of the
+     * It hangs from its RIGHT edge, above the ⋮ it came from, clamped at both ends of the
      * window: the floor keeps it off the right edge, and the ceiling keeps a ⋮ near the
      * left edge of a narrow window from putting the menu's own left edge off the screen.
      * Below `MENU_WIDTH + 2 * EDGE_GAP` of window there is no placement that leaves both
@@ -335,7 +335,7 @@ export function ChartDock({
         <span aria-hidden="true">＋</span> New chart
       </button>
 
-      {/* a popover under the ⋮ and not a `Sheet`: the actions are a word each, and a sheet
+      {/* a popover above the ⋮ and not a `Sheet`: the actions are a word each, and a sheet
           would black out the chart the reader is acting on. A labelled group of buttons
           rather than a `role="menu"`, which would promise arrow keys it does not implement */}
       {popover && open && (

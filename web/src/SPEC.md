@@ -397,23 +397,21 @@ loudest row on the screen above the plot a reader came to look at. `ChartDock` s
 it chooses, as an index under its subject rather than a filter over it.
 
 `ChartCard`, `AccountFlows` and `SpendingByCategory` each draw their plot hidden from a screen reader
-and carry its numbers in a visually hidden table beside it — as measured, and nothing enforces it —
-because the SVG is not readable. `ChartWizard`'s preview draws `ChartPlot` with no table beside
-it, so its figures reach a screen reader only once the chart is saved and drawn on a card. A future
-chart owes the pair wherever it is the thing a reader is reading.
+and carry its numbers in a visually hidden table beside it — as measured — because the SVG is not
+readable. `ChartWizard`'s preview draws `ChartPlot` with no table beside it, so its figures reach a
+screen reader only once the chart is saved and drawn on a card. A future chart owes the pair
+wherever it is the thing a reader is reading.
 
 `isAnimationActive` is false on every series `ChartPlot`, `AccountFlows` and `SpendingByCategory`
-draw — as measured, and nothing enforces it — because the Shell keeps every screen mounted, so a
-chart can first render inside a hidden one, and an animation started there freezes at an arbitrary
-frame and keeps that wrong height once the screen is shown.
+draw — as measured, and nothing enforces it.
 
 `DOTTED_UP_TO` is declared in `AccountFlows` and again in `ChartPlot`, one rule and one value, and
 nothing holds the two literals equal; the rule is written beside `ChartPlot`'s copy.
 
 `ChartWizard` keeps `metrics` and `breakdown` in the draft across a change of shape, so switching a
 donut to a line and back does not quietly discard the half that was not being read, and the charts
-route takes both whatever the kind: the docblock above `chartSchema` in `backend/src/app.ts` names a
-donut whose measures were cleared as a state the builder reaches on purpose.
+route takes both whatever the kind: `chartSchema` in `backend/src/app.ts` couples neither `metrics`
+nor `breakdown` to `kind` and sets no minimum on `metrics`.
 
 ## Where the reader is
 
@@ -495,9 +493,8 @@ were unreadable, filtered by a status or moved no money — the `DropKind` bucke
 Confirm, and a cause repeated afterwards would be a claim about rows the panel cannot see.
 
 `drops` in `CsvImport` leaves the filtered rows out of the summary card's sentences because the
-backend's own line in `problems` counts them and names the status values that filtered them, text
-from the file this client has no other way to read; a second count beside it would describe the
-same rows twice.
+backend's own line in `problems` counts them and names the status values that filtered them, as
+many as fit and a count of the rest; a second count beside it would describe the same rows twice.
 
 `IncomeSourcesBlock`'s pattern hint states the word floor `makeSourceMatcher` in
 `backend/src/classify.ts` applies to a pattern, and nothing holds the two together, the same shape
@@ -590,12 +587,13 @@ a raised surface with its own text colours rather than inheriting colours from t
 hidden account out of that list, and `POST /api/imports` refuses a hidden account's id, so a filter
 here would render the same list while moving the decision to the layer that does not hold it. An
 account is created by its own request and never by an upload — the upload route refuses
-`accountName` and `currency` outright — so the create arm makes the account before the file is read.
+`accountName` and `currency` outright — so the create arm makes the account before the file is
+uploaded.
 
-`ImportHistory` and `AccountDialog`'s delete preview ask `api.imports` for one account by its id and
-never match on `accountName`: the server filters imports on the account id, and the name an import
-row carries is the account's name when the statement was staged, which a later rename leaves
-behind.
+`ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
+`api.imports` for that one account by its id and never match on `accountName`: the server filters
+imports on the account id, and the name an import row carries is the account's name when the
+statement was staged, which a later rename leaves behind.
 
 `AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
 server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on
@@ -617,10 +615,12 @@ case the strip's paging effect follows.
 `Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed. Open, it closes
 on Escape and on a click on its backdrop but not on the card, keeps Tab and Shift+Tab among the
 card's focusable controls that are not hidden, or on the card itself when there are none, and turns
-off the page's scroll behind it. It moves focus into the card when it opens and, when it closes,
-back to the element that held focus before, if that element is still in the document. Its Tab trap
-stands down while the card sits inside a `hidden` ancestor, and Escape still closes it there. A
-caller relies on this rather than restating it beside its own sheet.
+off the page's scroll behind it. Once it has rendered open it moves focus to the card, and when it
+closes it returns focus to whatever held focus at that moment, if that is still in the document —
+so where a child takes focus with `autoFocus` as the sheet opens, the card takes focus from that
+child and, on close, focus returns to nothing. Its Tab trap stands down while the card sits inside
+a `hidden` ancestor, and Escape still closes it there. A caller relies on this rather than
+restating it beside its own sheet.
 
 `aria-current` is the app's idiom for which of a set is the current one — on the navigation's
 links, and on plain buttons in `AccountTabs`' account strip and `ChartDock`'s chart strip, neither

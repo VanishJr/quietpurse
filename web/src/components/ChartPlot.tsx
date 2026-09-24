@@ -4,10 +4,10 @@
  * Every kind in one component, because what surrounds a plot — the axis colours, the
  * tooltip, the animation rule, the empty state — is the same whichever kind it is, and
  * a component per kind would be a copy of it per kind, agreeing until one of them was
- * edited. It holds no state and fetches nothing, and animation is off on every series:
- * `web/src/SPEC.md` gives both reasons under *What a chart is, and where its numbers
- * come from*, and how a series and a slice are coloured under *The palette, and what
- * leaves the page*.
+ * edited. Animation is off on every series. It holds no state and fetches nothing, for
+ * the reason `web/src/SPEC.md` gives under *What a chart is, and where its numbers come
+ * from*; how a series and a slice are coloured is under *The palette, and what leaves
+ * the page*.
  */
 import {
   Area,

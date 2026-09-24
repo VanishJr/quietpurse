@@ -14,10 +14,9 @@ interface Props {
    */
   onChanged: () => void;
   /**
-   * One account's imports rather than every account's. The id goes to the server and
-   * the filtering happens there, on the id and never on `accountName`: a rename moves
-   * the account and leaves the name recorded on the row behind, so matching by name
-   * would drop every file uploaded before it.
+   * One account's imports rather than every account's, asked for on the id and never
+   * on `accountName`; `web/src/SPEC.md` gives the reason under *Accounts and statements,
+   * as the client handles them*.
    */
   account?: Account;
 }
@@ -51,8 +50,9 @@ const countsLine = (r: ImportRecord): string => {
         : `${r.transactions} transactions belong`;
   return [
     `${rowCount(r.rowsAccepted)} accepted`,
-    // no cause, because the record has none: rows_rejected is the total of every reason
-    // a row did not import, so naming one reason here would assert it of all of them
+    // no cause, because the record has none: rows_rejected is one total over every
+    // reason the importer dropped a row, so naming one reason here would assert it of
+    // all of them
     ...(r.rowsRejected > 0 ? [`${r.rowsRejected} not imported`] : []),
     `${owned} to this import`,
   ].join(' · ');
@@ -187,9 +187,9 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
     }
   };
 
-  // no filter here on purpose: the server was asked for one account and answered
-  // one account's. A second filter would hide a server that ignored the parameter,
-  // leaving the totals as the only symptom
+  // no filter here on purpose: when an account is given, the server was asked for that
+  // one account and answered its imports. A second filter would hide a server that
+  // ignored the parameter, leaving the totals as the only symptom
   const shown = list?.imports;
 
   return (

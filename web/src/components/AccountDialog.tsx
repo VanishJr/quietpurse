@@ -45,10 +45,9 @@ interface Preview {
 }
 
 /**
- * The transactions endpoint takes a limit and answers nothing about what it cut. Ask
- * for more than the count could plausibly be, and say so when the answer comes back
- * full — a number that is silently the limit is the one number this dialog must not
- * print.
+ * Ask for more than the count could plausibly be, and say so when the answer comes back
+ * full. The transactions endpoint's side of it is in `web/src/SPEC.md`, under *Accounts
+ * and statements, as the client handles them*.
  */
 export const COUNT_LIMIT = 100_000;
 
@@ -118,10 +117,10 @@ export function AccountDialog({
     setPreviewError(null);
     setPreview(null);
     try {
-      // on the id, never on the name: a rename leaves an import row's accountName
-      // behind, and matching on it would attribute the file to the old name. The
-      // filtering and the counting are both the server's - these totals are over the
-      // whole history, not over the page it would have sent
+      // on the id, never on the name, for the reason `web/src/SPEC.md` gives under
+      // *Accounts and statements, as the client handles them*. The counting is the
+      // server's - these totals are over the whole history, not over the page it would
+      // have sent
       const { totals } = await api.imports(account.id);
       // a hidden account's transactions are filtered out of the endpoint, so asking
       // it would answer 0 for an account that has rows
@@ -178,9 +177,8 @@ export function AccountDialog({
   };
 
   /**
-   * Case-insensitively, and trimmed on both sides: `accounts_name_unique` is on
-   * lower(name), so a client demanding the capitals back would refuse a name the
-   * server calls identical to the one on the tab.
+   * Case-insensitively, and trimmed on both sides, for the reason `web/src/SPEC.md`
+   * gives under *Accounts and statements, as the client handles them*.
    */
   const confirmed =
     !!account && confirmName.trim().toLowerCase() === account.name.trim().toLowerCase();
@@ -406,8 +404,8 @@ export function AccountDialog({
               </li>
             </ul>
           )}
-          {/* what COUNT_LIMIT was raised for: a number that is silently the limit is the
-              one number this dialog must not print as a fact */}
+          {/* a number that is silently the limit is the one number this dialog must not
+              print as a fact */}
           {preview?.truncated && (
             <p className="error">
               That count came back exactly at the limit this dialog asks for, so it is the
