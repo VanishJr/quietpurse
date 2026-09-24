@@ -18,9 +18,6 @@ interface Props {
 export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
 
-  /* Escape closes it, and the page behind must not scroll while it is up. Keyed on
-     `onClose` as well: it is a closure over the caller's state, and re-attaching a
-     listener costs nothing. */
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

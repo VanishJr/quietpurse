@@ -12,7 +12,6 @@ import {
 } from '../types';
 import { Chips } from './Chips';
 
-/** Fallback if /api/imports/presets is unreachable — the backend ships these too. */
 const FALLBACK_PRESETS = [{ key: 'generic', title: GENERIC_PRESET_TITLE }];
 
 /**
@@ -78,7 +77,6 @@ const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 const SNIFF_BYTES = 8192;
 
-/** Zip (so .xlsx), PDF, the older Excel format, gzip — the backend's own signatures. */
 const BINARY_SIGNATURES = [
   [0x50, 0x4b, 0x03, 0x04],
   [0x25, 0x50, 0x44, 0x46],
@@ -88,8 +86,8 @@ const BINARY_SIGNATURES = [
 
 /**
  * By content, never by the name: a bank that gives its workbook a .csv name is not
- * hypothetical, and the backend deliberately ignores the extension. Counting the
- * newlines of a decoded zip puts an invented row count on the screen.
+ * hypothetical. Counting the newlines of a decoded zip puts an invented row count on
+ * the screen.
  */
 const looksLikeText = (head: Uint8Array): boolean =>
   !BINARY_SIGNATURES.some((sig) => sig.every((b, i) => head[i] === b)) && !head.includes(0);
@@ -512,7 +510,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         </>
       )}
 
-      {/* paste fallback: some banks only show the statement in a browser window */}
       <details>
         <summary className="btn-link">…or paste the contents instead</summary>
         <p className="hint" style={{ marginTop: 8 }}>

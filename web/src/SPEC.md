@@ -612,24 +612,25 @@ case the strip's paging effect follows.
 
 ## What the shared controls promise
 
-`Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed. Open, it calls
-its `onClose` on Escape and on a click whose target is its backdrop, and not on a click inside the
-card — though a press begun inside the card and released over the backdrop can be a click on the
-backdrop — and whether that call closes it is the caller's. It keeps Tab and Shift+Tab, while focus
-is inside the card, among the card's focusable controls that are not hidden, or on the card itself
-when there are none, and sets `overflow: hidden` on the document's body, putting back on close what
-it found there when it last set it — so where one sheet opens while another is open, the body can
-keep `overflow: hidden` after every sheet has closed. It does not bring back focus that has left a
-card with controls in it — as when a step change unmounts the control that held it — so from there
-Tab and Shift+Tab move as the browser moves them, and Shift+Tab can reach the page behind the sheet.
-Once it has rendered open it calls `focus()` on the card, and when it closes it makes the same call
-on whatever held focus just before, if that is still in the document — so where a child takes focus
-with `autoFocus` as the sheet opens, the card takes focus from that child and, on close, focus
-returns to nothing. The browser ignores that call on an element that cannot take focus, and nothing
-on a screen the Shell has hidden can: a sheet that opens on a hidden screen does not take focus, and
-one that closes on a hidden screen gives none back to an element there. Its Tab trap stands down
-while the card sits inside a `hidden` ancestor, and Escape still calls its `onClose` there. A caller
-relies on this rather than restating it beside its own sheet.
+`Sheet` is described here as it behaves while it is the only sheet open, and not while more than one
+sheet is open; `web/src/components/Sheet.tsx` is the whole of its contract. `Sheet` is a modal
+dialog labelled by its `title`, and renders nothing while closed. Open, it calls its `onClose` on
+Escape and on a click whose target is its backdrop, and not on a click inside the card — though a
+press begun inside the card and released over the backdrop can be a click on the backdrop — and
+whether that call closes it is the caller's. It keeps Tab and Shift+Tab, while focus is inside the
+card, among the card's focusable controls that are not hidden, or on the card itself when there are
+none, and sets `overflow: hidden` on the document's body, putting back on close what it found there
+when it last set it. It does not bring back focus that has left a card with controls in it — as when
+a step change unmounts the control that held it — so from there Tab and Shift+Tab move as the
+browser moves them, and Shift+Tab can reach the page behind the sheet. Once it has rendered open it
+calls `focus()` on the card, and when it closes it makes the same call on whatever held focus just
+before, if that is still in the document — so where a child takes focus with `autoFocus` as the
+sheet opens, the card takes focus from that child and, on close, focus returns to nothing. The
+browser ignores that call on an element that cannot take focus, and nothing on a screen the Shell
+has hidden can: a sheet that opens on a hidden screen does not take focus, and one that closes on a
+hidden screen gives none back to an element there. Its Tab trap stands down while the card sits
+inside a `hidden` ancestor, and Escape still calls its `onClose` there. A caller relies on this
+rather than restating it beside its own sheet.
 
 `aria-current` is the app's idiom for which of a set is the current one — on the navigation's
 links, and on plain buttons in `AccountTabs`' account strip and `ChartDock`'s chart strip, neither
