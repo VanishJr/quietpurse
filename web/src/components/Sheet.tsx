@@ -5,14 +5,13 @@ interface Props {
   onClose: () => void;
   /** 'bottom' — on the bottom edge on a phone; 'center' — a dialog. */
   position?: 'bottom' | 'center';
-  /** A wider card, for a sheet that carries a grid, or a form beside a live plot. */
   wide?: boolean;
   title?: string;
   children: React.ReactNode;
 }
 
 /**
- * What it does for every caller is stated in `web/src/SPEC.md`, under *What the shared
+ * What a caller relies on is stated in `web/src/SPEC.md`, under *What the shared
  * controls promise*.
  */
 export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
