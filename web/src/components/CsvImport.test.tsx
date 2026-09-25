@@ -706,18 +706,35 @@ describe('discard', () => {
 
 describe('a file that is already in', () => {
   it('says so and offers nothing to confirm or discard', async () => {
-    mockFetch({ ...BASE, 'POST /api/imports': () => ok(DUPLICATE) });
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 1 }) });
     const { container } = mount();
     await upload(container);
 
     // anchor: the duplicate card, which exists only once the upload came back
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(screen.getByText(/Its 12 rows came in on/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^You uploaded it on .+\. It wasn't read again, and nothing was duplicated\.$/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('It had 1 row when it was read.')).toBeInTheDocument();
+    expect(screen.queryByText(/didn't import/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
     // the easiest of the three no-rows-landed endings to miss, because nothing threw
     expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  it('counts the rows the earlier import did not take, and places none of them in the data', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 73, skipped: 4 }) });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
+    expect(
+      screen.getByText("It had 73 rows when it was read, and 4 of them didn't import."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 });
 
