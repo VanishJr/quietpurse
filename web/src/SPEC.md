@@ -494,17 +494,17 @@ before Confirm, and a cause repeated afterwards would be a claim about rows none
 see.
 
 `CsvImport`'s re-upload card and the note `deduplicated` gates in `ImportHistory` never say where a
-file's rows are now. Only the card states what the earlier import recorded when its file was read:
-its counts are that import row's own, written when the import was staged or copied in by a restore.
-The note is gated on a count `listImports` takes when the history is read, and keeps to the rule
-only by what it does not claim. `import_id` names the first writer and not every attestation —
+file's rows are now. Of the two, only the card states what the earlier import recorded when its file
+was read: its counts are that import row's own, written when the import was staged or copied in by a
+restore. The note is gated on a count `listImports` takes when the history is read, and keeps to the
+rule only by what it does not claim. `import_id` names the first writer and not every attestation —
 *Import provenance, and what an import's row promises* in `backend/src/db/SPEC.md` — so deleting an
 earlier import takes with it the rows a later import's file also contained, the later import stays
 committed, and its file still answers `duplicate`. Nothing on the wire can tell the card that has
 happened, so a sentence placing the file's rows in the data would go on being printed over data that
 no longer holds them. The count the card prints as the file's rows is the duplicate answer's
-`total`, the import's accepted and dropped rows added together. For an import this code staged,
-that sum is the rows the file had when it was read, because `mapAndStore` in
+`total`, the import's accepted and dropped rows added together. For an import this code staged, that
+sum is the rows the file had when it was read, because `mapAndStore` in
 `backend/src/providers/statement.ts` refuses a read whose accepted and dropped rows do not add up to
 the rows it read. `restoreBackup` in `backend/src/db/index.ts` copies both counts as the backup file
 carries them and checks neither against the other, so for a restored import the sum is what the

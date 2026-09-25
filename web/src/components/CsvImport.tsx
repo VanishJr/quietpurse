@@ -562,10 +562,10 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         <div className="card" style={{ marginTop: 12 }}>
           <div className="switch-label">You've already imported this file</div>
           {/*
-            The import as it was read, never where its rows are now: `total` is the rows
-            the file had, not the rows that came in, and the day is the upload's. See
-            `web/src/SPEC.md` under *The sentences a person reads, and what is lifted out
-            of a screen to hold them*.
+            The import as it was read, never where its rows are now: `total` is not the
+            rows that came in, and the day is the upload's. See `web/src/SPEC.md` under
+            *The sentences a person reads, and what is lifted out of a screen to hold
+            them*.
           */}
           <p className="hint" style={{ marginTop: 6 }}>
             You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again, and
