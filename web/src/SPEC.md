@@ -504,9 +504,12 @@ committed, and its file still answers `duplicate`. Nothing on the wire can tell 
 happened, so a sentence placing the file's rows in the data would go on being printed over data that
 no longer holds them. The count the card prints as the file's rows is the duplicate answer's
 `total`, the import's accepted and dropped rows added together. For an import this code staged, that
-sum is the rows the file had when it was read, because `mapAndStore` in
-`backend/src/providers/statement.ts` refuses a read whose accepted and dropped rows do not add up to
-the rows it read. `restoreBackup` in `backend/src/db/index.ts` copies both counts as the backup file
+sum is the rows the importer read, because `mapAndStore` in `backend/src/providers/statement.ts`
+refuses a read whose accepted and dropped rows do not add up to the rows it read. When the file is a
+workbook those rows all come from one sheet, the one `readXlsx` in `backend/src/providers/xlsx.ts`
+read, and the import row records nothing about any other sheet, so where a workbook's other sheets
+hold rows the card counts that one sheet as the file, as the confirmed panel's heading already does
+with the same sum. `restoreBackup` in `backend/src/db/index.ts` copies both counts as the backup file
 carries them and checks neither against the other, so for a restored import the sum is what the
 backup says and nothing more.
 

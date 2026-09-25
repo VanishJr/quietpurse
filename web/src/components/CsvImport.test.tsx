@@ -754,6 +754,25 @@ describe('a file that is already in', () => {
     );
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
+
+  // the case above passes a clause that prints a fixed one, or that shows at one row only
+  it('counts every row the earlier import did not take when there are several', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 73, skipped: 4 }) });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
+    expect(
+      screen.getByText("It had 73 rows when it was read, and 4 of them didn't import."),
+    ).toBeInTheDocument();
+    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
+    expect(card.textContent).toBe(
+      "You've already imported this file" +
+        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
+        "It had 73 rows when it was read, and 4 of them didn't import.",
+    );
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
+  });
 });
 
 /**
