@@ -1,5 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { fmtDate } from '../format';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { Account, BalancesNotShown } from '../types';
@@ -10,8 +11,9 @@ import { CsvImport } from './CsvImport';
  * an upload writes nothing, Confirm is what makes the rows data, and Discard must
  * leave the caller's data alone.
  *
- * No rendered date is asserted anywhere here - the summary carries fmtDay(from) and the
- * duplicate card fmtDate(uploadedAt), and how a date is rendered is the copy's to change.
+ * No rendered date is asserted anywhere here but the duplicate card's, which is computed with
+ * fmtDate and never written - the summary carries fmtDay(from) and the duplicate card
+ * fmtDate(uploadedAt), and how a date is rendered is the copy's to change.
  */
 
 /**
@@ -705,19 +707,70 @@ describe('discard', () => {
 });
 
 describe('a file that is already in', () => {
+  if (DUPLICATE.outcome !== 'duplicate') throw new Error('DUPLICATE is not the duplicate answer');
+  const uploadedOn = fmtDate(DUPLICATE.uploadedAt);
+
   it('says so and offers nothing to confirm or discard', async () => {
-    mockFetch({ ...BASE, 'POST /api/imports': () => ok(DUPLICATE) });
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 1 }) });
     const { container } = mount();
     await upload(container);
 
     // anchor: the duplicate card, which exists only once the upload came back
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(screen.getByText(/Its 12 rows came in on/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^You uploaded it on .+\. It wasn't read again, and nothing was duplicated\.$/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('It had 1 row when it was read.')).toBeInTheDocument();
+    // toBe on the whole card: toHaveTextContent with a string passes on any part of it
+    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
+    expect(card.textContent).toBe(
+      "You've already imported this file" +
+        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
+        'It had 1 row when it was read.',
+    );
+    expect(screen.queryByText(/didn't import/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
 
     expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
     // the easiest of the three no-rows-landed endings to miss, because nothing threw
     expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  it('counts the rows the earlier import did not take, and places none of them in the data', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 73, skipped: 1 }) });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
+    expect(
+      screen.getByText("It had 73 rows when it was read, and 1 of them didn't import."),
+    ).toBeInTheDocument();
+    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
+    expect(card.textContent).toBe(
+      "You've already imported this file" +
+        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
+        "It had 73 rows when it was read, and 1 of them didn't import.",
+    );
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
+  });
+
+  it('counts every row the earlier import did not take when there are several', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 73, skipped: 4 }) });
+    const { container } = mount();
+    await upload(container);
+
+    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
+    expect(
+      screen.getByText("It had 73 rows when it was read, and 4 of them didn't import."),
+    ).toBeInTheDocument();
+    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
+    expect(card.textContent).toBe(
+      "You've already imported this file" +
+        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
+        "It had 73 rows when it was read, and 4 of them didn't import.",
+    );
+    expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 });
 

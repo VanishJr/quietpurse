@@ -216,6 +216,52 @@ describe('POST /api/imports', () => {
   });
 
   /**
+   * The duplicate answer composes its counts from the import row and the confirm answer
+   * composes them from the confirm's outcome, so the two are held to each other here as
+   * well as to the file.
+   */
+  it('the same file twice answers the skipped and total counts its confirm answered', async () => {
+    const accountId = await makeAccount('Counted Twice Http');
+    const bytes = Buffer.from(
+      [
+        'date,amount,description',
+        '2026-05-01,-12.00,counted on the first',
+        '2026-05-02,-7.50,counted on the second',
+        '2026-05-03,40.00,counted on the third',
+        '2026-05-04,0.00,moved nothing on the fourth',
+      ].join('\n'),
+      'utf8',
+    );
+    const upload = () =>
+      agent
+        .post('/api/imports')
+        .field('accountId', accountId)
+        .field('preset', 'generic')
+        .attach('file', bytes, 'counted.csv');
+
+    const first = await upload();
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.summary).toMatchObject({ total: 4, accepted: 3, skipped: 1 });
+
+    const confirmed = await confirm(first.body.summary.importId);
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(confirmed.body).toMatchObject({ inserted: 3, skipped: 1, total: 4 });
+
+    const second = await upload();
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect(second.body).toMatchObject({
+      outcome: 'duplicate',
+      importId: first.body.summary.importId,
+      skipped: 1,
+      total: 4,
+    });
+    expect({ skipped: second.body.skipped, total: second.body.total }).toEqual({
+      skipped: confirmed.body.skipped,
+      total: confirmed.body.total,
+    });
+  });
+
+  /**
    * The PDF path opens the file now, so this moved bands: the same
    * bytes that used to be refused by the sniffer with no `imports` row are a
    * `pdf` import that failed, and the row and its stored document are what make

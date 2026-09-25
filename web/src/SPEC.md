@@ -486,11 +486,35 @@ end of the statement moves that end instead of breaking the run, and nothing on 
 A PDF prints its opening and closing balances itself, and the rows adding up to them is what was
 checked there.
 
-`CsvImport`'s confirmed panel and `ImportHistory` print the count of rows that did not import
-without a cause, because none is kept: `rows_rejected` on the import row is the sum of the rows that
-were unreadable, filtered by a status or moved no money — the `DropKind` buckets in
-`backend/src/providers/statement.ts` — and does not say which. The breakdown is on the summary card before
-Confirm, and a cause repeated afterwards would be a claim about rows the panel cannot see.
+`CsvImport`'s confirmed panel, its re-upload card and `ImportHistory` print the count of rows that
+did not import without a cause, because none is kept: `rows_rejected` on the import row is the sum
+of the rows that were unreadable, filtered by a status or moved no money — the `DropKind` buckets in
+`backend/src/providers/statement.ts` — and does not say which. The breakdown is on the summary card
+before Confirm, and a cause repeated afterwards would be a claim about rows none of the three can
+see.
+
+`CsvImport`'s re-upload card and the note `deduplicated` gates in `ImportHistory` never say where a
+file's rows are now. Of the two, only the card states what the earlier import recorded when its file
+was read: its counts are that import row's own, written when the import was staged or copied in by a
+restore. The note is gated on a count `listImports` takes when the history is read, and keeps to the
+rule only by what it does not claim. `import_id` names the first writer and not every attestation —
+*Import provenance, and what an import's row promises* in `backend/src/db/SPEC.md` — so deleting an
+earlier import takes with it the rows a later import's file also contained, the later import stays
+committed, and its file still answers `duplicate`. Nothing on the wire can tell the card that has
+happened, so a sentence placing the file's rows in the data would go on being printed over data that
+no longer holds them. The count the card prints as the file's rows is the duplicate answer's
+`total`, the import's accepted and dropped rows added together. For an import this code staged, that
+sum is the data rows the file's reader handed `mapAndStore` in `backend/src/providers/statement.ts`,
+because it refuses a read whose accepted and dropped rows do not add up to those. Rows a reader does
+not hand over are in neither count, so for a file that has any the card counts fewer rows than the
+file has, as the confirmed panel's heading already does with the same sum. Rows left out that way
+include those on a workbook's other sheets, since `readXlsx` in `backend/src/providers/xlsx.ts`
+hands over rows from one sheet and the import row records nothing about any other. They also include
+the dated lines of a PDF table its template declares `collect: false`, such as a Revolut statement's
+pending section: `readPdf` in `backend/src/providers/pdf.ts` drops them before they become rows, and
+no notice on any screen names them. `restoreBackup` in `backend/src/db/index.ts` copies both counts
+as the backup file carries them and checks neither against the other, so for a restored import the
+sum is what the backup says and nothing more.
 
 `drops` in `CsvImport` leaves the filtered rows out of the summary card's sentences because the
 backend's own line in `problems` counts them and names the status values that filtered them, as
