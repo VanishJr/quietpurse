@@ -755,7 +755,6 @@ describe('a file that is already in', () => {
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 
-  // the case above passes a clause that prints a fixed one, or that shows at one row only
   it('counts every row the earlier import did not take when there are several', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 73, skipped: 4 }) });
     const { container } = mount();
