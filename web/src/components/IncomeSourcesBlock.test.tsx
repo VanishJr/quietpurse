@@ -44,11 +44,14 @@ beforeEach(() => {
 describe('IncomeSourcesBlock', () => {
   it('uses concise Settings copy and names automatic versus manual matching', async () => {
     await mount();
-    const rowOf = (label: string): HTMLElement => screen.getByText(label).closest('.row') as HTMLElement;
+    const rowOf = (label: string): HTMLElement => screen.getByText(label, { selector: '.row-title' }).closest('.row') as HTMLElement;
 
     expect(screen.getByText('Support is tracked separately and does not count toward earnings goals.')).toBeVisible();
-    expect(within(rowOf('Salary')).getByText('Earnings · Manual only')).toBeVisible();
-    expect(within(rowOf('Support')).getByText('Support · Auto-match: Anna Becker')).toBeVisible();
+    expect(within(rowOf('Salary')).getByText('Earnings')).toBeVisible();
+    expect(within(rowOf('Salary')).getByText('Manual only')).toBeVisible();
+    expect(within(rowOf('Support')).getByText('Support', { selector: '.settings-income-kind' })).toBeVisible();
+    expect(within(rowOf('Support')).getByText('1 automatic match pattern')).toBeVisible();
+    expect(within(rowOf('Support')).queryByText('Anna Becker')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add source' })).toBeVisible();
   });
 

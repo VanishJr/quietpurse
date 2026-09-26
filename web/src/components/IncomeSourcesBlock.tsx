@@ -127,7 +127,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   };
 
   const form = (onOk: () => void) => (
-    <>
+    <div className="settings-income-editor">
       <h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>
       <label className="setting-label" htmlFor="source-label">
         Source name
@@ -176,7 +176,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -209,30 +209,30 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           {sources.map((s) => {
             const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
             return (
-              <div key={s.id} className="row">
+              <div key={s.id} className="row settings-income-row">
                 <div className="row-main">
-                  <div className="row-title">{s.label}</div>
+                  <div className="settings-income-heading">
+                    <span className="row-title">{s.label}</span>
+                    <span className="settings-income-kind">{kindLabel(s.kind)}</span>
+                  </div>
                   <div className="row-sub">
-                    {kindLabel(s.kind)}
-                    {/* the patterns themselves and not what they tag: "tags income matching
-                        X" is false for a pattern under the matcher's floor, and the form's
-                        hint is gone by the time this row is read */}
                     {s.patterns.length > 0
-                      ? ` · Auto-match: ${s.patterns.join(', ')}`
-                      : ' · Manual only'}
+                      ? `${s.patterns.length} automatic match ${s.patterns.length === 1 ? 'pattern' : 'patterns'}`
+                      : 'Manual only'}
                   </div>
                   {mine?.form === 'delete' && (
                     <>
                       <p className="hint">
-                        Delete “{s.label}”? Assigned transactions move to {destination?.label ?? 'Other'}.
-                        Manual assignments cannot be restored.
+                        Delete “{s.label}”? {destination
+                          ? `Assigned transactions move to ${destination.label}. Manual assignments cannot be restored.`
+                          : 'The destination source is unavailable. Reload the catalog before deleting.'}
                       </p>
                       {actionError && <p className="error" role="alert">Error: {actionError}</p>}
                       <div className="btn-row">
                         <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
                           Cancel
                         </button>
-                        <button className="btn-danger" disabled={busy} onClick={() => remove(s.id)}>
+                        <button className="btn-danger" disabled={busy || !destination} onClick={() => remove(s.id)}>
                           Delete
                         </button>
                       </div>
@@ -240,7 +240,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                   )}
                 </div>
                 {mine?.form !== 'delete' && (
-                  <>
+                  <div className="settings-income-actions">
                     <button
                       className="btn-ghost"
                       disabled={busy}
@@ -261,15 +261,14 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                         Delete
                       </button>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             );
           })}
 
           <button
-            className="btn-link"
-            style={{ fontWeight: 600, padding: '12px 0' }}
+            className="btn-link settings-income-add"
             disabled={busy || open !== null}
             onClick={openAdd}
           >

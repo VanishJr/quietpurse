@@ -554,8 +554,9 @@ many as fit and a count of the rest; a second count beside it would describe the
 `IncomeSourcesBlock`'s pattern hint states the word floor `makeSourceMatcher` in
 `backend/src/classify.ts` applies to a pattern, and nothing holds the two together, the same shape
 as `categoryRuleCaption`'s coupling to that file: a pattern with too few words long enough to count
-is accepted, stored and tags nothing, so the hint, the example in the field above it and the row
-that lists a source's patterns are written against that floor and go wrong together when it moves.
+is accepted, stored and tags nothing, so the hint and the example in the editor field above it
+must move together when the floor moves. The compact list counts stored patterns rather than
+claiming that they match transactions; full phrases belong in the Add/Edit Sheet, not the card.
 
 ## The palette, and what leaves the page
 

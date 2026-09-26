@@ -1856,6 +1856,62 @@ textarea {
   font-size: 13px;
 }
 
+.settings-page .settings-income-row {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.settings-page .settings-income-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.settings-page .settings-income-heading .row-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.settings-page .settings-income-kind {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-secondary);
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-page .settings-income-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-page .settings-income-actions button {
+  min-height: 44px;
+}
+
+.settings-page .settings-income-add {
+  font-weight: 600;
+  min-height: 44px;
+}
+
+.settings-page .settings-income-editor .setting-label {
+  margin: 16px 0 6px;
+}
+
+.settings-page .settings-income-editor .hint {
+  margin: 8px 0;
+}
+
+.settings-page .settings-income-editor .btn-row button {
+  min-height: 44px;
+}
+
 .settings-page .settings-card .row {
   flex-wrap: wrap;
 }
@@ -1892,6 +1948,17 @@ textarea {
 
   .settings-page .settings-card {
     padding: 18px;
+  }
+
+  .settings-page .backdrop-center {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .settings-page .backdrop-center .sheet {
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    max-width: none;
+    padding-bottom: 32px;
   }
 }
 
