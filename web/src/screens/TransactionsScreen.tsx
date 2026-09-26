@@ -17,7 +17,7 @@ import {
 /**
  * The window each option names, carried on the entry rather than derived from the key a
  * second time — a label and the window under it cannot then drift apart. `days: null`
- * is unbounded, which is what keeps the Overview's "All transactions" link honest.
+ * is unbounded, which is what an arrival with a `focus` opens on.
  */
 const PERIODS = [
   { key: '7d', label: '7 days', days: 7 },
@@ -79,7 +79,10 @@ export function TransactionsScreen({
   const [accountId, setAccountId] = useState('all');
   const [category, setCategory] = useState('all');
   const [accounts, setAccounts] = useState<Account[]>([]);
-  /** A failed request used to render as "No transactions in the selected period". */
+  /**
+   * null while loading and after a refusal, and never `[]` for either: an empty list
+   * reads "No transactions in the selected period".
+   */
   const [txs, setTxs] = useState<Transaction[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -92,7 +95,6 @@ export function TransactionsScreen({
   const selectedRef = useRef<Transaction | null>(null);
   selectedRef.current = selected;
   const selectedRevision = useRef(dataRevision);
-  /** income source catalog — chips in the sheet and badges in the list */
   const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceLoadAttempt, setSourceLoadAttempt] = useState(0);
@@ -141,10 +143,9 @@ export function TransactionsScreen({
   const busy = saving || refreshingSelected;
 
   /**
-   * Arrived from an account's "All transactions". The link says all of them, so the
-   * other two filters are cleared as well and the period opens at the widest this
-   * screen offers — landing on "this account, this calendar month" would be a link
-   * that hides most of what it promised.
+   * An arrival with a `focus` asks for all of one account's rows, so the category filter
+   * goes back to every category and the period opens at the widest this screen offers —
+   * landing on whatever period was set would hide most of what the arrival asked for.
    */
   useEffect(() => {
     if (!focus) return;
@@ -166,16 +167,16 @@ export function TransactionsScreen({
         to,
         accountId: accountId === 'all' ? undefined : accountId,
         category: category === 'all' ? undefined : category,
-        // an unbounded window can exceed the backend's default limit (1000), and it
-        // truncates with nothing on the wire saying so. Tied to the missing lower
-        // bound rather than to a key, so a later arm cannot inherit that silently.
+        // an unbounded window can exceed the endpoint's default limit, and a cut answer
+        // says nothing about the cut, as `web/src/SPEC.md` says under *Accounts and
+        // statements, as the client handles them*. Tied to the missing lower bound
+        // rather than to a key, so a later arm cannot inherit that silently.
         limit: from === undefined ? 5000 : undefined,
       });
       if (generation === loadGeneration.current) setTxs(next);
     } catch (e) {
       if (generation !== loadGeneration.current) return;
-      // Overview's load takes no arguments, so its stale list still answers the same
-      // question. This one is filtered: rows kept from before a refused reload sit
+      // this list is filtered: rows kept from before a refused reload would sit
       // under a filter they were never an answer to.
       setTxs(null);
       setError((e as Error).message);
@@ -210,9 +211,8 @@ export function TransactionsScreen({
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name;
 
   /**
-   * The category filter as of the last render, and the reload bound to the filters as of
-   * the last render. A decision taken when a PATCH settles cannot read the selection the
-   * handler was created under: by then it may not be the selection the list in state answers.
+   * A decision taken when a PATCH settles cannot read the filters the handler was
+   * created under: by then they may not be the filters the list in state answers.
    */
   const currentCategory = useRef(category);
   currentCategory.current = category;
@@ -249,7 +249,6 @@ export function TransactionsScreen({
     }
   };
 
-  /** "One-off large purchase" flag — amortized in the goal calculation. */
   const applyOneOff = async (tx: Transaction, value: boolean) => {
     setSaving(true);
     try {
@@ -265,8 +264,8 @@ export function TransactionsScreen({
   };
 
   /**
-   * This row's category and no other's; null hands it back to auto-detection. Clicking
-   * the category the row already has is not a no-op — it pins the row against any rule.
+   * null hands it back to auto-detection. Clicking the category the row already has is
+   * not a no-op — it pins the row against any rule.
    */
   const applyCategory = async (tx: Transaction, next: Category | null) => {
     setSaving(true);
@@ -372,7 +371,6 @@ export function TransactionsScreen({
                 {item.transfer && <span className="badge">transfer</span>}
                 {item.refund && <span className="badge">refund</span>}
                 {item.oneOff && <span className="badge">one-off</span>}
-                {/* outside help (family, stipend...) — a badge with the source name */}
                 {!item.transfer && source?.kind === 'external' && (
                   <span className="badge">{source.label}</span>
                 )}
@@ -452,9 +450,8 @@ export function TransactionsScreen({
             )}
             {notice && <p className="hint" role="status">{notice}</p>}
 
-            {/* this row alone. Outside the description gate below it: a rule needs a
-                pattern to hang on and an empty description is exactly the row no rule
-                can ever reach */}
+            {/* outside the description gate below it: a rule needs a pattern to hang on
+                and an empty description is exactly the row no rule can ever reach */}
             <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--ink-grid)' }}>
               <div className="switch-label">Category</div>
               <div className="switch-hint">
@@ -528,7 +525,6 @@ export function TransactionsScreen({
               </button>
             )}
 
-            {/* expense: "one-off" flag — keeps it from inflating average spending */}
             {selected.amount < 0 && !selected.transfer && (
               <div className="switch-row">
                 <label className="row-main" htmlFor="tx-oneoff">
@@ -545,7 +541,6 @@ export function TransactionsScreen({
               </div>
             )}
 
-            {/* income: the source — income-based goals depend on it */}
             {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
               <div
                 style={{

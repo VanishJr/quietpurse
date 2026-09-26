@@ -1,70 +1,3 @@
-/**
- * Analytics: a workspace the reader builds, rather than one analysis the app chose.
- *
- * It used to be a single fixed view — a period pager, two total cards, a donut over a
- * category legend, and twelve bars if you switched to Year. That answered one question
- * well and every other question not at all: "how did groceries move over two years",
- * "what did this one account earn against what it spent", "is the shape of this quarter
- * the shape of the last one" were all outside it, and none of them is exotic.
- *
- * So the screen holds no analysis of its own now. It starts empty, the reader makes the
- * charts they want, and each one is a `Chart` the workspace keeps. Nothing
- * that the old screen could say has been lost: its yearly bars are a Column of Expenses
- * over 12 months, its donut and legend are a Donut split by category, its income-by-
- * source block is the same donut split by source — all of them reachable, and none of
- * them the only thing on offer.
- *
- * ---------------------------------------------------------------------------
- * One chart at a time, and the dock says which
- *
- * Not a grid of every chart at once. A chart is worth the width of the screen — the
- * axis labels of a 24-month series are unreadable at a third of it — and the reader
- * asked a specific question, which is answered by one plot rather than by six of them
- * needing to be found among each other. The dock along the bottom is the index.
- *
- * Which one is showing lives in the URL (`?chart=`), the way every other "where the
- * reader is" fact in this app does since the navigation moved there: a chart is a place
- * you can be sent to and come Back from.
- *
- * ---------------------------------------------------------------------------
- * The list is the workspace's, and the server is where it is
- *
- * It was this browser's localStorage once, which meant a chart did not follow
- * the reader to their phone and `AGENTS.md`'s "no state that lives only in the browser"
- * was crossed by the screen a reader spends the longest on. It is `GET`/`PUT
- * /api/analytics/charts` now, and three states came with the move that a browser store
- * never had: the list has not arrived, it could not be read, and the last change was
- * not saved.
- *
- * Everything below turns on one rule. **The version and the list are one value**, and
- * the version is only ever a number the server answered with. The route refuses a PUT
- * whose expected version is not the current one, which is what stops two devices
- * overwriting each other — and a client that keeps the two apart, or computes the next
- * version itself, defeats that quietly rather than loudly: its writes are ACCEPTED, on
- * top of work it never read. So `list` is one ref, `commit` is the only thing that
- * writes it, and `ChartsVersion` is branded so no other number can reach the PUT.
- *
- * **One PUT at a time.** Two mutations a few hundred milliseconds apart — build a
- * chart, rename it; duplicate, delete — would otherwise both carry the version the
- * screen was holding, and the second would be refused for staleness by the FIRST one's
- * write. The reader would be told the workspace changed elsewhere, and the thing that
- * changed it would be their own previous click. `pump` sends one list at a time and
- * later intents coalesce onto the latest.
- *
- * **A failed save does not take the work back off the screen.** The list stays, the
- * notice says it is not saved, and Try again sends it. The one exception is the
- * refusal for staleness, where the whole point is that what is on screen is not what
- * the workspace holds: there the server's list replaces it and the reader is told, in
- * words, that the change they just made is gone. Re-applying it would resurrect a
- * chart another device deleted, which is the exact silent wrongness the version exists
- * to prevent.
- *
- * The dock is also the only place a chart is acted on. There is no "New chart" beside
- * the heading and no Edit/Duplicate/Delete over the plot: making a chart, choosing one
- * and changing one are all things you do to the LIST, and the list is one strip at the
- * foot of the screen rather than three controls in three places.
- *
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ChartList, ChartsStaleError } from '../api';
 import {
@@ -87,36 +20,29 @@ import { setUrl, useUrl } from '../url';
 import { Account, Chart } from '../types';
 
 /**
- * What a refusal for staleness says here, which is not what the route says.
- *
- * The API's own sentence (`CHARTS_STALE`, backend/src/app.ts) ends "save again and it
- * will go through", and on this surface there is nothing to save again: the change was
- * not queued, it was dropped, because re-applying it over a list somebody else wrote
- * is how a chart deleted on another device comes back. Telling a reader to press a
- * button that cannot return their edit is worse than telling them nothing.
+ * The screen's own words and not the route's: here the change was dropped, not queued,
+ * because re-applying it over a list another tab or device wrote is how a chart deleted
+ * there comes back. Nothing can save it again, and telling a reader to press a button
+ * that cannot return their edit is worse than telling them nothing.
  */
 const CHANGED_ELSEWHERE =
   'These charts were changed somewhere else while you were working — what you see now is the current list, and the change you just made was not saved.';
 
-/** The list, or the two states a list that lives on a server can be in instead. */
 type ChartsState =
   | { phase: 'loading' }
   | { phase: 'failed'; message: string }
   | { phase: 'ready'; list: ChartList };
 
-/** Why the last write did not land. `stale` is the one that replaced what was on screen. */
+/** `stale` is the failure that replaced what was on screen. */
 interface SaveFailure {
   stale: boolean;
   message: string;
 }
 
 /**
- * What the client changed on its way out, in one sentence, or nothing.
- *
  * An edit this client makes to the reader's own content is an edit the reader is told
- * about — that is the whole difference between normalising and the silent substitution
- * this row exists to end. The cap is first because it is the only one that loses a
- * chart.
+ * about, which is the difference between normalising it and substituting for it. The
+ * cap is first because it is the one of these that loses a chart.
  */
 function editsSentence(cleaned: Normalised): string | null {
   const said: string[] = [];
@@ -158,14 +84,17 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * A ref because a click handler cannot read the state it set a moment ago, and the
    * write path has to know the version it is at rather than the version of the render
    * it was created in — which is the difference between two mutations producing
-   * ascending versions and producing the same one twice. `commit` is the only writer
-   * of either, so the mirror cannot drift from the store.
+   * ascending versions and producing the same one twice.
    */
   const list = useRef<ChartList | null>(null);
   /** The latest list the reader wants saved. Later intents replace it rather than queue. */
   const pending = useRef<ChartEntry[] | null>(null);
   const inFlight = useRef(false);
-  /** The first PUT is the migration's, and the browser's copy is dropped when it lands. */
+  /**
+   * Set by `migrate`, whose PUT is the first. While it is set, the first PUT answered 200
+   * drops the browser's copy, whatever that PUT carries; a refusal for staleness sets the
+   * flag back without dropping the copy.
+   */
   const migrating = useRef(false);
 
   const commit = useCallback((next: ChartList) => {
@@ -174,8 +103,6 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   }, []);
 
   /**
-   * Sends the pending list, one at a time, until there is nothing left to send.
-   *
    * `inFlight` is cleared in a `finally` over the whole loop and not on the success
    * arm, and the difference is the worst failure this design can have: left set, every
    * later mutation is committed to the screen and NOTHING is ever sent again, with no
@@ -213,7 +140,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
           );
         } catch (e) {
           if (e instanceof ChartsStaleError) {
-            // no merge, no re-apply, no retry at the new version: see the header
+            // no merge, no re-apply, no retry at the new version: re-applied over the list
+            // the other writer saved, the change would bring back any chart it deleted
             pending.current = null;
             /*
              * And the migration, if this was it, is over: the version is no longer 0,
@@ -244,11 +172,9 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   }, [commit]);
 
   /**
-   * The reader's new list: on screen at once, on the wire as soon as the wire is free.
-   *
    * Optimistic because a failed save must not take work off the screen that the reader
    * can see and did not undo. Unreachable before the list has loaded — a mutation over
-   * a list nobody read is a save at version 0 over a workspace that has one.
+   * a list nobody read is a save at version 0 over whatever list the server holds.
    */
   const save = useCallback(
     (next: ChartEntry[]) => {
@@ -263,21 +189,19 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   );
 
   /**
-   * The migration, and the only place `finto.analytics.charts` is read.
-   *
    * Both halves of the condition, out of the same response: a version above zero with
-   * an empty list is a workspace where somebody deliberately deleted every chart,
-   * possibly on another device, and uploading this browser's stale copy over it
-   * resurrects them and is indistinguishable from a bug. The key is cleared by `pump`
-   * when the PUT comes back 200 and never before, so a migration the server never took
-   * is tried again on the next mount.
+   * an empty list is a list whose every chart was deliberately deleted, perhaps on
+   * another device, and uploading this browser's stale copy over it resurrects them and
+   * is indistinguishable from a bug. The key is cleared by `pump` on the first PUT that
+   * comes back 200 and never before, so the migration is tried again on the next mount
+   * for as long as the list it reads is at version 0.
    *
    * Except after a refusal for staleness, which is the one failure that ends the
-   * migration rather than deferring it: the workspace was written by somebody else
+   * migration rather than deferring it: the list was written by another tab or device
    * while this PUT was out, its version is no longer 0, and both halves of the
    * condition above are needed. The browser's copy is left where it is, unread from
-   * here ever again — the alternative is re-applying it over a list another device
-   * wrote, which resurrects charts that were deliberately deleted.
+   * here while the list is above version 0 — the alternative is re-applying it over a
+   * list another device wrote, which resurrects charts that were deliberately deleted.
    */
   const migrate = useCallback(
     (loaded: ChartList) => {
@@ -320,17 +244,13 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   useEffect(loadCharts, [loadCharts]);
 
   /*
-   * The accounts are read once, here, and handed down. Every card would otherwise ask
-   * for the same list — a workspace of five per-account charts is five identical
-   * requests — and the answer is the same for all of them.
-   *
    * Hidden accounts are kept in what is stored: a chart pointed at one must keep
    * drawing rather than turn into "that account is no longer here" because it was taken
-   * off the Overview's rail. The wizard is what filters them out of the CHOICES.
+   * off the Overview's rail. `ChartWizard` is what filters them out of the CHOICES.
    *
-   * Asking again is a control and not a page reload, for the same reason the read is
-   * shared: one failure here stops every per-account card on the screen at once, so the
-   * way out of it has to be a step and not a fresh start on the whole workspace.
+   * Asking again is a control and not a page reload: one failure here stops every
+   * per-account chart at once, so the way out of it has to be a step and not a fresh
+   * start on the whole screen.
    */
   const loadAccounts = useCallback(() => {
     setAccountsError(null);
@@ -341,8 +261,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
         setAccountsError(null);
       })
       .catch((e: unknown) => {
-        // an empty list would be a claim that the workspace has no accounts, and every
-        // per-account chart on the screen would then say its account had been deleted
+        // an empty list would be a claim that the reader has no accounts, and every
+        // per-account chart would then say its account had been deleted
         setAccounts(null);
         setAccountsError((e as Error).message);
       });
@@ -356,14 +276,10 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const unreadable = entries.length - specs.length;
 
   /**
-   * Which tab is showing.
-   *
    * The URL is asked first and is not trusted: an id it carries may be a chart this
-   * workspace does not have (a link from somebody else, or a chart since deleted), and
-   * showing the first chart under a URL naming another one is better than a blank
-   * screen with a dock full of names. Falling back to the first chart rather than to
-   * nothing is also what makes the workspace open where it was left in the common case
-   * where the URL carries nothing at all.
+   * list does not have (a link from another installation, or a chart since deleted),
+   * and showing the first chart under a URL naming another one is better than a blank
+   * screen with a dock full of names.
    *
    * Nothing here writes the URL, which is what keeps an arrival at `?chart=c-b` from
    * being rewritten to nothing while the list is still in flight: `specs` is empty
@@ -381,8 +297,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const onSave = (spec: Chart) => {
     const at = positionOf(spec.id);
     if (at < 0 && entries.length >= CHARTS_MAX) {
-      // refused here rather than by the route, which would refuse the WHOLE list and
-      // say so in a sentence about a limit the reader has no way to see
+      // without this, the chart just built is committed and shown, `normaliseForSave` cuts
+      // it from the PUT, and `?chart=` is left naming a chart the server does not have
       setCapReached(true);
       setWizard(null);
       return;
@@ -393,9 +309,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
     /*
      * Only a chart that did not exist a moment ago. Every tab carries its own ⋮, so an
      * edit is as often a change to the LIST as to the chart on screen — and the reader
-     * who renamed the third tab while reading the first did not ask to be moved to the
-     * third. The same rule `remove` states at length, and the two disagreed: this one
-     * navigated on every save.
+     * who renamed one tab while reading another did not ask to be moved to it.
      *
      * Nothing is needed for the case where the edited chart IS the one showing. It is
      * already at this URL, and `setUrl` treats a write that changes nothing as the
@@ -404,9 +318,6 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
     if (at < 0) show(spec.id);
   };
 
-  /* Everything below is keyed on an id rather than on a spec: the dock is what calls
-     them now, and a strip of tabs knows which chart it is pointing at and nothing else
-     about it. */
   const edit = (id: string) => {
     const spec = specs.find((c) => c.id === id);
     if (spec) setWizard({ editing: spec });
@@ -555,14 +466,12 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
 }
 
 /**
- * The screen before anything has been made on it: a mark, a line and the way in.
- *
- * It carried two paragraphs of instructions — what a shape is, what the wizard will ask
- * next, where the charts are kept — and every one of those questions is answered by
- * pressing the button underneath them. The one thing this has to say is that the
- * emptiness is the starting state and not a failure to load, which is what the mark
- * says: a bare axis, and deliberately not one of the six shapes, because a drawn chart
- * here would read as a chart that did not arrive.
+ * No instructions — what a shape is, what the wizard will ask next, where the charts
+ * are kept — because every one of those questions is answered by pressing the button.
+ * The one thing this has to say is that the emptiness is the starting state and not a
+ * failure to load, which is what the mark says: a bare axis, and deliberately not one
+ * of the chart shapes, because a drawn chart here would read as a chart that did not
+ * arrive.
  */
 const Blank = ({ onNew }: { onNew: () => void }) => (
   <div className="chart-blank">

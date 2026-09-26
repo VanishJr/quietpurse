@@ -34,10 +34,10 @@ import { setUrl, useUrl } from '../url';
 const DEFAULT_WINDOW: MonthWindow = 6;
 
 /**
- * What one account's dashboard is drawn from. Carries the id it was fetched for, which
- * is the second of two guards against a tab switch overtaking the one before it: the
- * fetch drops its own answer when a newer one has been asked for (see `request`), and
- * this is what the render checks in case one gets past that anyway.
+ * Carries the id it was fetched for, which is the second of two guards against a tab
+ * switch overtaking the one before it: the fetch drops its own answer when a newer one
+ * has been asked for (see `request`), and this is what the render checks in case one
+ * gets past that anyway.
  */
 interface AccountData {
   accountId: string;
@@ -52,29 +52,21 @@ interface AccountData {
 }
 
 /**
- * Which panel has taken the screen over. They are pages and not dialogs — which is why
- * they are in the URL beside the screen rather than in state beside `dialog`.
+ * The panels are pages and not dialogs — which is why they are in the URL beside the
+ * screen rather than in state beside `dialog`.
  *
- * Neither carries an account of its own. The import history used to hold the `Account`
- * it was opened with, and it is always the account on the rail: `?panel=history` next
- * to `?account=` says the same thing in something a link can carry.
+ * Neither carries an account of its own: the import history is always about the account
+ * on the rail, and `?panel=history` next to `?account=` says so in something a link can
+ * carry, for an account on the rail of whoever opens it.
  */
 type PanelKind = 'import' | 'history';
 
-/** ...and what a URL that asks for something else gets, which is the dashboard. */
 const panelOf = (panel: string | null): PanelKind | null =>
   panel === 'import' || panel === 'history' ? panel : null;
 
-/**
- * Which step of the account panel is open, and for which account ('add' has none).
- * `origin` is the step it was opened at and does not move as the steps do — it is what
- * tells the panel whether its leftmost button goes back to a menu or closes. Two
- * things open a step directly: "+ Add", and a hidden account's panel, which has no ⋮
- * to reach a menu through.
- */
+/** `origin` is the step it was opened at, and does not move as the steps do. */
 type Dialog = { kind: DialogKind; origin: DialogKind; account: Account | null };
 
-/** Opening a step: it is its own origin until something steps away from it. */
 const openAt = (kind: DialogKind, account: Account | null): Dialog => ({
   kind,
   origin: kind,
@@ -86,11 +78,11 @@ const count = (n: number, one: string, many: string): string =>
   `${n} ${n === 1 ? one : many}`;
 
 /**
- * What the delete destroyed, in the server's own numbers and never the preview's —
- * for a hidden account the two legitimately differ, and the one worth printing is the
- * count of rows that actually went. "uploaded file" is the noun the preview's third
- * bullet uses, and deliberately: the two numbers are a claim about the same fact, so a
- * reader who compares them is entitled to find them equal.
+ * What the delete removed, in the server's own numbers and never the preview's — for
+ * a hidden account the two legitimately differ, and the one worth printing is the
+ * count of rows that actually went. "uploaded file" is the noun the preview uses too,
+ * and deliberately: the two numbers are a claim about the same fact, so a reader who
+ * compares them is entitled to find them equal.
  */
 const destroyedSentence = (name: string, d: AccountDeleted): string =>
   d.transactions === 0 && d.imports === 0 && d.documents === 0
@@ -100,9 +92,7 @@ const destroyedSentence = (name: string, d: AccountDeleted): string =>
       `${count(d.documents, 'uploaded file', 'uploaded files')} went with it.`;
 
 interface Props {
-  /** Opens the Transactions screen with this account's filter already applied. */
   onOpenTransactions: (accountId: string) => void;
-  /** Opens the Analytics screen — the spending card over every account. */
   onOpenAnalytics: () => void;
   dataRevision?: number;
 }
@@ -113,28 +103,20 @@ export function OverviewScreen({
   dataRevision = 0,
 }: Props) {
   /**
-   * null = never loaded. `[]` used to mean that as well as "loaded, and empty", which
-   * is how a failed request came to render as "you have no accounts".
+   * null until the list has been read, and never `[]` for that: an empty list renders
+   * the empty state, which over a refused request is a claim that there are no accounts.
    */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** What the last delete destroyed. Not a refusal, and not the dashboard's. */
+  /** What the last delete removed. Not a refusal, and not the dashboard's. */
   const [notice, setNotice] = useState<string | null>(null);
 
-  /**
-   * Which account, and which panel — both from the URL, so a link names the account it
-   * was read on and Back is the way out of the import page. `url.ts` has the rest.
-   *
-   * The chart's window and the hidden-accounts switch stay in state on purpose. They
-   * are how this reader has set the screen up rather than what they are looking at, and
-   * a link that arrives carrying somebody else's chart range is a link that argues with
-   * whoever opened it.
-   */
   const url = useUrl();
   const panel = panelOf(url.panel);
 
-  /** Hidden accounts are off the rail until asked for; restoring them has to stay reachable. */
+  // The chart's window and the hidden-accounts switch stay in state and out of the URL on
+  // purpose, for the reason `web/src/SPEC.md` gives under *Where the reader is*.
   const [showHidden, setShowHidden] = useState(false);
   const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
 
@@ -181,27 +163,24 @@ export function OverviewScreen({
   /**
    * Nothing chosen yet, or what was chosen has left the rail — the first account
    * stands in. Resolved while rendering rather than in an effect that writes the answer
-   * back: the effect version painted one frame of a rail with no tab marked and no
-   * panel under it, and everything downstream — which page the rail shows, which
-   * account's transactions are fetched — was deciding against that empty frame.
+   * back: an effect leaves a render of a rail with no tab marked and no panel under it,
+   * and everything downstream — which page the rail shows, which account's transactions
+   * are fetched — decides against that empty render.
    *
-   * The fallback is not written back to the URL either, and for a second reason on top
-   * of that one: `?screen=overview` with no account is a true and useful URL — "the
-   * dashboard, whichever account is first" — and an app that immediately rewrote it to
-   * name today's first account would hand out links that go stale on the next upload.
-   * It also means an `?account=` naming something deleted, hidden, or from somebody
-   * else's Finto lands on the first account rather than on a blank screen.
+   * The fallback is not written back to the URL either: `?screen=overview` with no
+   * account is a true and useful URL — "the dashboard, whichever account is first" —
+   * and an app that rewrote it to name today's first account would hand out links that
+   * go stale on the next upload. It also means an `?account=` naming something deleted,
+   * hidden, or from another installation lands on the first account rather than on a
+   * blank screen.
    */
   const selected = onRail.find((a) => a.id === url.account) ?? onRail[0] ?? null;
 
   /**
-   * Which fetch the screen is waiting for. Three requests per account and two of them
-   * waiting on the first, so a tab switch has a wide window to be overtaken in — and
-   * an answer for a tab nobody is looking at any more is not a slower answer, it is
-   * the wrong one. Writing it anyway left `data` holding an id `mine` then rejected,
-   * which renders no dashboard, no error and no reason to fetch again: the effect's
-   * deps did not move. Dropping it here is what keeps the screen showing the account
-   * whose tab is current.
+   * Which fetch the screen is waiting for. An answer for a tab nobody is looking at any
+   * more is not a slower answer, it is the wrong one: written anyway, it leaves `data`
+   * holding an id `mine` rejects, which renders no dashboard, no error and no reason to
+   * fetch again, because the effect's deps do not move.
    */
   const request = useRef(0);
 
@@ -227,8 +206,6 @@ export function OverviewScreen({
       }
       // Anchor on the uploaded history; today could be outside every statement.
       const anchor = monthOf(recent[0].date);
-      // the last day of the month, and the endpoints keep it whole — a `to` short by
-      // one drops that day out of the donut, both figures and the newest point at once
       const to = monthEnd(anchor);
       const [summary, monthly] = await Promise.all([
         api.accountSummary(account.id, `${anchor}-01`, to),
@@ -252,7 +229,6 @@ export function OverviewScreen({
     if (selected) loadAccount(selected);
   }, [selected, loadAccount, dataRevision]);
 
-  /** The account's row moved on the server — put the new one in the list as it is. */
   const applyAccount = (updated: Account) => {
     setAccounts((list) => list?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
   };
@@ -269,15 +245,12 @@ export function OverviewScreen({
     // list comes back, and a screen that says nothing sends the reader to press again
     setNotice(destroyedSentence(deleted.name, destroyed));
     // the whole list, never a splice: it is the server's answer instead of a guess at
-    // it, it is the shape afterCreate already uses, and the delete's own path is the
-    // wrong place to be clever — the deleted account is the selected one today, so a
-    // splice happens to work, and nothing in the code says it will stay that way.
-    // Deleting an account also un-pairs every transfer whose other leg was in it, so
+    // it. Deleting an account also un-pairs every transfer whose other leg was in it, so
     // the SURVIVING account's income and expenses move and its rows have to be re-read.
     load();
   };
 
-  // Trap: a sentence about the account that is gone must not stand above the panel of
+  // A sentence about the account that is gone must not stand above the panel of
   // the next one. An effect rather than a line in each setDialog caller, because a
   // caller written later cannot forget an effect. `afterDelete` sets dialog to null in
   // the same batch, so this sees null and does not eat the sentence it was just given.
@@ -288,23 +261,15 @@ export function OverviewScreen({
   const mine = data?.accountId === selected?.id ? data : null;
   const figures = mine?.figures ?? null;
 
-  /**
-   * The chart's months: the server's answer anchored, cut to the toggle and with its
-   * interior gaps filled. Sliced here rather than re-fetched — the request asks for
-   * the longest window once and 3 and 6 are cuts of it.
-   */
+  /** Sliced here rather than re-fetched: the request asks for the longest window once. */
   const months = useMemo(
     () => (figures ? windowMonths(figures.monthly.months, window_) : []),
     [figures, window_],
   );
 
-  /**
-   * All time and not the window, which is what the endpoint answers and more than this
-   * screen could ever see before. The warning on the flows card says so in those words.
-   */
+  /** All time, and not the window the figures beside it cover. */
   const otherCurrencies = figures?.monthly.otherCurrencies ?? [];
 
-  /** The newest month the account has anything in — what every figure is about. */
   const month = latestMonth(months);
   const prior = priorMonth(months);
 
@@ -433,8 +398,7 @@ export function OverviewScreen({
             {selected.hidden ? (
               /* The ⋮ lives on the balance card, and a hidden account has no balance card
                  to put it on — so this panel carries the same control under the same
-                 accessible name. Without it the only route back out of Hidden is a PATCH
-                 by hand: the sentence here used to name a menu that was not on the page. */
+                 accessible name. */
               <div className="acct-blank">
                 <h2 className="acct-blank-title">{selected.name} is hidden</h2>
                 <p className="acct-blank-text">
@@ -533,8 +497,9 @@ export function OverviewScreen({
             onStep={(kind) => setDialog({ ...dialog, kind })}
             onClose={() => setDialog(null)}
             // the account as well as the panel: the dialog's account is the one on the
-            // rail today, and naming it is what makes the URL true on its own rather
-            // than only in a session that got here by opening this menu
+            // rail today, and naming it is what makes the URL true on its own for an
+            // account on the rail of whoever opens it, rather than only in a session
+            // that got here by opening this menu
             onOpenHistory={(account) => {
               setDialog(null);
               setUrl({ account: account.id, panel: 'history' });
