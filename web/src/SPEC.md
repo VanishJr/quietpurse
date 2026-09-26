@@ -556,7 +556,7 @@ many as fit and a count of the rest; a second count beside it would describe the
 as `categoryRuleCaption`'s coupling to that file: a pattern with too few words long enough to count
 is accepted, stored and tags nothing, so the hint and the example in the editor field above it
 must move together when the floor moves. The compact list counts stored patterns rather than
-claiming that they match transactions; full phrases belong in the Add/Edit Sheet, not the card.
+claiming that they match transactions; full phrases belong in the source editor Sheet, not the card.
 
 ## The palette, and what leaves the page
 
