@@ -116,7 +116,8 @@ describe('financial setup', () => {
     await settled();
 
     expect(currency().value).toBe('EUR');
-    expect(owners().value).toBe('Yurii Kalvenko');
+    expect(owners().value).toBe('');
+    expect(screen.getByRole('button', { name: 'Remove owner name Yurii Kalvenko' })).toBeInTheDocument();
   });
 
   it('offers a retry when the settings could not be read, and takes it', async () => {
@@ -150,10 +151,10 @@ describe('financial setup', () => {
     await settled();
 
     fireEvent.change(currency(), { target: { value: 'EURO' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText(/three-letter ISO code/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Saved/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
   });
 
   it('marks the save done when the response echoes what was asked for', async () => {
@@ -165,9 +166,9 @@ describe('financial setup', () => {
     await settled();
 
     fireEvent.change(currency(), { target: { value: 'usd' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(await screen.findByRole('button', { name: 'Saved ✓' })).toBeInTheDocument();
+    expect(await screen.findByText('All changes saved')).toBeInTheDocument();
     // re-rendered from the echoed body, not from what was typed
     expect(currency().value).toBe('USD');
   });
@@ -181,11 +182,11 @@ describe('financial setup', () => {
     await settled();
 
     fireEvent.change(currency(), { target: { value: 'USD' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Saved/ })).not.toBeInTheDocument();
-    expect(currency().value).toBe('EUR');
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
+    expect(currency().value).toBe('USD');
   });
 });
 

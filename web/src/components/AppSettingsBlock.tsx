@@ -1,107 +1,107 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import { api } from '../api';
 import { CURRENCY_SUGGESTIONS, currencyName } from '../currencies';
-import { AppSettings } from '../types';
+import type { AppSettings } from '../types';
 
-const splitNames = (raw: string): string[] =>
-  raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+const sameNames = (left: string[], right: string[]) =>
+  JSON.stringify(left) === JSON.stringify(right);
 
-/**
- * Its own error rather than the screen's: an error shared with the screen would be
- * cleared by the screen's other handlers, wiping a failed save here.
- */
 export function AppSettingsBlock() {
-  /** null until the GET answered — a prefilled "EUR" nobody stored is a smaller lie, not a truth */
   const [stored, setStored] = useState<AppSettings | null>(null);
   const [currency, setCurrency] = useState('');
-  const [owners, setOwners] = useState('');
+  const [owners, setOwners] = useState<string[]>([]);
+  const [ownerDraft, setOwnerDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const take = (s: AppSettings) => {
-    setStored(s);
-    setCurrency(s.baseCurrency);
-    setOwners(s.ownerNames.join(', '));
+  const take = (settings: AppSettings) => {
+    setStored(settings);
+    setCurrency(settings.baseCurrency);
+    setOwners(settings.ownerNames);
+    setOwnerDraft('');
   };
 
   const load = useCallback(() => {
     setError(null);
-    api
-      .appSettings()
-      .then(take)
-      .catch((e) => setError((e as Error).message));
+    api.appSettings().then(take).catch((e) => setError((e as Error).message));
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const save = async () => {
+  const edit = () => {
+    setJustSaved(false);
+    setError(null);
+  };
+
+  const nameToAdd = ownerDraft.trim();
+  const canAddName = !!nameToAdd && !owners.includes(nameToAdd);
+  const addName = () => {
+    if (!canAddName || busy) return;
+    edit();
+    setOwners((names) => [...names, nameToAdd]);
+    setOwnerDraft('');
+  };
+
+  const patch = {
+    baseCurrency: currency.trim().toUpperCase(),
+    ownerNames: canAddName ? [...owners, nameToAdd] : owners,
+  };
+  const dirty = stored !== null &&
+    (patch.baseCurrency !== stored.baseCurrency || !sameNames(patch.ownerNames, stored.ownerNames));
+
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!stored || !dirty || saving.current) return;
+    saving.current = true;
     setBusy(true);
+    setError(null);
+    setJustSaved(false);
+    if (canAddName) setOwners(patch.ownerNames);
+    if (nameToAdd) setOwnerDraft('');
     try {
-      setError(null);
-      // dropped when the save starts, not when one fails: a mark left standing over an
-      // in-flight request affirms a save that is already being superseded
-      setJustSaved(false);
-      const patch = {
-        baseCurrency: currency.trim().toUpperCase(),
-        ownerNames: splitNames(owners),
-      };
       const next = await api.updateAppSettings(patch);
-      // the affirmation is derived from what the server says it stored, never from
-      // "nothing threw": a 200 over an ignored patch is exactly the failure to catch
-      const applied =
-        next.baseCurrency === patch.baseCurrency &&
-        JSON.stringify(next.ownerNames) === JSON.stringify(patch.ownerNames);
-      take(next);
-      setJustSaved(applied);
-      if (!applied) setError('the server stored something else — the fields show what it kept');
+      if (next.baseCurrency === patch.baseCurrency && sameNames(next.ownerNames, patch.ownerNames)) {
+        take(next);
+        setJustSaved(true);
+      } else {
+        setStored(next);
+        setError('the server stored something else — your edits are still here; review them before retrying');
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   };
 
-  // No heading of its own: its caller heads the section it sits in, and two headings
-  // over one form read as two forms.
   return (
     <section>
-      {error && (
+      {!stored && error && (
         <p className="error">
-          Error: {error}
-          {/* without the read there are no fields, so a reload of the page would be the
-              only way back to them */}
-          {!stored && (
-            <>
-              {' · '}
-              <button className="btn-link" type="button" onClick={load}>
-                Retry
-              </button>
-            </>
-          )}
+          Error: {error}{' · '}
+          <button className="btn-link" type="button" onClick={load}>Retry</button>
         </p>
       )}
-
       {!stored && !error && <p role="status" className="hint">Loading financial setup…</p>}
 
       {stored && (
-        <>
-          <label className="setting-label" htmlFor="app-currency">
-            Base currency
-          </label>
+        <form className="settings-financial-form" onSubmit={save}>
+          <label className="setting-label" htmlFor="app-currency">Base currency</label>
           <input
             id="app-currency"
             className="input settings-currency-input"
             list="settings-currencies"
             value={currency}
-            onChange={(e) => {
-              setJustSaved(false);
-              setCurrency(e.target.value);
+            disabled={busy}
+            onChange={(event) => {
+              edit();
+              setCurrency(event.target.value);
             }}
             placeholder="EUR"
           />
@@ -111,35 +111,73 @@ export function AppSettingsBlock() {
             ))}
           </datalist>
           {currencyName(currency) && (
-            <p className="settings-currency-name">{currency.trim().toUpperCase()} · {currencyName(currency)}</p>
+            <p className="settings-currency-name">
+              {currency.trim().toUpperCase()} · {currencyName(currency)}
+            </p>
           )}
           <p className="hint">
             Every total is converted into this one. Changing it recomputes them in the
             background, so the amounts on screen stay the old ones until that finishes.
           </p>
 
-          <label className="setting-label" htmlFor="app-owners">
-            Owner names
-          </label>
-          <input
-            id="app-owners"
-            className="input"
-            value={owners}
-            onChange={(e) => {
-              setJustSaved(false);
-              setOwners(e.target.value);
-            }}
-            placeholder="Yurii Kalvenko, Yuriy Kalvenko"
-          />
+          <label className="setting-label" htmlFor="app-owners">Owner names</label>
+          {owners.length > 0 && (
+            <ul className="settings-owner-tags" aria-label="Owner names on this form">
+              {owners.map((name, index) => (
+                <li className="settings-owner-tag" key={`${index}-${name}`}>
+                  <span>{name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove owner name ${name}`}
+                    disabled={busy}
+                    onClick={() => {
+                      edit();
+                      setOwners((names) => names.filter((_, position) => position !== index));
+                    }}
+                  >×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="settings-owner-entry">
+            <input
+              id="app-owners"
+              className="input"
+              value={ownerDraft}
+              disabled={busy}
+              onChange={(event) => {
+                edit();
+                setOwnerDraft(event.target.value);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addName();
+                }
+              }}
+              placeholder="Add a name from a statement"
+            />
+            <button className="btn-ghost" type="button" disabled={!canAddName || busy} onClick={addName}>
+              Add name
+            </button>
+          </div>
           <p className="hint">
             Your name as your bank writes it in a statement. Without it a transfer between
-            your own accounts is counted as income. Several spellings, comma-separated.
+            your own accounts is counted as income. Add each spelling separately.
           </p>
 
-          <button className="btn" style={{ marginTop: 12 }} disabled={busy} onClick={save}>
-            {justSaved ? 'Saved ✓' : 'Save'}
-          </button>
-        </>
+          <div className="settings-save-row">
+            <button className="btn" type="submit" disabled={!dirty || busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+            {!error && (
+              <p role="status" className="settings-save-status">
+                {busy ? 'Saving…' : justSaved ? 'All changes saved' : dirty ? 'Unsaved changes' : 'No changes to save'}
+              </p>
+            )}
+          </div>
+          {error && <p className="error" role="alert">Error: {error}</p>}
+        </form>
       )}
     </section>
   );

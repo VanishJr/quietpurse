@@ -1791,6 +1791,71 @@ textarea {
   color: var(--ink-secondary);
 }
 
+.settings-page .settings-owner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0;
+  list-style: none;
+}
+
+.settings-page .settings-owner-tag {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-primary);
+  font-size: 13px;
+}
+
+.settings-page .settings-owner-tag span {
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-owner-tag button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 20px;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-owner-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-page .settings-owner-entry .input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.settings-page .settings-owner-entry .btn-ghost {
+  min-height: 44px;
+}
+
+.settings-page .settings-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 16px;
+}
+
+.settings-page .settings-save-status {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
 .settings-page .settings-card .row {
   flex-wrap: wrap;
 }
