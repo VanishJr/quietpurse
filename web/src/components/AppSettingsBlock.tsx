@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
+import { CURRENCY_SUGGESTIONS, currencyName } from '../currencies';
 import { AppSettings } from '../types';
 
 const splitNames = (raw: string): string[] =>
@@ -95,7 +96,8 @@ export function AppSettingsBlock() {
           </label>
           <input
             id="app-currency"
-            className="input input-code"
+            className="input settings-currency-input"
+            list="settings-currencies"
             value={currency}
             onChange={(e) => {
               setJustSaved(false);
@@ -103,6 +105,14 @@ export function AppSettingsBlock() {
             }}
             placeholder="EUR"
           />
+          <datalist id="settings-currencies">
+            {CURRENCY_SUGGESTIONS.map((code) => (
+              <option key={code} value={code} label={currencyName(code) ?? code} />
+            ))}
+          </datalist>
+          {currencyName(currency) && (
+            <p className="settings-currency-name">{currency.trim().toUpperCase()} · {currencyName(currency)}</p>
+          )}
           <p className="hint">
             Every total is converted into this one. Changing it recomputes them in the
             background, so the amounts on screen stay the old ones until that finishes.
