@@ -1,21 +1,3 @@
-/**
- * Settings: everything that is about the whole of a person's data rather than about
- * one of their accounts.
- *
- * The Overview used to carry all of it — the base currency, the owner names, the
- * recurring payments, the export and the import history across every account — under
- * a heading below the dashboard. None of it was about the account on the tab, which
- * is the only thing that screen is now for, and all of it is settings.
- *
- * The order is the point, and it is: **how Finto counts**, then **what it found**,
- * then **your data**. Reading down the screen goes from the thing that is true before
- * the app has any data to the thing you do with it afterwards. Each section is a card
- * so that the order is visible as separation rather than as a run of headings.
- *
- * It fetches two things. `AppSettingsBlock` reads the settings it edits, and the
- * recurring list is read here; both were already first-paint requests when they were
- * on the Overview, so the app's first paint is unchanged.
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiLabel } from '../api';
 import { categoryLabel } from '../categories';
@@ -27,7 +9,6 @@ import { fmtDate, fmtMoney } from '../format';
 import { RecurringSummary } from '../types';
 import { setUrl, useUrl } from '../url';
 
-/** How many recurring payments to show before the tail is summarised. */
 const RECURRING_LIMIT = 8;
 
 interface Props {
@@ -47,14 +28,12 @@ export function SettingsScreen({
   const recurringRequest = useRef(0);
 
   /**
-   * The import history takes the screen over, so it is a place the reader can BE -
-   * and a place lives in the URL, like every other one in this app.
-   *
-   * It was a useState, and Shell keeps every screen mounted under `hidden`, so the
-   * state outlived the screen: leave Settings with the history up, come back to
-   * Settings, and the app answered with the history instead of the settings that were
-   * asked for. `panel` already carries exactly this fact for the Overview's Import,
-   * and Shell drops it on every move between screens, which is the whole of the fix.
+   * The import history takes the screen over, so it is a place the reader can BE, and
+   * it lives in the URL rather than in a `useState`: the Shell keeps every screen
+   * mounted under `hidden`, so state would outlive the visit, and coming back to
+   * Settings would answer with the history instead of the settings that were asked
+   * for. What closes it when the reader leaves is written in `web/src/SPEC.md`, under
+   * *Where the reader is*.
    */
   const url = useUrl();
   const historyOpen = url.panel === 'history';
@@ -67,8 +46,8 @@ export function SettingsScreen({
    */
   const [exportError, setExportError] = useState<string | null>(null);
   /**
-   * In flight, and nothing else: /api/backup serialises every table, so on a real
-   * history the screen sits unchanged long enough for a second click.
+   * In flight, and nothing else: on a real history the export takes long enough for a
+   * second click while the first is still out.
    */
   const [exporting, setExporting] = useState(false);
 
@@ -88,7 +67,6 @@ export function SettingsScreen({
     loadRecurring();
   }, [dataRevision, loadRecurring]);
 
-  /** Hide/restore a group of recurring payments (the backend replies with a fresh list). */
   const toggleRecurring = async (description: string, ignored: boolean) => {
     const request = ++recurringRequest.current;
     try {
@@ -134,7 +112,9 @@ export function SettingsScreen({
     <div className="screen-inner">
       <h1 className="title">Settings</h1>
 
-      {/* 1. how Finto counts — the two settings every figure in the app depends on */}
+      {/* the order is the point — how Finto counts, then what it found, then your data:
+          reading down goes from what is true before the app has any data to what you
+          do with it afterwards */}
       <section className="settings-section">
         <h2 className="settings-title">How Finto counts</h2>
         <p className="settings-lead">
@@ -146,7 +126,6 @@ export function SettingsScreen({
         </div>
       </section>
 
-      {/* 2. what it found */}
       <section className="settings-section">
         <h2 className="settings-title">Recurring payments</h2>
         <p className="settings-lead">
@@ -201,7 +180,6 @@ export function SettingsScreen({
         )}
       </section>
 
-      {/* 3. your data */}
       <section className="settings-section">
         <h2 className="settings-title">Your data</h2>
         <p className="settings-lead">

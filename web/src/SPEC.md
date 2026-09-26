@@ -9,11 +9,10 @@ parent: architecture
 What this package's source is for, where it stops, and the rules about it that no type and no test
 holds. `AGENTS.md`'s *Platforms*, *Invariants* and *Verification has a hole* carry the contract, the
 slug rule, the error budget and what a green run does not cover, and nothing below repeats them.
-The code of the modules at the root of `web/src` and of the components in `web/src/components/`,
-`App.tsx` and `Shell.tsx` excepted, keeps what `AGENTS.md`'s *Conventions* names as a keep, and the
-two month rules kept whole beside their functions are named below by symbol. The screens in
-`web/src/screens/`, and the two files excepted above, are described here where a rule reaches into
-one, and their code carries the rest of their reasoning. The test files under `web/src`,
+The code of the modules at the root of `web/src`, of the components in `web/src/components/` and of
+the screens in `web/src/screens/` keeps what `AGENTS.md`'s *Conventions* names as a keep, and the
+two month rules kept whole beside their functions are named below by symbol. A screen, or `Shell`,
+is described here where a rule reaches into it. The test files under `web/src`,
 `web/src/test/setup.ts` among them, keep their reasoning beside their code as well. The sections
 after *Invariants*, *Overview presentation* excepted, open each paragraph on the symbol it is about,
 so a rule is found by the symbol it governs.
@@ -48,8 +47,9 @@ the `unit` project installs no stub at all.
 not this app is the contract a mobile client has to reach. The theme is the one deliberate exception:
 a reader who pins dark on a phone and light on a desk has expressed two preferences, not one that
 failed to sync, so `theme.tsx` writes it to `localStorage` and is the only module that stores
-anything in the browser. The screen, the account, the open panel and the selected chart live in the
-query string and are read back through `url.ts`, and that is not a crossing: the URL is where the
+anything in the browser. The keys `url.ts` declares in `KEYS`, the screen, the account, the open
+panel and the selected chart among them, live in the query string and are read back through that
+module, and that is not a crossing: the URL is where the
 reader *is*, not something a second client needs to reach — a native client has its own screens and
 its own Back, and a server that has had no user since the product became single-user would be minting
 per-user interface state to hold it. It is the query and never the path because the fallback in
@@ -73,7 +73,8 @@ storage hook, a query-cache persister — where the identifier never appears in 
 `api.ts` against the routes `backend/src/app.ts` serves over the table in `backend/src/db/schema.ts`,
 so a chart follows a person to a second device. What is left of the browser copy is one read: the key
 `analytics.ts` used to write is migrated into the database on the first load that finds one which has
-never saved, and removed once that write is answered. It writes nothing, an installation that never
+never saved, and is not removed before the server has accepted a write, nor on a refusal. It
+writes nothing, an installation that never
 ran the browser-only list finds nothing under the key, and deleting it is a behaviour change this
 document does not rule on. Two things came with the move that are the
 client's alone and are held by cases in `web/src/screens/AnalyticsScreen.test.tsx` rather than by any
@@ -413,11 +414,22 @@ donut to a line and back does not quietly discard the half that was not being re
 route takes both whatever the kind: `chartSchema` in `backend/src/app.ts` couples neither `metrics`
 nor `breakdown` to `kind` and sets no minimum on `metrics`.
 
+`AnalyticsScreen` holds no analysis of its own: it draws the charts the reader made, none of the
+app's choosing. It draws one of them at a time rather than a grid, because the reader who made a
+chart asked one question of it and one plot answers it, where a grid would leave that plot to be
+found among the rest. What a chart id in the URL does is written under *Where the reader is*, and
+how the list reaches the server under *Boundary*; neither is restated here.
+
+`loadAccounts` reads the account list once for the Analytics screen, hidden accounts included, and
+the screen hands that one answer to the card it draws and to `ChartWizard` rather than letting
+either ask, because the answer is the same for every chart and the card is remounted each time the
+chart on screen changes.
+
 ## Where the reader is
 
-`useUrl` reads where the reader is off the URL, and the URL is the one store. The navigation in
-`Shell.tsx` reads `screen`, the Overview reads `account` and `panel`, the Analytics screen reads
-`chart`, and Back has to move all of them at once: a `useState` in any one of them cannot hear
+`useUrl` reads where the reader is off the URL, and the URL is the one store. Each reader calls
+`useUrl` for the keys it needs, a key can have more than one reader, and Back has to move every
+reader at once: a `useState` in any one of them cannot hear
 `popstate`, and a copy in each is two copies to disagree, which is what the app had while these were
 component state and had no answer to Back, to Reload or to a copied link. `useSyncExternalStore` is
 the primitive for exactly this — the URL is the store and every reader subscribes to it — and it is
@@ -430,13 +442,32 @@ two pieces of code that agree until one is edited fail invisibly from the app's 
 still works, since the click never uses the `href` — and what would be wrong is the address in the
 status bar, in the copied link and in the tab a middle click opens.
 
-`AppUrl` validates none of its values; the reader of each key does. `tabOf` in `Shell.tsx` folds an
-unknown `screen` to the Overview, `web/src/screens/OverviewScreen.tsx` reads `panel` as the import
-panel, the history panel or nothing, and `account` and `chart` name things `url.ts` knows nothing
-about. The promise every key makes is the same: the URL says where the reader was, and the reader's
-own data says whether that place still exists — a link carrying a chart id opens that chart where it
-exists and falls back to the first chart where it does not, exactly as `account` falls back to the
-first account.
+`AppUrl` validates none of its values; whatever reads a key validates it, and a key with more than
+one reader is read by each for itself. `tabOf` in `Shell.tsx` folds an unknown `screen` to the
+Overview, `web/src/screens/OverviewScreen.tsx` reads `panel` as the import panel, the history panel
+or nothing, and the values the other keys carry, an account id and a chart id among them, name
+things `url.ts` knows nothing about. The promise every key makes is the same: the URL says where
+the reader was, and the reader's own data says whether that place still exists — a link carrying a
+chart id opens that chart where it exists and falls back to the first chart where it does not,
+exactly as `account` falls back to the first account.
+
+`Shell` renders each section, the import entry and the settings control as an anchor whose `href` is
+`urlFor`'s address for the patch a click on it applies, so each is a link the browser can act on and
+not only a control the app answers. `navigate`, the click handler on each of them, takes a click for
+the app only when it is a primary click with no modifier held, and returns before `preventDefault`
+otherwise, so every other click is the browser's: as measured in a Chromium browser, a Ctrl+click, a
+middle click or a Shift+click on any of them opens that anchor's address in a new page and leaves
+the page it was made on where it was.
+
+`patchFor` in `Shell` sets `panel` to nothing on every section link and on the settings control, and
+that is what closes a panel when the reader leaves its screen by one of them: the Overview's import
+and history pages, and Settings' import history, which `SettingsScreen` keeps in the URL as `panel`
+set to `history` rather than in state so that this closes it. Back or Forward to an entry that
+carried a panel opens it again.
+
+`AppUrl` carries where the reader is and not how they have set a screen up: the Overview's chart
+window and its switch for hidden accounts are component state on purpose, because a link that
+carried them would override the setup of whoever opens it.
 
 ## The sentences a person reads, and what is lifted out of a screen to hold them
 
