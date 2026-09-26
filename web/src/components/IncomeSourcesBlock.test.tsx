@@ -115,23 +115,58 @@ describe('IncomeSourcesBlock', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add source' })).not.toBeInTheDocument());
   });
 
-  it('invalidates mounted readers before requesting the refreshed catalog', async () => {
+  it('sends the edited fields and invalidates only after the write commits, before catalog refresh', async () => {
     const sequence: string[] = [];
+    let finish: (response: Response) => void = () => {};
     let reads = 0;
     await mount({
       'GET /api/income-sources': () => {
         if (reads++ > 0) sequence.push('catalog');
         return ok(CATALOG);
       },
-      'PUT /api/income-sources/stipend': () => {
-        sequence.push('write');
-        return ok(source({ label: 'Grant' }));
+      'PUT /api/income-sources/stipend': (init) => {
+        sent.push({ method: 'PUT', body: JSON.parse(String(init?.body)) });
+        sequence.push('write pending');
+        return new Promise<Response>((resolve) => { finish = resolve; });
       },
     }, () => { sequence.push('invalidate'); });
     fireEvent.click(screen.getByRole('button', { name: 'Edit Stipend' }));
     fireEvent.change(screen.getByLabelText('Source name'), { target: { value: 'Grant' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Earnings' }));
+    fireEvent.change(screen.getByLabelText('Statement match patterns'), {
+      target: { value: 'Acme GmbH, Example Limited' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(sequence).toEqual(['write', 'invalidate', 'catalog']));
+    expect(sent).toEqual([{
+      method: 'PUT',
+      body: { label: 'Grant', kind: 'own', patterns: ['Acme GmbH', 'Example Limited'] },
+    }]);
+    expect(sequence).toEqual(['write pending']);
+    expect(screen.getByRole('dialog', { name: 'Edit source' })).toBeVisible();
+
+    await act(async () => {
+      sequence.push('write committed');
+      finish(ok(source({ label: 'Grant', kind: 'own', patterns: ['Acme GmbH', 'Example Limited'] })));
+    });
+    expect(sequence).toEqual(['write pending', 'write committed', 'invalidate', 'catalog']);
+  });
+
+  it('does not invalidate or refresh the catalog after a rejected pending write', async () => {
+    const changed = vi.fn();
+    let finish: (response: Response) => void = () => {};
+    await mount({
+      'PUT /api/income-sources/stipend': () =>
+        new Promise<Response>((resolve) => { finish = resolve; }),
+    }, changed);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Stipend' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(changed).not.toHaveBeenCalled();
+    expect(requests().filter((request) => request === 'GET /api/income-sources')).toHaveLength(1);
+    await act(async () => { finish(fail(400, { error: 'write refused' })); });
+    expect(within(screen.getByRole('dialog', { name: 'Edit source' })).getByRole('alert'))
+      .toHaveTextContent('write refused');
+    expect(changed).not.toHaveBeenCalled();
+    expect(requests().filter((request) => request === 'GET /api/income-sources')).toHaveLength(1);
   });
 
   it('invalidates readers even when the post-write catalog refresh fails', async () => {
