@@ -188,6 +188,122 @@ describe('financial setup', () => {
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
     expect(currency().value).toBe('USD');
   });
+
+  it('offers named suggestions but sends only a freely entered code', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': (init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return ok({ ...APP_SETTINGS, baseCurrency: 'QZX' });
+      },
+    });
+    mount();
+    await settled();
+
+    expect(screen.getByRole('combobox', { name: 'Base currency' })).toHaveAttribute('list', 'settings-currencies');
+    expect(screen.getByText('EUR · Euro')).toBeInTheDocument();
+    expect(document.querySelector('option[value="USD"]')).toHaveAttribute('label', 'US Dollar');
+    fireEvent.change(currency(), { target: { value: 'qzx' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('All changes saved')).toBeInTheDocument();
+    expect(sent).toEqual([{ baseCurrency: 'QZX', ownerNames: ['Yurii Kalvenko'] }]);
+    expect(currency()).toHaveValue('QZX');
+    expect(screen.queryByText(/QZX ·/)).not.toBeInTheDocument();
+  });
+
+  it('keeps owner tags local until Save, rejects empty and exact duplicate drafts, and handles Enter', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': (init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return ok({ ...APP_SETTINGS, ownerNames: ['Yuriy Kalvenko'] });
+      },
+    });
+    mount();
+    await settled();
+    const save = () => screen.getByRole('button', { name: 'Save changes' });
+    expect(save()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('No changes to save');
+
+    fireEvent.change(owners(), { target: { value: '   ' } });
+    fireEvent.keyDown(owners(), { key: 'Enter' });
+    expect(save()).toBeDisabled();
+    fireEvent.change(owners(), { target: { value: 'Yurii Kalvenko' } });
+    fireEvent.keyDown(owners(), { key: 'Enter' });
+    expect(screen.getAllByRole('button', { name: 'Remove owner name Yurii Kalvenko' })).toHaveLength(1);
+    expect(save()).toBeDisabled();
+
+    fireEvent.change(owners(), { target: { value: ' Yuriy Kalvenko ' } });
+    fireEvent.keyDown(owners(), { key: 'Enter' });
+    expect(screen.getByRole('button', { name: 'Remove owner name Yuriy Kalvenko' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove owner name Yurii Kalvenko' }));
+    expect(screen.queryByRole('button', { name: 'Remove owner name Yurii Kalvenko' })).not.toBeInTheDocument();
+    expect(save()).toBeEnabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+    expect(sent).toEqual([]);
+
+    fireEvent.click(save());
+    expect(await screen.findByText('All changes saved')).toBeInTheDocument();
+    expect(sent).toEqual([{ baseCurrency: 'EUR', ownerNames: ['Yuriy Kalvenko'] }]);
+    expect(save()).toBeDisabled();
+  });
+
+  it('saves an uncommitted name draft rather than silently omitting it', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': (init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return ok({ ...APP_SETTINGS, ownerNames: ['Yurii Kalvenko', 'Ana, Lee'] });
+      },
+    });
+    mount();
+    await settled();
+    fireEvent.change(owners(), { target: { value: ' Ana, Lee ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('All changes saved')).toBeInTheDocument();
+    expect(sent).toEqual([{ baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko', 'Ana, Lee'] }]);
+    expect(screen.getByRole('button', { name: 'Remove owner name Ana, Lee' })).toBeInTheDocument();
+  });
+
+  it('keeps failed edits beside their refusal, including a pending name', async () => {
+    mockFetch({ ...BASE, 'PATCH /api/app-settings': () => fail(400, { error: 'ownerNames refused' }) });
+    mount();
+    await settled();
+    fireEvent.change(currency(), { target: { value: 'USD' } });
+    fireEvent.change(owners(), { target: { value: 'Ana' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await within(cardFor('Financial setup')).findByRole('alert')).toHaveTextContent('ownerNames refused');
+    expect(currency()).toHaveValue('USD');
+    expect(screen.getByRole('button', { name: 'Remove owner name Ana' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
+  });
+
+  it('locks the saving form against duplicate submissions until the server answers', async () => {
+    let release: (response: Response) => void = () => {};
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': () => new Promise<Response>((resolve) => { release = resolve; }),
+    });
+    mount();
+    await settled();
+    fireEvent.change(currency(), { target: { value: 'USD' } });
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    const form = save.closest('form')!;
+    fireEvent.submit(form);
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(currency()).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Saving…');
+    fireEvent.submit(form);
+    expect(requests().filter((request) => request === 'PATCH /api/app-settings')).toHaveLength(1);
+    await act(async () => release(ok({ ...APP_SETTINGS, baseCurrency: 'USD' })));
+    expect(screen.getByText('All changes saved')).toBeInTheDocument();
+  });
 });
 
 describe('the data export', () => {
