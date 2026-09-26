@@ -86,6 +86,8 @@ export function AppSettingsBlock() {
         </p>
       )}
 
+      {!stored && !error && <p role="status" className="hint">Loading financial setup…</p>}
+
       {stored && (
         <>
           <label className="setting-label" htmlFor="app-currency">

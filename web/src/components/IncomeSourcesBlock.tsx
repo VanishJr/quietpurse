@@ -160,7 +160,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
 
   return (
     <>
-      <h2 className="block-title">Income sources</h2>
+      <h2 className="block-title" id="settings-income-title">Income sources</h2>
       <p className="hint">
         Support is tracked separately and does not count toward earnings goals.
       </p>
@@ -180,6 +180,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           )}
         </p>
       )}
+
+      {!sources && !error && <p role="status" className="hint">Loading income sources…</p>}
 
       {sources && (
         <>

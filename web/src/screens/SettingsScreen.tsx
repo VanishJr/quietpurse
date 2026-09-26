@@ -109,24 +109,29 @@ export function SettingsScreen({
   }
 
   return (
-    <div className="screen-inner">
-      <h1 className="title">Settings</h1>
-
-      {/* the order is the point — how Finto counts, then what it found, then your data:
-          reading down goes from what is true before the app has any data to what you
-          do with it afterwards */}
-      <section className="settings-section">
-        <h2 className="settings-title">How Finto counts</h2>
-        <p className="settings-lead">
-          These settings decide what totals and income-based goals mean across all accounts.
+    <div className="screen-inner settings-page">
+      <header className="settings-header">
+        <h1 className="title">Settings</h1>
+        <p className="settings-intro">
+          Set how Finto counts your money, review recurring payments, and manage your local data.
         </p>
-        <AppSettingsBlock />
-        <div className="settings-subsection">
-          <IncomeSourcesBlock onChanged={onDataChanged} />
-        </div>
-      </section>
+      </header>
 
-      <section className="settings-section">
+      <div className="settings-top">
+        <section className="settings-card" aria-labelledby="settings-financial-title">
+          <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
+          <p className="settings-lead">
+            These settings decide what totals and income-based goals mean across all accounts.
+          </p>
+          <AppSettingsBlock />
+        </section>
+
+        <section className="settings-card" aria-labelledby="settings-income-title">
+          <IncomeSourcesBlock onChanged={onDataChanged} />
+        </section>
+      </div>
+
+      <section className="settings-card">
         <h2 className="settings-title">Recurring payments</h2>
         <p className="settings-lead">
           Detected across every account, over the last twelve months.{' '}
@@ -138,6 +143,9 @@ export function SettingsScreen({
             </>
           )}
         </p>
+        {!recurring && !recurringError && (
+          <p role="status" className="hint">Loading recurring payments…</p>
+        )}
         {recurringError && <p className="error">Error: {recurringError}</p>}
         {recurring && recurring.groups.length === 0 && (
           <p className="hint">
@@ -180,8 +188,8 @@ export function SettingsScreen({
         )}
       </section>
 
-      <section className="settings-section">
-        <h2 className="settings-title">Your data</h2>
+      <section className="settings-card">
+        <h2 className="settings-title">Data &amp; backup</h2>
         <p className="settings-lead">
           What you have uploaded, and how to take all of it away with you.
         </p>
@@ -221,7 +229,10 @@ export function SettingsScreen({
         </p>
       </section>
 
-      <p className="api-hint">API: {apiLabel()}</p>
+      <section className="settings-card settings-advanced">
+        <h2 className="settings-title">Advanced · API connection</h2>
+        <p className="api-hint">API: {apiLabel()}</p>
+      </section>
     </div>
   );
 }

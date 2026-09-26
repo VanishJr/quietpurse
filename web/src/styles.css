@@ -963,13 +963,6 @@ textarea {
   margin-bottom: 8px;
 }
 
-.api-hint {
-  color: var(--ink-muted);
-  font-size: 11px;
-  text-align: center;
-  margin: 8px 0;
-}
-
 /* Text for a screen reader and nobody else. */
 .visually-hidden {
   position: absolute;
@@ -1729,34 +1722,103 @@ textarea {
   line-height: 1.6;
 }
 
-/* ---------- the Account screen's sections ---------- */
+.settings-page {
+  max-width: 1160px;
+}
 
-/* Everything that is about the workspace rather than about one account lives on that
-   screen now, in order: who you are, how the app computes, what it found, your data,
-   leaving. Each section is a card, so the order reads as separation rather than as a
-   run of headings down one column. */
-.settings-section {
+.settings-page .settings-header {
+  margin: 12px 0 28px;
+}
+
+.settings-page .settings-header .title {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+}
+
+.settings-page .settings-intro {
+  margin: 8px 0 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.settings-page .settings-top {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.settings-page .settings-card {
+  min-width: 0;
+  padding: 24px;
   border: 1px solid var(--ink-border);
   border-radius: var(--r-xl);
   background: var(--ink-surface);
-  padding: 20px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.settings-title {
+.settings-page .settings-top .settings-card {
+  margin-bottom: 0;
+}
+
+.settings-page .settings-title,
+.settings-page .settings-card > .block-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
-.settings-lead {
-  margin: 4px 0 14px;
+.settings-page .settings-lead {
+  margin: 8px 0 18px;
   font-size: 13px;
-  color: var(--ink-muted);
-  line-height: 1.45;
+  color: var(--ink-secondary);
+  line-height: 1.5;
 }
 
-/* ---------- narrow ---------- */
+.settings-page .settings-card > .hint {
+  margin-top: 8px;
+}
+
+.settings-page .settings-card .row {
+  flex-wrap: wrap;
+}
+
+.settings-page .settings-card .row-main {
+  flex-basis: 180px;
+}
+
+.settings-page .settings-card .row-sub,
+.settings-page .settings-card .hint,
+.settings-page .settings-card .error,
+.settings-page .settings-intro {
+  overflow-wrap: anywhere;
+}
+
+.settings-page .api-hint {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 1200px) {
+  .settings-page .settings-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 599px) {
+  .settings-page .settings-header {
+    margin-bottom: 22px;
+  }
+
+  .settings-page .settings-card {
+    padding: 18px;
+  }
+}
 
 /* ---------- analytics: the chart workspace ---------- */
 

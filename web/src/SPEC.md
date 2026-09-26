@@ -626,7 +626,10 @@ width able to widen a narrow page.
 Navigation uses the same links for the desktop sidebar and mobile bar. Import remains a desktop
 navigation link and a panel of Overview, while Settings takes its place in the mobile bar; Import
 is still reachable from Overview and Settings. Screens stay mounted so filters survive navigation,
-with inactive screens excluded through `hidden`. The account strip
+with inactive screens excluded through `hidden`. Settings separates financial setup from income
+classification, then presents recurring payments, data and backup actions, and API connection
+information in that order. Pending reads and failures belong to their respective regions, never
+to a page-wide empty result. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import

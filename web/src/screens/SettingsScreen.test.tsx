@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
@@ -23,6 +23,8 @@ const BASE: Routes = {
 };
 
 const mount = () => renderThemed(<SettingsScreen onOpenImport={vi.fn()} />);
+const cardFor = (name: string) =>
+  screen.getByRole('heading', { name }).closest('section.settings-card') as HTMLElement;
 
 describe('the screen itself', () => {
   it('asks for the global settings reads and nothing else', async () => {
@@ -43,6 +45,54 @@ describe('the screen itself', () => {
     expect(screen.getByRole('heading', { name: 'Income sources' })).toBeInTheDocument();
   });
 
+  it('heads the page and keeps each block in its own ordered card', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+
+    expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
+    expect(screen.getByText(/Set how Finto counts your money/)).toBeInTheDocument();
+    expect(Array.from(container.querySelectorAll('.settings-card h2'), (heading) => heading.textContent))
+      .toEqual([
+        'Financial setup',
+        'Income sources',
+        'Recurring payments',
+        'Data & backup',
+        'Advanced · API connection',
+      ]);
+    const top = container.querySelector('.settings-top');
+    expect(top?.children).toHaveLength(2);
+    expect(top).toContainElement(cardFor('Financial setup'));
+    expect(top).toContainElement(cardFor('Income sources'));
+    expect(within(cardFor('Financial setup')).getByText(/totals and income-based goals/))
+      .toBeInTheDocument();
+    expect(within(cardFor('Data & backup')).getByRole('button', { name: /Export my data/ }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Stored on this device/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps unresolved reads and refusals inside their respective cards', async () => {
+    let finishRecurring: (response: Response) => void = () => {};
+    mockFetch({
+      ...BASE,
+      'GET /api/app-settings': () => fail(500, { error: 'settings unavailable' }),
+      'GET /api/income-sources': () => fail(500, { error: 'catalog unavailable' }),
+      'GET /api/recurring': () => new Promise<Response>((resolve) => { finishRecurring = resolve; }),
+    });
+    mount();
+
+    expect(within(cardFor('Recurring payments')).getByRole('status')).toHaveTextContent('Loading recurring payments');
+    expect(within(cardFor('Recurring payments')).queryByText(/Nothing yet/)).not.toBeInTheDocument();
+    expect(within(cardFor('Financial setup')).getByRole('status')).toHaveTextContent('Loading financial setup');
+    expect(within(cardFor('Income sources')).getByRole('status')).toHaveTextContent('Loading income sources');
+    expect(await within(cardFor('Financial setup')).findByText(/settings unavailable/)).toBeInTheDocument();
+    expect(await within(cardFor('Income sources')).findByText(/catalog unavailable/)).toBeInTheDocument();
+    expect(within(cardFor('Financial setup')).queryByLabelText('Base currency')).not.toBeInTheDocument();
+    expect(within(cardFor('Income sources')).queryByRole('button', { name: 'Add source' })).not.toBeInTheDocument();
+    await act(async () => { finishRecurring(fail(500, { error: 'recurring unavailable' })); });
+    expect(within(cardFor('Recurring payments')).getByText(/recurring unavailable/)).toBeInTheDocument();
+    expect(within(cardFor('Recurring payments')).queryByText(/Nothing yet/)).not.toBeInTheDocument();
+  });
+
   it('carries no password, no address and no sign-out, since there is no account', async () => {
     mockFetch(BASE);
     mount();
@@ -53,13 +103,7 @@ describe('the screen itself', () => {
   });
 });
 
-/**
- * The three blocks that came here from the Overview, in the order the screen puts
- * them: how Finto counts, what it found, your data. The tests moved with them
- * unchanged except for where they mount.
- */
-
-describe('how Finto counts', () => {
+describe('financial setup', () => {
   const currency = () => screen.getByLabelText('Base currency') as HTMLInputElement;
   const owners = () => screen.getByLabelText('Owner names') as HTMLInputElement;
 
@@ -151,7 +195,7 @@ describe('the data export', () => {
   it('fetches the backup and saves what came back', async () => {
     mockFetch({ ...BASE, 'GET /api/backup': () => ok({ transactions: [] }) });
     mount();
-    await screen.findByRole('heading', { name: 'Your data' });
+    await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(exportControl());
 
@@ -167,7 +211,7 @@ describe('the data export', () => {
       'GET /api/backup': () => fail(500, { error: 'the export could not be assembled' }),
     });
     mount();
-    await screen.findByRole('heading', { name: 'Your data' });
+    await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(exportControl());
 
@@ -184,7 +228,7 @@ describe('the data export', () => {
       'GET /api/backup': () => new Promise<Response>((resolve) => (release = resolve)),
     });
     mount();
-    await screen.findByRole('heading', { name: 'Your data' });
+    await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(exportControl());
     expect(exportControl()).toBeDisabled();
@@ -201,14 +245,14 @@ describe('the import history across every account', () => {
   it('opens every account, and comes back', async () => {
     mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
     mount();
-    await screen.findByRole('heading', { name: 'Your data' });
+    await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(screen.getByRole('button', { name: /Import history \(every account\)/ }));
 
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
 
-    expect(await screen.findByRole('heading', { name: 'Your data' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Data & backup' })).toBeInTheDocument();
   });
 
   /**
@@ -224,7 +268,7 @@ describe('the import history across every account', () => {
   it('puts the takeover in the URL, so a move between screens closes it', async () => {
     mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
     mount();
-    await screen.findByRole('heading', { name: 'Your data' });
+    await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(screen.getByRole('button', { name: /Import history \(every account\)/ }));
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
@@ -232,7 +276,7 @@ describe('the import history across every account', () => {
 
     act(() => setUrl({ screen: 'settings', panel: null }));
 
-    expect(await screen.findByRole('heading', { name: 'Your data' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Data & backup' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
   });
 });
