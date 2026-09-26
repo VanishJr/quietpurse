@@ -154,6 +154,7 @@ describe('financial setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText(/three-letter ISO code/)).toBeInTheDocument();
+    expect(currency()).toHaveValue('EURO');
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
   });
 
@@ -187,6 +188,7 @@ describe('financial setup', () => {
     expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
     expect(currency().value).toBe('USD');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
   });
 
   it('offers named suggestions but sends only a freely entered code', async () => {
@@ -282,6 +284,38 @@ describe('financial setup', () => {
     expect(screen.getByRole('button', { name: 'Remove owner name Ana' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
     expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
+  });
+
+  it('supports Add name without submitting, and returns to pristine when edits are undone', async () => {
+    mockFetch(BASE);
+    mount();
+    await settled();
+    fireEvent.change(owners(), { target: { value: 'Alex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add name' }));
+    expect(screen.getByRole('button', { name: 'Remove owner name Alex' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove owner name Alex' }));
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    fireEvent.change(currency(), { target: { value: 'eur' } });
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(requests().filter((request) => request === 'PATCH /api/app-settings')).toHaveLength(0);
+  });
+
+  it('does not affirm a partial echo of the owner list or discard the unsaved tag', async () => {
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': () => ok({ ...APP_SETTINGS, ownerNames: ['Yurii Kalvenko'] }),
+    });
+    mount();
+    await settled();
+    fireEvent.change(owners(), { target: { value: 'Ana' } });
+    fireEvent.keyDown(owners(), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('server stored something else');
+    expect(screen.getByRole('button', { name: 'Remove owner name Ana' })).toBeInTheDocument();
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
   });
 
   it('locks the saving form against duplicate submissions until the server answers', async () => {

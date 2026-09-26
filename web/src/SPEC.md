@@ -629,7 +629,12 @@ is still reachable from Overview and Settings. Screens stay mounted so filters s
 with inactive screens excluded through `hidden`. Settings separates financial setup from income
 classification, then presents recurring payments, data and backup actions, and API connection
 information in that order. Pending reads and failures belong to their respective regions, never
-to a page-wide empty result. The account strip
+to a page-wide empty result. Financial setup shows the server's currency with a readable name when
+one is available; suggestions never restrict the code the server may accept. Owner spellings are
+individual local edits until a save, including a name still in the entry field. The form calls a
+write confirmed only when the returned currency and ordered names match what it sent; a refusal or
+unexpected answer leaves the edits available to correct or retry. Validation and recalculation
+remain with the server. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import
