@@ -120,6 +120,23 @@ describe('IncomeSourcesBlock', () => {
     expect(screen.getByText('Changing this updates every income-based goal; transaction assignments stay the same.')).toBeVisible();
   });
 
+  it('restores focus to Add and Edit after the Sheet closes', async () => {
+    await mount();
+    const add = screen.getByRole('button', { name: 'Add source' });
+    add.focus();
+    fireEvent.click(add);
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(add).toHaveFocus();
+
+    const edit = screen.getByRole('button', { name: 'Edit Stipend' });
+    edit.focus();
+    fireEvent.click(edit);
+    expect(screen.getByRole('dialog', { name: 'Edit source' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(edit).toHaveFocus();
+  });
+
   it('explains delete consequences before sending the write', async () => {
     await mount({
       'DELETE /api/income-sources/stipend': record('DELETE', ok({ deleted: true })),
@@ -133,6 +150,17 @@ describe('IncomeSourcesBlock', () => {
     expect(requests()).not.toContain('DELETE /api/income-sources/stipend');
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(requests()).toContain('DELETE /api/income-sources/stipend'));
+  });
+
+  it('shows a refused delete beside the still-open confirmation', async () => {
+    await mount({
+      'DELETE /api/income-sources/stipend': () => fail(400, { error: 'cannot delete this source' }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const confirmation = screen.getByText(/Delete “Stipend”/).closest('.row') as HTMLElement;
+    expect(await within(confirmation).findByRole('alert')).toHaveTextContent('cannot delete this source');
+    expect(within(confirmation).getByRole('button', { name: 'Delete' })).toBeEnabled();
   });
 
   it('offers Retry when the catalog cannot be read', async () => {

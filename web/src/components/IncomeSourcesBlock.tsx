@@ -227,6 +227,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                         Delete “{s.label}”? Assigned transactions move to {destination?.label ?? 'Other'}.
                         Manual assignments cannot be restored.
                       </p>
+                      {actionError && <p className="error" role="alert">Error: {actionError}</p>}
                       <div className="btn-row">
                         <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
                           Cancel
@@ -238,7 +239,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                     </>
                   )}
                 </div>
-                {!mine && (
+                {mine?.form !== 'delete' && (
                   <>
                     <button
                       className="btn-ghost"
@@ -250,11 +251,11 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                     </button>
                     {/* a builtin has no delete control, and the route refuses one anyway;
                         a deleted source's rows move to `other` */}
-                    {!s.builtin && (
+                    {!s.builtin && !mine && (
                       <button
                         className="btn-danger"
                         disabled={busy}
-                        onClick={() => setOpen({ form: 'delete', id: s.id })}
+                        onClick={() => { setActionError(null); setOpen({ form: 'delete', id: s.id }); }}
                         aria-label={`Delete ${s.label}`}
                       >
                         Delete
