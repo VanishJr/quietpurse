@@ -1355,7 +1355,7 @@ describe('what is sent, and when', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
 
     // the copy goes in after its source and `normaliseForSave` keeps the head of the
-    // list, so past the cap the save drops the list's last chart and keeps the copy: a
+    // list, so at the cap the save drops the list's last chart and keeps the copy: a
     // chart the reader did not ask to lose goes from the server, under a notice that
     // names no chart. Only when the source is last is it the copy that goes
     expect(await screen.findByText(/holds at most 100 charts/)).toBeInTheDocument();
@@ -1444,6 +1444,25 @@ describe('what is sent, and when', () => {
 
     expect(await screen.findByText(FULL)).toBeInTheDocument();
     expect(callsTo('PUT /api/analytics/charts')).toBe(0);
+  });
+
+  it('refuses to build a chart on a list already over the cap', async () => {
+    seed(numbered(CHARTS_MAX + 1));
+    window.history.replaceState(null, '', '/?chart=c-7');
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 7' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Create chart' }),
+    );
+
+    expect(await screen.findByText(FULL)).toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(0);
+    expect(new URLSearchParams(window.location.search).get('chart')).toBe('c-7');
+    expect(screen.queryByText(/could not be saved/)).not.toBeInTheDocument();
   });
 });
 
@@ -1670,6 +1689,7 @@ describe('a browser copy the route would refuse', () => {
 
     // the cap is the one place a chart is lost, and the reader is told
     expect(charts).toHaveLength(100);
+    expect((charts[99] as { id: string }).id).toBe('c-99');
     expect(await screen.findByText(/1 chart could not be saved/)).toBeInTheDocument();
   });
 });
