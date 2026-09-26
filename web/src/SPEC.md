@@ -420,10 +420,10 @@ chart asked one question of it and one plot answers it, where a grid would leave
 found among the rest. What a chart id in the URL does is written under *Where the reader is*, and
 how the list reaches the server under *Boundary*; neither is restated here.
 
-`loadAccounts` reads the account list once for the Analytics screen, hidden accounts included, and
-the screen hands that one answer to the card it draws and to `ChartWizard` rather than letting
-either ask, because the answer is the same for every chart and the card is remounted each time the
-chart on screen changes.
+`loadAccounts` in `AnalyticsScreen` reads the account list once, hidden accounts included, and the
+screen hands that one answer to the card it draws and to `ChartWizard` rather than letting either
+ask, because the answer is the same for every chart and the card is remounted each time the chart
+on screen changes.
 
 ## Where the reader is
 
@@ -455,15 +455,14 @@ exactly as `account` falls back to the first account.
 `urlFor`'s address for the patch a click on it applies, so each is a link the browser can act on and
 not only a control the app answers. `navigate`, the click handler on each of them, takes a click for
 the app only when it is a primary click with no modifier held, and returns before `preventDefault`
-otherwise, so every other click is the browser's: as measured in a Chromium browser, a Ctrl+click, a
-middle click or a Shift+click on any of them opens that anchor's address in a new page and leaves
-the page it was made on where it was.
+otherwise, so every other click is the browser's: as measured in Chromium on Linux, a Ctrl+click or
+a Shift+click on any of them opens that anchor's address in a new page and leaves the page it was
+made on where it was.
 
 `patchFor` in `Shell` sets `panel` to nothing on every section link and on the settings control, and
-that is what closes a panel when the reader leaves its screen by one of them: the Overview's import
-and history pages, and Settings' import history, which `SettingsScreen` keeps in the URL as `panel`
-set to `history` rather than in state so that this closes it. Back or Forward to an entry that
-carried a panel opens it again.
+that is what closes a panel when the reader leaves its screen by one of them, Settings' import
+history among them, which `SettingsScreen` keeps in the URL as `panel` set to `history` rather than
+in state so that this closes it. Back or Forward to an entry that carried a panel opens it again.
 
 `AppUrl` carries where the reader is and not how they have set a screen up: the Overview's chart
 window and its switch for hidden accounts are component state on purpose, because a link that

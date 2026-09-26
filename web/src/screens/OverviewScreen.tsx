@@ -112,13 +112,11 @@ export function OverviewScreen({
   /** What the last delete removed. Not a refusal, and not the dashboard's. */
   const [notice, setNotice] = useState<string | null>(null);
 
-  /**
-   * The chart's window and the hidden-accounts switch below stay in state and out of the
-   * URL on purpose, for the reason `web/src/SPEC.md` gives under *Where the reader is*.
-   */
   const url = useUrl();
   const panel = panelOf(url.panel);
 
+  // The chart's window and the hidden-accounts switch stay in state and out of the URL on
+  // purpose, for the reason `web/src/SPEC.md` gives under *Where the reader is*.
   const [showHidden, setShowHidden] = useState(false);
   const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
 

@@ -84,14 +84,17 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * A ref because a click handler cannot read the state it set a moment ago, and the
    * write path has to know the version it is at rather than the version of the render
    * it was created in — which is the difference between two mutations producing
-   * ascending versions and producing the same one twice. `commit` is the only writer
-   * of either, so the mirror cannot drift from the store.
+   * ascending versions and producing the same one twice. `commit` is the ref's only
+   * writer and the only thing that puts a list into state.
    */
   const list = useRef<ChartList | null>(null);
   /** The latest list the reader wants saved. Later intents replace it rather than queue. */
   const pending = useRef<ChartEntry[] | null>(null);
   const inFlight = useRef(false);
-  /** The first PUT is the migration's, and the browser's copy is dropped when it lands. */
+  /**
+   * Set by `migrate`, whose PUT is the first. While it is set, the first PUT answered 200
+   * drops the browser's copy, whatever that PUT carries; a refusal for staleness clears it.
+   */
   const migrating = useRef(false);
 
   const commit = useCallback((next: ChartList) => {
@@ -138,7 +141,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
         } catch (e) {
           if (e instanceof ChartsStaleError) {
             // no merge, no re-apply, no retry at the new version: re-applied over the list
-            // the other writer saved, the change would bring back a chart it deleted
+            // the other writer saved, the change would bring back any chart it deleted
             pending.current = null;
             /*
              * And the migration, if this was it, is over: the version is no longer 0,
