@@ -143,8 +143,8 @@ export function TransactionsScreen({
   const busy = saving || refreshingSelected;
 
   /**
-   * An arrival with a `focus` asks for all of one account's rows, so the other two
-   * filters are cleared as well and the period opens at the widest this screen offers —
+   * An arrival with a `focus` asks for all of one account's rows, so the category filter
+   * goes back to every category and the period opens at the widest this screen offers —
    * landing on whatever period was set would hide most of what the arrival asked for.
    */
   useEffect(() => {

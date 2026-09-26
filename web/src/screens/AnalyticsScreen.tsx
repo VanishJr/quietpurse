@@ -84,8 +84,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * A ref because a click handler cannot read the state it set a moment ago, and the
    * write path has to know the version it is at rather than the version of the render
    * it was created in — which is the difference between two mutations producing
-   * ascending versions and producing the same one twice. `commit` is the ref's only
-   * writer and the only thing that puts a list into state.
+   * ascending versions and producing the same one twice.
    */
   const list = useRef<ChartList | null>(null);
   /** The latest list the reader wants saved. Later intents replace it rather than queue. */
@@ -93,7 +92,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const inFlight = useRef(false);
   /**
    * Set by `migrate`, whose PUT is the first. While it is set, the first PUT answered 200
-   * drops the browser's copy, whatever that PUT carries; a refusal for staleness clears it.
+   * drops the browser's copy, whatever that PUT carries; a refusal for staleness sets the
+   * flag back without dropping the copy.
    */
   const migrating = useRef(false);
 
@@ -193,8 +193,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * an empty list is a list whose every chart was deliberately deleted, perhaps on
    * another device, and uploading this browser's stale copy over it resurrects them and
    * is indistinguishable from a bug. The key is cleared by `pump` on the first PUT that
-   * comes back 200 and never before, so a migration the server never took is tried
-   * again on the next mount.
+   * comes back 200 and never before, so the migration is tried again on the next mount
+   * for as long as the server has accepted no write.
    *
    * Except after a refusal for staleness, which is the one failure that ends the
    * migration rather than deferring it: the list was written by another tab or device

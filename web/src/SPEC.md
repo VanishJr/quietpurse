@@ -460,9 +460,10 @@ a Shift+click on any of them opens that anchor's address in a new page and leave
 made on where it was.
 
 `patchFor` in `Shell` sets `panel` to nothing on every section link and on the settings control, and
-that is what closes a panel when the reader leaves its screen by one of them, Settings' import
-history among them, which `SettingsScreen` keeps in the URL as `panel` set to `history` rather than
-in state so that this closes it. Back or Forward to an entry that carried a panel opens it again.
+that is what closes a panel when the reader leaves its screen by one of those links. Settings'
+import history is among the panels it closes: `SettingsScreen` keeps it in the URL as `panel` set
+to `history`, rather than in state, so that this closes it. Back or Forward to an entry that carried
+a panel opens it again.
 
 `AppUrl` carries where the reader is and not how they have set a screen up: the Overview's chart
 window and its switch for hidden accounts are component state on purpose, because a link that

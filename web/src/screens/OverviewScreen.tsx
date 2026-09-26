@@ -57,7 +57,7 @@ interface AccountData {
  *
  * Neither carries an account of its own: the import history is always about the account
  * on the rail, and `?panel=history` next to `?account=` says so in something a link can
- * carry.
+ * carry, for an account on the rail of whoever opens it.
  */
 type PanelKind = 'import' | 'history';
 
@@ -497,8 +497,9 @@ export function OverviewScreen({
             onStep={(kind) => setDialog({ ...dialog, kind })}
             onClose={() => setDialog(null)}
             // the account as well as the panel: the dialog's account is the one on the
-            // rail today, and naming it is what makes the URL true on its own rather
-            // than only in a session that got here by opening this menu
+            // rail today, and naming it is what makes the URL true on its own for an
+            // account on the rail of whoever opens it, rather than only in a session
+            // that got here by opening this menu
             onOpenHistory={(account) => {
               setDialog(null);
               setUrl({ account: account.id, panel: 'history' });
