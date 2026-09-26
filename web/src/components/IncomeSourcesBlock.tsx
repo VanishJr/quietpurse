@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { defs } from '../analytics';
 import { api } from '../api';
 import { Chips } from './Chips';
+import { Sheet } from './Sheet';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
 
 /**
@@ -37,7 +38,9 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [open, setOpen] = useState<Open | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<IncomeSourceKind>('external');
   const [patterns, setPatterns] = useState('');
@@ -60,16 +63,27 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
    * and a failed follow-up GET must not leave those readers on pre-mutation data.
    */
   const run = async (write: () => Promise<unknown>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
+    setActionError(null);
     try {
-      setError(null);
       await write();
-      setOpen(null);
+    } catch (e) {
+      setActionError((e as Error).message);
+      busyRef.current = false;
+      setBusy(false);
+      return;
+    }
+    setOpen(null);
+    try {
       await onChanged();
       await read();
+      setError(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -86,6 +100,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const remove = (id: string) => run(() => api.deleteIncomeSource(id));
 
   const openAdd = () => {
+    setActionError(null);
     setLabel('');
     setKind('external');
     setPatterns('');
@@ -93,6 +108,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   };
 
   const openEdit = (s: IncomeSourceDef) => {
+    setActionError(null);
     setLabel(s.label);
     setKind(s.kind);
     setPatterns(s.patterns.join(', '));
@@ -106,8 +122,13 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
    */
   const destination = sources?.find((s) => s.id === 'other');
 
+  const close = () => {
+    if (!busyRef.current) setOpen(null);
+  };
+
   const form = (onOk: () => void) => (
     <>
+      <h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>
       <label className="setting-label" htmlFor="source-label">
         Source name
       </label>
@@ -116,7 +137,6 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         className="input"
         value={label}
         onChange={(e) => setLabel(e.target.value)}
-        autoFocus
         placeholder="Stipend"
       />
       <div className="setting-label">Counts as</div>
@@ -147,12 +167,13 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         Comma-separate phrases. Each phrase needs at least two words of 3+ letters; leave blank
         for manual tagging.
       </p>
+      {actionError && <p className="error" role="alert">Error: {actionError}</p>}
       <div className="btn-row">
-        <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
+        <button className="btn-ghost" type="button" disabled={busy} onClick={close}>
           Cancel
         </button>
-        <button className="btn" disabled={busy} onClick={onOk}>
-          Save
+        <button className="btn" type="button" disabled={busy} onClick={onOk}>
+          {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
     </>
@@ -187,13 +208,6 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         <>
           {sources.map((s) => {
             const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
-            if (mine?.form === 'edit') {
-              return (
-                <div key={s.id} className="row">
-                  <div className="row-main">{form(() => save(s.id))}</div>
-                </div>
-              );
-            }
             return (
               <div key={s.id} className="row">
                 <div className="row-main">
@@ -252,22 +266,24 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
             );
           })}
 
-          {open?.form === 'add' ? (
-            <div className="row">
-              <div className="row-main">{form(add)}</div>
-            </div>
-          ) : (
-            <button
-              className="btn-link"
-              style={{ fontWeight: 600, padding: '12px 0' }}
-              disabled={busy || open !== null}
-              onClick={openAdd}
-            >
-              Add source
-            </button>
-          )}
+          <button
+            className="btn-link"
+            style={{ fontWeight: 600, padding: '12px 0' }}
+            disabled={busy || open !== null}
+            onClick={openAdd}
+          >
+            Add source
+          </button>
         </>
       )}
+      <Sheet
+        open={open?.form === 'add' || open?.form === 'edit'}
+        onClose={close}
+        position="center"
+        title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
+      >
+        {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}
+      </Sheet>
     </>
   );
 }
