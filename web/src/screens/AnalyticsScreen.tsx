@@ -194,14 +194,14 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * another device, and uploading this browser's stale copy over it resurrects them and
    * is indistinguishable from a bug. The key is cleared by `pump` on the first PUT that
    * comes back 200 and never before, so the migration is tried again on the next mount
-   * for as long as the server has accepted no write.
+   * for as long as the list it reads is at version 0.
    *
    * Except after a refusal for staleness, which is the one failure that ends the
    * migration rather than deferring it: the list was written by another tab or device
    * while this PUT was out, its version is no longer 0, and both halves of the
    * condition above are needed. The browser's copy is left where it is, unread from
-   * here ever again — the alternative is re-applying it over a list another device
-   * wrote, which resurrects charts that were deliberately deleted.
+   * here while the list is above version 0 — the alternative is re-applying it over a
+   * list another device wrote, which resurrects charts that were deliberately deleted.
    */
   const migrate = useCallback(
     (loaded: ChartList) => {
@@ -297,8 +297,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const onSave = (spec: Chart) => {
     const at = positionOf(spec.id);
     if (at < 0 && entries.length >= CHARTS_MAX) {
-      // refused here rather than by the route, which would refuse the WHOLE list and
-      // say so in a sentence about a limit the reader has no way to see
+      // without this, the chart just built is committed and shown, `normaliseForSave` cuts
+      // it from the PUT, and `?chart=` is left naming a chart the server does not have
       setCapReached(true);
       setWizard(null);
       return;

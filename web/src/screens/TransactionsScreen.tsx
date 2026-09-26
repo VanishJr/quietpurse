@@ -211,8 +211,8 @@ export function TransactionsScreen({
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name;
 
   /**
-   * A decision taken when a PATCH settles cannot read the selection the handler was
-   * created under: by then it may not be the selection the list in state answers.
+   * A decision taken when a PATCH settles cannot read the filters the handler was
+   * created under: by then they may not be the filters the list in state answers.
    */
   const currentCategory = useRef(category);
   currentCategory.current = category;
