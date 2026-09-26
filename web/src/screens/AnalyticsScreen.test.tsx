@@ -3,6 +3,7 @@ import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { ThemeProvider } from '../theme';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CHARTS_MAX } from '../analytics';
 import { ACCOUNTS, accountMonths, accountSummary, SUMMARY } from '../test/fixtures';
 import {
   askedFor,
@@ -1224,6 +1225,10 @@ describe('a workspace that has not been read yet', () => {
  * own clicks — from overwriting each other.
  */
 describe('what is sent, and when', () => {
+  const numbered = (n: number) =>
+    Array.from({ length: n }, (_, i) => chart(`c-${i}`, `Chart ${i}`));
+  const FULL = `This workspace holds at most ${CHARTS_MAX} charts. Delete one to make room.`;
+
   it('sends nothing at all merely by being read', async () => {
     seed([chart('c-a', 'Groceries')], 4);
     mockFetch(ROUTES);
@@ -1337,7 +1342,7 @@ describe('what is sent, and when', () => {
     await waitFor(() => expect(screen.queryByText(/Not saved/)).not.toBeInTheDocument());
   });
 
-  it('refuses to compose a hundred-and-first chart, rather than letting the route refuse the list', async () => {
+  it('refuses to copy the first chart at the cap, rather than saving the copy in place of the list’s last chart', async () => {
     seed(
       Array.from({ length: 100 }, (_, i) => ({ ...COLUMN_CHART, id: `c-${i}`, title: `Chart ${i}` })),
       5,
@@ -1349,11 +1354,96 @@ describe('what is sent, and when', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Chart 0' }));
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
 
-    // the route would refuse the WHOLE list, in a sentence about a limit the reader has
-    // no way to see
+    // the copy goes in after its source and `normaliseForSave` keeps the head of the
+    // list, so past the cap the save drops the list's last chart and keeps the copy: a
+    // chart the reader did not ask to lose goes from the server, under a notice that
+    // names no chart. Only when the source is last is it the copy that goes
     expect(await screen.findByText(/holds at most 100 charts/)).toBeInTheDocument();
     expect(puts).toEqual([]);
     expect(screen.queryByRole('button', { name: 'Chart 0 (copy)' })).not.toBeInTheDocument();
+  });
+
+  it('refuses to build a chart past the cap: nothing is sent, and the reader stays where they were', async () => {
+    seed(numbered(CHARTS_MAX));
+    window.history.replaceState(null, '', '/?chart=c-7');
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 7' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Create chart' }),
+    );
+
+    expect(await screen.findByText(FULL)).toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(0);
+    expect(new URLSearchParams(window.location.search).get('chart')).toBe('c-7');
+    expect(screen.getByRole('heading', { name: 'Chart 7' })).toBeInTheDocument();
+    expect(screen.queryByText(/could not be saved/)).not.toBeInTheDocument();
+  });
+
+  it('still saves an edit in a full workspace, since an edit adds nothing to the list', async () => {
+    seed(numbered(CHARTS_MAX));
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 0' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Chart 0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Chart name'), { target: { value: 'Renamed' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByRole('button', { name: 'Renamed' })).toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(1);
+    expect(puts[0].charts).toHaveLength(CHARTS_MAX);
+    expect(puts[0].charts[0]).toMatchObject({ id: 'c-0', title: 'Renamed' });
+    expect(screen.queryByText(FULL)).not.toBeInTheDocument();
+  });
+
+  it('builds the chart that fills the list to the cap', async () => {
+    seed(numbered(CHARTS_MAX - 1));
+    window.history.replaceState(null, '', '/?chart=c-7');
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 7' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Create chart' }),
+    );
+
+    expect(
+      await screen.findByRole('heading', { name: 'Expenses · 12 months' }),
+    ).toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(1);
+    expect(puts[0].charts).toHaveLength(CHARTS_MAX);
+    const built = puts[0].charts[CHARTS_MAX - 1] as { id: string; title: string };
+    expect(built.title).toBe('Expenses · 12 months');
+    expect(new URLSearchParams(window.location.search).get('chart')).toBe(built.id);
+    expect(screen.queryByText(FULL)).not.toBeInTheDocument();
+    expect(screen.queryByText(/could not be saved/)).not.toBeInTheDocument();
+  });
+
+  it('counts a row it cannot draw toward the cap', async () => {
+    seed([
+      ...numbered(CHARTS_MAX - 1),
+      { id: 'c-newer', kind: 'sunburst', range: '12m', title: 'Nope' },
+    ]);
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Chart 0' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Create chart' }),
+    );
+
+    expect(await screen.findByText(FULL)).toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(0);
   });
 });
 
