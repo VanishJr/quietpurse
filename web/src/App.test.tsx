@@ -239,22 +239,46 @@ describe('the shell', () => {
     expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
   });
 
-  it('reaches Settings through the bar’s own control, which is not in the list', async () => {
-    // it is the sixth destination and the only one the section list does not carry:
-    // the design puts it at the right of the bar, which is what freed the fifth slot
-    // for Import
+  it('puts Settings after Import in the Sections navigation and marks only the current link', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();
 
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
-    expect(tabs.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
-    expect(tabs.getByRole('link', { name: 'Import' })).toBeInTheDocument();
+    expect(tabs.getAllByRole('link').map((link) => link.textContent)).toEqual([
+      'Overview', 'Transactions', 'Analytics', 'Goals', 'Import', 'Settings',
+    ]);
+    const settings = tabs.getByRole('link', { name: 'Settings' });
+    expect(settings).not.toHaveAttribute('aria-current');
 
-    fireEvent.click(screen.getByRole('link', { name: 'Settings' }));
+    fireEvent.click(settings);
 
+    expect(window.location.search).toBe('?screen=settings');
+    expect(settings).toHaveAttribute('aria-current', 'page');
+    expect(tabs.getAllByRole('link').filter((link) => link.hasAttribute('aria-current'))).toEqual([
+      settings,
+    ]);
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Overview', hidden: true })).not.toBeVisible();
+
+    fireEvent.click(tabs.getByRole('link', { name: 'Goals' }));
+    expect(settings).not.toHaveAttribute('aria-current');
+    expect(tabs.getByRole('link', { name: 'Goals' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('opens Settings from its URL and keeps Import available from Settings', async () => {
+    window.history.replaceState(null, '', '/?screen=settings');
+    mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) });
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+    const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
+    expect(tabs.getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(screen.getByRole('button', { name: /Import a statement/ }));
+    expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeVisible();
+    expect(window.location.search).toBe('?screen=overview&panel=import');
+    expect(tabs.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
+    expect(tabs.getByRole('link', { name: 'Settings' })).not.toHaveAttribute('aria-current');
   });
 
   it('carries the URL of each destination on the destination itself', async () => {
@@ -277,7 +301,7 @@ describe('the shell', () => {
       'href',
       '/?screen=overview&panel=import',
     );
-    expect(screen.getByRole('link', { name: 'Settings' })).toHaveAttribute(
+    expect(tabs.getByRole('link', { name: 'Settings' })).toHaveAttribute(
       'href',
       '/?screen=settings',
     );
@@ -294,25 +318,28 @@ describe('the shell', () => {
 
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
 
-    // The default action left standing IS the assertion, and jsdom answers a real one
-    // by logging that it does not implement navigation. So it is caught at the document,
-    // above everything React listens on: what the app did or did not do to the event has
-    // already happened by the time this runs, and the run stays quiet.
-    const catcher = (e: Event) => e.preventDefault();
+    // Observe whether React cancelled the event before preventing jsdom's own navigation.
+    const prevented: boolean[] = [];
+    const catcher = (e: Event) => {
+      prevented.push(e.defaultPrevented);
+      e.preventDefault();
+    };
     document.addEventListener('click', catcher);
     try {
       fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }), { metaKey: true });
+      fireEvent.click(tabs.getByRole('link', { name: 'Settings' }), { ctrlKey: true });
+      fireEvent.click(tabs.getByRole('link', { name: 'Settings' }), { button: 1 });
     } finally {
       document.removeEventListener('click', catcher);
     }
 
-    // this window did not move, which is the only thing the app was asked not to do
+    expect(prevented).toEqual([false, false, false]);
     expect(window.location.search).toBe('');
     expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible();
     expect(tabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('offers a way past the bar, which is seven controls deep', async () => {
+  it('offers a way past the navigation controls', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();
@@ -326,32 +353,77 @@ describe('the shell', () => {
     expect(document.getElementById('screens')).toBe(screen.getByRole('main'));
   });
 
-  it('carries the theme control, which every screen is now reached under', async () => {
+  it('selects one named theme at a time, remembers each choice, and shows the device status once', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
-    render(<App />);
+    let view = render(<App />);
     expect(await appMounted()).toBeVisible();
 
-    // it names the theme it is on, because a single glyph is not a state anybody can
-    // read; clicking it moves to the next of the three
-    const button = screen.getByRole('button', { name: 'Theme: Dark. Click to change' });
-    fireEvent.click(button);
+    const group = () => within(screen.getByRole('group', { name: 'Theme' }));
+    const selected = (name: string) =>
+      group().getByRole('button', { name: `${name} theme, selected` });
+    const choices = () => group().getAllByRole('button');
+    expect(choices()).toHaveLength(3);
+    expect(selected('Dark')).toHaveAttribute('aria-pressed', 'true');
+    expect(choices().filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([
+      selected('Dark'),
+    ]);
+    expect(screen.getAllByText('Stored on this device')).toHaveLength(1);
 
-    expect(
-      screen.getByRole('button', { name: 'Theme: Auto. Click to change' }),
-    ).toBeInTheDocument();
+    for (const name of ['System', 'Light', 'Dark'] as const) {
+      fireEvent.click(group().getByRole('button', { name: `${name} theme` }));
+      expect(selected(name)).toHaveAttribute('aria-pressed', 'true');
+      expect(choices().filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([
+        selected(name),
+      ]);
+      expect(localStorage.getItem('finto.theme')).toBe(name.toLowerCase());
+      view.unmount();
+      view = render(<App />);
+      expect(await appMounted()).toBeVisible();
+      expect(selected(name)).toHaveAttribute('aria-pressed', 'true');
+    }
   });
 
-  it('opens on the theme that was saved, and dark only when none was', async () => {
-    // setup.ts clears the key between tests, so the default case above and this one are
-    // two states of the same key and not one state read twice
+  it('follows OS changes in System mode, but holds a chosen palette in Light mode', async () => {
+    const original = window.matchMedia;
+    let onChange: ((event: MediaQueryListEvent) => void) | undefined;
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => { onChange = listener; },
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      mockFetch(FIRST_PAINT_ROUTES);
+      render(<App />);
+      expect(await appMounted()).toBeVisible();
+      const group = within(screen.getByRole('group', { name: 'Theme' }));
+      fireEvent.click(group.getByRole('button', { name: 'System theme' }));
+      expect(document.documentElement.dataset.theme).toBe('light');
+
+      act(() => onChange?.({ matches: true } as MediaQueryListEvent));
+      expect(document.documentElement.dataset.theme).toBe('dark');
+
+      fireEvent.click(group.getByRole('button', { name: 'Light theme' }));
+      act(() => onChange?.({ matches: false } as MediaQueryListEvent));
+      act(() => onChange?.({ matches: true } as MediaQueryListEvent));
+      expect(document.documentElement.dataset.theme).toBe('light');
+
+      fireEvent.click(group.getByRole('button', { name: 'System theme' }));
+      expect(document.documentElement.dataset.theme).toBe('dark');
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it('opens on a previously saved theme', async () => {
     localStorage.setItem('finto.theme', 'light');
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();
 
-    expect(
-      screen.getByRole('button', { name: 'Theme: Light. Click to change' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Light theme, selected' })).toHaveAttribute(
+      'aria-pressed', 'true',
+    );
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 });

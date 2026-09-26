@@ -183,11 +183,11 @@ describe('the page heading', () => {
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
   });
 
-  it('carries neither the theme button nor the settings control, which are the bar’s now', async () => {
+  it('leaves the theme choices and Settings navigation to the shell', async () => {
     mount();
     await panel('Sparkasse Giro');
 
-    expect(screen.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Theme' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 

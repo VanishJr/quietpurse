@@ -451,7 +451,7 @@ the reader was, and the reader's own data says whether that place still exists â
 chart id opens that chart where it exists and falls back to the first chart where it does not,
 exactly as `account` falls back to the first account.
 
-`Shell` renders each section, the import entry and the settings control as an anchor whose `href` is
+`Shell` renders each section, including Settings after Import, as an anchor whose `href` is
 `urlFor`'s address for the patch a click on it applies, so each is a link the browser can act on and
 not only a control the app answers. `navigate`, the click handler on each of them, takes a click for
 the app only when it is a primary click with no modifier held, and returns before `preventDefault`
@@ -459,7 +459,7 @@ otherwise, so every other click is the browser's: as measured in Chromium on Lin
 a Shift+click on any of them opens that anchor's address in a new page and leaves the page it was
 made on where it was.
 
-`patchFor` in `Shell` sets `panel` to nothing on every section link and on the settings control, and
+`patchFor` in `Shell` sets `panel` to nothing on every section link, and
 that is what closes a panel when the reader leaves its screen by one of those links. Settings'
 import history is among the panels it closes: `SettingsScreen` keeps it in the URL as `panel` set
 to `history`, rather than in state, so that this closes it. Back or Forward to an entry that carried
@@ -623,16 +623,21 @@ is its position and not the colour `categoryColor` gives it everywhere else.
 The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
 width able to widen a narrow page.
 
-Navigation uses the same links for the desktop sidebar and mobile bar. Screens stay mounted so
-filters survive navigation, with inactive screens excluded through `hidden`. The account strip
+Navigation uses the same links for the desktop sidebar and mobile bar. Import remains a desktop
+navigation link and a panel of Overview, while Settings takes its place in the mobile bar; Import
+is still reachable from Overview and Settings. Screens stay mounted so filters survive navigation,
+with inactive screens excluded through `hidden`. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 
-Dark is the initial theme; an existing saved choice takes precedence. Colours are published from
-`theme.tsx` to CSS and chart components together. The action accent and income may share a colour,
+Dark is the initial theme; an existing saved choice takes precedence. The shell offers System,
+Light and Dark as explicit choices, with System following the OS preference. Its theme control
+moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
+indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
+together. The action accent and income may share a colour,
 so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
 a raised surface with its own text colours rather than inheriting colours from the plotted series.
 

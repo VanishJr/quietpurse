@@ -14,6 +14,7 @@ Report.md
 Strategy.md
 ROADMAP.md
 DEBT.md
+SETTINGS_REDESIGN_PLAN.md
 docs/
 # what the auth redesign needs from a server that cannot do it yet, and the decisions
 # taken while drawing it. A working note on the same footing as the plan above: the

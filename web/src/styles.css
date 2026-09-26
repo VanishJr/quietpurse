@@ -34,9 +34,7 @@ body {
  *
  * `manipulation` gives up double-tap-to-zoom on buttons, and with it the ~300ms a
  * mobile browser otherwise waits after every tap to find out whether a second one is
- * coming. Nothing in this app is zoomed by double-tapping a button — the chips, the
- * pills, the rail and the sheet's actions are all single-tap — so the wait buys
- * nothing and is paid on every tap of all of them. Panning and pinch-zoom of the page
+ * coming. These actions are all single-tap; panning and pinch-zoom remain available. Panning and pinch-zoom of the page
  * are untouched.
  *
  * The tap highlight is a filled rectangle drawn over the control on touch-down, in a
@@ -61,18 +59,10 @@ button:disabled {
 }
 
 /*
- * The rest of that reset, for the two classes in the top bar that are anchors rather
- * than buttons — the sections and the settings control; the header of Shell.tsx says why a
- * destination is a link. The rule above cannot reach them, and a link arrives with an
- * underline of its own that nothing further down this file turns off.
- *
- * Colour is not reset here: `.nav-item` and `.settings-link` each set their own, so a
- * `color: inherit` in this rule would be a declaration written to be beaten. What they
- * never set is the underline — and the two touch behaviours are as true of a link that
- * navigates as of a button that does.
+ * The section links need the same touch behaviour as buttons, without the browser's
+ * default underline.
  */
-.nav-item,
-.settings-link {
+.nav-item {
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -90,32 +80,9 @@ textarea {
 }
 
 /*
- * Reduced motion, for the whole sheet.
- *
- * Nothing in this app animates in order to be correct. Seven transitions are declared
- * below and six of them are a colour: the nav pills, the two rail discs, the theme
- * button, the tab names and the dropzone as the pointer arrives, and the switch's
- * track as it turns on. The seventh is the switch knob, sliding 18px. Every one ends
- * on a state that is right without the tween, so under `reduce` they cut to it and
- * nothing is lost but the travel.
- *
- * The charts needed no equivalent. Every Recharts series in the app already passes
- * `isAnimationActive={false}`, for a different reason — the screens stay mounted, so
- * a chart first renders inside a hidden container and an animation started there
- * freezes at an arbitrary frame — which happens to leave this file as the only thing
- * in the app that moves.
- *
- * `*` rather than the seven selectors, because the point of the rule is the eighth:
- * a transition written later is covered by something nobody has to remember. `0.01ms`
- * and not `0` for the usual reason — a `transitionend` listener still fires.
- *
- * Unscoped rather than under a root class: this sheet is the app's alone.
- *
- * `scroll-behavior` IS here, which it did not used to be: the note that stood in its
- * place said nothing in the app scrolled smoothly, and that stopped being true when the
- * Analytics dock grew arrows. `.dock-tabs` is the one element that sets it, and this is
- * where it is taken back off — the same argument as the `*` above, which is that a rule
- * written later should be covered by something nobody has to remember.
+ * Reduced motion applies to future transitions too. State changes must remain
+ * immediate without the tween; a nonzero duration still permits transitionend.
+ * Smooth scrolling stands down along with transitions.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -243,36 +210,38 @@ textarea {
   margin-top: 22px;
 }
 .topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-top: auto;
   padding-top: 40px;
 }
-.icon-btn {
-  order: 2;
-  flex: none;
-  width: 32px;
-  height: 36px;
-  font-size: 18px;
-  border-radius: var(--r-sm);
+.theme-title {
+  display: block;
+  margin: 0 0 8px 14px;
+  font-size: 12px;
   color: var(--ink-secondary);
 }
-.settings-link {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 14px;
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--ink-border);
   border-radius: var(--r-sm);
-  color: var(--ink-secondary);
-  font-size: 13px;
+  background: var(--ink-surface);
 }
-.settings-link[aria-current='page'],
-.settings-link:hover,
-.icon-btn:hover {
+.theme-option {
+  min-width: 0;
+  min-height: 40px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+.theme-option:hover {
   background: var(--ink-raised);
   color: var(--ink-primary);
+}
+.theme-option[aria-pressed='true'] {
+  background: var(--ink-accent);
+  color: var(--ink-onAccent);
 }
 .device-note {
   display: flex;
@@ -317,12 +286,15 @@ textarea {
     padding: 0;
     margin: 0;
   }
-  .settings-label,
-  .device-note {
+  .theme-title {
     display: none;
   }
-  .settings-link {
-    padding: 8px;
+  .theme-option {
+    min-height: 44px;
+    padding: 0 9px;
+  }
+  .device-note {
+    display: none;
   }
   .tabbar {
     position: fixed;

@@ -34,17 +34,11 @@ const patchFor = (key: TabKey) => ({ screen: key, panel: null });
 
 const IMPORT_PATCH = { screen: 'overview', panel: 'import' } as const;
 
-const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
-  system: 'light',
-  light: 'dark',
-  dark: 'system',
-};
-const MODE_GLYPH: Record<ThemeMode, string> = { system: '◐', light: '☀', dark: '☾' };
-const MODE_NAME: Record<ThemeMode, string> = {
-  system: 'Auto',
-  light: 'Light',
-  dark: 'Dark',
-};
+const THEME_MODES: readonly { mode: ThemeMode; label: string }[] = [
+  { mode: 'system', label: 'System' },
+  { mode: 'light', label: 'Light' },
+  { mode: 'dark', label: 'Dark' },
+];
 
 export function Shell() {
   const { mode, setMode } = useTheme();
@@ -126,27 +120,34 @@ export function Shell() {
                 <ImportIcon />
                 <span className="nav-label">Import</span>
               </a>
+              <a
+                className="nav-item"
+                href={urlFor(patchFor('settings'))}
+                onClick={(e) => navigate(e, () => go('settings'))}
+                aria-current={tab === 'settings' ? 'page' : undefined}
+              >
+                <SettingsIcon />
+                <span className="nav-label">Settings</span>
+              </a>
             </div>
           </nav>
 
-          <div className="topbar-actions">
-            <button
-              className="icon-btn"
-              onClick={() => setMode(NEXT_MODE[mode])}
-              aria-label={`Theme: ${MODE_NAME[mode]}. Click to change`}
-            >
-              <span aria-hidden="true">{MODE_GLYPH[mode]}</span>
-            </button>
-            <a
-              className="settings-link"
-              href={urlFor(patchFor('settings'))}
-              onClick={(e) => navigate(e, () => go('settings'))}
-              aria-current={tab === 'settings' ? 'page' : undefined}
-              aria-label="Settings"
-            >
-              <SettingsIcon />
-              <span className="settings-label">Settings</span>
-            </a>
+          <div className="topbar-actions" role="group" aria-label="Theme">
+            <span className="theme-title" aria-hidden="true">Theme</span>
+            <div className="theme-options">
+              {THEME_MODES.map(({ mode: option, label }) => (
+                <button
+                  key={option}
+                  type="button"
+                  className="theme-option"
+                  onClick={() => setMode(option)}
+                  aria-pressed={mode === option}
+                  aria-label={`${label} theme${mode === option ? ', selected' : ''}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <p className="device-note">
             <span aria-hidden="true" />

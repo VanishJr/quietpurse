@@ -47,10 +47,8 @@ export const ImportIcon = () => (
 
 export const SettingsIcon = () => (
   <svg {...box}>
-    <path d="M3.25 6h13.5M3.25 10h13.5M3.25 14h13.5" />
-    <circle cx="7" cy="6" r="1.75" fill="currentColor" stroke="none" />
-    <circle cx="13" cy="10" r="1.75" fill="currentColor" stroke="none" />
-    <circle cx="8.5" cy="14" r="1.75" fill="currentColor" stroke="none" />
+    <path d="M8.4 2.5h3.2l.5 1.8 1.05.45 1.6-.95L17 6.05l-.95 1.6.45 1.05 1.8.5v3.2l-1.8.5-.45 1.05.95 1.6-2.25 2.25-1.6-.95-1.05.45-.5 1.8H8.4l-.5-1.8-1.05-.45-1.6.95L3 15.55l.95-1.6-.45-1.05-1.8-.5V9.2l1.8-.5.45-1.05L3 6.05 5.25 3.8l1.6.95 1.05-.45z" />
+    <circle cx="10" cy="10.8" r="2.5" />
   </svg>
 );
 
