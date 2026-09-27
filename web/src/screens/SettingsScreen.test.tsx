@@ -318,6 +318,32 @@ describe('financial setup', () => {
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
   });
 
+  it('keeps pending names editable when a 200 reorders the saved owner list', async () => {
+    const sent: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'PATCH /api/app-settings': (init) => {
+        sent.push(JSON.parse(String(init?.body)));
+        return ok({ ...APP_SETTINGS, ownerNames: ['Bo', 'Yurii Kalvenko', 'Ana'] });
+      },
+    });
+    mount();
+    await settled();
+
+    fireEvent.change(owners(), { target: { value: 'Ana' } });
+    fireEvent.keyDown(owners(), { key: 'Enter' });
+    fireEvent.change(owners(), { target: { value: 'Bo' } });
+    expect(requests().filter((request) => request === 'PATCH /api/app-settings')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(sent).toEqual([{ baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko', 'Ana', 'Bo'] }]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('server stored something else');
+    expect(screen.getByRole('button', { name: 'Remove owner name Ana' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove owner name Bo' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    expect(screen.queryByText('All changes saved')).not.toBeInTheDocument();
+  });
+
   it('locks the saving form against duplicate submissions until the server answers', async () => {
     let release: (response: Response) => void = () => {};
     mockFetch({
