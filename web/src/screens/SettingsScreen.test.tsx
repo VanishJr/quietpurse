@@ -459,6 +459,14 @@ describe('the import history across every account', () => {
 });
 
 describe('recurring payments', () => {
+  const payment = (description: string, ignored = false) => ({
+    description, category: 'subscriptions', months: 6, count: 6,
+    avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored,
+  });
+  const answer = (...groups: ReturnType<typeof payment>[]) => ({
+    baseCurrency: 'EUR', monthlyTotal: -10, groups,
+  });
+
   it('lists what was found, and says so when nothing was', async () => {
     mockFetch(BASE);
     mount();
@@ -467,6 +475,107 @@ describe('recurring payments', () => {
     // the fixture is empty, and an empty list has to read as "not yet" rather than as
     // a block that failed to load
     expect(screen.getByText(/A payment has to appear in several months/)).toBeInTheDocument();
+  });
+
+  it('shows the period, monthly estimate and category marker without merchant identity', async () => {
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Long gym payment'))) });
+    const { container } = mount();
+
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByText('Long gym payment')).toBeInTheDocument();
+    expect(within(card).getByText(/last twelve months/)).toBeInTheDocument();
+    expect(within(card).getByText('Estimated per month')).toBeInTheDocument();
+    expect(within(card).getByText(/Subscriptions · 6 months detected/)).toBeInTheDocument();
+    expect(within(card).getByText('−10 EUR/mo')).toBeInTheDocument();
+    expect(container.querySelector('.settings-recurring-marker')).toHaveAttribute('aria-hidden', 'true');
+    expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
+  });
+
+  it('retries a failed read rather than inventing an empty list', async () => {
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ++reads === 1
+        ? fail(500, { error: 'unavailable' }) : ok(answer(payment('Gym'))),
+    });
+    mount();
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByRole('alert')).toHaveTextContent('unavailable');
+    expect(within(card).queryByText(/Nothing yet/)).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Retry' }));
+    expect(await within(card).findByRole('button', { name: 'Actions for Gym' })).toBeInTheDocument();
+    expect(reads).toBe(2);
+  });
+
+  it('opens a named action, closes on Escape or outside press, and returns focus on Escape', async () => {
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))) });
+    mount();
+    const trigger = await screen.findByRole('button', { name: 'Actions for Gym' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const action = screen.getByRole('button', { name: 'Exclude from recurring: Gym' });
+    expect(action).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(action).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(cardFor('Financial setup'));
+    expect(screen.queryByRole('button', { name: 'Exclude from recurring: Gym' })).not.toBeInTheDocument();
+  });
+
+  it('keeps excluded groups collapsed and restores them from the complete server answer', async () => {
+    const excluded = payment('Spotify', true);
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(answer(payment('Gym'), excluded)),
+      'POST /api/recurring/ignore': () => ok(answer(payment('Gym'), payment('Spotify'))),
+    });
+    mount();
+    const card = cardFor('Recurring payments');
+    const summary = await within(card).findByText('Excluded payments (1)');
+    const disclosure = summary.closest('details') as HTMLDetailsElement;
+    expect(disclosure.open).toBe(false);
+    fireEvent.click(summary);
+    expect(disclosure.open).toBe(true);
+    fireEvent.click(within(card).getByRole('button', { name: 'Restore payment Spotify' }));
+    expect(await within(card).findByRole('button', { name: 'Actions for Spotify' })).toBeInTheDocument();
+    expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
+    expect(requests()).toContain('POST /api/recurring/ignore');
+  });
+
+  it('reveals all active payments through Show more without hiding the excluded disclosure', async () => {
+    const active = Array.from({ length: 10 }, (_, index) => payment(`Gym ${index}`));
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(...active, payment('Old', true))) });
+    mount();
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByRole('button', { name: 'Show 2 more' })).toBeInTheDocument();
+    expect(within(card).queryByText('Gym 9')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: 'Show 2 more' }));
+    expect(within(card).getByText('Gym 9')).toBeInTheDocument();
+    expect(within(card).getByText('Excluded payments (1)')).toBeInTheDocument();
+  });
+
+  it('prevents repeated writes and keeps the row on refusal with its error inside the card', async () => {
+    let finish: (response: Response) => void = () => {};
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(answer(payment('Gym'), payment('Spotify'))),
+      'POST /api/recurring/ignore': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Gym' }));
+    const card = cardFor('Recurring payments');
+    expect(within(card).getByRole('status')).toHaveTextContent('Updating recurring payments');
+    expect(within(card).getByRole('button', { name: 'Actions for Spotify' })).toBeDisabled();
+    expect(requests().filter((request) => request === 'POST /api/recurring/ignore')).toHaveLength(1);
+    await act(async () => { finish(fail(500, { error: 'cannot exclude' })); });
+    expect(within(card).getByRole('alert')).toHaveTextContent('cannot exclude');
+    expect(within(card).getByRole('button', { name: 'Actions for Gym' })).toBeEnabled();
+    expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
   });
 
   it('hides a group and takes the list the server answers with', async () => {
