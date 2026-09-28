@@ -2055,6 +2055,74 @@ textarea {
   margin: 8px 0;
 }
 
+.settings-page .settings-data-actions {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-md);
+}
+
+.settings-page .settings-data-item + .settings-data-item {
+  border-top: 1px solid var(--ink-border);
+}
+
+.settings-page .settings-data-action {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 76px;
+  padding: 12px;
+  text-align: left;
+  border-radius: var(--r-md);
+}
+
+.settings-page .settings-data-action:hover:not(:disabled) {
+  background: var(--ink-raised);
+}
+
+.settings-page .settings-data-action:disabled {
+  opacity: 0.65;
+}
+
+.settings-page .settings-data-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-accent);
+}
+
+.settings-page .settings-data-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-page .settings-data-label {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+.settings-page .settings-data-description {
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-data-trailing {
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-data-error {
+  margin: 0;
+  padding: 0 12px 12px 64px;
+  font-size: 13px;
+}
+
 .settings-page .settings-card .row {
   flex-wrap: wrap;
 }

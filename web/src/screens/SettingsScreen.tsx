@@ -4,6 +4,8 @@ import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
+import { ImportIcon } from '../components/NavIcons';
+import { BackupIcon, ChevronIcon, DownloadIcon, HistoryIcon } from '../components/SettingsActionIcons';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { useTheme } from '../theme';
@@ -84,6 +86,7 @@ export function SettingsScreen({
    * second click while the first is still out.
    */
   const [exporting, setExporting] = useState(false);
+  const exportBusyRef = useRef(false);
 
   const loadRecurring = useCallback(async () => {
     const request = ++recurringRequest.current;
@@ -190,6 +193,8 @@ export function SettingsScreen({
    * believes they hold their data.
    */
   const runExport = async () => {
+    if (exportBusyRef.current) return;
+    exportBusyRef.current = true;
     setExporting(true);
     try {
       setExportError(null);
@@ -199,6 +204,7 @@ export function SettingsScreen({
     } catch (e) {
       setExportError((e as Error).message);
     } finally {
+      exportBusyRef.current = false;
       setExporting(false);
     }
   };
@@ -291,39 +297,51 @@ export function SettingsScreen({
           What you have uploaded, and how to take all of it away with you.
         </p>
 
-        <button className="btn-ghost" type="button" onClick={onOpenImport}>
-          ⭳ Import a statement
-        </button>
-
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          onClick={() => setHistoryOpen(true)}
-        >
-          ⧉ Import history (every account)
-        </button>
-        <p className="hint">
-          Every file you have uploaded, what it read, and the file itself to download again.
-          One account's history is under the ⋮ on its balance card, on Overview. The files
-          themselves are in the statements folder next to the database, on this machine.
-        </p>
-
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          disabled={exporting}
-          onClick={runExport}
-        >
-          ⬇ Export my data (.json)
-        </button>
-        {exportError && <p className="error">Error: {exportError}</p>}
-        <p className="hint">
-          Every transaction, account and setting, as readable JSON — not encrypted, so anyone
-          who opens the file can read it. The statement files you uploaded are not in it;
-          download those from Import history.
-        </p>
+        <div className="settings-data-actions">
+          <div className="settings-data-item">
+            <button className="settings-data-action" type="button" onClick={onOpenImport}>
+              <span className="settings-data-icon"><ImportIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label">Import a statement</span>
+                <span className="settings-data-description">Upload a CSV, XLSX, or PDF statement.</span>
+              </span>
+              <span className="settings-data-trailing"><ChevronIcon /></span>
+            </button>
+          </div>
+          <div className="settings-data-item">
+            <button className="settings-data-action" type="button" onClick={() => setHistoryOpen(true)}>
+              <span className="settings-data-icon"><HistoryIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label">Import history</span>
+                <span className="settings-data-description">
+                  Review uploads from every account and download original statement files.
+                </span>
+              </span>
+              <span className="settings-data-trailing"><ChevronIcon /></span>
+            </button>
+          </div>
+          <div className="settings-data-item">
+            <button
+              className="settings-data-action"
+              type="button"
+              disabled={exporting}
+              aria-busy={exporting}
+              onClick={runExport}
+            >
+              <span className="settings-data-icon"><BackupIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label">
+                  {exporting ? 'Preparing backup…' : 'Export backup'}
+                </span>
+                <span className="settings-data-description">
+                  Download readable, unencrypted JSON. Original statement files are not included.
+                </span>
+              </span>
+              <span className="settings-data-trailing"><DownloadIcon /></span>
+            </button>
+            {exportError && <p className="settings-data-error error" role="alert">Error: {exportError}</p>}
+          </div>
+        </div>
       </section>
 
       <section className="settings-card settings-advanced">
