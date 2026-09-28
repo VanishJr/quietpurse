@@ -727,6 +727,40 @@ describe('recurring payments', () => {
     expect(within(card).queryByText(/old mutation refused/)).not.toBeInTheDocument();
   });
 
+  it('ignores a late exclude refusal when a newer read already shows the payment excluded', async () => {
+    const before = answer(payment('Gym'));
+    const after = answer(payment('Gym', true));
+    let finishWrite: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(++reads === 1 ? before : after),
+      'POST /api/recurring/ignore': (init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ description: 'Gym', ignored: true });
+        return new Promise<Response>((resolve) => { finishWrite = resolve; });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return <><button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+        <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} /></>;
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByText('Excluded payments (1)')).toBeInTheDocument();
+    expect(reads).toBe(2);
+
+    await act(async () => { finishWrite(fail(500, { error: 'old exclude refused' })); });
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByText('Excluded payments (1)'));
+    expect(within(card).getByRole('button', { name: 'Restore payment Gym' })).toBeEnabled();
+    expect(reads).toBe(2);
+  });
+
   it('shows a failed exclude when a newer read still leaves that payment actionable', async () => {
     const current = answer(payment('Gym'));
     let finishWrite: (response: Response) => void = () => {};
