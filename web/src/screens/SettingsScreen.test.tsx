@@ -574,8 +574,11 @@ describe('recurring payments', () => {
       ...BASE,
       'GET /api/recurring': () => ok(answer(payment('Gym'), excluded)),
       'POST /api/recurring/ignore': (init) => {
-        writes.push(JSON.parse(String(init?.body)));
-        return ok(answer(payment('Gym'), payment('Spotify')));
+        const body = JSON.parse(String(init?.body));
+        writes.push(body);
+        return body.description === 'Spotify' && body.ignored === false
+          ? ok(answer(payment('Gym'), payment('Spotify')))
+          : fail(400, { error: 'restore refused' });
       },
     });
     mount();
