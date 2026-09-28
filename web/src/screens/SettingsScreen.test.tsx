@@ -489,11 +489,13 @@ describe('recurring payments', () => {
     });
     mount();
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Hide payment Spotify' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Spotify' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Spotify' }));
 
-    expect(
-      await screen.findByRole('button', { name: 'Restore payment Spotify' }),
-    ).toBeInTheDocument();
+    const excluded = await screen.findByText('Excluded payments (1)');
+    expect(screen.queryByRole('button', { name: 'Actions for Spotify' })).not.toBeInTheDocument();
+    fireEvent.click(excluded);
+    expect(screen.getByRole('button', { name: 'Restore payment Spotify' })).toBeInTheDocument();
   });
 
   it('keeps the newest recurring answer when a revision overtakes an older read', async () => {
@@ -537,12 +539,12 @@ describe('recurring payments', () => {
 
     await vi.waitFor(() => expect(reads).toBe(1));
     fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
-    expect(await screen.findByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Actions for Fresh' })).toBeVisible();
 
     await act(async () => {
       releaseOld(ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group('Stale')] }));
     });
-    expect(screen.getByRole('button', { name: 'Hide payment Fresh' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Hide payment Stale' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Actions for Fresh' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Actions for Stale' })).not.toBeInTheDocument();
   });
 });

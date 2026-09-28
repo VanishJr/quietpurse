@@ -139,7 +139,7 @@ describe('income-source data revision', () => {
 
     expect(await screen.findByText('Grant')).toBeVisible();
     expect(
-      await screen.findByRole('button', { name: 'Hide payment Monthly gym payment' }),
+      await screen.findByRole('button', { name: 'Actions for Monthly gym payment' }),
     ).toBeVisible();
     await waitFor(() => {
       expect(

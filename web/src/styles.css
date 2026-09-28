@@ -1912,6 +1912,143 @@ textarea {
   min-height: 44px;
 }
 
+.settings-page .settings-recurring-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.settings-page .settings-recurring-header .settings-lead {
+  margin-bottom: 18px;
+}
+
+.settings-page .settings-recurring-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin: 0 0 18px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.settings-page .settings-recurring-summary strong {
+  color: var(--ink-primary);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-page .settings-recurring-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto minmax(44px, max-content);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ink-grid);
+}
+
+.settings-page .settings-recurring-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.settings-page .settings-recurring-info {
+  min-width: 0;
+}
+
+.settings-page .settings-recurring-name {
+  color: var(--ink-primary);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-meta {
+  color: var(--ink-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-amount {
+  color: var(--ink-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-page .settings-recurring-actions {
+  position: relative;
+}
+
+.settings-page .settings-recurring-trigger,
+.settings-page .settings-recurring-restore {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-recurring-trigger {
+  font-size: 22px;
+}
+
+.settings-page .settings-recurring-restore {
+  color: var(--ink-accent);
+  font-size: 13px;
+}
+
+.settings-page .settings-recurring-menu {
+  position: absolute;
+  z-index: var(--z-raised);
+  right: 0;
+  top: 100%;
+  min-width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 4px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+}
+
+.settings-page .settings-recurring-menu button {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 12px;
+  color: var(--ink-bad);
+  text-align: left;
+}
+
+.settings-page .settings-recurring-menu button:hover,
+.settings-page .settings-recurring-trigger:hover {
+  background: var(--ink-raised);
+}
+
+.settings-page .settings-recurring-more,
+.settings-page .settings-recurring-excluded summary {
+  display: block;
+  min-height: 44px;
+  padding: 12px 0;
+  color: var(--ink-accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-page .settings-recurring-excluded {
+  margin-top: 8px;
+  border-top: 1px solid var(--ink-grid);
+}
+
+.settings-page .settings-recurring-excluded summary {
+  display: list-item;
+  list-style-position: inside;
+}
+
+.settings-page .settings-recurring-error .error {
+  margin: 8px 0;
+}
+
 .settings-page .settings-card .row {
   flex-wrap: wrap;
 }
@@ -1948,6 +2085,34 @@ textarea {
 
   .settings-page .settings-card {
     padding: 18px;
+  }
+
+  .settings-page .settings-recurring-summary {
+    align-items: flex-start;
+  }
+
+  .settings-page .settings-recurring-row {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(44px, max-content);
+    gap: 4px 10px;
+  }
+
+  .settings-page .settings-recurring-marker {
+    grid-row: 1;
+  }
+
+  .settings-page .settings-recurring-info {
+    grid-column: 2;
+  }
+
+  .settings-page .settings-recurring-amount {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .settings-page .settings-recurring-actions,
+  .settings-page .settings-recurring-restore {
+    grid-column: 3;
+    grid-row: 1 / span 2;
   }
 
   .settings-page .backdrop-center {
