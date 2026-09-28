@@ -6,6 +6,7 @@ import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
+import { useTheme } from '../theme';
 import { RecurringSummary } from '../types';
 import { setUrl, useUrl } from '../url';
 
@@ -26,6 +27,39 @@ export function SettingsScreen({
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringError, setRecurringError] = useState<string | null>(null);
   const recurringRequest = useRef(0);
+  const recurringBusyRef = useRef(false);
+  const [recurringBusy, setRecurringBusy] = useState<string | null>(null);
+  const [openRecurringMenu, setOpenRecurringMenu] = useState<string | null>(null);
+  const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const recurringMenuRef = useRef<HTMLDivElement>(null);
+  const recurringTriggerRef = useRef<HTMLButtonElement>(null);
+  const recurringActionRef = useRef<HTMLButtonElement>(null);
+  const recurringTitleRef = useRef<HTMLHeadingElement>(null);
+  const { categoryColor } = useTheme();
+
+  useEffect(() => {
+    if (!openRecurringMenu) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpenRecurringMenu(null);
+      recurringTriggerRef.current?.focus();
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (!recurringMenuRef.current?.contains(event.target as Node)) {
+        setOpenRecurringMenu(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer, true);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, [openRecurringMenu]);
+
+  useEffect(() => {
+    if (openRecurringMenu) recurringActionRef.current?.focus();
+  }, [openRecurringMenu]);
 
   /**
    * The import history takes the screen over, so it is a place the reader can BE, and
@@ -53,6 +87,7 @@ export function SettingsScreen({
 
   const loadRecurring = useCallback(async () => {
     const request = ++recurringRequest.current;
+    setOpenRecurringMenu(null);
     setRecurring(null);
     try {
       setRecurringError(null);
@@ -68,15 +103,84 @@ export function SettingsScreen({
   }, [dataRevision, loadRecurring]);
 
   const toggleRecurring = async (description: string, ignored: boolean) => {
+    if (recurringBusyRef.current) return;
+    recurringBusyRef.current = true;
+    setRecurringBusy(description);
+    if (ignored) recurringTriggerRef.current?.focus();
+    setOpenRecurringMenu(null);
     const request = ++recurringRequest.current;
     try {
       setRecurringError(null);
       const next = await api.setRecurringIgnored(description, ignored);
-      if (request === recurringRequest.current) setRecurring(next);
+      if (request === recurringRequest.current) {
+        setRecurring(next);
+        recurringTitleRef.current?.focus();
+      }
     } catch (e) {
       if (request === recurringRequest.current) setRecurringError((e as Error).message);
+    } finally {
+      recurringBusyRef.current = false;
+      setRecurringBusy(null);
     }
   };
+
+  const recurringRow = (g: RecurringSummary['groups'][number], excluded: boolean) => (
+    <div key={g.description} className="settings-recurring-row">
+      <span className="settings-recurring-marker" style={{ backgroundColor: categoryColor(g.category) }} aria-hidden="true" />
+      <div className="settings-recurring-info">
+        <div className="settings-recurring-name">{g.description}</div>
+        <div className="settings-recurring-meta">
+          {categoryLabel(g.category)} · {g.months} months detected · last {fmtDate(g.lastDate)}
+        </div>
+      </div>
+      <strong className="settings-recurring-amount">
+        {fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}/mo
+      </strong>
+      {excluded ? (
+        <button
+          className="settings-recurring-restore"
+          type="button"
+          aria-label={`Restore payment ${g.description}`}
+          disabled={recurringBusy !== null}
+          onClick={() => toggleRecurring(g.description, false)}
+        >
+          Restore
+        </button>
+      ) : (
+        <div className="settings-recurring-actions" ref={openRecurringMenu === g.description ? recurringMenuRef : undefined}>
+          <button
+            className="settings-recurring-trigger"
+            type="button"
+            aria-label={`Actions for ${g.description}`}
+            aria-expanded={openRecurringMenu === g.description}
+            aria-controls={openRecurringMenu === g.description ? 'settings-recurring-menu' : undefined}
+            disabled={recurringBusy !== null}
+            ref={openRecurringMenu === g.description ? recurringTriggerRef : undefined}
+            onClick={(event) => {
+              recurringTriggerRef.current = event.currentTarget;
+              if (openRecurringMenu === g.description) event.currentTarget.focus();
+              setOpenRecurringMenu(openRecurringMenu === g.description ? null : g.description);
+            }}
+          >
+            <span aria-hidden="true">⋮</span>
+          </button>
+          {openRecurringMenu === g.description && (
+            <div className="settings-recurring-menu" id="settings-recurring-menu">
+              <button
+                ref={recurringActionRef}
+                type="button"
+                disabled={recurringBusy !== null}
+                aria-label={`Exclude from recurring: ${g.description}`}
+                onClick={() => toggleRecurring(g.description, true)}
+              >
+                Exclude from recurring
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   /**
    * A fetch and not a link: /api/backup answers 500 like anything else, and
@@ -131,60 +235,51 @@ export function SettingsScreen({
         </section>
       </div>
 
-      <section className="settings-card">
-        <h2 className="settings-title">Recurring payments</h2>
-        <p className="settings-lead">
-          Detected across every account, over the last twelve months.{' '}
-          {recurring && recurring.groups.length > 0 && (
-            <>
-              About{' '}
-              <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong> a
-              month.
-            </>
+      <section className="settings-card settings-recurring" aria-labelledby="settings-recurring-title">
+        <div className="settings-recurring-header">
+          <div>
+            <h2 className="settings-title" id="settings-recurring-title" ref={recurringTitleRef} tabIndex={-1}>Recurring payments</h2>
+            <p className="settings-lead">Detected across every account, over the last twelve months.</p>
+          </div>
+          {recurring && (
+            <p className="settings-recurring-summary">
+              <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong>
+              <span>About this much a month</span>
+            </p>
           )}
-        </p>
+        </div>
         {!recurring && !recurringError && (
           <p role="status" className="hint">Loading recurring payments…</p>
         )}
-        {recurringError && <p className="error">Error: {recurringError}</p>}
+        {recurringError && (
+          <div className="settings-recurring-error">
+            <p className="error" role="alert">Error: {recurringError}</p>
+            {!recurring && <button className="btn-link" type="button" onClick={loadRecurring}>Retry</button>}
+          </div>
+        )}
+        {recurringBusy && <p role="status" className="hint">Updating recurring payments…</p>}
         {recurring && recurring.groups.length === 0 && (
           <p className="hint">
-            Nothing yet. A payment has to appear in several months before Finto calls it
-            recurring.
+            Nothing yet. A payment has to appear in several months before Finto calls it recurring.
           </p>
         )}
-        {[...active.slice(0, RECURRING_LIMIT), ...ignored].map((g) => (
-          <div key={g.description} className="row" style={{ padding: '8px 0' }}>
-            <div className="row-main">
-              <div className={`row-title${g.ignored ? ' muted-strike' : ''}`}>
-                {g.description}
-              </div>
-              <div className="row-sub">
-                {categoryLabel(g.category)} · {g.months} mo. · last {fmtDate(g.lastDate)}
-                {g.ignored ? ' · hidden' : ''}
-              </div>
-            </div>
-            <div
-              className={`row-value${g.ignored ? ' muted-strike' : ''}`}
-              style={{ fontSize: 13, color: 'var(--ink-secondary)' }}
-            >
-              {fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}/mo
-            </div>
-            <button
-              className={g.ignored ? 'btn-link' : 'btn-danger'}
-              onClick={() => toggleRecurring(g.description, !g.ignored)}
-              aria-label={
-                g.ignored ? `Restore payment ${g.description}` : `Hide payment ${g.description}`
-              }
-            >
-              {g.ignored ? 'Restore' : 'Hide'}
-            </button>
+        {recurring && active.length > 0 && (
+          <div className="settings-recurring-list">
+            {(showAllRecurring ? active : active.slice(0, RECURRING_LIMIT)).map((g) => recurringRow(g, false))}
           </div>
-        ))}
-        {active.length > RECURRING_LIMIT && (
-          <p className="hint" style={{ marginTop: 6 }}>
-            …and {active.length - RECURRING_LIMIT} more, smaller
-          </p>
+        )}
+        {!showAllRecurring && active.length > RECURRING_LIMIT && (
+          <button className="settings-recurring-more" type="button" onClick={() => setShowAllRecurring(true)}>
+            Show {active.length - RECURRING_LIMIT} more
+          </button>
+        )}
+        {ignored.length > 0 && (
+          <details className="settings-recurring-excluded">
+            <summary>Excluded payments ({ignored.length})</summary>
+            <div className="settings-recurring-list">
+              {ignored.map((g) => recurringRow(g, true))}
+            </div>
+          </details>
         )}
       </section>
 
