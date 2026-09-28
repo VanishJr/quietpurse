@@ -635,7 +635,12 @@ one is available; suggestions never restrict the code the server may accept. Add
 entering an owner spelling changes only the local form; a name still in the entry field joins the
 ordered list when Save sends it. Only an exact echo of the requested currency and ordered names
 resets the form to saved; a refusal or different answer leaves the edits available to correct or
-retry. Validation and recalculation remain with the server. The account strip
+retry. Validation and recalculation remain with the server. Settings' recurring list uses the server's
+monthly estimate and detected groups without recomputing them; category markers come from the
+category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
+rather than disappearing, and a mutation replaces the whole recurring answer instead of patching
+one row. Revision-triggered reads and mutations share one latest-answer guard so an older reply
+cannot replace newer recurring data. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import

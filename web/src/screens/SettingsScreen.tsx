@@ -244,7 +244,7 @@ export function SettingsScreen({
           {recurring && (
             <p className="settings-recurring-summary">
               <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong>
-              <span>About this much a month</span>
+              <span>Estimated per month</span>
             </p>
           )}
         </div>

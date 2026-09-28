@@ -1924,6 +1924,11 @@ textarea {
   margin-bottom: 18px;
 }
 
+.settings-page .settings-recurring-header .settings-title:focus {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
+}
+
 .settings-page .settings-recurring-summary {
   display: flex;
   flex-direction: column;
@@ -2043,6 +2048,7 @@ textarea {
 .settings-page .settings-recurring-excluded summary {
   display: list-item;
   list-style-position: inside;
+  overflow-wrap: anywhere;
 }
 
 .settings-page .settings-recurring-error .error {
