@@ -730,6 +730,50 @@ describe('recurring payments', () => {
     expect(screen.queryByRole('button', { name: 'Actions for Spotify' })).not.toBeInTheDocument();
   });
 
+  it('keeps the post-write refresh when an older revision read finishes afterward', async () => {
+    const group = (ignored: boolean) => ({
+      description: 'Spotify', category: 'subscriptions', months: 6, count: 6,
+      avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored,
+    });
+    const before = { baseCurrency: 'EUR', monthlyTotal: -10, groups: [group(false)] };
+    const after = { baseCurrency: 'EUR', monthlyTotal: 0, groups: [group(true)] };
+    let finishWrite: (response: Response) => void = () => {};
+    let finishOldRead: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => {
+        reads += 1;
+        if (reads === 2) return new Promise<Response>((resolve) => { finishOldRead = resolve; });
+        return ok(reads === 1 ? before : after);
+      },
+      'POST /api/recurring/ignore': () => new Promise<Response>((resolve) => { finishWrite = resolve; }),
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Spotify' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Spotify' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    await vi.waitFor(() => expect(reads).toBe(2));
+
+    await act(async () => { finishWrite(ok(after)); });
+    expect(reads).toBe(3);
+    expect(await screen.findByText('Excluded payments (1)')).toBeInTheDocument();
+
+    await act(async () => { finishOldRead(ok(before)); });
+    expect(screen.getByText('Excluded payments (1)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Actions for Spotify' })).not.toBeInTheDocument();
+  });
+
   it('keeps the newest recurring answer when a revision overtakes an older read', async () => {
     const group = (description: string) => ({
       description,
