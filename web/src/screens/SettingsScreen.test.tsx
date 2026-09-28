@@ -657,7 +657,7 @@ describe('recurring payments', () => {
     const trigger = await screen.findByRole('button', { name: `Actions for ${description}` });
     const row = trigger.closest('.settings-recurring-row') as HTMLElement;
     expect(within(row).getByText(description)).toHaveClass('settings-recurring-name');
-    expect(row.querySelector('.settings-recurring-amount')).toHaveTextContent('/mo');
+    expect(row.querySelector('.settings-recurring-amount')).toHaveTextContent('123,456,789,012 EUR/mo');
     expect(trigger.querySelector('svg[aria-hidden="true"]')).toBeInTheDocument();
   });
 
