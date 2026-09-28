@@ -898,6 +898,39 @@ describe('recurring payments', () => {
     expect(writes).toEqual([{ description: 'Spotify', ignored: true }]);
   });
 
+  it('round-trips a payment through the action menu and excluded disclosure', async () => {
+    let ignored = false;
+    const writes: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(answer(payment('Spotify', ignored))),
+      'POST /api/recurring/ignore': (init) => {
+        const body = JSON.parse(String(init?.body));
+        writes.push(body);
+        if (body.description !== 'Spotify' || body.ignored === ignored) {
+          return fail(400, { error: 'incorrect recurring action' });
+        }
+        ignored = body.ignored;
+        return ok(answer(payment('Spotify', ignored)));
+      },
+    });
+    mount();
+    const card = cardFor('Recurring payments');
+    fireEvent.click(await within(card).findByRole('button', { name: 'Actions for Spotify' }));
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude from recurring: Spotify' }));
+    const disclosure = await within(card).findByText('Excluded payments (1)');
+    expect(within(card).queryByRole('button', { name: 'Actions for Spotify' })).not.toBeInTheDocument();
+    fireEvent.click(disclosure);
+    fireEvent.click(within(card).getByRole('button', { name: 'Restore payment Spotify' }));
+
+    expect(await within(card).findByRole('button', { name: 'Actions for Spotify' })).toBeInTheDocument();
+    expect(within(card).queryByText('Excluded payments (1)')).not.toBeInTheDocument();
+    expect(writes).toEqual([
+      { description: 'Spotify', ignored: true },
+      { description: 'Spotify', ignored: false },
+    ]);
+  });
+
   it('re-reads after a mutation whose answer was overtaken by a pre-write revision read', async () => {
     const group = (ignored: boolean) => ({
       description: 'Spotify', category: 'subscriptions', months: 6, count: 6,
