@@ -528,10 +528,14 @@ describe('recurring payments', () => {
 
   it('keeps excluded groups collapsed and restores them from the complete server answer', async () => {
     const excluded = payment('Spotify', true);
+    const writes: unknown[] = [];
     mockFetch({
       ...BASE,
       'GET /api/recurring': () => ok(answer(payment('Gym'), excluded)),
-      'POST /api/recurring/ignore': () => ok(answer(payment('Gym'), payment('Spotify'))),
+      'POST /api/recurring/ignore': (init) => {
+        writes.push(JSON.parse(String(init?.body)));
+        return ok(answer(payment('Gym'), payment('Spotify')));
+      },
     });
     mount();
     const card = cardFor('Recurring payments');
@@ -543,7 +547,7 @@ describe('recurring payments', () => {
     fireEvent.click(within(card).getByRole('button', { name: 'Restore payment Spotify' }));
     expect(await within(card).findByRole('button', { name: 'Actions for Spotify' })).toBeInTheDocument();
     expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
-    expect(requests()).toContain('POST /api/recurring/ignore');
+    expect(writes).toEqual([{ description: 'Spotify', ignored: false }]);
   });
 
   it('reveals all active payments through Show more without hiding the excluded disclosure', async () => {
@@ -579,6 +583,7 @@ describe('recurring payments', () => {
   });
 
   it('hides a group and takes the list the server answers with', async () => {
+    const writes: unknown[] = [];
     const group = {
       description: 'Spotify',
       category: 'subscriptions',
@@ -593,8 +598,10 @@ describe('recurring payments', () => {
       ...BASE,
       'GET /api/recurring': () =>
         ok({ baseCurrency: 'EUR', monthlyTotal: 10, groups: [group] }),
-      'POST /api/recurring/ignore': () =>
-        ok({ baseCurrency: 'EUR', monthlyTotal: 0, groups: [{ ...group, ignored: true }] }),
+      'POST /api/recurring/ignore': (init) => {
+        writes.push(JSON.parse(String(init?.body)));
+        return ok({ baseCurrency: 'EUR', monthlyTotal: 0, groups: [{ ...group, ignored: true }] });
+      },
     });
     mount();
 
@@ -605,6 +612,7 @@ describe('recurring payments', () => {
     expect(screen.queryByRole('button', { name: 'Actions for Spotify' })).not.toBeInTheDocument();
     fireEvent.click(excluded);
     expect(screen.getByRole('button', { name: 'Restore payment Spotify' })).toBeInTheDocument();
+    expect(writes).toEqual([{ description: 'Spotify', ignored: true }]);
   });
 
   it('re-reads after a mutation whose answer was overtaken by a pre-write revision read', async () => {
