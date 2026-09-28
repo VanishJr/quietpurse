@@ -626,6 +626,40 @@ describe('recurring payments', () => {
     expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
   });
 
+  it('does not show a superseded mutation refusal beside a newer recurring read', async () => {
+    const before = answer(payment('Old'));
+    const after = answer(payment('Fresh'));
+    let finishWrite: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(++reads === 1 ? before : after),
+      'POST /api/recurring/ignore': () => new Promise<Response>((resolve) => { finishWrite = resolve; }),
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+          <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Old' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Old' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByRole('button', { name: 'Actions for Fresh' })).toBeInTheDocument();
+    expect(reads).toBe(2);
+
+    await act(async () => { finishWrite(fail(500, { error: 'old mutation refused' })); });
+    expect(within(card).getByRole('button', { name: 'Actions for Fresh' })).toBeEnabled();
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(card).queryByText(/old mutation refused/)).not.toBeInTheDocument();
+  });
+
   it('hides a group and takes the list the server answers with', async () => {
     const writes: unknown[] = [];
     const group = {

@@ -122,7 +122,7 @@ export function SettingsScreen({
       }
       recurringTitleRef.current?.focus();
     } catch (e) {
-      setRecurringError((e as Error).message);
+      if (request === recurringRequest.current) setRecurringError((e as Error).message);
     } finally {
       recurringBusyRef.current = false;
       setRecurringBusy(null);
