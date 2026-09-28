@@ -640,7 +640,9 @@ monthly estimate and detected groups without recomputing them; category markers 
 category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
 rather than disappearing, and a mutation replaces the whole recurring answer instead of patching
 one row. Revision-triggered reads and mutations share one latest-answer guard so an older reply
-cannot replace newer recurring data. The account strip
+cannot replace newer recurring data. A newer answer only makes a failed exclude or restore
+irrelevant when that payment is gone or already in the requested state; an in-flight read or one
+that still leaves the action available does not erase the refusal. The account strip
 marks the current account with `aria-current` like the navigation does and is deliberately not a
 tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import

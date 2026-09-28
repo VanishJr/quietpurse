@@ -688,6 +688,110 @@ describe('recurring payments', () => {
     expect(within(card).queryByText(/old mutation refused/)).not.toBeInTheDocument();
   });
 
+  it('shows a failed exclude when a newer read still leaves that payment actionable', async () => {
+    const current = answer(payment('Gym'));
+    let finishWrite: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => { reads += 1; return ok(current); },
+      'POST /api/recurring/ignore': (init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ description: 'Gym', ignored: true });
+        return new Promise<Response>((resolve) => { finishWrite = resolve; });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return <><button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+        <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} /></>;
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByRole('button', { name: 'Actions for Gym' })).toBeInTheDocument();
+    expect(reads).toBe(2);
+
+    await act(async () => { finishWrite(fail(500, { error: 'exclude refused' })); });
+    expect(within(card).getByRole('alert')).toHaveTextContent('exclude refused');
+    expect(within(card).getByRole('button', { name: 'Actions for Gym' })).toBeEnabled();
+  });
+
+  it('shows a failed restore when a newer read still leaves the payment excluded', async () => {
+    const current = answer(payment('Gym', true));
+    let finishWrite: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => { reads += 1; return ok(current); },
+      'POST /api/recurring/ignore': (init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ description: 'Gym', ignored: false });
+        return new Promise<Response>((resolve) => { finishWrite = resolve; });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return <><button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+        <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} /></>;
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByText('Excluded payments (1)'));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore payment Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    const card = cardFor('Recurring payments');
+    expect(await within(card).findByText('Excluded payments (1)')).toBeInTheDocument();
+    expect(reads).toBe(2);
+
+    await act(async () => { finishWrite(fail(500, { error: 'restore refused' })); });
+    expect(within(card).getByRole('alert')).toHaveTextContent('restore refused');
+    fireEvent.click(within(card).getByText('Excluded payments (1)'));
+    expect(within(card).getByRole('button', { name: 'Restore payment Gym' })).toBeEnabled();
+  });
+
+  it('keeps a failed exclude visible until a pending newer read establishes the action is obsolete', async () => {
+    const before = answer(payment('Gym'));
+    const after = answer(payment('Gym', true));
+    let finishWrite: (response: Response) => void = () => {};
+    let finishRead: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ++reads === 1
+        ? ok(before) : new Promise<Response>((resolve) => { finishRead = resolve; }),
+      'POST /api/recurring/ignore': (init) => {
+        expect(JSON.parse(String(init?.body))).toEqual({ description: 'Gym', ignored: true });
+        return new Promise<Response>((resolve) => { finishWrite = resolve; });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return <><button onClick={() => setRevision((value) => value + 1)}>Reclassify</button>
+        <SettingsScreen onOpenImport={vi.fn()} dataRevision={revision} /></>;
+    };
+    renderThemed(<Host />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Exclude from recurring: Gym' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    await vi.waitFor(() => expect(reads).toBe(2));
+    await act(async () => { finishWrite(fail(500, { error: 'exclude refused' })); });
+    const card = cardFor('Recurring payments');
+    expect(within(card).getByRole('alert')).toHaveTextContent('exclude refused');
+
+    await act(async () => { finishRead(ok(before)); });
+    expect(within(card).getByRole('alert')).toHaveTextContent('exclude refused');
+    expect(within(card).getByRole('button', { name: 'Actions for Gym' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
+    await vi.waitFor(() => expect(reads).toBe(3));
+    await act(async () => { finishRead(ok(after)); });
+    expect(within(card).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(card).getByText('Excluded payments (1)')).toBeInTheDocument();
+  });
+
   it('hides a group and takes the list the server answers with', async () => {
     const writes: unknown[] = [];
     const group = {

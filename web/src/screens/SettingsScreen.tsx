@@ -14,6 +14,11 @@ import { setUrl, useUrl } from '../url';
 
 const RECURRING_LIMIT = 8;
 
+const recurringActionObsolete = (summary: RecurringSummary, description: string, ignored: boolean) => {
+  const group = summary.groups.find((item) => item.description === description);
+  return !group || group.ignored === ignored;
+};
+
 interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
   onOpenImport: () => void;
@@ -29,6 +34,8 @@ export function SettingsScreen({
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringError, setRecurringError] = useState<string | null>(null);
   const recurringRequest = useRef(0);
+  const recurringAnswer = useRef<{ request: number; summary: RecurringSummary } | null>(null);
+  const failedRecurringAction = useRef<{ description: string; ignored: boolean; message: string } | null>(null);
   const recurringBusyRef = useRef(false);
   const [recurringBusy, setRecurringBusy] = useState<string | null>(null);
   const [openRecurringMenu, setOpenRecurringMenu] = useState<string | null>(null);
@@ -93,9 +100,21 @@ export function SettingsScreen({
     setOpenRecurringMenu(null);
     setRecurring(null);
     try {
-      setRecurringError(null);
+      if (!failedRecurringAction.current) setRecurringError(null);
       const next = await api.recurring();
-      if (request === recurringRequest.current) setRecurring(next);
+      if (request === recurringRequest.current) {
+        recurringAnswer.current = { request, summary: next };
+        setRecurring(next);
+        const failed = failedRecurringAction.current;
+        if (failed) {
+          if (recurringActionObsolete(next, failed.description, failed.ignored)) {
+            failedRecurringAction.current = null;
+            setRecurringError(null);
+          } else {
+            setRecurringError(failed.message);
+          }
+        }
+      }
     } catch (e) {
       if (request === recurringRequest.current) setRecurringError((e as Error).message);
     }
@@ -112,17 +131,25 @@ export function SettingsScreen({
     if (ignored) recurringTriggerRef.current?.focus();
     setOpenRecurringMenu(null);
     const request = ++recurringRequest.current;
+    failedRecurringAction.current = null;
     try {
       setRecurringError(null);
       const next = await api.setRecurringIgnored(description, ignored);
       if (request === recurringRequest.current) {
+        recurringAnswer.current = { request, summary: next };
         setRecurring(next);
       } else {
         await loadRecurring();
       }
       recurringTitleRef.current?.focus();
     } catch (e) {
-      if (request === recurringRequest.current) setRecurringError((e as Error).message);
+      const latest = recurringAnswer.current;
+      // A newer request only supersedes a refusal when its answer makes this action obsolete.
+      if (!latest || latest.request <= request || !recurringActionObsolete(latest.summary, description, ignored)) {
+        const message = (e as Error).message;
+        failedRecurringAction.current = { description, ignored, message };
+        setRecurringError(message);
+      }
     } finally {
       recurringBusyRef.current = false;
       setRecurringBusy(null);
