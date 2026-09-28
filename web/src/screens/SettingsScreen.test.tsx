@@ -366,6 +366,41 @@ describe('financial setup', () => {
   });
 });
 
+describe('data and backup actions', () => {
+  it('offers three distinct full-row controls with decorative native icons and their safety copy', () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const card = cardFor('Data & backup');
+    const actions = within(card).getAllByRole('button');
+    expect(actions).toHaveLength(3);
+    expect(actions.map((button) => button.querySelector('.settings-data-label')?.textContent)).toEqual([
+      'Import a statement', 'Import history', 'Export backup',
+    ]);
+    expect(actions[0]).toHaveTextContent('CSV, XLSX, or PDF');
+    expect(actions[1]).toHaveTextContent('every account');
+    expect(actions[1]).toHaveTextContent('download original statement files');
+    expect(actions[2]).toHaveTextContent('readable, unencrypted JSON');
+    expect(actions[2]).toHaveTextContent('Original statement files are not included');
+    for (const action of actions) {
+      expect(action).toHaveClass('settings-data-action');
+      expect(action.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2);
+    }
+    expect(container.querySelectorAll('.settings-data-trailing svg')).toHaveLength(3);
+    expect(requests()).not.toContain('GET /api/backup');
+  });
+
+  it('hands Import to the same Shell callback without making a second request', () => {
+    mockFetch(BASE);
+    const onOpenImport = vi.fn();
+    renderThemed(<SettingsScreen onOpenImport={onOpenImport} />);
+
+    fireEvent.click(within(cardFor('Data & backup')).getByRole('button', { name: /^Import a statement/ }));
+
+    expect(onOpenImport).toHaveBeenCalledOnce();
+    expect(requests()).not.toContain('GET /api/backup');
+  });
+});
+
 describe('the data export', () => {
   const exportControl = () => screen.getByRole('button', { name: /^Export backup/ });
 
@@ -392,7 +427,9 @@ describe('the data export', () => {
 
     fireEvent.click(exportControl());
 
-    expect(await screen.findByText(/the export could not be assembled/)).toBeInTheDocument();
+    const error = await within(cardFor('Data & backup')).findByRole('alert');
+    expect(error).toHaveTextContent('the export could not be assembled');
+    expect(error.closest('.settings-data-item')).toContainElement(exportControl());
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -410,12 +447,14 @@ describe('the data export', () => {
     fireEvent.click(exportControl());
     const preparing = screen.getByRole('button', { name: /^Preparing backup…/ });
     expect(preparing).toBeDisabled();
+    expect(preparing).toHaveAttribute('aria-busy', 'true');
     fireEvent.click(preparing);
     release(ok({ transactions: [] }));
 
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
     expect(requests().filter((r) => r === 'GET /api/backup')).toHaveLength(1);
     expect(exportControl()).toBeEnabled();
+    expect(exportControl()).toHaveAttribute('aria-busy', 'false');
   });
 });
 
@@ -428,6 +467,7 @@ describe('the import history across every account', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Import history/ }));
 
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
+    expect(window.location.search).toBe('?screen=settings&panel=history');
     fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
 
     expect(await screen.findByRole('heading', { name: 'Data & backup' })).toBeInTheDocument();

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { PRESETS } from './test/fixtures';
+import { importsResponse, PRESETS } from './test/fixtures';
 import { FIRST_PAINT_ROUTES, mockFetch, ok } from './test/harness';
 
 /**
@@ -279,6 +279,30 @@ describe('the shell', () => {
     expect(window.location.search).toBe('?screen=overview&panel=import');
     expect(tabs.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
     expect(tabs.getByRole('link', { name: 'Settings' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('closes Settings history on Back and when navigating away from Settings', async () => {
+    mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports': () => ok(importsResponse([])) });
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+
+    const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
+    fireEvent.click(tabs.getByRole('link', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Import history/ }));
+    expect(screen.getByRole('heading', { name: 'Import history' })).toBeVisible();
+    expect(window.location.search).toBe('?screen=settings&panel=history');
+
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Data & backup' })).toBeVisible());
+    expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
+    expect(window.location.search).toBe('?screen=settings');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Import history/ }));
+    fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }));
+    expect(window.location.search).toBe('?screen=transactions');
+    fireEvent.click(tabs.getByRole('link', { name: 'Settings' }));
+    expect(screen.getByRole('heading', { name: 'Data & backup' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
   });
 
   it('carries the URL of each destination on the destination itself', async () => {
