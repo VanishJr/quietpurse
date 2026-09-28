@@ -65,7 +65,7 @@ describe('the screen itself', () => {
     expect(top).toContainElement(cardFor('Income sources'));
     expect(within(cardFor('Financial setup')).getByText(/totals and income-based goals/))
       .toBeInTheDocument();
-    expect(within(cardFor('Data & backup')).getByRole('button', { name: /Export my data/ }))
+    expect(within(cardFor('Data & backup')).getByRole('button', { name: /^Export backup/ }))
       .toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /Stored on this device/i })).not.toBeInTheDocument();
   });
@@ -367,7 +367,7 @@ describe('financial setup', () => {
 });
 
 describe('the data export', () => {
-  const exportControl = () => screen.getByRole('button', { name: /Export my data/ });
+  const exportControl = () => screen.getByRole('button', { name: /^Export backup/ });
 
   it('fetches the backup and saves what came back', async () => {
     mockFetch({ ...BASE, 'GET /api/backup': () => ok({ transactions: [] }) });
@@ -408,8 +408,9 @@ describe('the data export', () => {
     await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(exportControl());
-    expect(exportControl()).toBeDisabled();
-    fireEvent.click(exportControl());
+    const preparing = screen.getByRole('button', { name: /^Preparing backup…/ });
+    expect(preparing).toBeDisabled();
+    fireEvent.click(preparing);
     release(ok({ transactions: [] }));
 
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
@@ -424,7 +425,7 @@ describe('the import history across every account', () => {
     mount();
     await screen.findByRole('heading', { name: 'Data & backup' });
 
-    fireEvent.click(screen.getByRole('button', { name: /Import history \(every account\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Import history/ }));
 
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
@@ -447,7 +448,7 @@ describe('the import history across every account', () => {
     mount();
     await screen.findByRole('heading', { name: 'Data & backup' });
 
-    fireEvent.click(screen.getByRole('button', { name: /Import history \(every account\)/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Import history/ }));
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
     expect(new URLSearchParams(window.location.search).get('panel')).toBe('history');
 
