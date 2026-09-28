@@ -619,6 +619,31 @@ describe('recurring payments', () => {
     expect(writes).toEqual([{ description: 'Spotify', ignored: false }]);
   });
 
+  it('restores the chosen excluded payment without retargeting another one', async () => {
+    const writes: unknown[] = [];
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok(answer(payment('Gym'), payment('Spotify', true), payment('YouTube', true))),
+      'POST /api/recurring/ignore': (init) => {
+        const body = JSON.parse(String(init?.body));
+        writes.push(body);
+        return body.description === 'YouTube' && body.ignored === false
+          ? ok(answer(payment('Gym'), payment('Spotify', true), payment('YouTube')))
+          : fail(400, { error: 'wrong payment restored' });
+      },
+    });
+    mount();
+    const card = cardFor('Recurring payments');
+    fireEvent.click(await within(card).findByText('Excluded payments (2)'));
+    fireEvent.click(within(card).getByRole('button', { name: 'Restore payment YouTube' }));
+
+    expect(await within(card).findByRole('button', { name: 'Actions for YouTube' })).toBeInTheDocument();
+    expect(within(card).getByText('Excluded payments (1)')).toBeInTheDocument();
+    fireEvent.click(within(card).getByText('Excluded payments (1)'));
+    expect(within(card).getByRole('button', { name: 'Restore payment Spotify' })).toBeInTheDocument();
+    expect(writes).toEqual([{ description: 'YouTube', ignored: false }]);
+  });
+
   it('keeps long payment descriptions and amounts in separate row cells with a named action', async () => {
     const description = 'LongPaymentNameWithoutBreaks'.repeat(12);
     mockFetch({
