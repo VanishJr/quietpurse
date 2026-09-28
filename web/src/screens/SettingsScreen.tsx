@@ -334,21 +334,23 @@ export function SettingsScreen({
 
         <div className="settings-data-actions">
           <div className="settings-data-item">
-            <button className="settings-data-action" type="button" onClick={onOpenImport}>
+            <button className="settings-data-action" type="button" onClick={onOpenImport}
+              aria-labelledby="settings-import-label" aria-describedby="settings-import-description">
               <span className="settings-data-icon"><ImportIcon /></span>
               <span className="settings-data-copy">
-                <span className="settings-data-label">Import a statement</span>
-                <span className="settings-data-description">Upload a CSV, XLSX, or PDF statement.</span>
+                <span className="settings-data-label" id="settings-import-label">Import a statement</span>
+                <span className="settings-data-description" id="settings-import-description">Upload a CSV, XLSX, or PDF statement.</span>
               </span>
               <span className="settings-data-trailing"><ChevronIcon /></span>
             </button>
           </div>
           <div className="settings-data-item">
-            <button className="settings-data-action" type="button" onClick={() => setHistoryOpen(true)}>
+            <button className="settings-data-action" type="button" onClick={() => setHistoryOpen(true)}
+              aria-labelledby="settings-history-label" aria-describedby="settings-history-description">
               <span className="settings-data-icon"><HistoryIcon /></span>
               <span className="settings-data-copy">
-                <span className="settings-data-label">Import history</span>
-                <span className="settings-data-description">
+                <span className="settings-data-label" id="settings-history-label">Import history</span>
+                <span className="settings-data-description" id="settings-history-description">
                   Review uploads from every account and download original statement files.
                 </span>
               </span>
@@ -361,14 +363,16 @@ export function SettingsScreen({
               type="button"
               disabled={exporting}
               aria-busy={exporting}
+              aria-labelledby="settings-export-label"
+              aria-describedby="settings-export-description"
               onClick={runExport}
             >
               <span className="settings-data-icon"><BackupIcon /></span>
               <span className="settings-data-copy">
-                <span className="settings-data-label">
+                <span className="settings-data-label" id="settings-export-label">
                   {exporting ? 'Preparing backup…' : 'Export backup'}
                 </span>
-                <span className="settings-data-description">
+                <span className="settings-data-description" id="settings-export-description">
                   Download readable, unencrypted JSON. Original statement files are not included.
                 </span>
               </span>

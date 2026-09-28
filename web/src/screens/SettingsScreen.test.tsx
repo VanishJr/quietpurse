@@ -376,6 +376,16 @@ describe('data and backup actions', () => {
     expect(actions.map((button) => button.querySelector('.settings-data-label')?.textContent)).toEqual([
       'Import a statement', 'Import history', 'Export backup',
     ]);
+    expect(actions[0]).toHaveAccessibleName('Import a statement');
+    expect(actions[0]).toHaveAccessibleDescription('Upload a CSV, XLSX, or PDF statement.');
+    expect(actions[1]).toHaveAccessibleName('Import history');
+    expect(actions[1]).toHaveAccessibleDescription(
+      'Review uploads from every account and download original statement files.',
+    );
+    expect(actions[2]).toHaveAccessibleName('Export backup');
+    expect(actions[2]).toHaveAccessibleDescription(
+      'Download readable, unencrypted JSON. Original statement files are not included.',
+    );
     expect(actions[0]).toHaveTextContent('CSV, XLSX, or PDF');
     expect(actions[1]).toHaveTextContent('every account');
     expect(actions[1]).toHaveTextContent('download original statement files');
@@ -447,6 +457,10 @@ describe('the data export', () => {
     fireEvent.click(exportControl());
     const preparing = screen.getByRole('button', { name: /^Preparing backup…/ });
     expect(preparing).toBeDisabled();
+    expect(preparing).toHaveAccessibleName('Preparing backup…');
+    expect(preparing).toHaveAccessibleDescription(
+      'Download readable, unencrypted JSON. Original statement files are not included.',
+    );
     expect(preparing).toHaveAttribute('aria-busy', 'true');
     fireEvent.click(preparing);
     release(ok({ transactions: [] }));
