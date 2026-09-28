@@ -1781,6 +1781,11 @@ textarea {
   margin-top: 8px;
 }
 
+.settings-page .input:focus-visible {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
+}
+
 .settings-page .settings-currency-input {
   max-width: 180px;
 }
@@ -1996,7 +2001,9 @@ textarea {
 }
 
 .settings-page .settings-recurring-trigger {
-  font-size: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
 }
 
 .settings-page .settings-recurring-restore {
@@ -2181,6 +2188,9 @@ textarea {
   .settings-page .settings-recurring-amount {
     grid-column: 2;
     grid-row: 2;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .settings-page .settings-recurring-actions,

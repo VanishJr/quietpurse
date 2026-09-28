@@ -5,7 +5,7 @@ import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { ImportIcon } from '../components/NavIcons';
-import { BackupIcon, ChevronIcon, DownloadIcon, HistoryIcon } from '../components/SettingsActionIcons';
+import { BackupIcon, ChevronIcon, DownloadIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { useTheme } from '../theme';
@@ -152,7 +152,15 @@ export function SettingsScreen({
           Restore
         </button>
       ) : (
-        <div className="settings-recurring-actions" ref={openRecurringMenu === g.description ? recurringMenuRef : undefined}>
+        <div
+          className="settings-recurring-actions"
+          ref={openRecurringMenu === g.description ? recurringMenuRef : undefined}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setOpenRecurringMenu(null);
+            }
+          }}
+        >
           <button
             className="settings-recurring-trigger"
             type="button"
@@ -167,7 +175,7 @@ export function SettingsScreen({
               setOpenRecurringMenu(openRecurringMenu === g.description ? null : g.description);
             }}
           >
-            <span aria-hidden="true">⋮</span>
+            <MoreIcon />
           </button>
           {openRecurringMenu === g.description && (
             <div className="settings-recurring-menu" id="settings-recurring-menu">

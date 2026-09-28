@@ -24,6 +24,14 @@ export const BackupIcon = () => (
   </svg>
 );
 
+export const MoreIcon = () => (
+  <svg {...box}>
+    <circle cx="10" cy="4" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="10" cy="10" r="1.5" fill="currentColor" stroke="none" />
+    <circle cx="10" cy="16" r="1.5" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const ChevronIcon = () => (
   <svg {...box}>
     <path d="m8 5 5 5-5 5" />

@@ -529,6 +529,9 @@ describe('recurring payments', () => {
     expect(within(card).getByText(/Subscriptions · 6 months detected/)).toBeInTheDocument();
     expect(within(card).getByText('−10 EUR/mo')).toBeInTheDocument();
     expect(container.querySelector('.settings-recurring-marker')).toHaveAttribute('aria-hidden', 'true');
+    const trigger = within(card).getByRole('button', { name: 'Actions for Long gym payment' });
+    expect(trigger.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
   });
 
@@ -565,6 +568,14 @@ describe('recurring payments', () => {
     fireEvent.click(trigger);
     fireEvent.pointerDown(cardFor('Financial setup'));
     expect(screen.queryByRole('button', { name: 'Exclude from recurring: Gym' })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Exclude from recurring: Gym' })).toHaveFocus();
+    const next = screen.getByRole('button', { name: /^Import a statement/ });
+    fireEvent.blur(screen.getByRole('button', { name: 'Exclude from recurring: Gym' }), { relatedTarget: next });
+    next.focus();
+    expect(screen.queryByRole('button', { name: 'Exclude from recurring: Gym' })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('keeps excluded groups collapsed and restores them from the complete server answer', async () => {
@@ -592,6 +603,23 @@ describe('recurring payments', () => {
     expect(await within(card).findByRole('button', { name: 'Actions for Spotify' })).toBeInTheDocument();
     expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
     expect(writes).toEqual([{ description: 'Spotify', ignored: false }]);
+  });
+
+  it('keeps long payment descriptions and amounts in separate row cells with a named action', async () => {
+    const description = 'LongPaymentNameWithoutBreaks'.repeat(12);
+    mockFetch({
+      ...BASE,
+      'GET /api/recurring': () => ok({
+        baseCurrency: 'EUR', monthlyTotal: 123456789012,
+        groups: [{ ...payment(description), monthlyAvg: 123456789012 }],
+      }),
+    });
+    mount();
+    const trigger = await screen.findByRole('button', { name: `Actions for ${description}` });
+    const row = trigger.closest('.settings-recurring-row') as HTMLElement;
+    expect(within(row).getByText(description)).toHaveClass('settings-recurring-name');
+    expect(row.querySelector('.settings-recurring-amount')).toHaveTextContent('/mo');
+    expect(trigger.querySelector('svg[aria-hidden="true"]')).toBeInTheDocument();
   });
 
   it('reveals all active payments through Show more without hiding the excluded disclosure', async () => {
