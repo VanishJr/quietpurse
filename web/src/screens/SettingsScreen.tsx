@@ -114,10 +114,12 @@ export function SettingsScreen({
       const next = await api.setRecurringIgnored(description, ignored);
       if (request === recurringRequest.current) {
         setRecurring(next);
-        recurringTitleRef.current?.focus();
+      } else {
+        await loadRecurring();
       }
+      recurringTitleRef.current?.focus();
     } catch (e) {
-      if (request === recurringRequest.current) setRecurringError((e as Error).message);
+      setRecurringError((e as Error).message);
     } finally {
       recurringBusyRef.current = false;
       setRecurringBusy(null);
