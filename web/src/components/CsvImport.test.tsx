@@ -154,6 +154,77 @@ describe('the Import page foundation', () => {
   });
 });
 
+describe('the setup steps', () => {
+  it('numbers file, layout, and account in order and keeps the submit helper after them', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    mount();
+    await screen.findByRole('button', { name: 'N26' });
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    expect(within(setup).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['01 Choose a file', '02 Column layout', '03 Account']);
+    const steps = [...setup.querySelectorAll<HTMLElement>('.import-step')];
+    expect(steps).toHaveLength(3);
+    expect(within(steps[0]).getByText('…or paste the contents instead')).toBeInTheDocument();
+    expect(within(steps[1]).getByRole('group', { name: 'Statement preset' })).toBeInTheDocument();
+    expect(within(steps[2]).getByRole('group', { name: 'Account for this import' })).toBeInTheDocument();
+    expect(screen.getByText('No transactions are added until you review and confirm.'))
+      .toBeInTheDocument();
+  });
+
+  it('shows every server preset with Any statement initially pressed', async () => {
+    const choices = [
+      ...PRESETS.presets,
+      ...Array.from({ length: 8 }, (_, i) => ({ key: `bank-${i}`, title: `Bank ${i} statement` })),
+    ];
+    mockFetch({ ...BASE, 'GET /api/imports/presets': () => ok({ presets: choices }) });
+    mount();
+    const group = screen.getByRole('group', { name: 'Statement preset' });
+    await screen.findByRole('button', { name: choices.at(-1)!.title });
+    expect(within(group).getAllByRole('button').map((button) => button.textContent))
+      .toEqual(choices.map((choice) => choice.title));
+    expect(within(group).getByRole('button', { name: choices[0].title }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  it('requires both input and destination; paste can replace the file', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    const { container } = mount();
+    const destination = await screen.findByRole('button', { name: 'N26' });
+    const submit = screen.getByRole('button', { name: 'Import' });
+    expect(submit).toBeDisabled();
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(destination);
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents', hidden: true }), {
+      target: { value: 'date;amount\n2026-06-01;-10' },
+    });
+    expect(screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' }))
+      .toBeInTheDocument();
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents', hidden: true }), {
+      target: { value: '  ' },
+    });
+    expect(submit).toBeDisabled();
+  });
+
+  it('reads Reading… only while the upload request is pending', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({ ...ACCOUNT_ROUTES, 'POST /api/imports': () => new Promise((resolve) => { answer = resolve; }) });
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(screen.getByRole('button', { name: 'Reading…' })).toBeDisabled();
+    await act(async () => answer(ok(summaryResult())));
+    expect(await screen.findByRole('button', { name: 'Import' })).toBeEnabled();
+  });
+});
+
 describe('the formats the screen offers', () => {
   /** Lets the preset load, and any read takeFile started, finish inside act. */
   const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
@@ -264,7 +335,7 @@ describe('the formats the screen offers', () => {
     expect(screen.getByText(name)).toHaveClass('import-file-name');
     expect(screen.getByText(name)).toHaveTextContent(name);
     expect(picker).toHaveTextContent('1 rows · 1 kB');
-    expect(screen.queryByRole('status', { name: /empty file/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
 
     fireEvent.change(fileInput(container), {
       target: { files: [new File([], 'empty.csv', { type: 'text/csv' })] },
@@ -947,26 +1018,38 @@ describe('the account picker', () => {
     expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'false');
     // and the way out of the list, for a bank that has no account yet
     expect(screen.getByRole('button', { name: '+ New account' })).toBeInTheDocument();
+    expect(screen.getByText("Hidden accounts aren't listed here — unhide one first."))
+      .toBeInTheDocument();
     // the create arm stays shut until it is asked for: an account chosen by the
     // screen rather than by the person is how rows land in the wrong one
     expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
   });
 
   /**
-   * The heading is a <div> and not a <label>, because Chips renders no control for
-   * htmlFor to point at. The group's own name has to differ from that heading:
-   * TransactionsScreen's account filter is already a group called "Account", and this
-   * row is what made the name ambiguous. jsdom cannot see the collision itself —
-   * neither screen mounts the other — so what is held here is the distinctness.
+   * The group's name differs from its heading so it cannot be confused with the
+   * TransactionsScreen account filter, which is named "Account" too.
    */
   it('heads the picker, and does not name its group what the transactions filter is named', async () => {
     mockFetch(ACCOUNT_ROUTES);
     mount();
     await screen.findByRole('button', { name: 'Sparkasse Giro' });
 
-    expect(screen.getByText('Account')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Account' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: /account/i })).toBeInTheDocument();
+  });
+
+  it('keeps long account names intact and offers new account as another chip', async () => {
+    const name = 'Long account name '.repeat(12).trim();
+    mockFetch({ ...ACCOUNT_ROUTES, 'GET /api/accounts': () => ok([...PICKABLE, { ...PICKABLE[0], id: 'acc-long', name }]) });
+    mount();
+    const long = await screen.findByRole('button', { name });
+    const group = screen.getByRole('group', { name: 'Account for this import' });
+    expect(long).toHaveTextContent(name);
+    expect(long).toHaveClass('chip');
+    expect(within(group).getByRole('button', { name: '+ New account' })).toHaveClass('chip');
+    fireEvent.click(within(group).getByRole('button', { name: '+ New account' }));
+    expect(screen.getByLabelText('Account name')).toBeInTheDocument();
   });
 
   it('keeps Import disabled until an account is picked', async () => {
@@ -1014,24 +1097,51 @@ describe('the account picker', () => {
     const { container } = mount();
     chooseFile(container);
 
-    expect(await screen.findByText(/Your accounts couldn't be loaded/)).toBeInTheDocument();
+    const error = await screen.findByText(/Your accounts couldn't be loaded/);
+    expect(error).toHaveTextContent('Nothing can be imported until the list is there');
+    expect(error.closest('.import-step')).toContainElement(
+      screen.getByRole('heading', { level: 3, name: 'Account' }),
+    );
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
     // and no create arm to fall through to
     expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
     expect(countOf('POST /api/imports')).toBe(0);
   });
 
+  it('keeps a loaded picker usable when the post-confirm account reload fails', async () => {
+    let reads = 0;
+    mockFetch({
+      ...ACCOUNT_ROUTES,
+      'GET /api/accounts': () => ++reads === 1 ? ok(PICKABLE) : fail(500),
+      'POST /api/imports': () => ok(summaryResult({ accountId: 'acc-3', accountName: 'N26' })),
+      'POST /api/imports/imp-1/confirm': () => ok(CONFIRMED),
+    });
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    const error = await screen.findByText(/Your accounts couldn't be loaded/);
+    expect(error).not.toHaveTextContent('Nothing can be imported until the list is there');
+    expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+    expect(reads).toBe(2);
+  });
+
   /**
-   * With every account removed the endpoint answers `[]`, so the picker is gone and
+   * With no visible accounts the endpoint answers `[]`, so the picker is gone and
    * the create arm is the only state — and this sentence is then the one thing on
-   * screen saying why the bank the user is looking for is missing. It renders on any
-   * loaded list, empty included, which is why it is not inside the picker.
+   * screen saying why a hidden bank is missing. It renders on any loaded list,
+   * empty included, which is why it is not inside the picker.
    */
-  it("says removed accounts aren't listed even when the list is empty", async () => {
+  it("says hidden accounts aren't listed even when the list is empty", async () => {
     mockFetch(BASE);
     mount();
 
-    expect(await screen.findByText(/Accounts you've removed aren't listed/)).toBeInTheDocument();
+    expect(await screen.findByText("Hidden accounts aren't listed here — unhide one first.")).toBeInTheDocument();
+    expect(screen.getByLabelText('Account name')).toHaveValue('');
     // the empty-list state, not the populated one: there is no picker above it
     expect(screen.queryByRole('button', { name: '+ New account' })).not.toBeInTheDocument();
   });
@@ -1182,6 +1292,8 @@ describe('the account the create arm makes', () => {
     await screen.findByPlaceholderText('Sparkasse Giro');
 
     expect(screen.queryByLabelText('Account currency')).toBeNull();
+    expect(screen.getByLabelText('Account name')).toBeInTheDocument();
+    expect(screen.getByText(/created when you press Import, before the file is read/)).toBeInTheDocument();
     expect(screen.getByText(/It will hold amounts in EUR/)).toBeInTheDocument();
   });
 

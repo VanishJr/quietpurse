@@ -379,6 +379,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         <section className="import-setup" aria-labelledby="import-setup-heading">
           <h2 id="import-setup-heading">Set up your import</h2>
 
+      <div className="import-step" aria-labelledby="import-file-heading">
+        <h3 id="import-file-heading" className="import-step-heading"><span aria-hidden="true">01</span> Choose a file</h3>
+        <p className="import-step-lead">Choose a statement from your bank, or drop it below.</p>
       <button
         type="button"
         className={`import-dropzone${dragging ? ' import-dropzone-active' : ''}${file ? ' import-dropzone-selected' : ''}`}
@@ -428,9 +431,28 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         }}
       />
 
-      <label className="setting-label" htmlFor="csv-preset">
-        Column layout
-      </label>
+      <details className="import-paste">
+        <summary>…or paste the contents instead</summary>
+        <p className="hint">
+          Pasting here replaces the chosen file.
+        </p>
+        <textarea
+          className="input csv-input"
+          value={csvText}
+          onChange={(e) => {
+            newInput();
+            setCsvText(e.target.value);
+            setFile(null);
+          }}
+          placeholder="Buchungstag;Betrag;Verwendungszweck…"
+          aria-label="Statement contents"
+        />
+      </details>
+      </div>
+
+      <div className="import-step" aria-labelledby="import-layout-heading">
+        <h3 id="import-layout-heading" className="import-step-heading"><span aria-hidden="true">02</span> Column layout</h3>
+        <p className="import-step-lead">Tell Finto how to read the columns in your statement.</p>
       <Chips
         label="Statement preset"
         options={presets.map((p) => ({ key: p.key, label: p.title }))}
@@ -441,9 +463,13 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         Pick your bank if it's listed. "Any statement" reads the header and finds the
         date, amount and description columns on its own — try it first.
       </p>
+      </div>
 
+      <div className="import-step" aria-labelledby="import-account-heading">
+        <h3 id="import-account-heading" className="import-step-heading"><span aria-hidden="true">03</span> Account</h3>
+        <p className="import-step-lead">Choose where this statement's transactions belong.</p>
       {accountsError && (
-        <p className="error">
+        <p className="error import-accounts-error">
           Your accounts couldn't be loaded: {accountsError}.
           {/* only while there is no list at all: after a failed reload the picker below
               is still the one that loaded, and telling the user nothing can be imported
@@ -455,8 +481,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       {accounts !== null && accounts.length > 0 && (
         <>
-          {/* a heading and not a <label>: Chips renders no control to point htmlFor at */}
-          <div className="setting-label">Account</div>
           <Chips
             // not "Account": the account filter on the Transactions screen carries that
             // name, and two controls sharing an accessible name is one ambiguity for a
@@ -482,7 +506,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           gone, and this is then the only thing on screen saying why the bank the user
           is looking for is missing */}
       {accounts !== null && (
-        <p className="hint">Accounts you've removed aren't listed; restore one first.</p>
+        <p className="hint">Hidden accounts aren't listed here — unhide one first.</p>
       )}
 
       {creating && (
@@ -505,34 +529,20 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         </>
       )}
 
-      <details className="import-paste">
-        <summary>…or paste the contents instead</summary>
-        <p className="hint">
-          Pasting here replaces the chosen file.
-        </p>
-        <textarea
-          className="input csv-input"
-          value={csvText}
-          onChange={(e) => {
-            newInput();
-            setCsvText(e.target.value);
-            setFile(null);
-          }}
-          placeholder="Buchungstag;Betrag;Verwendungszweck…"
-          aria-label="Statement contents"
-        />
-      </details>
+      </div>
 
       {error && <p className="error">Error: {error}</p>}
 
-      <button
-        className="btn"
-        style={{ display: 'block', width: '100%', marginTop: 12 }}
-        disabled={busy || !destinationReady || (!file && !csvText.trim())}
-        onClick={runImport}
-      >
-        {busy && !summary ? 'Reading…' : 'Import'}
-      </button>
+      <div className="import-submit">
+        <p>No transactions are added until you review and confirm.</p>
+        <button
+          className="btn"
+          disabled={busy || !destinationReady || (!file && !csvText.trim())}
+          onClick={runImport}
+        >
+          {busy && !summary ? 'Reading…' : 'Import'}
+        </button>
+      </div>
         </section>
 
       {(discarded || created || duplicate || summary || confirmed) && (

@@ -45,6 +45,102 @@
   line-height: 1.3;
 }
 
+.import-page .import-step + .import-step {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--ink-border);
+}
+
+.import-page .import-step-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.import-page .import-step-heading span {
+  color: var(--ink-accent);
+  font-size: 13px;
+}
+
+.import-page .import-step-lead {
+  margin: 6px 0 16px;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.import-page .import-step .chips {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  overflow: visible;
+}
+
+.import-page .import-step .chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: center;
+}
+
+.import-page .import-step .hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.import-page .import-step .setting-label {
+  margin: 18px 0 8px;
+  color: var(--ink-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-page .import-step input.input {
+  min-height: 44px;
+}
+
+.import-page .import-accounts-error {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--ink-bad);
+  border-radius: var(--r-md);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.import-page .import-submit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--ink-border);
+}
+
+.import-page .import-submit p {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.import-page .import-submit .btn {
+  flex: none;
+  min-height: 44px;
+  padding-inline: 28px;
+}
+
 .import-page .import-guide-item + .import-guide-item {
   margin-top: 18px;
   padding-top: 18px;
@@ -224,5 +320,14 @@
   .import-page .import-setup,
   .import-page .import-guide {
     padding: 18px;
+  }
+
+  .import-page .import-submit {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .import-page .import-submit .btn {
+    width: 100%;
   }
 }
