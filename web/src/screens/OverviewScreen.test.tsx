@@ -1554,8 +1554,8 @@ describe('what left this screen', () => {
 
     // all four moved to the Account screen, in order, and are asserted there
     expect(screen.queryByLabelText('Base currency')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Export my data/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export backup/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Recurring payments/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^API:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/local REST API/)).not.toBeInTheDocument();
   });
 });

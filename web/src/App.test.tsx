@@ -281,6 +281,30 @@ describe('the shell', () => {
     expect(tabs.getByRole('link', { name: 'Settings' })).not.toHaveAttribute('aria-current');
   });
 
+  it('restores Settings from its URL on reload and returns to the prior screen on Back', async () => {
+    mockFetch(FIRST_PAINT_ROUTES);
+    const view = render(<App />);
+    expect(await appMounted()).toBeVisible();
+    const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
+    fireEvent.click(tabs.getByRole('link', { name: 'Settings' }));
+    expect(window.location.search).toBe('?screen=settings');
+    expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+
+    // jsdom cannot reload a document; remount against the same location and history.
+    view.unmount();
+    render(<App />);
+    const reloadedTabs = within(screen.getByRole('navigation', { name: 'Sections' }));
+    expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible();
+    expect(reloadedTabs.getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+    expect(window.location.search).toBe('?screen=settings');
+
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Overview' })).toBeVisible());
+    expect(window.location.search).toBe('');
+    expect(reloadedTabs.getByRole('link', { name: 'Overview' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('heading', { name: 'Settings', level: 1, hidden: true })).not.toBeVisible();
+  });
+
   it('closes Settings history on Back and when navigating away from Settings', async () => {
     mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports': () => ok(importsResponse([])) });
     render(<App />);
@@ -401,7 +425,7 @@ describe('the shell', () => {
 
     const group = () => within(screen.getByRole('group', { name: 'Theme' }));
     const selected = (name: string) =>
-      group().getByRole('button', { name: `${name} theme, selected` });
+      group().getByRole('button', { name: `${name} theme`, pressed: true });
     const choices = () => group().getAllByRole('button');
     expect(choices()).toHaveLength(3);
     expect(selected('Dark')).toHaveAttribute('aria-pressed', 'true');
@@ -462,9 +486,11 @@ describe('the shell', () => {
     render(<App />);
     expect(await appMounted()).toBeVisible();
 
-    expect(screen.getByRole('button', { name: 'Light theme, selected' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Light theme', pressed: true })).toHaveAttribute(
       'aria-pressed', 'true',
     );
+    // the state is aria-pressed's alone; a name that changed with it would announce it twice
+    expect(screen.getByRole('button', { name: 'Dark theme', pressed: false })).toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 });
