@@ -153,6 +153,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
   const [discarded, setDiscarded] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
   /** which input a pending read belongs to — a slow one must not label a newer one */
   const pickSeq = useRef(0);
 
@@ -310,6 +312,20 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (result) {
+      (result.outcome === 'awaiting_confirmation' ? reviewHeading : resultHeading).current?.focus();
+    }
+  }, [result]);
+
+  useEffect(() => {
+    if (confirmed) resultHeading.current?.focus();
+  }, [confirmed]);
+
+  useEffect(() => {
+    if (discarded) resultHeading.current?.focus();
+  }, [discarded]);
 
   const summary = result?.outcome === 'awaiting_confirmation' ? result.summary : null;
   const duplicate = result?.outcome === 'duplicate' ? result : null;
@@ -564,7 +580,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
       {discarded && (
         <section className="card import-outcome import-discarded" aria-labelledby="import-discarded-heading">
-          <h2 id="import-discarded-heading" className="import-outcome-heading">
+          <h2 id="import-discarded-heading" className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
             Discarded — nothing was imported.
           </h2>
           <p>The file is untouched, so you can fix the column layout or the account above and upload it again.</p>
@@ -573,7 +589,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       {duplicate && (
         <section className="card import-outcome import-duplicate" aria-labelledby="import-duplicate-heading">
-          <h2 id="import-duplicate-heading" className="import-outcome-heading">
+          <h2 id="import-duplicate-heading" className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
             You've already imported this file
           </h2>
           {/*
@@ -591,7 +607,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       {summary && !confirmed && (
         <section className="card import-review" aria-labelledby="import-review-heading">
-          <h2 id="import-review-heading" className="import-review-heading">
+          <h2 id="import-review-heading" className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
             Read {summary.accepted} of {summary.total} rows — nothing imported yet
           </h2>
           {/* This qualifies every figure, including a PDF read independently of the chosen chip. */}
@@ -682,7 +698,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       {confirmed && (
         <section className="card import-outcome import-confirmed" aria-labelledby="import-confirmed-heading">
-          <h2 id="import-confirmed-heading" className={`import-outcome-heading${confirmed.inserted > 0 ? ' import-outcome-success' : ''}`}>
+          <h2 id="import-confirmed-heading" ref={resultHeading} tabIndex={-1}
+            className={`import-outcome-heading${confirmed.inserted > 0 ? ' import-outcome-success' : ''}`}>
             Imported {confirmed.inserted} of {confirmed.total} rows
           </h2>
           {/*

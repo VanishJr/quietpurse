@@ -192,6 +192,13 @@
   color: var(--ink-good);
 }
 
+.import-page .import-outcome-heading:focus,
+.import-page .import-review-heading:focus {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 4px;
+  border-radius: var(--r-xs);
+}
+
 .import-page .import-outcome p,
 .import-page .import-created p {
   margin: 10px 0 0;
