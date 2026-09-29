@@ -221,4 +221,18 @@ describe('the recompute runs one at a time', () => {
     expect(await check.promise, 'the start-up check compared before the run in flight had written').toBe(false);
     expect(rateCalls).toBe(1);
   });
+
+  it('lets a held run finish inside its own case when its rate call times out', async () => {
+    await insertTransactions([row('Serial timed out')]);
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    holding = true;
+    const a = track('a', reclassifyAll());
+    await vi.waitFor(() => expect(rateCalls).toBe(1));
+
+    timeout.abort(new Error('the rate call timed out'));
+    await vi.waitFor(() => expect(a.settled(), 'a held run outlived the timeout of its own rate call').toBe(true));
+    await a.promise;
+    expect(rateCalls).toBe(1);
+  });
 });

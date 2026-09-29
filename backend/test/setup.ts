@@ -28,8 +28,9 @@ const documentRoot = path.join(home, 'statements');
 process.env.DOCUMENT_STORE_PATH = documentRoot;
 
 // Network is forbidden in tests: rates (Monobank, NBU) must degrade quietly.
-globalThis.fetch = (() =>
+const offline = (() =>
   Promise.reject(new Error('network disabled in tests'))) as typeof fetch;
+globalThis.fetch = offline;
 
 import { freshTestDb } from './pglite';
 
@@ -62,11 +63,17 @@ afterEach(noMismatch);
 afterAll(noMismatch);
 
 // The recompute queue lives in the module registry every file shares, so a run still in
-// it would finish inside the next file's freshly truncated tables. The wait outlasts the
-// rate call's own timeout, which is what ends a call a test left parked: a shorter wait
-// gives up first and leaves that run to finish under whatever case comes next.
+// it would finish inside the next file's freshly truncated tables. Putting the network
+// back offline first is what bounds the wait: a run that starts during it fails its rate
+// call at once, so only a call a test left parked can hold it, until that call's own
+// timeout, which the wait outlasts. A longer wait is no substitute: every start-up check
+// takes a turn of its own, so nothing bounds how many runs are queued.
 const { reclassifyIdle } = await import('../src/classify');
 const { REQUEST_TIMEOUT_MS } = await import('../src/rates');
 const IDLE_TIMEOUT_MS = 2 * REQUEST_TIMEOUT_MS;
-afterEach(() => reclassifyIdle(), IDLE_TIMEOUT_MS);
-afterAll(() => reclassifyIdle(), IDLE_TIMEOUT_MS);
+const idle = (): Promise<void> => {
+  globalThis.fetch = offline;
+  return reclassifyIdle();
+};
+afterEach(idle, IDLE_TIMEOUT_MS);
+afterAll(idle, IDLE_TIMEOUT_MS);
