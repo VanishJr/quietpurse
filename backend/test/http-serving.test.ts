@@ -1,8 +1,4 @@
 /**
- * What leaves the server that is not the answer itself: the built client's page and
- * the cache rule on it, the shape of a path that gets the app, and the headers that
- * stop a copy being kept or a page being framed.
- *
  * The page is requested from a build this file writes under the OS temp directory,
  * through the same function the app mounts, and never from web/dist: the backend CI
  * jobs never run `npm run build`, so a case that reached for web/dist would be green
@@ -25,6 +21,8 @@ import {
 } from '../src/app';
 import { seedDefaults } from '../src/db';
 import { freshTestDb } from './pglite';
+
+type RouteLayer = { route?: { path: unknown; stack: { handle: unknown }[] } };
 
 let agent: request.Agent;
 
@@ -97,6 +95,7 @@ describe('the page, served from wherever the checkout lives', () => {
     expect(res.headers['content-type']).toMatch(/^text\/html/);
     expect(res.text).toContain(`finto-serving-${kind}`);
     expect(res.headers['last-modified']).toBeDefined();
+    expect(res.headers['cache-control']).toBe('no-cache');
   });
 
   it('answers a deep app path with the page too, under a dotted path', async () => {
@@ -118,6 +117,13 @@ describe('the page, served from wherever the checkout lives', () => {
     expect(res.text).toBe('not found');
   });
 
+  it.each(['/', '/transactions'])('refuses the page to a JSON client at %s', async (p) => {
+    const res = await servedFrom(build('.dotted')).get(p).set('Accept', 'application/json');
+    expect(res.status, res.text).toBe(404);
+    expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    expect(res.text).toBe('not found');
+  });
+
   it.each(['/', '/transactions', '/assets/index-a1b2c3.js'])(
     'says the client is not built for %s when there is no build',
     async (p) => {
@@ -127,6 +133,21 @@ describe('the page, served from wherever the checkout lives', () => {
       expect(res.text).toBe(CLIENT_NOT_BUILT);
     },
   );
+
+  /**
+   * By the handler's source, not the app's layers: registrations inlined back into
+   * app.ts leave the same layers behind, and only the handler's text tells them apart.
+   */
+  it('reaches the app through serveClient, not through a copy of it', () => {
+    const fallbackSource = (target: express.Express): string[] =>
+      (target.router.stack as RouteLayer[])
+        .filter((l) => l.route && String(l.route.path) === String(/^\/(?!api(?:\/|$)).*/))
+        .map((l) => l.route!.stack.map((s) => String(s.handle)).join('\n'));
+    const t = express();
+    serveClient(t, '/nowhere');
+    expect(fallbackSource(t)).toHaveLength(1);
+    expect(fallbackSource(app)).toEqual(fallbackSource(t));
+  });
 });
 
 describe('which paths get the app', () => {

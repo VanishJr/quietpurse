@@ -1972,8 +1972,6 @@ export function serveClient(target: express.Express, dist: string): void {
 
   target.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
     const index = path.join(dist, 'index.html');
-    // before the shape test, and deliberately: with no build there is nothing to
-    // serve for any path, and this sentence is the one that says why
     if (!fs.existsSync(index)) {
       res.status(503).type('text/plain').send(CLIENT_NOT_BUILT);
       return;
