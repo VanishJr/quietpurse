@@ -22,16 +22,17 @@ docs/
 # not travelling with them.
 REDESIGN-BACK-DEBT.md
 
-# agent pipeline. The mechanism is published - how a task is run, the four agent
-# definitions, the six commands - and the material a task produces is not: briefs and
-# memos are 3.3 MB of prose against 2 MB of source, and prompt.md is a working file with
-# a machine path in it. Listed rather than un-ignored wholesale, so that a future
+# agent pipeline. The mechanism is published - how a task is run, the agent definitions,
+# the commands and the concepts they share - and the material a task produces is not:
+# briefs and memos outweigh the source, and a request is the owner's words about their
+# own data. Listed rather than un-ignored wholesale, so that a future
 # .claude/settings.local.json is excluded by default instead of by remembering to.
 .claude/*
 !.claude/agents/
 !.claude/commands/
 .agents/*
 !.agents/README.md
+!.agents/concepts/
 # CLAUDE.md carries the half that rots - test counts, what a green run covered on which
 # tip. AGENTS.md carries the durable half and is published.
 CLAUDE.md

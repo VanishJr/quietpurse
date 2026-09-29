@@ -18,9 +18,10 @@ cannot see. It is the file to read before changing anything.
 
 Two things it deliberately does not carry. **Counts** — how many tests, which tip they were
 measured on — live in a working file outside the repository, because a number published here is
-wrong by the next merge. And **the plan** — the order of work, the open findings — is not in the
-public tree either; `ROADMAP.md` and `DEBT.md` are referenced by `.agents/README.md` and are not
-files you are missing. Nothing here depends on them.
+wrong by the next merge. And **the work** — what the owner asked for, and the findings that did
+not become a task — is not in the public tree either: a task starts from the owner's words in
+chat, and its record under `.agents/tasks/` and `DEBT.md` are per-machine files that
+`.agents/README.md` describes and you are not missing. Nothing here depends on them.
 
 ## Layout
 
@@ -236,4 +237,5 @@ everywhere.
 - Match the style, naming and idiom of the file being edited — **but never its comment volume.**
   Matching a dense neighbour is how the density spread.
 - **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
-  human commits.
+  human commits. The task pipeline is the one standing request: its commands commit every round
+  on the task's branch, per `.agents/concepts/commits.md`, and no agent inside it commits.
