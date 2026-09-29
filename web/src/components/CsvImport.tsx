@@ -507,7 +507,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       <details className="import-paste">
         <summary>…or paste the contents instead</summary>
-        <p className="hint" style={{ marginTop: 8 }}>
+        <p className="hint">
           Pasting here replaces the chosen file.
         </p>
         <textarea
