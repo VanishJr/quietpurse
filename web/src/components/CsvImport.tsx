@@ -536,7 +536,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       {(discarded || created || duplicate || summary || confirmed) && (
         <div className="import-results" role="region" aria-label="Import review or result">
       {discarded && (
-        <p className="hint" style={{ marginTop: 12 }}>
+        <p className="hint">
           Discarded — nothing was imported. The file is untouched, so you can fix the
           column layout or the account above and upload it again.
         </p>
@@ -547,7 +547,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           covers every way this import can end without any: an error, a duplicate, a
           discard, and the summary card the user is about to discard from */}
       {created && (
-        <p className="hint" style={{ marginTop: 12 }}>
+        <p className="hint">
           The account "{created.name}" was created when you pressed Import, before the file
           was read — it exists whether or not these rows land. Remove it from Overview if
           you didn't want it.
@@ -555,7 +555,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {duplicate && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card">
           <div className="switch-label">You've already imported this file</div>
           {/*
             The import as it was read, never where its rows are now: `total` is not the
@@ -575,7 +575,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {summary && !confirmed && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card">
           <div className="switch-label">
             Read {summary.accepted} of {summary.total} rows — nothing imported yet
           </div>
@@ -656,7 +656,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {confirmed && (
-        <div className="card" style={{ marginTop: 12 }}>
+        <div className="card">
           <div className="switch-label">
             Imported {confirmed.inserted} of {confirmed.total} rows
           </div>

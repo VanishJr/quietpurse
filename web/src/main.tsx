@@ -9,6 +9,7 @@ import '@fontsource/inter/600.css';
 import '@fontsource/inter/700.css';
 import './styles/tokens.css';
 import './styles.css';
+import './styles/import.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found in index.html');
