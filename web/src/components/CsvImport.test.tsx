@@ -138,6 +138,11 @@ describe('the Import page foundation', () => {
     expect(guide).toHaveTextContent(/Export or Download.*PDF.*CSV or Excel export/s);
     expect(guide).toHaveTextContent(/read on this device.*file and its rows stay in your Finto folder/s);
     expect(guide).toHaveTextContent(/matched by content.*wider date range/s);
+    expect(within(guide).getAllByRole('paragraph').map((p) => p.textContent?.trim())).toEqual([
+      "In your bank's transaction list, choose Export or Download. Finto can read a PDF only if it recognises the layout; otherwise, use the CSV or Excel export.",
+      'Statements are read on this device. The file and its rows stay in your Finto folder.',
+      "Rows are matched by content, so re-importing won't duplicate them. You can safely export a wider date range than you need.",
+    ]);
   });
 
   it('places the review between setup and guidance after the file is read', async () => {
@@ -168,6 +173,20 @@ describe('the setup steps', () => {
     expect(within(steps[0]).getByText('…or paste the contents instead')).toBeInTheDocument();
     expect(within(steps[1]).getByRole('group', { name: 'Statement preset' })).toBeInTheDocument();
     expect(within(steps[2]).getByRole('group', { name: 'Account for this import' })).toBeInTheDocument();
+    expect(within(steps[0]).getByText('Choose a statement from your bank, or drop it below.'))
+      .toBeInTheDocument();
+    expect(within(steps[1]).getByText('Tell Finto how to read the columns in your statement.'))
+      .toBeInTheDocument();
+    expect(within(steps[1]).getByText(
+      'Pick your bank if it\'s listed. "Any statement" reads the header and finds the date, amount and description columns on its own — try it first.',
+    )).toBeInTheDocument();
+    expect(within(steps[2]).getByText("Choose where this statement's transactions belong."))
+      .toBeInTheDocument();
+    expect(within(steps[2]).getByText("Hidden accounts aren't listed here — unhide one first."))
+      .toBeInTheDocument();
+    expect(within(steps[2]).getByText(
+      "Pick the account this statement belongs to — its rows join what's already there, and nothing is duplicated.",
+    )).toBeInTheDocument();
     expect(screen.getByText('No transactions are added until you review and confirm.'))
       .toBeInTheDocument();
   });
@@ -593,6 +612,14 @@ describe('the summary panel', () => {
     expect(screen.queryByText(/running balance/)).not.toBeInTheDocument();
     expect(screen.queryByText('Statement balance')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Warnings' })).not.toBeInTheDocument();
+    const card = screen.getByRole('heading', { name: /Read 12 of 14 rows/ }).closest('.import-review')!;
+    expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
+      .toEqual(['Rows', 'Period', 'Net']);
+    expect([...card.querySelectorAll('.import-review-reader, .import-review-details p')]
+      .map((p) => p.textContent)).toEqual([
+      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
+      'They\'ll join your existing "statement".',
+    ]);
     unmount();
 
     mockFetch({
@@ -1051,6 +1078,28 @@ describe('discard', () => {
     // outlives the import it was created for, and the discard notice above says the
     // opposite on its own
     expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  it('holds the review without announcing discard until its response arrives', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/discard': () => new Promise((resolve) => { answer = resolve; }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(screen.getByRole('region', { name: /Read 12 of 14 rows/ })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(screen.queryByRole('heading', { name: /Discarded/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Importing…' }));
+    expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
+    await act(async () => answer(ok({ discarded: true, importId: 'imp-1' })));
+    expect(await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' }))
+      .toHaveFocus();
+    expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
   });
 
   it('keeps the review actions and shows a refused discard beside the review', async () => {
