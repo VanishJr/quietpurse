@@ -327,6 +327,13 @@ export const recurringSummarySchema = z.strictObject({
 });
 export type RecurringSummary = z.infer<typeof recurringSummarySchema>;
 
+export const conversionSchema = z.strictObject({
+  baseCurrency: z.string(),
+  converting: z.boolean(),
+  unconverted: z.number(),
+});
+export type Conversion = z.infer<typeof conversionSchema>;
+
 export const appSettingsSchema = z.strictObject({
   /** base currency of all totals; changing it requires recomputing base_amount */
   baseCurrency: z.string(),
@@ -596,6 +603,7 @@ export const ANSWERS = {
   'DELETE /api/goals/:id': json(goalDeletedSchema),
   'GET /api/app-settings': json(appSettingsSchema),
   'PATCH /api/app-settings': json(appSettingsSchema),
+  'GET /api/conversion': json(conversionSchema),
   'GET /api/category-rules': json(z.array(categoryRuleWithCountsSchema)),
   'POST /api/category-rules/preview': json(categoryRulePreviewSchema),
   'POST /api/category-rules': json(categoryRuleCreatedSchema),

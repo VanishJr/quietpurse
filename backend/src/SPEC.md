@@ -313,6 +313,14 @@ absent means nobody looked. A fee is absent on the way out and null on the way i
 importer invented. None of those distinctions is visible in the type, and each is the whole content
 of the field.
 
+**A refill in flight is said, not left for a reader to infer.** A change of base currency answers
+with every converted amount reset and refills them in the background, because the refill fetches
+rates and a request cannot wait on the network. `GET /api/conversion` says whether any refill is
+running — a start-up recompute, a reclassification and a currency change can overlap — and how many
+rows still have no base amount, so a client that re-reads its figures once `converting` is false
+does not show the gap as the data. Stopping is not finishing: a rate that could not be fetched
+leaves its rows without a base amount until the next recompute, and `unconverted` is what says so.
+
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
 numbers, and every reader of the rates built from that feed looks one up by three-letter code — the

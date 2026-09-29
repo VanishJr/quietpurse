@@ -2443,6 +2443,12 @@ export async function resetBaseAmounts(): Promise<number> {
   );
 }
 
+export async function countUnconverted(): Promise<number> {
+  const [row] = await rowsOf<{ n: number }>(sql`
+    SELECT COUNT(*)::int AS n FROM transactions WHERE base_amount_cents IS NULL`);
+  return row?.n ?? 0;
+}
+
 export async function listUnconvertedDays(): Promise<{ day: string; currency: string }[]> {
   return rowsOf<{ day: string; currency: string }>(sql`
     SELECT DISTINCT SUBSTR(date, 1, 10) AS day, currency

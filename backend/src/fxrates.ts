@@ -152,6 +152,11 @@ function sqlReason(e: unknown): string {
   return c?.code ? `[${c.code}] ${msg}` : msg;
 }
 
+/** How many runs are refilling base amounts right now: callers overlap, so a count. */
+let running = 0;
+
+export const baseAmountsConverting = (): boolean => running > 0;
+
 /**
  * Neither a network error nor a failed write fails the call: those rows stay NULL and
  * are picked up on the next recompute. The fetch and the write are caught apart so that
@@ -162,6 +167,17 @@ function sqlReason(e: unknown): string {
 export async function backfillBaseAmounts(
   log: (s: string) => void = (s) => logFx.info(s),
 ): Promise<number> {
+  // before the first await, so a caller that starts one and answers at once has already
+  // made it visible to the next read of baseAmountsConverting
+  running += 1;
+  try {
+    return await fillBaseAmounts(log);
+  } finally {
+    running -= 1;
+  }
+}
+
+async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
   const base = await currentBaseCurrency();
   let done = await setBaseForBaseCurrency(base);
 

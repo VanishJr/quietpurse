@@ -7,6 +7,7 @@ import {
   CategoryRuleCreated,
   CategoryRulePreview,
   CategoryRuleWithCounts,
+  Conversion,
   Deleted,
   DocumentDeleted,
   GoalCreate,
@@ -353,6 +354,7 @@ export const api = {
   appSettings: () => request<AppSettings>('/api/app-settings'),
   updateAppSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>('/api/app-settings', json('PATCH', patch)),
+  conversion: () => request<Conversion>('/api/conversion'),
 
   /** No Content-Type on purpose: the browser sets it, with the multipart boundary. */
   importStatement: (form: FormData) =>

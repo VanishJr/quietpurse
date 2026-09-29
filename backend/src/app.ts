@@ -64,6 +64,7 @@ import {
   GoalWriteError,
   listCategoryRules,
   listRecurringGroups,
+  countUnconverted,
   listTransactions,
   listTransferRules,
   listCharts,
@@ -88,7 +89,7 @@ import {
   deleteDocument,
   getDocument,
 } from './documents';
-import { backfillBaseAmounts } from './fxrates';
+import { backfillBaseAmounts, baseAmountsConverting } from './fxrates';
 import { getGoalProgress, listGoalProgress } from './goals';
 import { causeChain, logHttp, logImport, logger, reasonFirst } from './logger';
 import { CSV_PRESETS, CsvMapping } from './providers/csv';
@@ -1223,6 +1224,14 @@ app.patch('/api/app-settings', async (req, res) => {
   }
   if (ownerNamesChanged) await reclassifyAll();
   answer(res, 'PATCH /api/app-settings', settings);
+});
+
+app.get('/api/conversion', async (_req, res) => {
+  answer(res, 'GET /api/conversion', {
+    baseCurrency: await currentBaseCurrency(),
+    converting: baseAmountsConverting(),
+    unconverted: await countUnconverted(),
+  });
 });
 
 app.get('/api/category-rules', async (_req, res) => {
