@@ -11,6 +11,7 @@ import {
   StatementImportResult,
 } from '../types';
 import { Chips } from './Chips';
+import { ImportIcon } from './NavIcons';
 
 const FALLBACK_PRESETS = [{ key: 'generic', title: GENERIC_PRESET_TITLE }];
 
@@ -28,6 +29,9 @@ const ACCEPT_TOKENS: Record<ImportSourceType, readonly [`.${string}`, string, ..
 };
 
 const ACCEPTED = Object.values(ACCEPT_TOKENS).flat().join(',');
+
+const fileSize = (bytes: number): string =>
+  `${bytes === 0 ? 0 : Math.max(1, Math.round(bytes / 1024))} kB`;
 
 /**
  * Why a statement that does print a running balance got no start-and-end pair out of
@@ -336,6 +340,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * gives under *The sentences a person reads, and what is lifted out of a screen to
    * hold them*.
    */
+  const emptyFile = file !== null && (file.size === 0 || fileRows === 0);
+
   const drops = summary
     ? [
         {
@@ -373,8 +379,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         <section className="import-setup" aria-labelledby="import-setup-heading">
           <h2 id="import-setup-heading">Set up your import</h2>
 
-      <div
-        className={`dropzone${dragging ? ' dropzone-active' : ''}`}
+      <button
+        type="button"
+        className={`import-dropzone${dragging ? ' import-dropzone-active' : ''}${file ? ' import-dropzone-selected' : ''}`}
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -383,47 +390,42 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          takeFile(e.dataTransfer.files?.[0]);
+          void takeFile(e.dataTransfer.files?.[0]);
         }}
         onClick={() => fileInput.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            fileInput.current?.click();
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label="Choose a CSV, Excel or PDF statement file"
+        aria-label={file
+          ? 'Choose another CSV, Excel or PDF statement file'
+          : 'Choose a CSV, Excel or PDF statement file'}
+        aria-describedby={file ? 'import-selected-file' : undefined}
       >
-        <div className="dropzone-icon" aria-hidden="true">
-          ⭳
-        </div>
+        <span className="import-dropzone-icon"><ImportIcon /></span>
         {file ? (
           <>
-            <div className="dropzone-title">{file.name}</div>
-            <div className="dropzone-sub">
-              {fileRows === null
-                ? `${Math.max(1, Math.round(file.size / 1024))} kB`
-                : fileRows > 0
-                  ? `${fileRows} rows`
-                  : 'empty file'}{' '}
-              · click to choose another
-            </div>
+            <span className="import-file-details" id="import-selected-file">
+              <span className="import-file-name">{file.name}</span>
+              <span className="import-file-meta">
+                {fileRows !== null && `${fileRows} rows · `}{fileSize(file.size)}
+              </span>
+              {emptyFile && <span className="import-file-empty" role="status">Empty file</span>}
+            </span>
+            <span className="import-file-choose">Click to choose another</span>
           </>
         ) : (
           <>
-            <div className="dropzone-title">Drop a .csv, .xlsx or .pdf statement here</div>
-            <div className="dropzone-sub">or click to choose a file</div>
+            <span className="import-dropzone-title">Drop a .csv, .xlsx or .pdf statement here</span>
+            <span className="import-dropzone-sub">or click to choose a file</span>
           </>
         )}
-      </div>
+      </button>
       <input
         ref={fileInput}
         type="file"
         accept={ACCEPTED}
         hidden
-        onChange={(e) => takeFile(e.target.files?.[0])}
+        onChange={(e) => {
+          void takeFile(e.target.files?.[0]);
+          e.target.value = '';
+        }}
       />
 
       <label className="setting-label" htmlFor="csv-preset">
@@ -503,8 +505,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         </>
       )}
 
-      <details>
-        <summary className="btn-link">…or paste the contents instead</summary>
+      <details className="import-paste">
+        <summary>…or paste the contents instead</summary>
         <p className="hint" style={{ marginTop: 8 }}>
           Pasting here replaces the chosen file.
         </p>
