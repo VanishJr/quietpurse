@@ -147,6 +147,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorArea, setErrorArea] = useState<'setup' | 'result'>('setup');
   const [result, setResult] = useState<StatementImportResult | null>(null);
   /** what landed once the summary was accepted — the backend's counts, not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
@@ -261,6 +262,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // onImported() stays out of here and fires when Confirm comes back
       setResult(await api.importStatement(uploadForm(account, preset, body)));
     } catch (e) {
+      setErrorArea('setup');
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -287,6 +289,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // created went in when it was created, and does not arrive here
       await loadAccounts();
     } catch (e) {
+      setErrorArea('result');
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -301,6 +304,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setResult(null);
       setDiscarded(true);
     } catch (e) {
+      setErrorArea('result');
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -531,7 +535,12 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
 
       </div>
 
-      {error && <p className="error">Error: {error}</p>}
+      {error && errorArea === 'setup' && (
+        <div className="import-error" role="alert">
+          <strong>Error</strong>
+          <p>{error}</p>
+        </div>
+      )}
 
       <div className="import-submit">
         <p>No transactions are added until you review and confirm.</p>
@@ -545,45 +554,39 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       </div>
         </section>
 
-      {(discarded || created || duplicate || summary || confirmed) && (
+      {(discarded || created || duplicate || summary || confirmed || (error && errorArea === 'result')) && (
         <div className="import-results" role="region" aria-label="Import review or result">
-      {discarded && (
-        <p className="hint">
-          Discarded — nothing was imported. The file is untouched, so you can fix the
-          column layout or the account above and upload it again.
-        </p>
+      {error && errorArea === 'result' && (
+        <div className="import-error" role="alert">
+          <strong>Error</strong>
+          <p>{error}</p>
+        </div>
       )}
-
-      {/* the write this screen makes before it uploads anything, and the one the user did
-          not press a button called "Create" for. It stands until rows land in it, which
-          covers every way this import can end without any: an error, a duplicate, a
-          discard, and the summary card the user is about to discard from */}
-      {created && (
-        <p className="hint">
-          The account "{created.name}" was created when you pressed Import, before the file
-          was read — it exists whether or not these rows land. Remove it from Overview if
-          you didn't want it.
-        </p>
+      {discarded && (
+        <section className="card import-outcome import-discarded" aria-labelledby="import-discarded-heading">
+          <h2 id="import-discarded-heading" className="import-outcome-heading">
+            Discarded — nothing was imported.
+          </h2>
+          <p>The file is untouched, so you can fix the column layout or the account above and upload it again.</p>
+        </section>
       )}
 
       {duplicate && (
-        <div className="card">
-          <div className="switch-label">You've already imported this file</div>
+        <section className="card import-outcome import-duplicate" aria-labelledby="import-duplicate-heading">
+          <h2 id="import-duplicate-heading" className="import-outcome-heading">
+            You've already imported this file
+          </h2>
           {/*
             The import as it was read, never where its rows are now: `total` is not the
             rows that came in, and the day is the upload's. See `web/src/SPEC.md` under
             *The sentences a person reads, and what is lifted out of a screen to hold
             them*.
           */}
-          <p className="hint" style={{ marginTop: 6 }}>
-            You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again, and
-            nothing was duplicated.
-          </p>
-          <p className="hint" style={{ marginTop: 6 }}>
-            It had {rowCount(duplicate.total)} when it was read
-            {duplicate.skipped > 0 && `, and ${duplicate.skipped} of them didn't import`}.
-          </p>
-        </div>
+          <p>You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again.</p>
+          <p>It had {rowCount(duplicate.total)} when it was read.</p>
+          {duplicate.skipped > 0 && <p>{duplicate.skipped} of them didn't import.</p>}
+          <p>Nothing was duplicated.</p>
+        </section>
       )}
 
       {summary && !confirmed && (
@@ -678,10 +681,10 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {confirmed && (
-        <div className="card">
-          <div className="switch-label">
+        <section className="card import-outcome import-confirmed" aria-labelledby="import-confirmed-heading">
+          <h2 id="import-confirmed-heading" className={`import-outcome-heading${confirmed.inserted > 0 ? ' import-outcome-success' : ''}`}>
             Imported {confirmed.inserted} of {confirmed.total} rows
-          </div>
+          </h2>
           {/*
             A count and no cause, and that is the honest limit rather than an omission:
             this panel reads imports.rows_rejected, which keeps no reason; see
@@ -689,23 +692,29 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             of a screen to hold them*.
           */}
           {confirmed.skipped > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {rowCount(confirmed.skipped)} didn't import.
-            </p>
+            <p>{rowCount(confirmed.skipped)} didn't import.</p>
           )}
           {alreadyPresent > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {alreadyPresent} were already in the database — this export overlaps one you
-              imported before. Nothing was duplicated.
-            </p>
+            <p>{alreadyPresent} were already in the database — this export overlaps one you
+              imported before. Nothing was duplicated.</p>
           )}
           {shortfall > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {shortfall} of the rows this summary called new were written by another import
-              while it waited here. They're in your data — under that import, not this one.
-            </p>
+            <p>{shortfall} of the rows this summary called new were written by another import
+              while it waited here. They're in your data — under that import, not this one.</p>
           )}
-        </div>
+        </section>
+      )}
+
+      {/* The account exists independently of the upload outcome, including a failed upload. */}
+      {created && (
+        <aside className="import-created" aria-label="Account created">
+          <h2>Account created</h2>
+          <p>
+            The account "{created.name}" was created when you pressed Import, before the file
+            was read — it exists whether or not these rows land. Remove it from Overview if
+            you didn't want it.
+          </p>
+        </aside>
       )}
         </div>
       )}

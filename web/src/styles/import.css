@@ -172,6 +172,62 @@
   overflow-wrap: anywhere;
 }
 
+.import-page .import-outcome,
+.import-page .import-created {
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-xl);
+  background: var(--ink-surface);
+}
+
+.import-page .import-outcome-heading {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.import-page .import-outcome-success {
+  color: var(--ink-good);
+}
+
+.import-page .import-outcome p,
+.import-page .import-created p {
+  margin: 10px 0 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.import-page .import-created h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.import-page .import-error {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--ink-bad);
+  border-radius: var(--r-md);
+  color: var(--ink-bad);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.import-page .import-results > .import-error {
+  margin-bottom: 0;
+}
+
+.import-page .import-error p {
+  margin: 4px 0 0;
+}
+
 .import-page .import-review {
   min-width: 0;
   padding: 24px;
@@ -438,7 +494,9 @@
 
   .import-page .import-setup,
   .import-page .import-guide,
-  .import-page .import-review {
+  .import-page .import-review,
+  .import-page .import-outcome,
+  .import-page .import-created {
     padding: 18px;
   }
 
