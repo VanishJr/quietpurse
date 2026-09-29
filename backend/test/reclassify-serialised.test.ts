@@ -61,12 +61,16 @@ beforeEach(async () => {
   rateCalls = 0;
   parked = [];
   settledOrder = [];
-  globalThis.fetch = ((input: string | URL | Request) => {
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
     if (String(input) !== MONOBANK) return offline();
     rateCalls += 1;
     if (!holding) return offline();
+    const signal = init?.signal;
     return new Promise<Response>((_, reject) => {
       parked.push(() => reject(new Error('released')));
+      // as a real fetch does: a call a failed case left parked then ends at the request's
+      // own timeout, inside setup.ts's idle wait, instead of wedging every later file
+      signal?.addEventListener('abort', () => reject(signal.reason));
     });
   }) as typeof fetch;
 });

@@ -62,7 +62,11 @@ afterEach(noMismatch);
 afterAll(noMismatch);
 
 // The recompute queue lives in the module registry every file shares, so a run still in
-// it would finish inside the next file's freshly truncated tables.
+// it would finish inside the next file's freshly truncated tables. The wait outlasts the
+// rate call's own timeout, which is what ends a call a test left parked: a shorter wait
+// gives up first and leaves that run to finish under whatever case comes next.
 const { reclassifyIdle } = await import('../src/classify');
-afterEach(() => reclassifyIdle());
-afterAll(() => reclassifyIdle());
+const { REQUEST_TIMEOUT_MS } = await import('../src/rates');
+const IDLE_TIMEOUT_MS = 2 * REQUEST_TIMEOUT_MS;
+afterEach(() => reclassifyIdle(), IDLE_TIMEOUT_MS);
+afterAll(() => reclassifyIdle(), IDLE_TIMEOUT_MS);
