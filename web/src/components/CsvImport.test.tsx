@@ -486,6 +486,20 @@ describe('the summary panel', () => {
    * for a fortnight. Both client sentences at n = 1, because a correct helper with one
    * call site not using it is the defect itself.
    */
+  it('separates mixed-currency totals in text as well as in visual lines', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({
+        totals: [{ currency: 'EUR', net: -420.5 }, { currency: 'USD', net: 115.25 }],
+      })),
+    });
+    const { container } = mount();
+    await upload(container);
+    const card = await screen.findByRole('heading', { name: /Read 12 of 14 rows/ });
+    const net = card.closest('.import-review')!.querySelector('.import-review-net')!;
+    expect(net.textContent).toBe('−420.50 EUR ·\n115.25 USD');
+  });
+
   it('says one row rather than 1 rows, in every sentence that counts rows', async () => {
     mockFetch({
       ...BASE,
@@ -582,6 +596,10 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /1,200 EUR at the start, 59\.76 EUR at the end\. The rows add up\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/1,200 EUR → 59\.76 EUR/);
+    expect(metric).not.toHaveTextContent(/The rows add up/);
+    expect(screen.getAllByText(/Checked against the statement/)).toHaveLength(1);
   });
 
   /**
@@ -666,6 +684,10 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 579\.85 EUR/);
+    expect(metric).not.toHaveTextContent(/Checked against|nothing could check/);
+    expect(screen.getAllByText(/Checked against the 2 running balances/)).toHaveLength(1);
     // the unqualified claim, which is true of neither of these two numbers
     expect(screen.queryByText(/The rows read run unbroken/)).not.toBeInTheDocument();
   });
@@ -696,6 +718,10 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /Read from the 2 running balances this statement states, added together: 387\.40 EUR at the start, 511\.72 EUR at the end\. Each of them states a single row, so nothing here was checked\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 511\.72 EUR/);
+    expect(metric).not.toHaveTextContent(/checked/);
+    expect(screen.getAllByText(/Read from the 2 running balances/)).toHaveLength(1);
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Checked against/)).not.toBeInTheDocument();
     unmount();

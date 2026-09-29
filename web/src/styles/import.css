@@ -209,9 +209,12 @@
 
 .import-page .import-review-metric-label,
 .import-page .import-review-metric-value,
-.import-page .import-review-balance-context,
-.import-page .import-review-net > span {
+.import-page .import-review-balance-context {
   display: block;
+}
+
+.import-page .import-review-net {
+  white-space: pre-line;
 }
 
 .import-page .import-review-metric-label {

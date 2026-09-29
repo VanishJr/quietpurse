@@ -608,20 +608,23 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             <div className="import-review-metric">
               <span className="import-review-metric-label">Net</span>
               <span className="import-review-metric-value import-review-net">
-                {summary.totals.map((t) => (
-                  <span key={t.currency}>{fmtMoney(t.net, t.currency)}</span>
-                ))}
+                {summary.totals.map((t) => fmtMoney(t.net, t.currency)).join(' ·\n')}
               </span>
             </div>
             {balances && balanceLine && (
               <div className="import-review-metric">
-                <span className="import-review-metric-label">Statement balance</span>
-                <span className="import-review-balance-context">{balanceLine.lead}</span>
+                <span className="import-review-metric-label">Statement balance</span>{' '}
+                {balances.series && (
+                  <span className="import-review-balance-context">
+                    {balances.series.summed > 1
+                      ? `Combined from ${balances.series.summed} running balances in the file. `
+                      : 'From a running balance in the file. '}
+                  </span>
+                )}
                 <span className="import-review-metric-value">
                   {fmtMoney(balances.opening, balances.currency)} →{' '}
                   {fmtMoney(balances.closing, balances.currency)}
                 </span>
-                <span className="import-review-balance-context">{balanceLine.claim}</span>
               </div>
             )}
           </div>
