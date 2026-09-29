@@ -237,4 +237,5 @@ everywhere.
 - Match the style, naming and idiom of the file being edited — **but never its comment volume.**
   Matching a dense neighbour is how the density spread.
 - **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
-  human commits.
+  human commits. The task pipeline is the one standing request: its commands commit every round
+  on the task's branch, per `.agents/concepts/commits.md`, and no agent inside it commits.
