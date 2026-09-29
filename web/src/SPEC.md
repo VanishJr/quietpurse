@@ -538,6 +538,14 @@ of the rows that were unreadable, filtered by a status or moved no money — the
 before Confirm, and a cause repeated afterwards would be a claim about rows none of the three can
 see.
 
+`CsvImport` stages a read for review rather than treating it as an import. Its reader sentence
+precedes every figure because it qualifies what those figures mean; the balance pair, when present,
+is opening to closing, while its claim stays in the details because a continuous run cannot prove
+the statement is complete. Without a pair the metric is absent, and a reason is shown only when the
+server supplies one. Parser problems on a staged read are warnings, not fatal request errors; the
+review's sentences remain visible without disclosure before the person confirms. Confirmed counts
+come from the confirm response, and only an inserted row gives the confirmed headline success ink.
+
 `CsvImport` keeps a newly created account visible as its own notice until Confirm reports that rows
 landed in that account. A zero-insert confirmation leaves it standing: the account was written before
 the upload, and the lack of imported rows does not undo that write. Successful reads, confirmations
