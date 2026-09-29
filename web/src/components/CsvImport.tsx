@@ -587,76 +587,81 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {summary && !confirmed && (
-        <div className="card">
-          <div className="switch-label">
+        <section className="card import-review" aria-labelledby="import-review-heading">
+          <h2 id="import-review-heading" className="import-review-heading">
             Read {summary.accepted} of {summary.total} rows — nothing imported yet
-          </div>
-          {/*
-            First, and above every number on this card: it says which reader produced
-            them, so it qualifies all of them. Stated unconditionally and never diffed
-            against the chip above — a "you picked X but it read as Y" warning would
-            fire on every PDF uploaded with a chip selected, where the mismatch is by
-            design, and it is knowledge only this client has where the REST response is
-            the contract a mobile client reads.
-          */}
-          <p className="hint" style={{ marginTop: 6 }}>
-            {readAsSentence(summary.readAs)}
-          </p>
-          <p className="hint" style={{ marginTop: 6 }}>
-            {fmtDay(summary.from)} to {fmtDay(summary.to)}, {summary.totals
-              .map((t) => fmtMoney(t.net, t.currency))
-              .join(' · ')}{' '}
-            in total. They'll join your existing "{summary.accountName}".
-          </p>
-          {/*
-            Only when the format states its own balances at all. A PDF prints an
-            opening and a closing box; a CSV or Excel statement prints a running
-            balance per row, and the backend derives the pair from it — which is why
-            the numbers below can be a sum the user will find in no single cell, and
-            why the sentence says how many were added. A file that states neither
-            gets no line: a "couldn't be reconciled" warning about nothing.
+          </h2>
+          {/* This qualifies every figure, including a PDF read independently of the chosen chip. */}
+          <p className="import-review-reader">{readAsSentence(summary.readAs)}</p>
 
-            Both halves of the sentence come from balanceClaim: it may claim the run and
-            never that the statement is complete, and only the runs it could have failed
-            on.
-          */}
-          {balances && balanceLine && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {balanceLine.lead}
-              {fmtMoney(balances.opening, balances.currency)} at the start,{' '}
-              {fmtMoney(balances.closing, balances.currency)} at the end.{' '}
-              {balanceLine.claim}
-            </p>
+          <div className="import-review-metrics" aria-label="Statement figures">
+            <div className="import-review-metric">
+              <span className="import-review-metric-label">Rows</span>
+              <span className="import-review-metric-value">{summary.accepted} of {summary.total}</span>
+            </div>
+            <div className="import-review-metric">
+              <span className="import-review-metric-label">Period</span>
+              <span className="import-review-metric-value">
+                {fmtDay(summary.from)} to {fmtDay(summary.to)}
+              </span>
+            </div>
+            <div className="import-review-metric">
+              <span className="import-review-metric-label">Net</span>
+              <span className="import-review-metric-value import-review-net">
+                {summary.totals.map((t) => (
+                  <span key={t.currency}>{fmtMoney(t.net, t.currency)}</span>
+                ))}
+              </span>
+            </div>
+            {balances && (
+              <div className="import-review-metric">
+                <span className="import-review-metric-label">Statement balance</span>
+                <span className="import-review-metric-value">
+                  {fmtMoney(balances.opening, balances.currency)} →{' '}
+                  {fmtMoney(balances.closing, balances.currency)}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="import-review-details">
+            <h3>Details</h3>
+            <p>They'll join your existing "{summary.accountName}".</p>
+            {/* The pair and its claim stay one sentence: a derived pair does not prove completeness. */}
+            {balances && balanceLine && (
+              <p>
+                {balanceLine.lead}
+                {fmtMoney(balances.opening, balances.currency)} at the start,{' '}
+                {fmtMoney(balances.closing, balances.currency)} at the end.{' '}
+                {balanceLine.claim}
+              </p>
+            )}
+            {summary.balancesNotShown && (
+              <p>{BALANCES_NOT_SHOWN[summary.balancesNotShown]}</p>
+            )}
+            {summary.alreadyPresent > 0 && (
+              <p>
+                {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
+                database — this export overlaps one you imported before. Nothing will be
+                duplicated.
+              </p>
+            )}
+            {summary.supersededImportId && (
+              <p>
+                An earlier upload of this same file was still waiting to be confirmed. It has
+                been dropped in favour of this one — it had imported nothing.
+              </p>
+            )}
+          </div>
+
+          {(drops.length > 0 || summary.problems.length > 0) && (
+            <div className="import-review-warnings">
+              <h3>Warnings</h3>
+              {drops.map((d) => <p key={d.key}>{d.say(d.n)}</p>)}
+              {summary.problems.slice(0, 3).map((p, i) => <p key={i}>{p}</p>)}
+            </div>
           )}
-          {summary.balancesNotShown && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {BALANCES_NOT_SHOWN[summary.balancesNotShown]}
-            </p>
-          )}
-          {summary.alreadyPresent > 0 && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
-              database — this export overlaps one you imported before. Nothing will be
-              duplicated.
-            </p>
-          )}
-          {drops.map((d) => (
-            <p key={d.key} className="hint" style={{ marginTop: 6 }}>
-              {d.say(d.n)}
-            </p>
-          ))}
-          {summary.supersededImportId && (
-            <p className="hint" style={{ marginTop: 6 }}>
-              An earlier upload of this same file was still waiting to be confirmed. It has
-              been dropped in favour of this one — it had imported nothing.
-            </p>
-          )}
-          {summary.problems.slice(0, 3).map((p) => (
-            <p key={p} className="hint" style={{ marginTop: 6 }}>
-              {p}
-            </p>
-          ))}
-          <div className="btn-row">
+          <div className="import-review-actions">
             <button className="btn-ghost" disabled={busy} onClick={() => runDiscard(summary)}>
               Discard
             </button>
@@ -664,7 +669,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
               {busy ? 'Importing…' : 'Confirm'}
             </button>
           </div>
-        </div>
+        </section>
       )}
 
       {confirmed && (
