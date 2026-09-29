@@ -2,7 +2,7 @@
   width: 100%;
   max-width: 1160px;
   margin: 0 auto;
-  padding: 30px 32px 32px;
+  padding: 24px 24px 32px;
 }
 
 .import-page .import-header {
@@ -451,7 +451,11 @@
 
 .import-page .import-paste .csv-input {
   display: block;
+  min-height: 96px;
   margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
 }
 
 @media (min-width: 700px) {
@@ -462,6 +466,10 @@
 }
 
 @media (min-width: 1180px) {
+  .import-page {
+    padding: 30px 32px 32px;
+  }
+
   .import-page .import-layout {
     grid-template-columns: minmax(0, 1fr) minmax(260px, 0.58fr);
     gap: 20px;
@@ -481,12 +489,6 @@
   .import-page .import-results {
     grid-column: 1 / -1;
     grid-row: 2;
-  }
-}
-
-@media (max-width: 1179px) {
-  .import-page {
-    padding: 24px 24px 32px;
   }
 }
 
