@@ -1,18 +1,28 @@
 /**
- * What leaves the server that is not the answer itself: the cache rule on the built
- * client, the shape of a path that gets the app, and the two headers that stop a copy
- * being kept or a page being framed.
+ * What leaves the server that is not the answer itself: the built client's page and
+ * the cache rule on it, the shape of a path that gets the app, and the headers that
+ * stop a copy being kept or a page being framed.
  *
- * The two decisions about the client are pure functions here rather than requests,
- * and that is not a shortcut: the backend CI jobs never run `npm run build`, so a
- * case that reached for web/dist would be green on this machine and skipped in CI -
- * which is exactly the direction this repository has been burned in before. What the
- * functions decide is the whole of the defect either way.
+ * The page is requested from a build this file writes under the OS temp directory,
+ * through the same function the app mounts, and never from web/dist: the backend CI
+ * jobs never run `npm run build`, so a case that reached for web/dist would be green
+ * on this machine and red or skipped in CI.
  */
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import express from 'express';
 import request from 'supertest';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { WEB_DIST, app, cacheControlFor, servesTheApp } from '../src/app';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  CLIENT_NOT_BUILT,
+  WEB_DIST,
+  app,
+  cacheControlFor,
+  errorHandler,
+  serveClient,
+  servesTheApp,
+} from '../src/app';
 import { seedDefaults } from '../src/db';
 import { freshTestDb } from './pglite';
 
@@ -26,11 +36,11 @@ beforeAll(async () => {
 
 describe('the cache rule on the built client', () => {
   it('caches only what Vite content-hashed, and reads the path relative to the build', () => {
-    expect(cacheControlFor(path.join(WEB_DIST, 'assets', 'index-a1b2c3.js'))).toBe(
+    expect(cacheControlFor(WEB_DIST, path.join(WEB_DIST, 'assets', 'index-a1b2c3.js'))).toBe(
       'public, max-age=31536000, immutable',
     );
-    expect(cacheControlFor(path.join(WEB_DIST, 'index.html'))).toBe('no-cache');
-    expect(cacheControlFor(path.join(WEB_DIST, 'favicon.svg'))).toBe('no-cache');
+    expect(cacheControlFor(WEB_DIST, path.join(WEB_DIST, 'index.html'))).toBe('no-cache');
+    expect(cacheControlFor(WEB_DIST, path.join(WEB_DIST, 'favicon.svg'))).toBe('no-cache');
   });
 
   /**
@@ -41,8 +51,82 @@ describe('the cache rule on the built client', () => {
    */
   it('is not fooled by a checkout that lives under a directory called assets', () => {
     const outside = path.join(path.sep, 'home', 'someone', 'assets', 'finto', 'index.html');
-    expect(cacheControlFor(outside)).toBe('no-cache');
+    expect(cacheControlFor(WEB_DIST, outside)).toBe('no-cache');
   });
+});
+
+/**
+ * `send` checks every segment of a path it is handed whole, and refuses one that starts
+ * with a dot - so a page sent by its absolute path is a 404 from any checkout under such
+ * a directory. The builds here differ by that dot and by the marker that names each;
+ * merged into one, or with the dot dropped, they stay green over exactly that regression.
+ */
+describe('the page, served from wherever the checkout lives', () => {
+  let tmp: string;
+  const build = (where: string) => path.join(tmp, where, 'dist');
+
+  const servedFrom = (dist: string): request.Agent => {
+    const t = express();
+    serveClient(t, dist);
+    t.use(errorHandler);
+    return request.agent(t);
+  };
+
+  beforeAll(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'finto-serving-'));
+    for (const [where, marker] of [
+      ['plain', 'finto-serving-plain'],
+      ['.dotted', 'finto-serving-dotted'],
+    ]) {
+      fs.mkdirSync(path.join(build(where), 'assets'), { recursive: true });
+      fs.writeFileSync(path.join(build(where), 'index.html'), `<!doctype html><title>${marker}</title>`);
+      fs.writeFileSync(path.join(build(where), 'assets', 'app-a1b2c3.js'), 'export {};\n');
+    }
+  });
+
+  afterAll(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['plain', 'plain'],
+    ['dotted', '.dotted'],
+  ])('answers / with the page of a build under a %s path', async (kind, where) => {
+    const res = await servedFrom(build(where)).get('/').set('Accept', 'text/html');
+    expect(res.status, res.text).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^text\/html/);
+    expect(res.text).toContain(`finto-serving-${kind}`);
+    expect(res.headers['last-modified']).toBeDefined();
+  });
+
+  it('answers a deep app path with the page too, under a dotted path', async () => {
+    const res = await servedFrom(build('.dotted')).get('/transactions').set('Accept', 'text/html');
+    expect(res.status, res.text).toBe(200);
+    expect(res.text).toContain('finto-serving-dotted');
+  });
+
+  it('serves a hashed asset from a build under a dotted path, cached for good', async () => {
+    const res = await servedFrom(build('.dotted')).get('/assets/app-a1b2c3.js');
+    expect(res.status, res.text).toBe(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('refuses a bundle the build does not hold rather than answering it with the page', async () => {
+    const res = await servedFrom(build('.dotted')).get('/assets/gone-a1b2c3.js').set('Accept', '*/*');
+    expect(res.status, res.text).toBe(404);
+    expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    expect(res.text).toBe('not found');
+  });
+
+  it.each(['/', '/transactions', '/assets/index-a1b2c3.js'])(
+    'says the client is not built for %s when there is no build',
+    async (p) => {
+      const res = await servedFrom(build('unbuilt')).get(p).set('Accept', 'text/html');
+      expect(res.status, res.text).toBe(503);
+      expect(res.headers['content-type']).toMatch(/^text\/plain/);
+      expect(res.text).toBe(CLIENT_NOT_BUILT);
+    },
+  );
 });
 
 describe('which paths get the app', () => {
