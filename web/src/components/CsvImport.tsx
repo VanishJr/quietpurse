@@ -613,13 +613,15 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 ))}
               </span>
             </div>
-            {balances && (
+            {balances && balanceLine && (
               <div className="import-review-metric">
                 <span className="import-review-metric-label">Statement balance</span>
+                <span className="import-review-balance-context">{balanceLine.lead}</span>
                 <span className="import-review-metric-value">
                   {fmtMoney(balances.opening, balances.currency)} →{' '}
                   {fmtMoney(balances.closing, balances.currency)}
                 </span>
+                <span className="import-review-balance-context">{balanceLine.claim}</span>
               </div>
             )}
           </div>
@@ -661,7 +663,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
               {summary.problems.slice(0, 3).map((p, i) => <p key={i}>{p}</p>)}
             </div>
           )}
-          <div className="import-review-actions">
+          <div className="btn-row import-review-actions">
             <button className="btn-ghost" disabled={busy} onClick={() => runDiscard(summary)}>
               Discard
             </button>

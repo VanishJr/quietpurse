@@ -393,6 +393,7 @@ describe('the paste fallback', () => {
 });
 
 describe('the summary panel', () => {
+  const details = async () => within((await screen.findByRole('heading', { name: 'Details' })).parentElement as HTMLElement);
   it('reports the counts, says nothing is imported, and names the account', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
     const { container } = mount();
@@ -464,15 +465,18 @@ describe('the summary panel', () => {
     const { container } = mount();
     await upload(container);
 
-    const card = (await screen.findByText(/Read 8 of 14 rows/)).parentElement as HTMLElement;
-    expect([...card.querySelectorAll('p.hint')].map((p) => p.textContent)).toEqual([
+    const card = (await screen.findByText(/Read 8 of 14 rows/)).closest('.import-review') as HTMLElement;
+    expect([...card.querySelectorAll('.import-review-reader, .import-review-details p, .import-review-warnings p')]
+      .map((p) => p.textContent)).toEqual([
       expect.stringContaining("which found the columns in the file's own header"),
-      expect.stringContaining('in total'),
+      'They\'ll join your existing "statement".',
       "2 rows couldn't be read. If it's the whole file, the column layout is probably" +
         " wrong — discard this and try your bank's preset above.",
       '1 row moved no money, so there was nothing to import.',
       '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
     ]);
+    expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
+      .toEqual(['Rows', 'Period', 'Net']);
     // the pre-fix render, and the one the backend's line contradicts word for word
     expect(screen.queryByText(/6 rows couldn't be read/)).not.toBeInTheDocument();
   });
@@ -528,9 +532,12 @@ describe('the summary panel', () => {
     // the chip's own label and the summary's title are one string, off one backend
     // list — a second dictionary in this package is what the field exists to avoid
     expect(screen.getByRole('button', { name: 'Revolut (Statement CSV)' })).toBeInTheDocument();
-    // first paragraph of the card, above the date range and everything below it
-    const card = line.closest('.card') as HTMLElement;
-    expect(card.querySelectorAll('p.hint')[0]).toBe(line);
+    // directly beneath the heading, before even the first metric
+    const card = line.closest('.import-review') as HTMLElement;
+    expect(card.querySelector('.import-review-reader')).toBe(line);
+    expect(line.previousElementSibling).toBe(card.querySelector('.import-review-heading'));
+    expect(line.compareDocumentPosition(card.querySelector('.import-review-metrics')!)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
 
     mockFetch({
@@ -572,7 +579,7 @@ describe('the summary panel', () => {
     // the numbers, not the shape: the sentence names two of them and reads the same
     // either way round, so an assertion over its wording alone passes on a card that
     // tells the user their statement began at what it ended with
-    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /1,200 EUR at the start, 59\.76 EUR at the end\. The rows add up\./,
     );
   });
@@ -603,7 +610,7 @@ describe('the summary panel', () => {
     });
     const { container, unmount } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
     expect(screen.queryByText(/The rows add up/)).not.toBeInTheDocument();
@@ -626,7 +633,7 @@ describe('the summary panel', () => {
     });
     const single = mount();
     await upload(single.container);
-    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 134\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
@@ -656,7 +663,7 @@ describe('the summary panel', () => {
     });
     const { container } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it\./,
     );
     // the unqualified claim, which is true of neither of these two numbers
@@ -686,7 +693,7 @@ describe('the summary panel', () => {
     });
     const { container, unmount } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /Read from the 2 running balances this statement states, added together: 387\.40 EUR at the start, 511\.72 EUR at the end\. Each of them states a single row, so nothing here was checked\./,
     );
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
@@ -711,7 +718,7 @@ describe('the summary panel', () => {
     });
     const single = mount();
     await upload(single.container);
-    expect(await screen.findByText(/Read from the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Read from the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 66\.72 EUR at the end\. It states a single row, so nothing here was checked\./,
     );
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
