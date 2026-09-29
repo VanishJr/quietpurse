@@ -813,7 +813,7 @@ textarea {
   inset: 0;
   background: var(--ink-backdrop);
   display: flex;
-  z-index: 10;
+  z-index: var(--z-modal);
 }
 
 /* phone: sheet slides up from the bottom edge */

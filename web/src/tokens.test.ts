@@ -99,4 +99,16 @@ describe('every design token has a reader', () => {
         `${unread.join(', ')} - delete it, or point at it from the rule that wrote its value out by hand`,
     ).toEqual([]);
   });
+
+  /**
+   * A popover left open behind a sheet shares `--z-raised`, and at an equal layer the
+   * later element in the document paints on top — over the backdrop, and clickable.
+   */
+  it('stacks the modal backdrop above every raised layer', () => {
+    const value = (token: string) =>
+      Number(source.match(new RegExp(`^\\s*${token}\\s*:\\s*(\\d+)`, 'm'))?.[1]);
+    expect(value('--z-modal')).toBeGreaterThan(value('--z-raised'));
+    const backdrop = readFileSync(resolve(SRC, 'styles.css'), 'utf8').match(/^\.backdrop \{[^}]*\}/m)?.[0];
+    expect(backdrop).toMatch(/z-index:\s*var\(--z-modal\)/);
+  });
 });
