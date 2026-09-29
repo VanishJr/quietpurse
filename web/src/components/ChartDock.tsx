@@ -3,6 +3,7 @@
  * *What a chart is, and where its numbers come from*.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDismiss } from '../dismiss';
 import { ChartGlyph, GlyphName } from './ChartGlyphs';
 
 export interface DockTab {
@@ -129,34 +130,22 @@ export function ChartDock({
     });
   };
 
-  /**
-   * The pointer listener is in the CAPTURE phase and lets a press on a ⋮ through, which
-   * is what makes the button a toggle: without the exemption, the press closes the
-   * popover and the click that follows opens it again.
-   */
+  useDismiss(
+    popover,
+    (target) => !!target.closest('.dock-menu, .dock-more'),
+    () => close(),
+    () => close(false),
+  );
+
   useEffect(() => {
     if (!popover) return;
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    const onPointer = (e: Event) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('.dock-menu') || target?.closest('.dock-more')) return;
-      close(false);
-    };
     // a menu measured off a button that has since moved is a menu pointing at nothing
     const onMoved = () => close(false);
-
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('pointerdown', onPointer, true);
     window.addEventListener('resize', onMoved);
     // capture, because the strip scrolls sideways and the screen scrolls under it, and
     // neither of those scrolls bubbles to the window
     document.addEventListener('scroll', onMoved, true);
     return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('pointerdown', onPointer, true);
       window.removeEventListener('resize', onMoved);
       document.removeEventListener('scroll', onMoved, true);
     };

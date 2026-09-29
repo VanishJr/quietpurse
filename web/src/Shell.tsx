@@ -12,6 +12,7 @@ import { GoalsScreen } from './screens/GoalsScreen';
 import { OverviewScreen } from './screens/OverviewScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
+import { ScreenShown } from './screen';
 import { ThemeMode, useTheme } from './theme';
 import { TxFocus } from './types';
 import { setUrl, urlFor, useUrl } from './url';
@@ -39,6 +40,13 @@ const THEME_MODES: readonly { mode: ThemeMode; label: string }[] = [
   { mode: 'light', label: 'Light' },
   { mode: 'dark', label: 'Dark' },
 ];
+
+/** One `shown` for both, so the `hidden` a screen sits under and what its sheets are told cannot differ. */
+const Screen = ({ shown, children }: { shown: boolean; children: React.ReactNode }) => (
+  <div className="screen" hidden={!shown}>
+    <ScreenShown value={shown}>{children}</ScreenShown>
+  </div>
+);
 
 export function Shell() {
   const { mode, setMode } = useTheme();
@@ -157,29 +165,29 @@ export function Shell() {
       </header>
 
       <main className="screens" id="screens" tabIndex={-1}>
-        <div className="screen" hidden={tab !== 'overview'}>
+        <Screen shown={tab === 'overview'}>
           <OverviewScreen
             onOpenTransactions={openTransactions}
             onOpenAnalytics={() => go('analytics')}
             dataRevision={dataRevision}
           />
-        </div>
-        <div className="screen" hidden={tab !== 'transactions'}>
+        </Screen>
+        <Screen shown={tab === 'transactions'}>
           <TransactionsScreen focus={focus} dataRevision={dataRevision} />
-        </div>
-        <div className="screen" hidden={tab !== 'analytics'}>
+        </Screen>
+        <Screen shown={tab === 'analytics'}>
           <AnalyticsScreen dataRevision={dataRevision} />
-        </div>
-        <div className="screen" hidden={tab !== 'goal'}>
+        </Screen>
+        <Screen shown={tab === 'goal'}>
           <GoalsScreen reloadToken={dataRevision} />
-        </div>
-        <div className="screen" hidden={tab !== 'settings'}>
+        </Screen>
+        <Screen shown={tab === 'settings'}>
           <SettingsScreen
             onOpenImport={openImport}
             onDataChanged={() => setDataRevision((value) => value + 1)}
             dataRevision={dataRevision}
           />
-        </div>
+        </Screen>
       </main>
     </div>
   );

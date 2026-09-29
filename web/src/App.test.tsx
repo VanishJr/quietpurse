@@ -305,6 +305,23 @@ describe('the shell', () => {
     expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
   });
 
+  it('lets a sheet left open on a screen hold the page only while that screen shows', async () => {
+    mockFetch(FIRST_PAINT_ROUTES);
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+    const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
+    fireEvent.click(tabs.getByRole('link', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add source' }));
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toBeVisible();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }));
+    expect(document.body.style.overflow).toBe('');
+    fireEvent.click(tabs.getByRole('link', { name: 'Settings' }));
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toBeVisible();
+    expect(document.body.style.overflow).toBe('hidden');
+  });
+
   it('carries the URL of each destination on the destination itself', async () => {
     // every section was a `<button onClick>`, which is a control that HAPPENS to change
     // the page and that no browser can find that out about: Cmd-click, middle click,
