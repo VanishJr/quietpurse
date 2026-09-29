@@ -33,7 +33,11 @@ try {
           return { left, top, right, bottom };
         };
         const screen = document.querySelector('.screen:not([hidden])');
-        const setup = document.querySelector('.import-setup');
+        const surfaceProbe = document.createElement('span');
+        surfaceProbe.style.backgroundColor = 'var(--ink-surface)';
+        document.body.append(surfaceProbe);
+        const surfaceToken = getComputedStyle(surfaceProbe).backgroundColor;
+        surfaceProbe.remove();
         return {
           viewport: innerWidth,
           documentWidth: document.documentElement.scrollWidth,
@@ -41,13 +45,17 @@ try {
           screenClientWidth: screen.clientWidth,
           columns: getComputedStyle(document.querySelector('.import-layout')).gridTemplateColumns,
           theme: document.documentElement.dataset.theme,
-          surface: getComputedStyle(setup).backgroundColor,
+          surfaceToken,
+          setupSurface: getComputedStyle(document.querySelector('.import-setup')).backgroundColor,
+          guideSurface: getComputedStyle(document.querySelector('.import-guide')).backgroundColor,
           setup: bounds('.import-setup'),
           guide: bounds('.import-guide'),
         };
       });
       assert.equal(state.viewport, width);
       assert.equal(state.theme, theme.toLowerCase());
+      assert.equal(state.setupSurface, state.surfaceToken, `${theme} ${width}: setup surface token mismatch`);
+      assert.equal(state.guideSurface, state.surfaceToken, `${theme} ${width}: guide surface token mismatch`);
       assert.ok(state.documentWidth <= width, `${theme} ${width}: document overflows`);
       assert.ok(state.screenWidth <= state.screenClientWidth, `${theme} ${width}: screen overflows`);
       assert.ok(state.setup.left >= 0 && state.guide.right <= width, `${theme} ${width}: card offscreen`);
@@ -59,12 +67,13 @@ try {
         assert.equal(state.columns.split(' ').length, 1, `${theme} ${width}: expected one column`);
         assert.ok(state.guide.top >= state.setup.bottom, `${theme} ${width}: guide not after setup`);
       }
-      observations.push({ theme, width, columns: state.columns, surface: state.surface,
+      observations.push({ theme, width, columns: state.columns, surfaceToken: state.surfaceToken,
+        setupSurface: state.setupSurface, guideSurface: state.guideSurface,
         documentWidth: state.documentWidth, screenWidth: state.screenWidth });
     }
   }
-  assert.notEqual(observations[0].surface, observations[widths.length].surface,
-    'Light and Dark cards should use different palette surfaces');
+  assert.notEqual(observations[0].surfaceToken, observations[widths.length].surfaceToken,
+    'Light and Dark should resolve different surface palette colors');
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.locator('.import-setup input[type=file]').setInputFiles({
