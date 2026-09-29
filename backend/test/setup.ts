@@ -60,3 +60,9 @@ const noMismatch = (): void => {
 };
 afterEach(noMismatch);
 afterAll(noMismatch);
+
+// The recompute queue lives in the module registry every file shares, so a run still in
+// it would finish inside the next file's freshly truncated tables.
+const { reclassifyIdle } = await import('../src/classify');
+afterEach(() => reclassifyIdle());
+afterAll(() => reclassifyIdle());

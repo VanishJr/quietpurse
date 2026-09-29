@@ -12,8 +12,9 @@ import {
 } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { getRatesToUAH } from './rates';
-import { Transaction } from './types';
+import { IncomeSourceDef, Transaction, TransferRule } from './types';
 import { categoryPatternMatches, makeTransferRuleMatcher } from './transaction-description';
+import type { CategoryRule } from './wire';
 
 /**
  * Window for a same-currency pair: the amounts have to match to the cent, so there is
@@ -50,12 +51,27 @@ function normalizeName(s: string): string {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+interface TaggingRules {
+  ownerNames: string[];
+  incomeSources: IncomeSourceDef[];
+  transferRules: TransferRule[];
+  categoryRules: CategoryRule[];
+}
+
+async function loadTaggingRules(): Promise<TaggingRules> {
+  const { ownerNames } = await getAppSettings();
+  const incomeSources = await listIncomeSources();
+  const transferRules = await listTransferRules();
+  const categoryRules = await listCategoryRules();
+  return { ownerNames, incomeSources, transferRules, categoryRules };
+}
+
 /**
  * Matched word by word rather than as a substring: statements write a name in any
  * order. Names below two words are dropped — one word hits a random merchant.
  */
-async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
-  const names = (await getAppSettings()).ownerNames
+function makeOwnerMatcher(ownerNames: string[]): (description: string) => boolean {
+  const names = ownerNames
     .map((n) => normalizeName(n).split(' ').filter((w) => w.length >= 3))
     .filter((words) => words.length >= 2);
 
@@ -69,13 +85,9 @@ async function makeOwnerMatcher(): Promise<(description: string) => boolean> {
   };
 }
 
-async function makeRuleMatcher(): Promise<(t: Transaction) => boolean> {
-  return makeTransferRuleMatcher(await listTransferRules());
-}
-
 /** Patterns are matched like owner names, and the first matching source by sort wins. */
-async function makeSourceMatcher(): Promise<(description: string) => string | undefined> {
-  const sources = (await listIncomeSources())
+function makeSourceMatcher(incomeSources: IncomeSourceDef[]): (description: string) => string | undefined {
+  const sources = incomeSources
     .map((s) => ({
       id: s.id,
       names: s.patterns
@@ -93,8 +105,7 @@ async function makeSourceMatcher(): Promise<(description: string) => string | un
 }
 
 /** Stronger than the dictionary: the dictionary is a default, a rule is the owner's decision. */
-async function makeCategoryRuleMatcher(): Promise<(description: string) => string | undefined> {
-  const rules = await listCategoryRules();
+function makeCategoryRuleMatcher(rules: CategoryRule[]): (description: string) => string | undefined {
   if (rules.length === 0) return () => undefined;
   return (description: string) => rules.find((r) => categoryPatternMatches(description, r.pattern))?.category;
 }
@@ -184,14 +195,13 @@ async function ratesOrEmpty(): Promise<Record<string, number>> {
   }
 }
 
-/** @returns how many transactions were recognized as transfers */
-export async function reclassifyAll(): Promise<number> {
-  const rates = await ratesOrEmpty();
-  const isOwner = await makeOwnerMatcher();
-  const sourceFor = await makeSourceMatcher();
-  const matchesRule = await makeRuleMatcher();
-  const userCategory = await makeCategoryRuleMatcher();
+async function reclassifyWith(rules: TaggingRules): Promise<number> {
+  const isOwner = makeOwnerMatcher(rules.ownerNames);
+  const sourceFor = makeSourceMatcher(rules.incomeSources);
+  const matchesRule = makeTransferRuleMatcher(rules.transferRules);
+  const userCategory = makeCategoryRuleMatcher(rules.categoryRules);
   const txs = await allTransactions();
+  const rates = await ratesOrEmpty();
 
   const result = new Map<string, Classification>(
     txs.map((t) => {
@@ -269,32 +279,68 @@ export async function reclassifyAll(): Promise<number> {
 
   const rows = [...result.values()];
   await applyClassification(rows);
-  await setMeta('classify_version', await rulesSignature());
+  await setMeta('classify_version', rulesSignature(rules));
 
   await backfillBaseAmounts();
 
   return rows.filter((r) => r.transfer).length;
 }
 
-/** A source's kind is deliberately outside it: kind moves summaries, not tags. */
-async function rulesSignature(): Promise<string> {
-  const transferRules = (await listTransferRules())
+/**
+ * A source's kind is deliberately outside it: kind moves summaries, not tags. It reads
+ * nothing, on purpose — a read taken after the writes can name a rule the rows never got.
+ */
+function rulesSignature(rules: TaggingRules): string {
+  const transferRules = rules.transferRules
     .map((r) => JSON.stringify([r.accountId, r.matchMode, r.description]))
     .sort();
-  const categoryRules = (await listCategoryRules())
+  const categoryRules = rules.categoryRules
     .map((r) => `${r.pattern}>${r.category}`)
     .sort()
     .join(';');
-  const sourcePatterns = (await listIncomeSources())
+  const sourcePatterns = rules.incomeSources
     .map((s) => `${s.id}:${s.patterns.join('+')}`)
     .sort()
     .join(';');
-  const { ownerNames } = await getAppSettings();
-  return `${RULES_VERSION}|${ownerNames.join(',')}|${sourcePatterns}|${categoryRules}|[${transferRules.join(',')}]`;
+  return `${RULES_VERSION}|${rules.ownerNames.join(',')}|${sourcePatterns}|${categoryRules}|[${transferRules.join(',')}]`;
+}
+
+let tail: Promise<unknown> = Promise.resolve();
+
+function serialised<T>(job: () => Promise<T>): Promise<T> {
+  const run = tail.then(() => job());
+  // only the queue drops the rejection: each caller's own promise still carries it
+  tail = run.catch(() => undefined);
+  return run;
+}
+
+let queued: Promise<number> | undefined;
+
+/** @returns how many transactions were recognized as transfers */
+export async function reclassifyAll(): Promise<number> {
+  queued ??= serialised(async () => {
+    // cleared as the run starts, not as it ends: a caller arriving after this point may
+    // have written after this run's load, so it has to get the next run, not this one
+    queued = undefined;
+    return reclassifyWith(await loadTaggingRules());
+  });
+  return queued;
 }
 
 export async function reclassifyIfRulesChanged(): Promise<boolean> {
-  if ((await getMeta('classify_version')) === (await rulesSignature())) return false;
-  await reclassifyAll();
-  return true;
+  return serialised(async () => {
+    const rules = await loadTaggingRules();
+    if ((await getMeta('classify_version')) === rulesSignature(rules)) return false;
+    // the body and not reclassifyAll: this job already holds the queue, and the wrapper
+    // would wait on it forever
+    await reclassifyWith(rules);
+    return true;
+  });
+}
+
+export async function reclassifyIdle(): Promise<void> {
+  for (let seen = tail; ; seen = tail) {
+    await seen;
+    if (seen === tail) return;
+  }
 }
