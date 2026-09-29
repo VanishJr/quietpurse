@@ -451,11 +451,14 @@ describe('the summary panel', () => {
         ok(
           summaryResult({
             accepted: 8,
-            newRows: 8,
+            newRows: 6,
+            alreadyPresent: 2,
             skipped: 6,
             unreadable: 2,
             filtered: 3,
             noMovement: 1,
+            balances: { opening: 1200, closing: 59.76, currency: 'EUR' },
+            supersededImportId: 'imp-0',
             problems: [
               '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
             ],
@@ -468,15 +471,19 @@ describe('the summary panel', () => {
     const card = (await screen.findByText(/Read 8 of 14 rows/)).closest('.import-review') as HTMLElement;
     expect([...card.querySelectorAll('.import-review-reader, .import-review-details p, .import-review-warnings p')]
       .map((p) => p.textContent)).toEqual([
-      expect.stringContaining("which found the columns in the file's own header"),
+      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
       'They\'ll join your existing "statement".',
-      "2 rows couldn't be read. If it's the whole file, the column layout is probably" +
-        " wrong — discard this and try your bank's preset above.",
+      "Checked against the statement's own balances: 1,200 EUR at the start, 59.76 EUR at the end. The rows add up.",
+      '6 of them are new; 2 are already in the database — this export overlaps one you imported before. Nothing will be duplicated.',
+      'An earlier upload of this same file was still waiting to be confirmed. It has been dropped in favour of this one — it had imported nothing.',
+      "2 rows couldn't be read. If it's the whole file, the column layout is probably wrong — discard this and try your bank's preset above.",
       '1 row moved no money, so there was nothing to import.',
       '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
     ]);
     expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
-      .toEqual(['Rows', 'Period', 'Net']);
+      .toEqual(['Rows', 'Period', 'Net', 'Statement balance']);
+    expect([...card.querySelectorAll('.import-review-metric-value')].map((m) => m.textContent?.trim()))
+      .toEqual(['8 of 14', '01.06.2026 to 30.06.2026', '−420.50 EUR', '1,200 EUR → 59.76 EUR']);
     // the pre-fix render, and the one the backend's line contradicts word for word
     expect(screen.queryByText(/6 rows couldn't be read/)).not.toBeInTheDocument();
   });
@@ -581,6 +588,8 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
     expect(screen.queryByText(/Checked against the statement/)).not.toBeInTheDocument();
     expect(screen.queryByText(/running balance/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Statement balance')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Warnings' })).not.toBeInTheDocument();
     unmount();
 
     mockFetch({
@@ -631,6 +640,9 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 579\.85 EUR/);
+    expect(screen.getAllByText(/Checked against the 2 running balances/)).toHaveLength(1);
     expect(screen.queryByText(/The rows add up/)).not.toBeInTheDocument();
     unmount();
 
@@ -654,6 +666,8 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 134\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
+    expect(screen.getByText('Statement balance').closest('.import-review-metric'))
+      .toHaveTextContent(/From a running balance in the file\. 72\.40 EUR → 134\.85 EUR/);
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
   });
 
@@ -747,6 +761,8 @@ describe('the summary panel', () => {
     expect((await details()).getByText(/Read from the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 66\.72 EUR at the end\. It states a single row, so nothing here was checked\./,
     );
+    expect(screen.getByText('Statement balance').closest('.import-review-metric'))
+      .toHaveTextContent(/From a running balance in the file\. 72\.40 EUR → 66\.72 EUR/);
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
   });
@@ -773,10 +789,32 @@ describe('the summary panel', () => {
       const { container, unmount } = mount();
       await upload(container);
       expect(await screen.findByText(sentence)).toBeInTheDocument();
+      expect(screen.queryByText('Statement balance')).not.toBeInTheDocument();
+      expect(screen.getAllByText(/^(Rows|Period|Net)$/)).toHaveLength(3);
       // and never a pair alongside the reason it could not be derived
       expect(screen.queryByText(/at the start,/)).not.toBeInTheDocument();
       unmount();
     }
+  });
+
+  it('keeps parser warnings whole, separately from details, and limits them to three', async () => {
+    const longProblem = 'Unrecognised column value '.repeat(45).trim();
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({
+        problems: [longProblem, 'Second parser warning', 'Third parser warning', 'Fourth parser warning'],
+      })),
+    });
+    const { container } = mount();
+    await upload(container);
+    const heading = await screen.findByRole('heading', { name: 'Warnings' });
+    const warnings = heading.parentElement as HTMLElement;
+    expect([...warnings.querySelectorAll('p')].map((p) => p.textContent))
+      .toEqual([longProblem, 'Second parser warning', 'Third parser warning']);
+    expect(warnings).not.toHaveClass('error');
+    expect(screen.queryByText('Fourth parser warning')).not.toBeInTheDocument();
+    expect(warnings.compareDocumentPosition(screen.getByRole('button', { name: 'Confirm' }))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -788,6 +826,30 @@ describe('confirm', () => {
    */
   const ACCOUNT_MISSING =
     'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
+
+  it('keeps both review actions disabled and shows no success until Confirm returns', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/confirm': () => new Promise((resolve) => { answer = resolve; }),
+    });
+    const { container } = mount();
+    await upload(container);
+    const discard = await screen.findByRole('button', { name: 'Discard' });
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    expect(discard.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(confirm);
+    expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(discard).toBeDisabled();
+    fireEvent.click(discard);
+    expect(countOf('POST /api/imports/imp-1/discard')).toBe(0);
+    expect(screen.getByRole('heading', { name: /nothing imported yet/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
+    await act(async () => answer(ok(CONFIRMED)));
+    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    expect(countOf('POST /api/imports/imp-1/confirm')).toBe(1);
+  });
 
   it('requests the confirm once, replaces the summary, and tells the caller once', async () => {
     mockFetch({
