@@ -1021,7 +1021,7 @@ describe('the empty states', () => {
         files: [new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' })],
       },
     });
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     // the reload is the observable, and the request count is how it is read: the panel
     // replaces this screen while it is open, so the rail the created account has to

@@ -101,7 +101,7 @@ async function upload(container: HTMLElement): Promise<void> {
   // still null neither the picker nor the create arm has rendered
   const name = await screen.findByPlaceholderText('Sparkasse Giro');
   fireEvent.change(name, { target: { value: 'statement' } });
-  await screen.findByText(/click to choose another/);
+  await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 }
 
@@ -113,7 +113,7 @@ const fillCreateArm = async (container: HTMLElement, name: string): Promise<void
   fireEvent.click(await screen.findByRole('button', { name: '+ New account' }));
   fireEvent.change(screen.getByPlaceholderText('Sparkasse Giro'), { target: { value: name } });
   chooseFile(container);
-  await screen.findByText(/click to choose another/);
+  await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 };
 
 const countOf = (key: string): number => requests().filter((r) => r === key).length;
@@ -197,12 +197,12 @@ describe('the formats the screen offers', () => {
   it('shows a CSV its row count and a PDF its size, never a row count', async () => {
     mockFetch(BASE);
     const { container } = mount();
-    const preview = () => screen.getByText(/click to choose another/);
+    const preview = () => screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     const csv = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
     fireEvent.change(fileInput(container), { target: { files: [csv] } });
     await settle();
-    expect(preview()).toHaveTextContent(/1 rows/);
+    expect(preview()).toHaveTextContent('1 rows · 1 kB');
 
     // several lines on purpose: a build that ignored the %PDF signature would count
     // them, so the assertion below has something to catch
@@ -211,8 +211,113 @@ describe('the formats the screen offers', () => {
     });
     fireEvent.change(fileInput(container), { target: { files: [pdf] } });
     await settle();
-    expect(preview()).toHaveTextContent(/kB/);
+    expect(preview()).toHaveTextContent('1 kB');
     expect(preview()).not.toHaveTextContent(/rows/);
+  });
+
+  it('uses a native button with a decorative icon and opens the same picker on click', () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const picker = screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' });
+    expect(picker).toBeInstanceOf(HTMLButtonElement);
+    expect(picker).toHaveAttribute('type', 'button');
+    expect(picker.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    const input = fileInput(container);
+    const click = vi.spyOn(input, 'click');
+    picker.focus();
+    expect(picker).toHaveFocus();
+    fireEvent.click(picker);
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('distinguishes drag-over from an empty or selected file without replacing the target', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const picker = screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' });
+    expect(picker).toHaveClass('import-dropzone');
+    expect(picker).not.toHaveClass('import-dropzone-active', 'import-dropzone-selected');
+    fireEvent.dragOver(picker);
+    expect(picker).toHaveClass('import-dropzone-active');
+    fireEvent.dragLeave(picker);
+    expect(picker).not.toHaveClass('import-dropzone-active');
+
+    const csv = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
+    fireEvent.drop(picker, { dataTransfer: { files: [csv] } });
+    await settle();
+    expect(picker).toHaveClass('import-dropzone-selected');
+    expect(picker).not.toHaveClass('import-dropzone-active');
+    expect(fileInput(container).getAttribute('accept')).toContain('.csv');
+    expect(screen.getByText('Click to choose another').closest('button')).toBe(picker);
+    expect(picker.querySelector('a, button')).toBeNull();
+  });
+
+  it('shows a long file name whole and marks only the empty status as an error', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const name = 'statement-' + 'very-long-name-'.repeat(10) + '.csv';
+    fireEvent.change(fileInput(container), {
+      target: { files: [new File(['date;amount\n2026-06-01;-10'], name, { type: 'text/csv' })] },
+    });
+    await settle();
+    const picker = screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(picker).toHaveAttribute('aria-describedby', 'import-selected-file');
+    expect(screen.getByText(name)).toHaveClass('import-file-name');
+    expect(screen.getByText(name)).toHaveTextContent(name);
+    expect(picker).toHaveTextContent('1 rows · 1 kB');
+    expect(screen.queryByRole('status', { name: /empty file/i })).not.toBeInTheDocument();
+
+    fireEvent.change(fileInput(container), {
+      target: { files: [new File([], 'empty.csv', { type: 'text/csv' })] },
+    });
+    await settle();
+    expect(picker).toHaveTextContent('0 rows · 0 kB');
+    expect(screen.getByRole('status')).toHaveClass('import-file-empty');
+    expect(screen.getByRole('status')).toHaveTextContent('Empty file');
+    expect(picker).not.toHaveClass('import-file-empty');
+  });
+
+  it('does not label a newer binary file with the earlier text file\'s late row count', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    let release!: (text: string) => void;
+    const stalled = new Promise<string>((resolve) => { release = resolve; });
+    const first = new File(['date;amount\n2026-06-01;-10'], 'first.csv', { type: 'text/csv' });
+    const read = vi.fn(() => stalled);
+    Object.defineProperty(first, 'text', { value: read });
+    fireEvent.change(fileInput(container), { target: { files: [first] } });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+
+    const next = new File(['%PDF-1.7\nobj'], 'next.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput(container), { target: { files: [next] } });
+    await settle();
+    await act(async () => release('date;amount\n2026-06-01;-10\n2026-06-02;-20'));
+    const picker = screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(picker).toHaveTextContent('next.pdf');
+    expect(picker).toHaveTextContent('1 kB');
+    expect(picker).not.toHaveTextContent(/rows/);
+  });
+});
+
+describe('the paste fallback', () => {
+  it('starts collapsed, opens natively, and replaces the file and previous review', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container } = mount();
+    const disclosure = screen.getByText('…or paste the contents instead').closest('details')!;
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(disclosure.querySelector('summary')).toBeInstanceOf(HTMLElement);
+    fireEvent.click(disclosure.querySelector('summary')!);
+    expect(disclosure).toHaveAttribute('open');
+    expect(within(disclosure).getByText('Pasting here replaces the chosen file.')).toBeInTheDocument();
+
+    await upload(container);
+    expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents' }), {
+      target: { value: 'date;amount\n2026-06-01;-10' },
+    });
+    expect(screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' }))
+      .not.toHaveTextContent('statement.csv');
+    expect(screen.queryByText(/Read 12 of 14 rows/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
   });
 });
 
@@ -869,7 +974,7 @@ describe('the account picker', () => {
     const { container } = mount();
     await screen.findByRole('button', { name: 'N26' });
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
 
@@ -883,7 +988,7 @@ describe('the account picker', () => {
     const { container } = mount();
     fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
     await screen.findByText(/Read 12 of 14 rows/);
 
@@ -941,7 +1046,7 @@ describe('the account picker', () => {
     const { container } = mount();
     const name = await screen.findByPlaceholderText('Sparkasse Giro');
     chooseFile(container, 'sparkasse-2026-07.csv');
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(name).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
@@ -1091,7 +1196,7 @@ describe('the account the create arm makes', () => {
     const name = await screen.findByPlaceholderText('Sparkasse Giro');
     fireEvent.change(name, { target: { value: 'Third Bank' } });
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(screen.queryByText(/It will hold amounts in/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();

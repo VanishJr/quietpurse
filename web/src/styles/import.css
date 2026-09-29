@@ -72,9 +72,111 @@
 }
 
 .import-page .import-results,
-.import-page .import-guide,
-.import-page .dropzone-title {
+.import-page .import-guide {
   overflow-wrap: anywhere;
+}
+
+.import-page .import-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 168px;
+  margin: 12px 0;
+  padding: 24px 16px;
+  border: 2px dashed var(--ink-border);
+  border-radius: var(--r-md);
+  background: var(--ink-surface);
+  text-align: center;
+  line-height: 1.5;
+  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+
+.import-page .import-dropzone:hover,
+.import-page .import-dropzone-active {
+  border-color: var(--ink-accent);
+}
+
+.import-page .import-dropzone-active {
+  background: var(--ink-grid);
+}
+
+.import-page .import-dropzone-selected {
+  border-style: solid;
+}
+
+.import-page .import-dropzone-icon {
+  display: flex;
+  color: var(--ink-accent);
+  margin-bottom: 12px;
+}
+
+.import-page .import-dropzone-icon svg {
+  width: 28px;
+  height: 28px;
+}
+
+.import-page .import-dropzone-title,
+.import-page .import-file-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.import-page .import-dropzone-sub,
+.import-page .import-file-meta {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.import-page .import-file-details {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.import-page .import-file-name {
+  display: block;
+}
+
+.import-page .import-file-empty {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-bad);
+  font-size: 13px;
+}
+
+.import-page .import-file-choose {
+  display: block;
+  margin-top: 12px;
+  color: var(--ink-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-page .import-paste {
+  margin-top: 18px;
+}
+
+.import-page .import-paste > summary {
+  display: list-item;
+  width: fit-content;
+  min-height: 44px;
+  margin: 0;
+  padding: 12px 0;
+  color: var(--ink-accent);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.import-page .import-paste .csv-input {
+  display: block;
+  margin-top: 8px;
 }
 
 @media (min-width: 1180px) {
