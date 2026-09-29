@@ -358,27 +358,20 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     : [];
 
   return (
-    <section>
-      <button className="btn-link" onClick={onBack}>
-        ← Back to accounts
-      </button>
-      <h1 className="title">Import a statement</h1>
+    <section className="import-page">
+      <header className="import-header">
+        <button className="btn-link" onClick={onBack}>
+          ← Back to accounts
+        </button>
+        <h1 className="title">Import a statement</h1>
+        <p className="import-subtitle">
+          Bring in a CSV, Excel or PDF statement. Finto reads it on this device.
+        </p>
+      </header>
 
-      {/* the drop zone says what is accepted; this says what to go and fetch, and the two
-          are different lists: a PDF is read only in a layout the importer recognises, and
-          one in any other layout is refused with a request for the CSV or Excel export */}
-      <p className="hint">
-        Any bank that lets you download a statement works here, whether it has an API or
-        not. Export it as CSV or Excel — in most banks that's "Export" or "Download" in the
-        transaction list — and drop the file below, or drop the PDF statement itself.
-        Nothing is uploaded anywhere: the file goes to your own backend and into your own
-        database.
-      </p>
-      <p className="hint">
-        Re-importing the same file, or one that overlaps a previous export, creates no
-        duplicates — rows are matched by their contents. So it's safe to grab a wider date
-        range than you need.
-      </p>
+      <div className="import-layout">
+        <section className="import-setup" aria-labelledby="import-setup-heading">
+          <h2 id="import-setup-heading">Set up your import</h2>
 
       <div
         className={`dropzone${dragging ? ' dropzone-active' : ''}`}
@@ -538,7 +531,10 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       >
         {busy && !summary ? 'Reading…' : 'Import'}
       </button>
+        </section>
 
+      {(discarded || created || duplicate || summary || confirmed) && (
+        <div className="import-results" role="region" aria-label="Import review or result">
       {discarded && (
         <p className="hint" style={{ marginTop: 12 }}>
           Discarded — nothing was imported. The file is untouched, so you can fix the
@@ -689,6 +685,33 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           )}
         </div>
       )}
+        </div>
+      )}
+
+        <aside className="import-guide" aria-labelledby="import-guide-heading">
+          <h2 id="import-guide-heading">Before you import</h2>
+          <div className="import-guide-item">
+            <h3>Getting the file</h3>
+            <p>
+              In your bank's transaction list, choose Export or Download. Finto can read a PDF
+              only if it recognises the layout; otherwise, use the CSV or Excel export.
+            </p>
+          </div>
+          <div className="import-guide-item">
+            <h3>Your file stays here</h3>
+            <p>
+              Statements are read on this device. The file and its rows stay in your Finto folder.
+            </p>
+          </div>
+          <div className="import-guide-item">
+            <h3>Re-imports are safe</h3>
+            <p>
+              Rows are matched by content, so re-importing won't duplicate them. You can safely
+              export a wider date range than you need.
+            </p>
+          </div>
+        </aside>
+      </div>
     </section>
   );
 }
