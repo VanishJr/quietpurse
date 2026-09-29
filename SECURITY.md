@@ -78,6 +78,8 @@ Stated because they are decisions, not oversights.
   request in the transaction path.
 - Does not hold bank credentials or API tokens. Direct bank connections were removed; a statement
   is a file the user uploads.
-- Outbound network access is limited to exchange-rate providers (ECB, NBU) for currency conversion.
+- Outbound network access is limited to exchange-rate providers: the ECB's rates through Frankfurter
+  and the NBU for currency conversion, and Monobank's public exchange rates, which the recompute
+  fetches to check cross-currency transfers.
 - Does not keep anything in the browser but the theme choice. There is no cookie, no token and no
   session.

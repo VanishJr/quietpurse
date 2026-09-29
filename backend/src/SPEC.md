@@ -316,10 +316,11 @@ of the field.
 **A refill in flight is said, not left for a reader to infer.** A change of base currency answers
 with every converted amount reset and refills them in the background, because the refill fetches
 rates and a request cannot wait on the network. `GET /api/conversion` says whether any refill is
-running — a start-up recompute, a reclassification and a currency change can overlap — and how many
-rows still have no base amount, so a client that re-reads its figures once `converting` is false
-does not show the gap as the data. Stopping is not finishing: a rate that could not be fetched
-leaves its rows without a base amount until the next recompute, and `unconverted` is what says so.
+running — the start-up refill that runs when the rules have not changed, a recompute's refill and a
+currency change's refill can overlap — and how many rows still have no base amount, so a client that
+re-reads its figures once `converting` is false does not show the gap as the data. Stopping is not
+finishing: a rate that could not be fetched leaves its rows without a base amount until the next
+recompute, and `unconverted` is what says so.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
@@ -557,6 +558,21 @@ startup check on the signature**, and it is a full recomputation from each trans
 fields rather than an increment, so no state accumulates and running it twice is running it once. A
 door that changes something the signature does not carry recomputes for itself; nothing about the
 signature makes that unnecessary.
+
+Runs happen one at a time, because the re-tag holds no transaction: two runs side by side interleave
+their writes, and the one that loaded first can overwrite a pairing the later one found. A caller
+that arrives while a run is in flight is answered by the next run that has not started yet — every
+caller arriving in that time shares it — and never by the run in flight, whose load may predate that
+caller's write. A run that fails hands its error to its own callers and still lets the queued one
+start. The startup check compares and runs as one turn of the same queue, and calls the unqueued
+body, because the queued entry would wait on the turn it already holds. A queued caller also waits
+out the network waits of the run ahead of it — the pairing rates and the base-amount refill.
+
+**A run signs the rules it loaded, not the rules as they stand after its writes.** The signature is
+computed from the same read the matchers were built from. Read again after the writes, it can name a
+rule saved while the run was in flight, one the rows never received, and a start that finds that
+signature equal then repairs nothing — so the mismatch outlives a process that dies before the
+saving door's own run.
 
 **A hidden account's transactions stay in the database.** Hiding an account takes it off the screen
 and its rows out of the figures; it does not delete them, because the classifier still needs them as
