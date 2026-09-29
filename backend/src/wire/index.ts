@@ -309,6 +309,7 @@ export const chartsStaleSchema = chartListSchema.extend({ error: z.string() });
 export type ChartsStale = z.infer<typeof chartsStaleSchema>;
 
 export const recurringGroupSchema = z.strictObject({
+  key: z.string(),
   description: z.string(),
   category: z.string(),
   months: z.number(),

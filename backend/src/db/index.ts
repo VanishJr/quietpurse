@@ -2528,6 +2528,7 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
       const totalCents = list.reduce((sum, r) => sum - r.base_amount_cents, 0);
       const last = list[list.length - 1];
       return {
+        key,
         description: last.description, // the most recent spelling in the group
         category: last.category,
         months,

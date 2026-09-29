@@ -46,6 +46,7 @@ describe('income-source data revision', () => {
       return { from: query.get('from') ?? '', to: query.get('to') ?? '' };
     };
     const recurringGroup = {
+      key: 'monthly gym payment',
       description: 'Monthly gym payment',
       category: 'subscriptions',
       months: 3,
