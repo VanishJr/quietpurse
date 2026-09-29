@@ -253,8 +253,20 @@ Settings' recurring groups. The last reader matters because a source pattern can
 pair, which can turn the surviving expense into a recurring payment. The invalidation runs as soon
 as the write succeeds: a failed follow-up catalog GET cannot suppress it. Transactions clears its
 old source catalog during that reload and exposes a failed read with a retry rather than combining
-freshly classified rows with stale names. Revision-driven loads are latest-request-wins, so a slow
-pre-mutation response cannot replace the newer answer.
+freshly classified rows with stale names. Settings also clears its old source catalog after a
+committed write: if the new read fails, Retry is available rather than actions on stale rows.
+Financial setup's save invalidates the same readers when the server's answer carries owner names
+other than the ones it held, whether or not that answer echoes the request: the server reclassifies
+transfers before it answers. An answer that changed nothing invalidates nothing. One carrying a
+new base currency arrives with every converted amount reset and refilled in the background, so the
+block asks `GET /api/conversion` until no refill is running and invalidates once then, names and
+all: a reader re-read in the gap would show it as the data — an empty recurring list, a zero total.
+A names-only save made while that watch is open leaves the invalidation to it. A refill that stopped
+with rows still unconverted is said beside the form, with how many, because stopping is not
+finishing; a status that cannot be read is said with a Retry and invalidates nothing. The watch
+ends with the block, so no poll outlives the screen that asked.
+Revision-driven loads are latest-request-wins, so a slow pre-mutation response cannot replace the
+newer answer.
 
 **The account delete's counts — transactions, imports, documents — are what the delete removed from
 the database, which for a hidden account is legitimately not what the panel previewed.** A document
@@ -404,7 +416,9 @@ screen reader only once the chart is saved and drawn on a card. A future chart o
 wherever it is the thing a reader is reading.
 
 `isAnimationActive` is false on every series `ChartPlot`, `AccountFlows` and `SpendingByCategory`
-draw — as measured, and nothing enforces it.
+draw — as measured, and nothing enforces it. The screens stay mounted, so a chart first renders
+inside a hidden container, and an animation started there freezes at an arbitrary frame. It is also
+why the stylesheet's reduced-motion rule has no chart counterpart: a chart has no motion to reduce.
 
 `DOTTED_UP_TO` is declared in `AccountFlows` and again in `ChartPlot`, one rule and one value, and
 nothing holds the two literals equal; the rule is written beside `ChartPlot`'s copy.
@@ -629,22 +643,41 @@ navigation link and a panel of Overview, while Settings takes its place in the m
 is still reachable from Overview and Settings. Screens stay mounted so filters survive navigation,
 with inactive screens excluded through `hidden`. Settings separates financial setup from income
 classification, then presents recurring payments, data and backup actions, and API connection
-information in that order. Pending reads and failures belong to their respective regions, never
-to a page-wide empty result. Financial setup shows the server's currency with a readable name when
-one is available; suggestions never restrict the code the server may accept. Adding, removing or
-entering an owner spelling changes only the local form; a name still in the entry field joins the
-ordered list when Save sends it. Only an exact echo of the requested currency and ordered names
-resets the form to saved; a refusal or different answer leaves the edits available to correct or
-retry. Validation and recalculation remain with the server. Settings' recurring list uses the server's
-monthly estimate and detected groups without recomputing them; category markers come from the
+information in that order. The API address stays in a closed-by-default Advanced disclosure: it
+identifies this page's local REST API, not a preference the reader can change. Pending reads and
+failures belong to their respective regions, never to a page-wide empty result. Financial setup
+shows the server's currency with a readable name when one is available; suggestions never
+restrict the code the server may accept. Adding, removing or entering an owner spelling changes
+only the local form; Save includes a name still in the entry field in the ordered list. A comma in
+the entry separates spellings. Removing a spelling hands focus to the next one, the previous one,
+or the entry field. Only an exact echo of the requested currency and ordered names resets the form
+to saved; a refusal or different answer leaves the edits available to correct or retry, and a
+different answer names what the server kept, since the fields still show the edits. Validation and recalculation
+remain with the server. Settings' recurring list uses the server's monthly estimate and detected groups without recomputing them; category markers come from the
 category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
 rather than disappearing, and a mutation replaces the whole recurring answer instead of patching
-one row. Revision-triggered reads and mutations share one latest-answer guard so an older reply
-cannot replace newer recurring data. A newer answer only makes a failed exclude or restore
+one row. A group is followed across answers by the server's `key`, not its description: the
+description is the group's newest spelling and moves between reads. Revision-triggered reads and
+mutations share one latest-answer guard so an older reply cannot replace newer recurring data, and
+a write overtaken by a newer answer re-reads only when that answer does not already show the write
+done. A newer answer only makes a failed exclude or restore
 irrelevant when that payment is gone or already in the requested state; an in-flight read or one
-that still leaves the action available does not erase the refusal. The account strip
-marks the current account with `aria-current` like the navigation does and is deliberately not a
-tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
+that still leaves the action available does not erase the refusal. A refusal belongs to its
+payment: an action on another payment neither clears nor replaces it. Refusals are shown apart
+from a failed read, which keeps its own Retry for the read; neither hides the other, nor the
+loading status. A control on Settings that would turn disabled while it holds focus — a save
+pressed or entered, a name just added, a save answered with nothing left to save, an exclude,
+restore or delete in flight, Add source once its form is open — is `aria-disabled` instead and
+ignores a press, and a field being sent is read-only: a browser drops focus from a control
+disabled under it, a refusal would then hand it back to nothing, and inside a sheet the Tab trap
+would have nothing to hold. The income-source form is locked while its save is out because the
+save already took its values, and the sheet that closes on success would drop an edit made
+meanwhile. After a write,
+focus goes to the section's heading only when it was lost or is still inside the card. The summary
+total shows only beside detected groups. Import and history navigate to
+their respective flows; backup uses the checked fetch path and produces a file only after a successful response. A
+refusal stays beside Export, not elsewhere on Settings. The account strip marks the current
+account with `aria-current` like the navigation does and is deliberately not a tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
@@ -695,7 +728,8 @@ target is its backdrop, and not on a click inside the card — though a press be
 and released over the backdrop can be a click on the backdrop — and whether that call closes it is
 the caller's. It keeps Tab and Shift+Tab, while focus is inside the card, among the card's focusable
 controls that are not hidden, or on the card itself when there are none, and sets `overflow: hidden`
-on the document's body, putting back on close what it found there when it last set it. It does not
+on the document's body, putting back what it found there when it last set it once it closes or its
+screen is hidden. It does not
 bring back focus that has left a card with controls in it — as when a step change unmounts the
 control that held it — so from there Tab and Shift+Tab move as the browser moves them, and Shift+Tab
 can reach the page behind the sheet. Once it has rendered open it calls `focus()` on the card, and
@@ -704,9 +738,19 @@ document — so where a child takes focus with `autoFocus` as the sheet opens, t
 from that child and, on close, focus returns to nothing. The browser ignores that call on an element
 that cannot take focus, and nothing on a screen the Shell has hidden can: a sheet that opens on a
 hidden screen does not take focus, and one that closes on a hidden screen gives none back to an
-element there. Its Tab trap stands down while the card sits inside a `hidden` ancestor, and such an
-Escape still calls its `onClose` there. A caller relies on this rather than restating it beside its
-own sheet.
+element there. While the Shell has hidden the screen holding it — `ScreenShown` is false there — an
+open sheet stays open and keeps what it holds, but takes nothing from the page: no scroll lock, no
+Escape, no Tab trap. They come back with the screen, and the card takes focus again, while a close
+still returns focus to what held it when the sheet opened. The Shell renders each screen's `hidden`
+and its `ScreenShown` from one value. The Tab trap also stands down while the card sits inside any
+other `hidden` ancestor. Its backdrop is on `--z-modal`, above the `--z-raised` layer a popover
+uses, so a popover left open behind a sheet stays under the backdrop. A caller relies on this
+rather than restating it beside its own sheet.
+
+`useDismiss` is the Escape-and-outside-press close that the recurring menu and `ChartDock`'s
+popover share. Like a sheet, it hears nothing while the Shell hides the screen it sits on.
+`Chips` takes `locked`, which marks every chip `aria-disabled` and ignores a press, for a form
+whose values are already on their way.
 
 `aria-current` is the app's idiom for which of a set is the current one — on the navigation's
 links, and on plain buttons in `AccountTabs`' account strip and `ChartDock`'s chart strip, neither
