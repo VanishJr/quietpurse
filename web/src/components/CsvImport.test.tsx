@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { fmtDate } from '../format';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
@@ -117,6 +117,42 @@ const fillCreateArm = async (container: HTMLElement, name: string): Promise<void
 };
 
 const countOf = (key: string): number => requests().filter((r) => r === key).length;
+
+describe('the Import page foundation', () => {
+  it('opens with a short device-local introduction and three separate guidance items', () => {
+    mockFetch(BASE);
+    mount();
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Import a statement' })).toBeInTheDocument();
+    expect(screen.getByText('Bring in a CSV, Excel or PDF statement. Finto reads it on this device.'))
+      .toBeInTheDocument();
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    expect(within(setup).getByRole('button', { name: /choose a CSV, Excel or PDF/i })).toBeInTheDocument();
+    expect(within(setup).getByRole('button', { name: 'Import' })).toBeInTheDocument();
+
+    const guide = screen.getByRole('complementary', { name: 'Before you import' });
+    expect(within(guide).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'Getting the file', 'Your file stays here', 'Re-imports are safe',
+    ]);
+    expect(guide).toHaveTextContent(/Export or Download.*PDF.*CSV or Excel export/s);
+    expect(guide).toHaveTextContent(/read on this device.*file and its rows stay in your Finto folder/s);
+    expect(guide).toHaveTextContent(/matched by content.*wider date range/s);
+  });
+
+  it('places the review between setup and guidance after the file is read', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container } = mount();
+    await upload(container);
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    const result = await screen.findByRole('region', { name: 'Import review or result' });
+    const guide = screen.getByRole('complementary', { name: 'Before you import' });
+    expect(setup.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(result.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(result).getByText(/nothing imported yet/)).toBeInTheDocument();
+  });
+});
 
 describe('the formats the screen offers', () => {
   /** Lets the preset load, and any read takeFile started, finish inside act. */

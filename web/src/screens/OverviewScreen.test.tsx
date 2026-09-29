@@ -194,7 +194,10 @@ describe('the page heading', () => {
   it('opens the import panel for a URL that names it', async () => {
     mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
 
-    expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Import a statement' });
+    expect(heading).toBeInTheDocument();
+    expect(heading.closest('.import-page')).toBeInTheDocument();
+    expect(heading.closest('.screen-inner')).toBeNull();
   });
 
   it('drops the panel from the URL on the way out, which is what the bar reads', async () => {
