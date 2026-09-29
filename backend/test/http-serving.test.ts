@@ -192,6 +192,16 @@ describe('the headers every answer carries', () => {
   });
 
   /**
+   * Of `app`, never of a build this file writes: the hold is that the app's own client
+   * mount stays below these headers. Whether this checkout is built decides the status,
+   * so the status is only the message.
+   */
+  it.each(['/', '/transactions', '/assets/index-a1b2c3.js'])('refuses to be framed at %s', async (p) => {
+    const res = await agent.get(p).set('Accept', 'text/html');
+    expect(res.headers['x-frame-options'], String(res.status)).toBe('DENY');
+  });
+
+  /**
    * Both of these are the whole database in one response, and res.send sets an ETag
    * and no Cache-Control - which permits a cache to keep a copy the person did not
    * ask anybody to keep. The document download already said so; these two did not.
