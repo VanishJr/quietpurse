@@ -1,7 +1,6 @@
 /**
- * A run is held at its Monobank rate call, which it makes once everything it tags with
- * is loaded. A held call is released with a rejection and never with a rate list: an
- * answer is cached, and the next run would then make no call to count.
+ * A held rate call is released with a rejection and never with a rate list: an answer is
+ * cached, and the next run would then make no call to count.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reclassifyAll, reclassifyIdle, reclassifyIfRulesChanged } from '../src/classify';

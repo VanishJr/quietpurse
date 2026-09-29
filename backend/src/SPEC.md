@@ -318,8 +318,9 @@ with every converted amount reset and refills them in the background, because th
 rates and a request cannot wait on the network. `GET /api/conversion` says whether any refill is
 running — the start-up refill that runs when the rules have not changed, a recompute's refill and a
 currency change's refill can overlap — and how many rows still have no base amount, so a client that
-re-reads its figures once `converting` is false does not show the gap as the data. Stopping is not finishing: a rate that could not be fetched
-leaves its rows without a base amount until the next recompute, and `unconverted` is what says so.
+re-reads its figures once `converting` is false does not show the gap as the data. Stopping is not
+finishing: a rate that could not be fetched leaves its rows without a base amount until the next
+recompute, and `unconverted` is what says so.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
