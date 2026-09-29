@@ -16,6 +16,7 @@ export type {
   ChartKind,
   ChartMetric,
   ChartRange,
+  Conversion,
   Deleted,
   DocumentDeleted,
   GoalBasis,

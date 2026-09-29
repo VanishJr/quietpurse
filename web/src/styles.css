@@ -34,10 +34,8 @@ body {
  *
  * `manipulation` gives up double-tap-to-zoom on buttons, and with it the ~300ms a
  * mobile browser otherwise waits after every tap to find out whether a second one is
- * coming. Nothing in this app is zoomed by double-tapping a button — the chips, the
- * pills, the rail and the sheet's actions are all single-tap — so the wait buys
- * nothing and is paid on every tap of all of them. Panning and pinch-zoom of the page
- * are untouched.
+ * coming. Nothing in this app is zoomed by double-tapping a button, so the wait buys
+ * nothing and is paid on every tap. Panning and pinch-zoom of the page are untouched.
  *
  * The tap highlight is a filled rectangle drawn over the control on touch-down, in a
  * colour the platform picks. On a row of `--r-pill` discs it is a square, on the navy
@@ -56,23 +54,19 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   cursor: default;
 }
 
 /*
- * The rest of that reset, for the two classes in the top bar that are anchors rather
- * than buttons — the sections and the settings control; the header of Shell.tsx says why a
- * destination is a link. The rule above cannot reach them, and a link arrives with an
- * underline of its own that nothing further down this file turns off.
+ * The rest of that reset, for the section links, which are anchors rather than buttons:
+ * the rule above cannot reach them, and a link arrives with an underline of its own.
  *
- * Colour is not reset here: `.nav-item` and `.settings-link` each set their own, so a
- * `color: inherit` in this rule would be a declaration written to be beaten. What they
- * never set is the underline — and the two touch behaviours are as true of a link that
- * navigates as of a button that does.
+ * Colour is not reset here: `.nav-item` sets its own, so a `color: inherit` in this rule
+ * would be a declaration written to be beaten.
  */
-.nav-item,
-.settings-link {
+.nav-item {
   text-decoration: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -90,32 +84,15 @@ textarea {
 }
 
 /*
- * Reduced motion, for the whole sheet.
+ * Reduced motion, for the whole sheet. Under `reduce` a transition cuts to its end
+ * state, so nothing here may animate in order to be correct: the end state has to be
+ * right without the tween.
  *
- * Nothing in this app animates in order to be correct. Seven transitions are declared
- * below and six of them are a colour: the nav pills, the two rail discs, the theme
- * button, the tab names and the dropzone as the pointer arrives, and the switch's
- * track as it turns on. The seventh is the switch knob, sliding 18px. Every one ends
- * on a state that is right without the tween, so under `reduce` they cut to it and
- * nothing is lost but the travel.
- *
- * The charts needed no equivalent. Every Recharts series in the app already passes
- * `isAnimationActive={false}`, for a different reason — the screens stay mounted, so
- * a chart first renders inside a hidden container and an animation started there
- * freezes at an arbitrary frame — which happens to leave this file as the only thing
- * in the app that moves.
- *
- * `*` rather than the seven selectors, because the point of the rule is the eighth:
- * a transition written later is covered by something nobody has to remember. `0.01ms`
- * and not `0` for the usual reason — a `transitionend` listener still fires.
+ * `*` rather than the transitioned selectors, because the point of the rule is the
+ * transition written later, covered by something nobody has to remember; the same goes
+ * for `scroll-behavior`. `0.01ms` and not `0`, so a `transitionend` listener still fires.
  *
  * Unscoped rather than under a root class: this sheet is the app's alone.
- *
- * `scroll-behavior` IS here, which it did not used to be: the note that stood in its
- * place said nothing in the app scrolled smoothly, and that stopped being true when the
- * Analytics dock grew arrows. `.dock-tabs` is the one element that sets it, and this is
- * where it is taken back off — the same argument as the `*` above, which is that a rule
- * written later should be covered by something nobody has to remember.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -243,36 +220,38 @@ textarea {
   margin-top: 22px;
 }
 .topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-top: auto;
   padding-top: 40px;
 }
-.icon-btn {
-  order: 2;
-  flex: none;
-  width: 32px;
-  height: 36px;
-  font-size: 18px;
-  border-radius: var(--r-sm);
+.theme-title {
+  display: block;
+  margin: 0 0 8px 14px;
+  font-size: 12px;
   color: var(--ink-secondary);
 }
-.settings-link {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 14px;
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--ink-border);
   border-radius: var(--r-sm);
-  color: var(--ink-secondary);
-  font-size: 13px;
+  background: var(--ink-surface);
 }
-.settings-link[aria-current='page'],
-.settings-link:hover,
-.icon-btn:hover {
+.theme-option {
+  min-width: 0;
+  min-height: 40px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-secondary);
+}
+.theme-option:hover {
   background: var(--ink-raised);
   color: var(--ink-primary);
+}
+.theme-option[aria-pressed='true'] {
+  background: var(--ink-accent);
+  color: var(--ink-onAccent);
 }
 .device-note {
   display: flex;
@@ -317,12 +296,15 @@ textarea {
     padding: 0;
     margin: 0;
   }
-  .settings-label,
-  .device-note {
+  .theme-title {
     display: none;
   }
-  .settings-link {
-    padding: 8px;
+  .theme-option {
+    min-height: 44px;
+    padding: 0 9px;
+  }
+  .device-note {
+    display: none;
   }
   .tabbar {
     position: fixed;
@@ -446,7 +428,8 @@ textarea {
   text-align: center;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.5;
 }
 
@@ -477,7 +460,8 @@ textarea {
   border-color: var(--ink-muted);
 }
 
-.btn-ghost:disabled {
+.btn-ghost:disabled,
+.btn-ghost[aria-disabled='true'] {
   opacity: 0.5;
 }
 
@@ -841,7 +825,7 @@ textarea {
   inset: 0;
   background: var(--ink-backdrop);
   display: flex;
-  z-index: 10;
+  z-index: var(--z-modal);
 }
 
 /* phone: sheet slides up from the bottom edge */
@@ -989,13 +973,6 @@ textarea {
   color: var(--ink-muted);
   line-height: 1.35;
   margin-bottom: 8px;
-}
-
-.api-hint {
-  color: var(--ink-muted);
-  font-size: 11px;
-  text-align: center;
-  margin: 8px 0;
 }
 
 /* Text for a screen reader and nobody else. */
@@ -1757,34 +1734,552 @@ textarea {
   line-height: 1.6;
 }
 
-/* ---------- the Account screen's sections ---------- */
+.settings-page {
+  max-width: 1160px;
+}
 
-/* Everything that is about the workspace rather than about one account lives on that
-   screen now, in order: who you are, how the app computes, what it found, your data,
-   leaving. Each section is a card, so the order reads as separation rather than as a
-   run of headings down one column. */
-.settings-section {
+.settings-page .settings-header {
+  margin: 12px 0 28px;
+}
+
+.settings-page .settings-header .title {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+}
+
+.settings-page .settings-intro {
+  margin: 8px 0 0;
+  color: var(--ink-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.settings-page .settings-top {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.settings-page .settings-card {
+  min-width: 0;
+  padding: 24px;
   border: 1px solid var(--ink-border);
   border-radius: var(--r-xl);
   background: var(--ink-surface);
-  padding: 20px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.settings-title {
+.settings-page .settings-top .settings-card {
+  margin-bottom: 0;
+}
+
+.settings-page .settings-title,
+.settings-page .settings-card > .block-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
-.settings-lead {
-  margin: 4px 0 14px;
+.settings-page .settings-lead {
+  margin: 8px 0 18px;
   font-size: 13px;
-  color: var(--ink-muted);
-  line-height: 1.45;
+  color: var(--ink-secondary);
+  line-height: 1.5;
 }
 
-/* ---------- narrow ---------- */
+.settings-page .settings-card > .hint {
+  margin-top: 8px;
+}
+
+.settings-page .input:focus-visible {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-currency-input {
+  max-width: 180px;
+}
+
+.settings-page .settings-currency-name {
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-owner-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0;
+  list-style: none;
+}
+
+.settings-page .settings-owner-tag {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-primary);
+  font-size: 13px;
+}
+
+.settings-page .settings-owner-tag span {
+  min-width: 0;
+  padding: 8px 4px 8px 10px;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-owner-tag button {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 20px;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-owner-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.settings-page .settings-owner-entry .input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.settings-page .settings-owner-entry .btn-ghost {
+  min-height: 44px;
+}
+
+.settings-page .settings-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 16px;
+}
+
+.settings-page .settings-save-status {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+}
+
+.settings-page .settings-income-row {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.settings-page .settings-income-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.settings-page .settings-income-heading .row-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.settings-page .settings-income-kind {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-secondary);
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-page .settings-income-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.settings-page .settings-income-actions button {
+  min-height: 44px;
+}
+
+.settings-page .settings-income-add {
+  font-weight: 600;
+  min-height: 44px;
+}
+
+.settings-page .settings-income-editor .setting-label {
+  margin: 16px 0 6px;
+}
+
+.settings-page .settings-income-editor .hint {
+  margin: 8px 0;
+}
+
+.settings-page .settings-income-editor .btn-row button {
+  min-height: 44px;
+}
+
+.settings-page .settings-recurring-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.settings-page .settings-recurring-header .settings-lead {
+  margin-bottom: 18px;
+}
+
+.settings-page .settings-recurring-header .settings-title:focus {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
+}
+
+.settings-page .settings-recurring-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 18px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.settings-page .settings-recurring-summary strong {
+  max-width: 100%;
+  color: var(--ink-primary);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto minmax(44px, max-content);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ink-grid);
+}
+
+.settings-page .settings-recurring-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.settings-page .settings-recurring-info {
+  min-width: 0;
+}
+
+.settings-page .settings-recurring-name {
+  color: var(--ink-primary);
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-meta {
+  color: var(--ink-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-amount {
+  color: var(--ink-primary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-page .settings-recurring-actions {
+  position: relative;
+}
+
+.settings-page .settings-recurring-trigger,
+.settings-page .settings-recurring-restore {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-recurring-trigger {
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+}
+
+.settings-page .settings-recurring-restore {
+  color: var(--ink-accent);
+  font-size: 13px;
+}
+
+.settings-page .settings-recurring-menu {
+  position: absolute;
+  z-index: var(--z-raised);
+  right: 0;
+  top: 100%;
+  min-width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 4px;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+}
+
+.settings-page .settings-recurring-menu button {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 12px;
+  color: var(--ink-bad);
+  text-align: left;
+}
+
+.settings-page .settings-recurring-menu button:hover,
+.settings-page .settings-recurring-trigger:hover:not([aria-disabled='true']) {
+  background: var(--ink-raised);
+}
+
+.settings-page .settings-recurring-more,
+.settings-page .settings-recurring-excluded summary {
+  display: block;
+  min-height: 44px;
+  padding: 12px 0;
+  color: var(--ink-accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-page .settings-recurring-excluded {
+  margin-top: 8px;
+  border-top: 1px solid var(--ink-grid);
+}
+
+.settings-page .settings-recurring-excluded summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-excluded-chevron {
+  display: flex;
+  flex: none;
+}
+
+.settings-page .settings-recurring-excluded-chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-page .settings-recurring-excluded[open] > summary .settings-recurring-excluded-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-page .settings-recurring-error .error {
+  margin: 8px 0;
+}
+
+.settings-page .settings-data-actions {
+  border: 1px solid var(--ink-border);
+  border-radius: var(--r-md);
+}
+
+.settings-page .settings-data-item + .settings-data-item {
+  border-top: 1px solid var(--ink-border);
+}
+
+.settings-page .settings-data-action {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 76px;
+  padding: 12px;
+  text-align: left;
+  border-radius: var(--r-md);
+}
+
+.settings-page .settings-data-action:hover:not(:disabled) {
+  background: var(--ink-raised);
+}
+
+.settings-page .settings-data-action:disabled {
+  opacity: 0.65;
+}
+
+.settings-page .settings-data-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+  background: var(--ink-raised);
+  color: var(--ink-accent);
+}
+
+.settings-page .settings-data-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-page .settings-data-label {
+  color: var(--ink-primary);
+  font-weight: 600;
+}
+
+.settings-page .settings-data-description {
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-data-trailing {
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-data-error {
+  margin: 0;
+  padding: 0 12px 12px 64px;
+  font-size: 13px;
+}
+
+.settings-page .settings-card .row {
+  flex-wrap: wrap;
+}
+
+.settings-page .settings-card .row-main {
+  flex-basis: 180px;
+}
+
+.settings-page .settings-card .row-sub,
+.settings-page .settings-card .hint,
+.settings-page .settings-card .error,
+.settings-page .settings-intro {
+  overflow-wrap: anywhere;
+}
+
+.settings-page .settings-advanced {
+  padding: 0;
+}
+
+.settings-page .settings-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 20px 24px;
+  color: var(--ink-primary);
+  text-align: left;
+}
+
+.settings-page .settings-advanced-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-page .settings-advanced-chevron {
+  display: flex;
+  flex: none;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-advanced-toggle[aria-expanded='true'] .settings-advanced-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-page .settings-advanced-content {
+  padding: 0 24px 24px;
+}
+
+.settings-page .settings-advanced-content .settings-lead {
+  margin: 0 0 8px;
+}
+
+.settings-page .settings-api-origin {
+  display: block;
+  color: var(--ink-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+@media (min-width: 1200px) {
+  .settings-page .settings-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 599px) {
+  .settings-page .settings-header {
+    margin-bottom: 22px;
+  }
+
+  .settings-page .settings-card {
+    padding: 18px;
+  }
+
+  .settings-page .settings-advanced {
+    padding: 0;
+  }
+
+  .settings-page .settings-advanced-toggle {
+    padding: 18px;
+  }
+
+  .settings-page .settings-advanced-content {
+    padding: 0 18px 18px;
+  }
+
+  .settings-page .settings-recurring-summary {
+    align-items: flex-start;
+  }
+
+  .settings-page .settings-recurring-row {
+    grid-template-columns: 14px minmax(0, 1fr) minmax(44px, max-content);
+    gap: 4px 10px;
+  }
+
+  .settings-page .settings-recurring-marker {
+    grid-row: 1;
+  }
+
+  .settings-page .settings-recurring-info {
+    grid-column: 2;
+  }
+
+  .settings-page .settings-recurring-amount {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-page .settings-recurring-actions,
+  .settings-page .settings-recurring-restore {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}
 
 /* ---------- analytics: the chart workspace ---------- */
 
@@ -2620,11 +3115,6 @@ textarea {
   font-size: 12px;
   color: var(--ink-muted);
   margin-top: 8px;
-}
-
-.input-code {
-  width: 80px;
-  flex: none;
 }
 
 .body-text {

@@ -10,6 +10,7 @@
 import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
+import { recurringKey } from '../src/categorizer';
 import { RecurringGroup, applyClassification, insertTransactions, seedDefaults } from '../src/db';
 import { NewTransaction } from '../src/types';
 import { idOf } from './helpers';
@@ -85,6 +86,19 @@ beforeAll(async () => {
   const before = await recurring();
   expect(rentGroup(before)).toMatchObject({ months: 3, monthlyAvg: RENT, ignored: false });
   expect(before.monthlyTotal).toBe(RENT);
+});
+
+describe('GET /api/recurring', () => {
+  /**
+   * The group answers under its newest spelling, which moves every month, so a client
+   * that follows one group across reads has to follow the key the hide is stored under.
+   */
+  it('names each group by the key a hide by any of its spellings lands on', async () => {
+    const group = rentGroup(await recurring());
+    expect(group?.description).toBe(rentLine(-1));
+    expect(group?.key).toBe(recurringKey(rentLine(-3)));
+    expect(group?.key).toBe(recurringKey(rentLine(-1)));
+  });
 });
 
 describe('POST /api/recurring/ignore', () => {

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { defs } from '../analytics';
 import { api } from '../api';
 import { Chips } from './Chips';
+import { Sheet } from './Sheet';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
 
 /**
@@ -38,9 +39,14 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<Open | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<IncomeSourceKind>('external');
   const [patterns, setPatterns] = useState('');
+  const addRef = useRef<HTMLButtonElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const editRefs = useRef(new Map<string, HTMLButtonElement>());
+  const refocus = useRef<{ edited: string | null } | null>(null);
 
   const read = useCallback(async () => {
     setSources(await api.incomeSources());
@@ -55,18 +61,45 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
     load();
   }, [load]);
 
+  /*
+   * The committed write clears the rows, and with them the control that opened the form,
+   * so the Sheet has no opener left to hand focus back to. It lands here once the catalog
+   * answered, unless the reader has already put it somewhere themselves.
+   */
+  useEffect(() => {
+    const target = refocus.current;
+    if (!target || busy) return;
+    refocus.current = null;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
+    const next = sources
+      ? (target.edited !== null && editRefs.current.get(target.edited)) || addRef.current
+      : retryRef.current;
+    next?.focus();
+  }, [busy, sources]);
+
   /**
    * Invalidation precedes the catalog refresh: the write already changed every reader,
    * and a failed follow-up GET must not leave those readers on pre-mutation data.
    */
   const run = async (write: () => Promise<unknown>) => {
+    if (busy) return;
     setBusy(true);
+    setActionError(null);
     try {
-      setError(null);
       await write();
-      setOpen(null);
+    } catch (e) {
+      setActionError((e as Error).message);
+      setBusy(false);
+      return;
+    }
+    refocus.current = { edited: open?.form === 'edit' ? open.id : null };
+    setOpen(null);
+    setSources(null);
+    try {
       await onChanged();
       await read();
+      setError(null);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -86,6 +119,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const remove = (id: string) => run(() => api.deleteIncomeSource(id));
 
   const openAdd = () => {
+    if (busy || open !== null) return;
+    setActionError(null);
     setLabel('');
     setKind('external');
     setPatterns('');
@@ -93,6 +128,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   };
 
   const openEdit = (s: IncomeSourceDef) => {
+    setActionError(null);
     setLabel(s.label);
     setKind(s.kind);
     setPatterns(s.patterns.join(', '));
@@ -106,8 +142,13 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
    */
   const destination = sources?.find((s) => s.id === 'other');
 
+  const close = () => {
+    if (!busy) setOpen(null);
+  };
+
   const form = (onOk: () => void) => (
-    <>
+    <div className="settings-income-editor">
+      <h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>
       <label className="setting-label" htmlFor="source-label">
         Source name
       </label>
@@ -115,8 +156,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         id="source-label"
         className="input"
         value={label}
+        readOnly={busy}
         onChange={(e) => setLabel(e.target.value)}
-        autoFocus
         placeholder="Stipend"
       />
       <div className="setting-label">Counts as</div>
@@ -125,6 +166,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         options={KINDS.map((k) => ({ key: k.key, label: k.label }))}
         selected={kind}
         onSelect={(k) => setKind(k as IncomeSourceKind)}
+        locked={busy}
       />
       <p className="hint">
         Changing this updates every income-based goal; transaction assignments stay the same.
@@ -136,6 +178,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         id="source-patterns"
         className="input"
         value={patterns}
+        readOnly={busy}
         onChange={(e) => setPatterns(e.target.value)}
         placeholder="Musterstiftung Musterstadt, Leistungsstipendium Beispielstadt"
       />
@@ -147,20 +190,21 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         Comma-separate phrases. Each phrase needs at least two words of 3+ letters; leave blank
         for manual tagging.
       </p>
+      {actionError && <p className="error" role="alert">Error: {actionError}</p>}
       <div className="btn-row">
-        <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
+        <button className="btn-ghost" type="button" aria-disabled={busy} onClick={close}>
           Cancel
         </button>
-        <button className="btn" disabled={busy} onClick={onOk}>
-          Save
+        <button className="btn" type="button" aria-disabled={busy} onClick={onOk}>
+          {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
-    </>
+    </div>
   );
 
   return (
     <>
-      <h2 className="block-title">Income sources</h2>
+      <h2 className="block-title" id="settings-income-title">Income sources</h2>
       <p className="hint">
         Support is tracked separately and does not count toward earnings goals.
       </p>
@@ -173,7 +217,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           {!sources && (
             <>
               {' · '}
-              <button className="btn-link" type="button" onClick={load}>
+              <button ref={retryRef} className="btn-link" type="button" onClick={load}>
                 Retry
               </button>
             </>
@@ -181,50 +225,56 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         </p>
       )}
 
+      {!sources && !error && <p role="status" className="hint">Loading income sources…</p>}
+
       {sources && (
         <>
           {sources.map((s) => {
             const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
-            if (mine?.form === 'edit') {
-              return (
-                <div key={s.id} className="row">
-                  <div className="row-main">{form(() => save(s.id))}</div>
-                </div>
-              );
-            }
             return (
-              <div key={s.id} className="row">
+              <div key={s.id} className="row settings-income-row">
                 <div className="row-main">
-                  <div className="row-title">{s.label}</div>
+                  <div className="settings-income-heading">
+                    <span className="row-title">{s.label}</span>
+                    <span className="settings-income-kind">{kindLabel(s.kind)}</span>
+                  </div>
                   <div className="row-sub">
-                    {kindLabel(s.kind)}
-                    {/* the patterns themselves and not what they tag: "tags income matching
-                        X" is false for a pattern under the matcher's floor, and the form's
-                        hint is gone by the time this row is read */}
                     {s.patterns.length > 0
-                      ? ` · Auto-match: ${s.patterns.join(', ')}`
-                      : ' · Manual only'}
+                      ? `${s.patterns.length} automatic match ${s.patterns.length === 1 ? 'pattern' : 'patterns'}`
+                      : 'Manual only'}
                   </div>
                   {mine?.form === 'delete' && (
                     <>
                       <p className="hint">
-                        Delete “{s.label}”? Assigned transactions move to {destination?.label ?? 'Other'}.
-                        Manual assignments cannot be restored.
+                        Delete “{s.label}”? {destination
+                          ? `Assigned transactions move to ${destination.label}. Manual assignments cannot be restored.`
+                          : 'The destination source is unavailable. Reload the catalog before deleting.'}
                       </p>
+                      {actionError && <p className="error" role="alert">Error: {actionError}</p>}
                       <div className="btn-row">
-                        <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
+                        <button className="btn-ghost" aria-disabled={busy} onClick={close}>
                           Cancel
                         </button>
-                        <button className="btn-danger" disabled={busy} onClick={() => remove(s.id)}>
+                        <button
+                          className="btn-danger"
+                          aria-disabled={busy || !destination}
+                          onClick={() => {
+                            if (destination) remove(s.id);
+                          }}
+                        >
                           Delete
                         </button>
                       </div>
                     </>
                   )}
                 </div>
-                {!mine && (
-                  <>
+                {mine?.form !== 'delete' && (
+                  <div className="settings-income-actions">
                     <button
+                      ref={(button) => {
+                        if (button) editRefs.current.set(s.id, button);
+                        else editRefs.current.delete(s.id);
+                      }}
                       className="btn-ghost"
                       disabled={busy}
                       onClick={() => openEdit(s)}
@@ -234,38 +284,39 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                     </button>
                     {/* a builtin has no delete control, and the route refuses one anyway;
                         a deleted source's rows move to `other` */}
-                    {!s.builtin && (
+                    {!s.builtin && !mine && (
                       <button
                         className="btn-danger"
                         disabled={busy}
-                        onClick={() => setOpen({ form: 'delete', id: s.id })}
+                        onClick={() => { setActionError(null); setOpen({ form: 'delete', id: s.id }); }}
                         aria-label={`Delete ${s.label}`}
                       >
                         Delete
                       </button>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
             );
           })}
 
-          {open?.form === 'add' ? (
-            <div className="row">
-              <div className="row-main">{form(add)}</div>
-            </div>
-          ) : (
-            <button
-              className="btn-link"
-              style={{ fontWeight: 600, padding: '12px 0' }}
-              disabled={busy || open !== null}
-              onClick={openAdd}
-            >
-              Add source
-            </button>
-          )}
+          <button
+            ref={addRef}
+            className="btn-link settings-income-add"
+            aria-disabled={busy || open !== null}
+            onClick={openAdd}
+          >
+            Add source
+          </button>
         </>
       )}
+      <Sheet
+        open={open?.form === 'add' || open?.form === 'edit'}
+        onClose={close}
+        title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
+      >
+        {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}
+      </Sheet>
     </>
   );
 }

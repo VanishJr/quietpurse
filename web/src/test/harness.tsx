@@ -28,9 +28,10 @@ import {
  *
  * Known limit: the guard sees only what was requested by the time its afterEach
  * runs. One arriving later is wiped by the next test's resetFetch(), or never read
- * at all after the last test in a file. Unreachable while nothing in web/src uses
- * setTimeout, setInterval or requestAnimationFrame - real with the first debounced
- * or polled request, which is when this needs fixing.
+ * at all after the last test in a file. A request made from a timer stays inside
+ * that limit only while its timer stops when its component unmounts: setup.ts's
+ * afterEach unmounts before the guard reads. One that outlives its component is
+ * when this needs fixing.
  */
 
 /**

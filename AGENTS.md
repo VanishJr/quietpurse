@@ -142,7 +142,7 @@ navigation and no download, so whether a file lands on disk is unanswerable here
 rendering — recharts measures a 0×0 box, so a test can mount a donut and assert nothing about it.
 Those checks stay manual, and an agent can run them: a real Chrome is reachable through the
 `claude-in-chrome` tools, and each check is recorded with how it was observed (`.agents/README.md`,
-and rule 9 in `.claude/agents/reviewer.md`). The carve-out is **`⬇ Export my data (.json)`**, which
+and rule 9 in `.claude/agents/reviewer.md`). The carve-out is Settings' **`Export backup`**, which
 stays the maintainer's — it writes every transaction to a file, and that is not an export an agent
 runs on anyone's behalf.
 

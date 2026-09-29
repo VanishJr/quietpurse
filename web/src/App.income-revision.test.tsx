@@ -46,6 +46,7 @@ describe('income-source data revision', () => {
       return { from: query.get('from') ?? '', to: query.get('to') ?? '' };
     };
     const recurringGroup = {
+      key: 'monthly gym payment',
       description: 'Monthly gym payment',
       category: 'subscriptions',
       months: 3,
@@ -135,12 +136,11 @@ describe('income-source data revision', () => {
     const recurringBefore = requests().filter(
       (request) => request === 'GET /api/recurring',
     ).length;
-    const sourceForm = screen.getByLabelText('Source name').closest('.row') as HTMLElement;
-    fireEvent.click(within(sourceForm).getByRole('button', { name: 'Save' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Edit source' })).getByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText('Grant')).toBeVisible();
     expect(
-      await screen.findByRole('button', { name: 'Hide payment Monthly gym payment' }),
+      await screen.findByRole('button', { name: 'Actions for Monthly gym payment' }),
     ).toBeVisible();
     await waitFor(() => {
       expect(

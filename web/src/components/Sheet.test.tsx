@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
+import { ScreenShown } from '../screen';
 import { Sheet } from './Sheet';
 
 function Menu() {
@@ -17,6 +18,54 @@ function Menu() {
     </>
   );
 }
+
+/** A sheet on a screen the reader can leave and come back to, as the Shell arranges it. */
+function Screened() {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(true);
+  return (
+    <>
+      <button onClick={() => setShown((value) => !value)}>Switch screen</button>
+      <div hidden={!shown}>
+        <ScreenShown value={shown}>
+          <button onClick={() => setOpen(true)}>Open</button>
+          <Sheet open={open} onClose={() => setOpen(false)} title="Transaction">
+            <button onClick={() => setOpen(false)}>Close</button>
+          </Sheet>
+        </ScreenShown>
+      </div>
+    </>
+  );
+}
+
+describe('a sheet on a hidden screen', () => {
+  it('holds nothing of the page while hidden, and takes it back with the screen', () => {
+    render(<Screened />);
+    const opener = screen.getByRole('button', { name: 'Open' });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    const switcher = screen.getByRole('button', { name: 'Switch screen' });
+    switcher.focus();
+    fireEvent.click(switcher);
+    expect(document.body.style.overflow).toBe('');
+    fireEvent.keyDown(switcher, { key: 'Escape' });
+    expect(fireEvent.keyDown(switcher, { key: 'Tab' })).toBe(true);
+    expect(screen.getByRole('dialog', { hidden: true })).toBeInTheDocument();
+
+    fireEvent.click(switcher);
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    // back to what opened it, not to the control that brought the reader back
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(document.body.style.overflow).toBe('');
+  });
+});
 
 describe('account menu keyboard navigation', () => {
   it('includes description disclosures and keeps focus inside after a preview heading is focused', () => {

@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef } from 'react';
+import { ScreenShown } from '../screen';
 
 interface Props {
   open: boolean;
@@ -16,9 +17,11 @@ interface Props {
  */
 export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const shown = useContext(ScreenShown);
+  const live = open && shown;
 
   useEffect(() => {
-    if (!open) return;
+    if (!live) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
       if (e.key !== 'Tab') return;
@@ -49,22 +52,30 @@ export function Sheet({ open, onClose, position = 'bottom', wide = false, title,
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [live, onClose]);
 
   /*
-   * Moving the keyboard in happens once, on opening, and is its own effect for exactly
-   * that reason: a caller may pass a fresh `onClose` arrow on each render, and in the
-   * effect above this would re-run — and re-focus the card, taking the caret out of an
-   * input mid-word — every time the parent rendered for any reason at all.
+   * The opener is taken once per opening, not once per showing: a return to the screen
+   * finds the navigation link that brought the reader back in focus, and that is not
+   * where a close should send them.
    */
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement;
-    cardRef.current?.focus();
     return () => {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   }, [open]);
+
+  /*
+   * Moving the keyboard in is its own effect, keyed on nothing but `live`: a caller may
+   * pass a fresh `onClose` arrow on each render, and in the first effect this would
+   * re-run — and re-focus the card, taking the caret out of an input mid-word — every
+   * time the parent rendered for any reason at all.
+   */
+  useEffect(() => {
+    if (live) cardRef.current?.focus();
+  }, [live]);
 
   if (!open) return null;
 

@@ -4,12 +4,24 @@ import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
+import { ImportIcon } from '../components/NavIcons';
+import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
+import { useDismiss } from '../dismiss';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
+import { useTheme } from '../theme';
 import { RecurringSummary } from '../types';
 import { setUrl, useUrl } from '../url';
 
 const RECURRING_LIMIT = 8;
+
+/** By `key`: a group answers under its newest spelling, and that moves between reads. */
+const recurringActionObsolete = (summary: RecurringSummary, key: string, ignored: boolean) => {
+  const group = summary.groups.find((item) => item.key === key);
+  return !group || group.ignored === ignored;
+};
+
+type FailedRecurringAction = { key: string; description: string; ignored: boolean; message: string };
 
 interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
@@ -24,8 +36,33 @@ export function SettingsScreen({
   dataRevision = 0,
 }: Props) {
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
-  const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [recurringReadError, setRecurringReadError] = useState<string | null>(null);
+  const [recurringActionErrors, setRecurringActionErrors] = useState<FailedRecurringAction[]>([]);
   const recurringRequest = useRef(0);
+  const recurringAnswer = useRef<{ request: number; summary: RecurringSummary } | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [recurringBusy, setRecurringBusy] = useState(false);
+  const [openRecurringMenu, setOpenRecurringMenu] = useState<string | null>(null);
+  const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const recurringMenuRef = useRef<HTMLDivElement>(null);
+  const recurringTriggerRef = useRef<HTMLButtonElement>(null);
+  const recurringActionRef = useRef<HTMLButtonElement>(null);
+  const recurringTitleRef = useRef<HTMLHeadingElement>(null);
+  const { categoryColor } = useTheme();
+
+  useDismiss(
+    openRecurringMenu,
+    (target) => !!recurringMenuRef.current?.contains(target),
+    () => {
+      setOpenRecurringMenu(null);
+      recurringTriggerRef.current?.focus();
+    },
+    () => setOpenRecurringMenu(null),
+  );
+
+  useEffect(() => {
+    if (openRecurringMenu) recurringActionRef.current?.focus();
+  }, [openRecurringMenu]);
 
   /**
    * The import history takes the screen over, so it is a place the reader can BE, and
@@ -51,32 +88,121 @@ export function SettingsScreen({
    */
   const [exporting, setExporting] = useState(false);
 
+  const takeRecurring = useCallback((request: number, summary: RecurringSummary) => {
+    recurringAnswer.current = { request, summary };
+    setRecurring(summary);
+    setRecurringActionErrors((failed) =>
+      failed.filter((action) => !recurringActionObsolete(summary, action.key, action.ignored)));
+  }, []);
+
   const loadRecurring = useCallback(async () => {
     const request = ++recurringRequest.current;
+    setOpenRecurringMenu(null);
     setRecurring(null);
+    setRecurringReadError(null);
     try {
-      setRecurringError(null);
       const next = await api.recurring();
-      if (request === recurringRequest.current) setRecurring(next);
+      if (request === recurringRequest.current) takeRecurring(request, next);
     } catch (e) {
-      if (request === recurringRequest.current) setRecurringError((e as Error).message);
+      if (request === recurringRequest.current) setRecurringReadError((e as Error).message);
     }
-  }, []);
+  }, [takeRecurring]);
 
   useEffect(() => {
     loadRecurring();
   }, [dataRevision, loadRecurring]);
 
-  const toggleRecurring = async (description: string, ignored: boolean) => {
+  const toggleRecurring = async ({ key, description }: RecurringSummary['groups'][number], ignored: boolean) => {
+    if (recurringBusy) return;
+    setRecurringBusy(true);
+    if (ignored) recurringTriggerRef.current?.focus();
+    setOpenRecurringMenu(null);
     const request = ++recurringRequest.current;
+    const overtaken = () => {
+      const latest = recurringAnswer.current;
+      return !!latest && latest.request > request && recurringActionObsolete(latest.summary, key, ignored);
+    };
+    const otherPayments = (failed: FailedRecurringAction[]) => failed.filter((action) => action.key !== key);
+    setRecurringActionErrors(otherPayments);
     try {
-      setRecurringError(null);
       const next = await api.setRecurringIgnored(description, ignored);
-      if (request === recurringRequest.current) setRecurring(next);
+      if (request === recurringRequest.current) takeRecurring(request, next);
+      else if (!overtaken()) await loadRecurring();
+      const title = recurringTitleRef.current;
+      const focused = document.activeElement;
+      if (!focused || focused === document.body || title?.closest('section')?.contains(focused)) {
+        title?.focus();
+      }
     } catch (e) {
-      if (request === recurringRequest.current) setRecurringError((e as Error).message);
+      if (!overtaken()) {
+        const refused = { key, description, ignored, message: (e as Error).message };
+        setRecurringActionErrors((failed) => [...otherPayments(failed), refused]);
+      }
+    } finally {
+      setRecurringBusy(false);
     }
   };
+
+  const recurringRow = (g: RecurringSummary['groups'][number], excluded: boolean) => (
+    <div key={g.key} className="settings-recurring-row">
+      <span className="settings-recurring-marker" style={{ backgroundColor: categoryColor(g.category) }} aria-hidden="true" />
+      <div className="settings-recurring-info">
+        <div className="settings-recurring-name">{g.description}</div>
+        <div className="settings-recurring-meta">
+          {categoryLabel(g.category)} · {g.months} months detected · last {fmtDate(g.lastDate)}
+        </div>
+      </div>
+      <strong className="settings-recurring-amount">
+        {fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}/mo
+      </strong>
+      {excluded ? (
+        <button
+          className="settings-recurring-restore"
+          type="button"
+          aria-label={`Restore payment ${g.description}`}
+          aria-disabled={recurringBusy}
+          onClick={() => toggleRecurring(g, false)}
+        >
+          Restore
+        </button>
+      ) : (
+        <div
+          className="settings-recurring-actions"
+          ref={openRecurringMenu === g.key ? recurringMenuRef : undefined}
+        >
+          <button
+            className="settings-recurring-trigger"
+            type="button"
+            aria-label={`Actions for ${g.description}`}
+            aria-expanded={openRecurringMenu === g.key}
+            aria-controls={openRecurringMenu === g.key ? 'settings-recurring-menu' : undefined}
+            aria-disabled={recurringBusy}
+            ref={openRecurringMenu === g.key ? recurringTriggerRef : undefined}
+            onClick={(event) => {
+              if (recurringBusy) return;
+              recurringTriggerRef.current = event.currentTarget;
+              if (openRecurringMenu === g.key) event.currentTarget.focus();
+              setOpenRecurringMenu(openRecurringMenu === g.key ? null : g.key);
+            }}
+          >
+            <MoreIcon />
+          </button>
+          {openRecurringMenu === g.key && (
+            <div className="settings-recurring-menu" id="settings-recurring-menu">
+              <button
+                ref={recurringActionRef}
+                type="button"
+                aria-label={`Exclude from recurring: ${g.description}`}
+                onClick={() => toggleRecurring(g, true)}
+              >
+                Exclude from recurring
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   /**
    * A fetch and not a link: /api/backup answers 500 like anything else, and
@@ -84,6 +210,7 @@ export function SettingsScreen({
    * believes they hold their data.
    */
   const runExport = async () => {
+    if (exporting) return;
     setExporting(true);
     try {
       setExportError(null);
@@ -109,119 +236,161 @@ export function SettingsScreen({
   }
 
   return (
-    <div className="screen-inner">
-      <h1 className="title">Settings</h1>
-
-      {/* the order is the point — how Finto counts, then what it found, then your data:
-          reading down goes from what is true before the app has any data to what you
-          do with it afterwards */}
-      <section className="settings-section">
-        <h2 className="settings-title">How Finto counts</h2>
-        <p className="settings-lead">
-          These settings decide what totals and income-based goals mean across all accounts.
+    <div className="screen-inner settings-page">
+      <header className="settings-header">
+        <h1 className="title">Settings</h1>
+        <p className="settings-intro">
+          Set how Finto counts your money, review recurring payments, and manage your local data.
         </p>
-        <AppSettingsBlock />
-        <div className="settings-subsection">
-          <IncomeSourcesBlock onChanged={onDataChanged} />
-        </div>
-      </section>
+      </header>
 
-      <section className="settings-section">
-        <h2 className="settings-title">Recurring payments</h2>
-        <p className="settings-lead">
-          Detected across every account, over the last twelve months.{' '}
-          {recurring && recurring.groups.length > 0 && (
-            <>
-              About{' '}
-              <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong> a
-              month.
-            </>
-          )}
-        </p>
-        {recurringError && <p className="error">Error: {recurringError}</p>}
-        {recurring && recurring.groups.length === 0 && (
-          <p className="hint">
-            Nothing yet. A payment has to appear in several months before Finto calls it
-            recurring.
+      <div className="settings-top">
+        <section className="settings-card" aria-labelledby="settings-financial-title">
+          <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
+          <p className="settings-lead">
+            These settings decide what totals and income-based goals mean across all accounts.
           </p>
+          <AppSettingsBlock onChanged={onDataChanged} />
+        </section>
+
+        <section className="settings-card" aria-labelledby="settings-income-title">
+          <IncomeSourcesBlock onChanged={onDataChanged} />
+        </section>
+      </div>
+
+      <section className="settings-card settings-recurring" aria-labelledby="settings-recurring-title">
+        <div className="settings-recurring-header">
+          <div>
+            <h2 className="settings-title" id="settings-recurring-title" ref={recurringTitleRef} tabIndex={-1}>Recurring payments</h2>
+            <p className="settings-lead">Detected across every account, over the last twelve months.</p>
+          </div>
+          {recurring && recurring.groups.length > 0 && (
+            <p className="settings-recurring-summary">
+              <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong>
+              <span>Estimated per month</span>
+            </p>
+          )}
+        </div>
+        {!recurring && !recurringReadError && (
+          <p role="status" className="hint">Loading recurring payments…</p>
         )}
-        {[...active.slice(0, RECURRING_LIMIT), ...ignored].map((g) => (
-          <div key={g.description} className="row" style={{ padding: '8px 0' }}>
-            <div className="row-main">
-              <div className={`row-title${g.ignored ? ' muted-strike' : ''}`}>
-                {g.description}
-              </div>
-              <div className="row-sub">
-                {categoryLabel(g.category)} · {g.months} mo. · last {fmtDate(g.lastDate)}
-                {g.ignored ? ' · hidden' : ''}
-              </div>
-            </div>
-            <div
-              className={`row-value${g.ignored ? ' muted-strike' : ''}`}
-              style={{ fontSize: 13, color: 'var(--ink-secondary)' }}
-            >
-              {fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}/mo
-            </div>
-            <button
-              className={g.ignored ? 'btn-link' : 'btn-danger'}
-              onClick={() => toggleRecurring(g.description, !g.ignored)}
-              aria-label={
-                g.ignored ? `Restore payment ${g.description}` : `Hide payment ${g.description}`
-              }
-            >
-              {g.ignored ? 'Restore' : 'Hide'}
-            </button>
+        {recurringReadError && (
+          <div className="settings-recurring-error">
+            <p className="error" role="alert">Error: {recurringReadError}</p>
+            <button className="btn-link" type="button" onClick={loadRecurring}>Retry</button>
+          </div>
+        )}
+        {recurringActionErrors.map((failed) => (
+          <div key={failed.key} className="settings-recurring-error">
+            <p className="error" role="alert">Error: {failed.description}: {failed.message}</p>
           </div>
         ))}
-        {active.length > RECURRING_LIMIT && (
-          <p className="hint" style={{ marginTop: 6 }}>
-            …and {active.length - RECURRING_LIMIT} more, smaller
+        {recurringBusy && <p role="status" className="hint">Updating recurring payments…</p>}
+        {recurring && recurring.groups.length === 0 && (
+          <p className="hint">
+            Nothing yet. A payment has to appear in several months before Finto calls it recurring.
           </p>
+        )}
+        {recurring && active.length > 0 && (
+          <div className="settings-recurring-list">
+            {(showAllRecurring ? active : active.slice(0, RECURRING_LIMIT)).map((g) => recurringRow(g, false))}
+          </div>
+        )}
+        {!showAllRecurring && active.length > RECURRING_LIMIT && (
+          <button className="settings-recurring-more" type="button" onClick={() => setShowAllRecurring(true)}>
+            Show {active.length - RECURRING_LIMIT} more
+          </button>
+        )}
+        {ignored.length > 0 && (
+          <details className="settings-recurring-excluded">
+            <summary>
+              <span className="settings-recurring-excluded-chevron" aria-hidden="true"><ChevronIcon /></span>
+              Excluded payments ({ignored.length})
+            </summary>
+            <div className="settings-recurring-list">
+              {ignored.map((g) => recurringRow(g, true))}
+            </div>
+          </details>
         )}
       </section>
 
-      <section className="settings-section">
-        <h2 className="settings-title">Your data</h2>
+      <section className="settings-card">
+        <h2 className="settings-title">Data &amp; backup</h2>
         <p className="settings-lead">
           What you have uploaded, and how to take all of it away with you.
         </p>
 
-        <button className="btn-ghost" type="button" onClick={onOpenImport}>
-          ⭳ Import a statement
-        </button>
-
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          onClick={() => setHistoryOpen(true)}
-        >
-          ⧉ Import history (every account)
-        </button>
-        <p className="hint">
-          Every file you have uploaded, what it read, and the file itself to download again.
-          One account's history is under the ⋮ on its balance card, on Overview. The files
-          themselves are in the statements folder next to the database, on this machine.
-        </p>
-
-        <button
-          className="btn-link"
-          type="button"
-          style={{ display: 'block' }}
-          disabled={exporting}
-          onClick={runExport}
-        >
-          ⬇ Export my data (.json)
-        </button>
-        {exportError && <p className="error">Error: {exportError}</p>}
-        <p className="hint">
-          Every transaction, account and setting, as readable JSON — not encrypted, so anyone
-          who opens the file can read it. The statement files you uploaded are not in it;
-          download those from Import history.
-        </p>
+        <div className="settings-data-actions">
+          <div className="settings-data-item">
+            <button className="settings-data-action" type="button" onClick={onOpenImport}
+              aria-labelledby="settings-import-label" aria-describedby="settings-import-description">
+              <span className="settings-data-icon"><ImportIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label" id="settings-import-label">Import a statement</span>
+                <span className="settings-data-description" id="settings-import-description">Upload a CSV, XLSX, or PDF statement.</span>
+              </span>
+              <span className="settings-data-trailing"><ChevronIcon /></span>
+            </button>
+          </div>
+          <div className="settings-data-item">
+            <button className="settings-data-action" type="button" onClick={() => setHistoryOpen(true)}
+              aria-labelledby="settings-history-label" aria-describedby="settings-history-description">
+              <span className="settings-data-icon"><HistoryIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label" id="settings-history-label">Import history</span>
+                <span className="settings-data-description" id="settings-history-description">
+                  Review uploads from every account and download original statement files.
+                </span>
+              </span>
+              <span className="settings-data-trailing"><ChevronIcon /></span>
+            </button>
+          </div>
+          <div className="settings-data-item">
+            <button
+              className="settings-data-action"
+              type="button"
+              disabled={exporting}
+              aria-busy={exporting}
+              aria-labelledby="settings-export-label"
+              aria-describedby="settings-export-description"
+              onClick={runExport}
+            >
+              <span className="settings-data-icon"><BackupIcon /></span>
+              <span className="settings-data-copy">
+                <span className="settings-data-label" id="settings-export-label">
+                  {exporting ? 'Preparing backup…' : 'Export backup'}
+                </span>
+                <span className="settings-data-description" id="settings-export-description">
+                  Download readable, unencrypted JSON. Original statement files are not included.
+                </span>
+              </span>
+              <span className="settings-data-trailing"><ImportIcon /></span>
+            </button>
+            {exportError && <p className="settings-data-error error" role="alert">Error: {exportError}</p>}
+          </div>
+        </div>
       </section>
 
-      <p className="api-hint">API: {apiLabel()}</p>
+      {/* a button inside the heading rather than a heading inside <summary>: a summary's
+          contents are presentational, which takes the heading out of heading navigation */}
+      <section className="settings-card settings-advanced" aria-labelledby="settings-advanced-title">
+        <h2 className="settings-title" id="settings-advanced-title">
+          <button
+            className="settings-advanced-toggle"
+            type="button"
+            aria-expanded={advancedOpen}
+            aria-controls="settings-advanced-content"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            <span className="settings-advanced-label">Advanced · API connection</span>
+            <span className="settings-advanced-chevron" aria-hidden="true"><ChevronIcon /></span>
+          </button>
+        </h2>
+        <div className="settings-advanced-content" id="settings-advanced-content" hidden={!advancedOpen}>
+          <p className="settings-lead">This is the address of Finto’s local REST API.</p>
+          <code className="settings-api-origin">{apiLabel()}</code>
+        </div>
+      </section>
     </div>
   );
 }

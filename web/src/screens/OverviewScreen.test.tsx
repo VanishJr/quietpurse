@@ -183,11 +183,11 @@ describe('the page heading', () => {
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
   });
 
-  it('carries neither the theme button nor the settings control, which are the bar’s now', async () => {
+  it('leaves the theme choices and Settings navigation to the shell', async () => {
     mount();
     await panel('Sparkasse Giro');
 
-    expect(screen.queryByRole('button', { name: /^Theme:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Theme' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
@@ -1554,8 +1554,8 @@ describe('what left this screen', () => {
 
     // all four moved to the Account screen, in order, and are asserted there
     expect(screen.queryByLabelText('Base currency')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Export my data/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Export backup/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Recurring payments/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/^API:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/local REST API/)).not.toBeInTheDocument();
   });
 });
