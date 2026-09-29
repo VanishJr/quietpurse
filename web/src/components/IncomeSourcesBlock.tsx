@@ -38,12 +38,15 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const busyRef = useRef(false);
   const [open, setOpen] = useState<Open | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<IncomeSourceKind>('external');
   const [patterns, setPatterns] = useState('');
+  const addRef = useRef<HTMLButtonElement>(null);
+  const retryRef = useRef<HTMLButtonElement>(null);
+  const editRefs = useRef(new Map<string, HTMLButtonElement>());
+  const refocus = useRef<{ edited: string | null } | null>(null);
 
   const read = useCallback(async () => {
     setSources(await api.incomeSources());
@@ -58,24 +61,41 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
     load();
   }, [load]);
 
+  /*
+   * The committed write clears the rows, and with them the control that opened the form,
+   * so the Sheet has no opener left to hand focus back to. It lands here once the catalog
+   * answered, unless the reader has already put it somewhere themselves.
+   */
+  useEffect(() => {
+    const target = refocus.current;
+    if (!target || busy) return;
+    refocus.current = null;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
+    const next = sources
+      ? (target.edited !== null && editRefs.current.get(target.edited)) || addRef.current
+      : retryRef.current;
+    next?.focus();
+  }, [busy, sources]);
+
   /**
    * Invalidation precedes the catalog refresh: the write already changed every reader,
    * and a failed follow-up GET must not leave those readers on pre-mutation data.
    */
   const run = async (write: () => Promise<unknown>) => {
-    if (busyRef.current) return;
-    busyRef.current = true;
+    if (busy) return;
     setBusy(true);
     setActionError(null);
     try {
       await write();
     } catch (e) {
       setActionError((e as Error).message);
-      busyRef.current = false;
       setBusy(false);
       return;
     }
+    refocus.current = { edited: open?.form === 'edit' ? open.id : null };
     setOpen(null);
+    setSources(null);
     try {
       await onChanged();
       await read();
@@ -83,7 +103,6 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -100,6 +119,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const remove = (id: string) => run(() => api.deleteIncomeSource(id));
 
   const openAdd = () => {
+    if (busy || open !== null) return;
     setActionError(null);
     setLabel('');
     setKind('external');
@@ -123,7 +143,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const destination = sources?.find((s) => s.id === 'other');
 
   const close = () => {
-    if (!busyRef.current) setOpen(null);
+    if (!busy) setOpen(null);
   };
 
   const form = (onOk: () => void) => (
@@ -136,6 +156,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         id="source-label"
         className="input"
         value={label}
+        readOnly={busy}
         onChange={(e) => setLabel(e.target.value)}
         placeholder="Stipend"
       />
@@ -145,6 +166,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         options={KINDS.map((k) => ({ key: k.key, label: k.label }))}
         selected={kind}
         onSelect={(k) => setKind(k as IncomeSourceKind)}
+        locked={busy}
       />
       <p className="hint">
         Changing this updates every income-based goal; transaction assignments stay the same.
@@ -156,6 +178,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
         id="source-patterns"
         className="input"
         value={patterns}
+        readOnly={busy}
         onChange={(e) => setPatterns(e.target.value)}
         placeholder="Musterstiftung Musterstadt, Leistungsstipendium Beispielstadt"
       />
@@ -169,10 +192,10 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       </p>
       {actionError && <p className="error" role="alert">Error: {actionError}</p>}
       <div className="btn-row">
-        <button className="btn-ghost" type="button" disabled={busy} onClick={close}>
+        <button className="btn-ghost" type="button" aria-disabled={busy} onClick={close}>
           Cancel
         </button>
-        <button className="btn" type="button" disabled={busy} onClick={onOk}>
+        <button className="btn" type="button" aria-disabled={busy} onClick={onOk}>
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
@@ -194,7 +217,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           {!sources && (
             <>
               {' · '}
-              <button className="btn-link" type="button" onClick={load}>
+              <button ref={retryRef} className="btn-link" type="button" onClick={load}>
                 Retry
               </button>
             </>
@@ -229,10 +252,16 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                       </p>
                       {actionError && <p className="error" role="alert">Error: {actionError}</p>}
                       <div className="btn-row">
-                        <button className="btn-ghost" disabled={busy} onClick={() => setOpen(null)}>
+                        <button className="btn-ghost" aria-disabled={busy} onClick={close}>
                           Cancel
                         </button>
-                        <button className="btn-danger" disabled={busy || !destination} onClick={() => remove(s.id)}>
+                        <button
+                          className="btn-danger"
+                          aria-disabled={busy || !destination}
+                          onClick={() => {
+                            if (destination) remove(s.id);
+                          }}
+                        >
                           Delete
                         </button>
                       </div>
@@ -242,6 +271,10 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                 {mine?.form !== 'delete' && (
                   <div className="settings-income-actions">
                     <button
+                      ref={(button) => {
+                        if (button) editRefs.current.set(s.id, button);
+                        else editRefs.current.delete(s.id);
+                      }}
                       className="btn-ghost"
                       disabled={busy}
                       onClick={() => openEdit(s)}
@@ -268,8 +301,9 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           })}
 
           <button
+            ref={addRef}
             className="btn-link settings-income-add"
-            disabled={busy || open !== null}
+            aria-disabled={busy || open !== null}
             onClick={openAdd}
           >
             Add source
@@ -279,7 +313,6 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       <Sheet
         open={open?.form === 'add' || open?.form === 'edit'}
         onClose={close}
-        position="center"
         title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
       >
         {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}

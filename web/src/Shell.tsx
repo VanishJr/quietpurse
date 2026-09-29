@@ -150,7 +150,7 @@ export function Shell() {
                   className="theme-option"
                   onClick={() => setMode(option)}
                   aria-pressed={mode === option}
-                  aria-label={`${label} theme${mode === option ? ', selected' : ''}`}
+                  aria-label={`${label} theme`}
                 >
                   {label}
                 </button>

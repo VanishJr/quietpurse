@@ -34,8 +34,8 @@ body {
  *
  * `manipulation` gives up double-tap-to-zoom on buttons, and with it the ~300ms a
  * mobile browser otherwise waits after every tap to find out whether a second one is
- * coming. These actions are all single-tap; panning and pinch-zoom remain available. Panning and pinch-zoom of the page
- * are untouched.
+ * coming. Nothing in this app is zoomed by double-tapping a button, so the wait buys
+ * nothing and is paid on every tap. Panning and pinch-zoom of the page are untouched.
  *
  * The tap highlight is a filled rectangle drawn over the control on touch-down, in a
  * colour the platform picks. On a row of `--r-pill` discs it is a square, on the navy
@@ -54,13 +54,17 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-button:disabled {
+button:disabled,
+button[aria-disabled='true'] {
   cursor: default;
 }
 
 /*
- * The section links need the same touch behaviour as buttons, without the browser's
- * default underline.
+ * The rest of that reset, for the section links, which are anchors rather than buttons:
+ * the rule above cannot reach them, and a link arrives with an underline of its own.
+ *
+ * Colour is not reset here: `.nav-item` sets its own, so a `color: inherit` in this rule
+ * would be a declaration written to be beaten.
  */
 .nav-item {
   text-decoration: none;
@@ -80,9 +84,15 @@ textarea {
 }
 
 /*
- * Reduced motion applies to future transitions too. State changes must remain
- * immediate without the tween; a nonzero duration still permits transitionend.
- * Smooth scrolling stands down along with transitions.
+ * Reduced motion, for the whole sheet. Under `reduce` a transition cuts to its end
+ * state, so nothing here may animate in order to be correct: the end state has to be
+ * right without the tween.
+ *
+ * `*` rather than the transitioned selectors, because the point of the rule is the
+ * transition written later, covered by something nobody has to remember; the same goes
+ * for `scroll-behavior`. `0.01ms` and not `0`, so a `transitionend` listener still fires.
+ *
+ * Unscoped rather than under a root class: this sheet is the app's alone.
  */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -418,7 +428,8 @@ textarea {
   text-align: center;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.5;
 }
 
@@ -449,7 +460,8 @@ textarea {
   border-color: var(--ink-muted);
 }
 
-.btn-ghost:disabled {
+.btn-ghost:disabled,
+.btn-ghost[aria-disabled='true'] {
   opacity: 0.5;
 }
 
@@ -2037,7 +2049,7 @@ textarea {
 }
 
 .settings-page .settings-recurring-menu button:hover,
-.settings-page .settings-recurring-trigger:hover {
+.settings-page .settings-recurring-trigger:hover:not([aria-disabled='true']) {
   background: var(--ink-raised);
 }
 
@@ -2057,9 +2069,24 @@ textarea {
 }
 
 .settings-page .settings-recurring-excluded summary {
-  display: list-item;
-  list-style-position: inside;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow-wrap: anywhere;
+}
+
+.settings-page .settings-recurring-excluded-chevron {
+  display: flex;
+  flex: none;
+}
+
+.settings-page .settings-recurring-excluded-chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-page .settings-recurring-excluded[open] > summary .settings-recurring-excluded-chevron {
+  transform: rotate(90deg);
 }
 
 .settings-page .settings-recurring-error .error {
@@ -2149,12 +2176,50 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.settings-page .api-hint {
-  margin: 10px 0 0;
-  color: var(--ink-muted);
-  font-size: 12px;
+.settings-page .settings-advanced {
+  padding: 0;
+}
+
+.settings-page .settings-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 20px 24px;
+  color: var(--ink-primary);
   text-align: left;
+}
+
+.settings-page .settings-advanced-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-page .settings-advanced-chevron {
+  display: flex;
+  flex: none;
+  color: var(--ink-secondary);
+}
+
+.settings-page .settings-advanced-toggle[aria-expanded='true'] .settings-advanced-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-page .settings-advanced-content {
+  padding: 0 24px 24px;
+}
+
+.settings-page .settings-advanced-content .settings-lead {
+  margin: 0 0 8px;
+}
+
+.settings-page .settings-api-origin {
+  display: block;
+  color: var(--ink-primary);
+  font-size: 13px;
   overflow-wrap: anywhere;
+  user-select: text;
 }
 
 @media (min-width: 1200px) {
@@ -2170,6 +2235,18 @@ textarea {
 
   .settings-page .settings-card {
     padding: 18px;
+  }
+
+  .settings-page .settings-advanced {
+    padding: 0;
+  }
+
+  .settings-page .settings-advanced-toggle {
+    padding: 18px;
+  }
+
+  .settings-page .settings-advanced-content {
+    padding: 0 18px 18px;
   }
 
   .settings-page .settings-recurring-summary {
@@ -2201,17 +2278,6 @@ textarea {
   .settings-page .settings-recurring-restore {
     grid-column: 3;
     grid-row: 1 / span 2;
-  }
-
-  .settings-page .backdrop-center {
-    align-items: flex-end;
-    padding: 0;
-  }
-
-  .settings-page .backdrop-center .sheet {
-    border-radius: var(--r-xl) var(--r-xl) 0 0;
-    max-width: none;
-    padding-bottom: 32px;
   }
 }
 
@@ -3049,11 +3115,6 @@ textarea {
   font-size: 12px;
   color: var(--ink-muted);
   margin-top: 8px;
-}
-
-.input-code {
-  width: 80px;
-  flex: none;
 }
 
 .body-text {

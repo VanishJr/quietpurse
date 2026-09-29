@@ -5,7 +5,8 @@ import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { ImportIcon } from '../components/NavIcons';
-import { BackupIcon, ChevronIcon, DownloadIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
+import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
+import { useDismiss } from '../dismiss';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { useTheme } from '../theme';
@@ -14,10 +15,13 @@ import { setUrl, useUrl } from '../url';
 
 const RECURRING_LIMIT = 8;
 
-const recurringActionObsolete = (summary: RecurringSummary, description: string, ignored: boolean) => {
-  const group = summary.groups.find((item) => item.description === description);
+/** By `key`: a group answers under its newest spelling, and that moves between reads. */
+const recurringActionObsolete = (summary: RecurringSummary, key: string, ignored: boolean) => {
+  const group = summary.groups.find((item) => item.key === key);
   return !group || group.ignored === ignored;
 };
+
+type FailedRecurringAction = { key: string; description: string; ignored: boolean; message: string };
 
 interface Props {
   /** The bar's own Import, so the two entry points are one behaviour. */
@@ -32,12 +36,12 @@ export function SettingsScreen({
   dataRevision = 0,
 }: Props) {
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
-  const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [recurringReadError, setRecurringReadError] = useState<string | null>(null);
+  const [recurringActionErrors, setRecurringActionErrors] = useState<FailedRecurringAction[]>([]);
   const recurringRequest = useRef(0);
   const recurringAnswer = useRef<{ request: number; summary: RecurringSummary } | null>(null);
-  const failedRecurringAction = useRef<{ description: string; ignored: boolean; message: string } | null>(null);
-  const recurringBusyRef = useRef(false);
-  const [recurringBusy, setRecurringBusy] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [recurringBusy, setRecurringBusy] = useState(false);
   const [openRecurringMenu, setOpenRecurringMenu] = useState<string | null>(null);
   const [showAllRecurring, setShowAllRecurring] = useState(false);
   const recurringMenuRef = useRef<HTMLDivElement>(null);
@@ -46,25 +50,15 @@ export function SettingsScreen({
   const recurringTitleRef = useRef<HTMLHeadingElement>(null);
   const { categoryColor } = useTheme();
 
-  useEffect(() => {
-    if (!openRecurringMenu) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+  useDismiss(
+    openRecurringMenu,
+    (target) => !!recurringMenuRef.current?.contains(target),
+    () => {
       setOpenRecurringMenu(null);
       recurringTriggerRef.current?.focus();
-    };
-    const onPointer = (event: PointerEvent) => {
-      if (!recurringMenuRef.current?.contains(event.target as Node)) {
-        setOpenRecurringMenu(null);
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('pointerdown', onPointer, true);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('pointerdown', onPointer, true);
-    };
-  }, [openRecurringMenu]);
+    },
+    () => setOpenRecurringMenu(null),
+  );
 
   useEffect(() => {
     if (openRecurringMenu) recurringActionRef.current?.focus();
@@ -93,71 +87,64 @@ export function SettingsScreen({
    * second click while the first is still out.
    */
   const [exporting, setExporting] = useState(false);
-  const exportBusyRef = useRef(false);
+
+  const takeRecurring = useCallback((request: number, summary: RecurringSummary) => {
+    recurringAnswer.current = { request, summary };
+    setRecurring(summary);
+    setRecurringActionErrors((failed) =>
+      failed.filter((action) => !recurringActionObsolete(summary, action.key, action.ignored)));
+  }, []);
 
   const loadRecurring = useCallback(async () => {
     const request = ++recurringRequest.current;
     setOpenRecurringMenu(null);
     setRecurring(null);
+    setRecurringReadError(null);
     try {
-      if (!failedRecurringAction.current) setRecurringError(null);
       const next = await api.recurring();
-      if (request === recurringRequest.current) {
-        recurringAnswer.current = { request, summary: next };
-        setRecurring(next);
-        const failed = failedRecurringAction.current;
-        if (failed) {
-          if (recurringActionObsolete(next, failed.description, failed.ignored)) {
-            failedRecurringAction.current = null;
-            setRecurringError(null);
-          } else {
-            setRecurringError(failed.message);
-          }
-        }
-      }
+      if (request === recurringRequest.current) takeRecurring(request, next);
     } catch (e) {
-      if (request === recurringRequest.current) setRecurringError((e as Error).message);
+      if (request === recurringRequest.current) setRecurringReadError((e as Error).message);
     }
-  }, []);
+  }, [takeRecurring]);
 
   useEffect(() => {
     loadRecurring();
   }, [dataRevision, loadRecurring]);
 
-  const toggleRecurring = async (description: string, ignored: boolean) => {
-    if (recurringBusyRef.current) return;
-    recurringBusyRef.current = true;
-    setRecurringBusy(description);
+  const toggleRecurring = async ({ key, description }: RecurringSummary['groups'][number], ignored: boolean) => {
+    if (recurringBusy) return;
+    setRecurringBusy(true);
     if (ignored) recurringTriggerRef.current?.focus();
     setOpenRecurringMenu(null);
     const request = ++recurringRequest.current;
-    failedRecurringAction.current = null;
-    try {
-      setRecurringError(null);
-      const next = await api.setRecurringIgnored(description, ignored);
-      if (request === recurringRequest.current) {
-        recurringAnswer.current = { request, summary: next };
-        setRecurring(next);
-      } else {
-        await loadRecurring();
-      }
-      recurringTitleRef.current?.focus();
-    } catch (e) {
+    const overtaken = () => {
       const latest = recurringAnswer.current;
-      // A newer request only supersedes a refusal when its answer makes this action obsolete.
-      if (!latest || latest.request <= request || !recurringActionObsolete(latest.summary, description, ignored)) {
-        const message = (e as Error).message;
-        failedRecurringAction.current = { description, ignored, message };
-        setRecurringError(message);
+      return !!latest && latest.request > request && recurringActionObsolete(latest.summary, key, ignored);
+    };
+    const otherPayments = (failed: FailedRecurringAction[]) => failed.filter((action) => action.key !== key);
+    setRecurringActionErrors(otherPayments);
+    try {
+      const next = await api.setRecurringIgnored(description, ignored);
+      if (request === recurringRequest.current) takeRecurring(request, next);
+      else if (!overtaken()) await loadRecurring();
+      const title = recurringTitleRef.current;
+      const focused = document.activeElement;
+      if (!focused || focused === document.body || title?.closest('section')?.contains(focused)) {
+        title?.focus();
+      }
+    } catch (e) {
+      if (!overtaken()) {
+        const refused = { key, description, ignored, message: (e as Error).message };
+        setRecurringActionErrors((failed) => [...otherPayments(failed), refused]);
       }
     } finally {
-      recurringBusyRef.current = false;
-      setRecurringBusy(null);
+      setRecurringBusy(false);
     }
   };
 
   const recurringRow = (g: RecurringSummary['groups'][number], excluded: boolean) => (
-    <div key={g.description} className="settings-recurring-row">
+    <div key={g.key} className="settings-recurring-row">
       <span className="settings-recurring-marker" style={{ backgroundColor: categoryColor(g.category) }} aria-hidden="true" />
       <div className="settings-recurring-info">
         <div className="settings-recurring-name">{g.description}</div>
@@ -173,45 +160,40 @@ export function SettingsScreen({
           className="settings-recurring-restore"
           type="button"
           aria-label={`Restore payment ${g.description}`}
-          disabled={recurringBusy !== null}
-          onClick={() => toggleRecurring(g.description, false)}
+          aria-disabled={recurringBusy}
+          onClick={() => toggleRecurring(g, false)}
         >
           Restore
         </button>
       ) : (
         <div
           className="settings-recurring-actions"
-          ref={openRecurringMenu === g.description ? recurringMenuRef : undefined}
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setOpenRecurringMenu(null);
-            }
-          }}
+          ref={openRecurringMenu === g.key ? recurringMenuRef : undefined}
         >
           <button
             className="settings-recurring-trigger"
             type="button"
             aria-label={`Actions for ${g.description}`}
-            aria-expanded={openRecurringMenu === g.description}
-            aria-controls={openRecurringMenu === g.description ? 'settings-recurring-menu' : undefined}
-            disabled={recurringBusy !== null}
-            ref={openRecurringMenu === g.description ? recurringTriggerRef : undefined}
+            aria-expanded={openRecurringMenu === g.key}
+            aria-controls={openRecurringMenu === g.key ? 'settings-recurring-menu' : undefined}
+            aria-disabled={recurringBusy}
+            ref={openRecurringMenu === g.key ? recurringTriggerRef : undefined}
             onClick={(event) => {
+              if (recurringBusy) return;
               recurringTriggerRef.current = event.currentTarget;
-              if (openRecurringMenu === g.description) event.currentTarget.focus();
-              setOpenRecurringMenu(openRecurringMenu === g.description ? null : g.description);
+              if (openRecurringMenu === g.key) event.currentTarget.focus();
+              setOpenRecurringMenu(openRecurringMenu === g.key ? null : g.key);
             }}
           >
             <MoreIcon />
           </button>
-          {openRecurringMenu === g.description && (
+          {openRecurringMenu === g.key && (
             <div className="settings-recurring-menu" id="settings-recurring-menu">
               <button
                 ref={recurringActionRef}
                 type="button"
-                disabled={recurringBusy !== null}
                 aria-label={`Exclude from recurring: ${g.description}`}
-                onClick={() => toggleRecurring(g.description, true)}
+                onClick={() => toggleRecurring(g, true)}
               >
                 Exclude from recurring
               </button>
@@ -228,8 +210,7 @@ export function SettingsScreen({
    * believes they hold their data.
    */
   const runExport = async () => {
-    if (exportBusyRef.current) return;
-    exportBusyRef.current = true;
+    if (exporting) return;
     setExporting(true);
     try {
       setExportError(null);
@@ -239,7 +220,6 @@ export function SettingsScreen({
     } catch (e) {
       setExportError((e as Error).message);
     } finally {
-      exportBusyRef.current = false;
       setExporting(false);
     }
   };
@@ -270,7 +250,7 @@ export function SettingsScreen({
           <p className="settings-lead">
             These settings decide what totals and income-based goals mean across all accounts.
           </p>
-          <AppSettingsBlock />
+          <AppSettingsBlock onChanged={onDataChanged} />
         </section>
 
         <section className="settings-card" aria-labelledby="settings-income-title">
@@ -284,22 +264,27 @@ export function SettingsScreen({
             <h2 className="settings-title" id="settings-recurring-title" ref={recurringTitleRef} tabIndex={-1}>Recurring payments</h2>
             <p className="settings-lead">Detected across every account, over the last twelve months.</p>
           </div>
-          {recurring && (
+          {recurring && recurring.groups.length > 0 && (
             <p className="settings-recurring-summary">
               <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong>
               <span>Estimated per month</span>
             </p>
           )}
         </div>
-        {!recurring && !recurringError && (
+        {!recurring && !recurringReadError && (
           <p role="status" className="hint">Loading recurring payments…</p>
         )}
-        {recurringError && (
+        {recurringReadError && (
           <div className="settings-recurring-error">
-            <p className="error" role="alert">Error: {recurringError}</p>
-            {!recurring && <button className="btn-link" type="button" onClick={loadRecurring}>Retry</button>}
+            <p className="error" role="alert">Error: {recurringReadError}</p>
+            <button className="btn-link" type="button" onClick={loadRecurring}>Retry</button>
           </div>
         )}
+        {recurringActionErrors.map((failed) => (
+          <div key={failed.key} className="settings-recurring-error">
+            <p className="error" role="alert">Error: {failed.description}: {failed.message}</p>
+          </div>
+        ))}
         {recurringBusy && <p role="status" className="hint">Updating recurring payments…</p>}
         {recurring && recurring.groups.length === 0 && (
           <p className="hint">
@@ -318,7 +303,10 @@ export function SettingsScreen({
         )}
         {ignored.length > 0 && (
           <details className="settings-recurring-excluded">
-            <summary>Excluded payments ({ignored.length})</summary>
+            <summary>
+              <span className="settings-recurring-excluded-chevron" aria-hidden="true"><ChevronIcon /></span>
+              Excluded payments ({ignored.length})
+            </summary>
             <div className="settings-recurring-list">
               {ignored.map((g) => recurringRow(g, true))}
             </div>
@@ -376,16 +364,32 @@ export function SettingsScreen({
                   Download readable, unencrypted JSON. Original statement files are not included.
                 </span>
               </span>
-              <span className="settings-data-trailing"><DownloadIcon /></span>
+              <span className="settings-data-trailing"><ImportIcon /></span>
             </button>
             {exportError && <p className="settings-data-error error" role="alert">Error: {exportError}</p>}
           </div>
         </div>
       </section>
 
-      <section className="settings-card settings-advanced">
-        <h2 className="settings-title">Advanced · API connection</h2>
-        <p className="api-hint">API: {apiLabel()}</p>
+      {/* a button inside the heading rather than a heading inside <summary>: a summary's
+          contents are presentational, which takes the heading out of heading navigation */}
+      <section className="settings-card settings-advanced" aria-labelledby="settings-advanced-title">
+        <h2 className="settings-title" id="settings-advanced-title">
+          <button
+            className="settings-advanced-toggle"
+            type="button"
+            aria-expanded={advancedOpen}
+            aria-controls="settings-advanced-content"
+            onClick={() => setAdvancedOpen((open) => !open)}
+          >
+            <span className="settings-advanced-label">Advanced · API connection</span>
+            <span className="settings-advanced-chevron" aria-hidden="true"><ChevronIcon /></span>
+          </button>
+        </h2>
+        <div className="settings-advanced-content" id="settings-advanced-content" hidden={!advancedOpen}>
+          <p className="settings-lead">This is the address of Finto’s local REST API.</p>
+          <code className="settings-api-origin">{apiLabel()}</code>
+        </div>
       </section>
     </div>
   );

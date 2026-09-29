@@ -9,9 +9,11 @@ interface Props {
   onSelect: (key: string) => void;
   /** Describes the filter for screen readers, e.g. "Period". */
   label?: string;
+  /** aria-disabled rather than disabled, so a chip that holds focus keeps it */
+  locked?: boolean;
 }
 
-export function Chips({ options, selected, onSelect, label }: Props) {
+export function Chips({ options, selected, onSelect, label, locked = false }: Props) {
   return (
     <div className="chips" role="group" aria-label={label}>
       {options.map((o) => (
@@ -19,7 +21,10 @@ export function Chips({ options, selected, onSelect, label }: Props) {
           key={o.key}
           className="chip"
           aria-pressed={o.key === selected}
-          onClick={() => onSelect(o.key)}
+          aria-disabled={locked || undefined}
+          onClick={() => {
+            if (!locked) onSelect(o.key);
+          }}
         >
           {o.label}
         </button>
