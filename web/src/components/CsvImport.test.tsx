@@ -400,9 +400,10 @@ describe('the summary panel', () => {
     await upload(container);
 
     // anchor: the summary panel, which exists only once the upload came back
-    expect(await screen.findByText(/Read 12 of 14 rows/)).toHaveTextContent(
-      /nothing imported yet/,
-    );
+    const heading = await screen.findByRole('heading', { name: /Read 12 of 14 rows/ });
+    expect(heading).toHaveTextContent(/nothing imported yet/);
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
     // an upload goes to an account that already exists, so the sentence has one arm:
     // the name arm is retired, on the wire as well as here
     expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
@@ -862,7 +863,12 @@ describe('confirm', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
 
     // anchor: the confirmed panel, which exists only once the confirm came back
-    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Imported 12 of 12 rows' });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    expect(heading).toHaveClass('import-outcome-success');
+    expect(heading.closest('.import-confirmed')).toHaveClass('card');
+    expect(heading.closest('.import-confirmed')).not.toHaveClass('import-outcome-success');
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(1);
     expect(onImported).toHaveBeenCalledTimes(1);
@@ -939,7 +945,7 @@ describe('confirm', () => {
     const { container } = mount();
     await fillCreateArm(container, 'Foo');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await screen.findByText(/^Error:/);
+    await screen.findByRole('alert');
     expect(screen.getByText(/"Foo" was created when you pressed Import/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sparkasse Giro' }));
@@ -976,7 +982,10 @@ describe('confirm', () => {
 
     // the server's own sentence and all of it: its last clause is the way out, so a
     // message this client cut or classified would lose exactly the half that acts
-    expect(await screen.findByText(/^Error:/)).toHaveTextContent(ACCOUNT_MISSING);
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(ACCOUNT_MISSING)).toBeInTheDocument();
+    expect(alert.parentElement).toBe(screen.getByRole('region', { name: 'Import review or result' }));
     // the control the sentence points at, still there and still pressable, on a card
     // the refused confirm left standing
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
@@ -984,6 +993,30 @@ describe('confirm', () => {
     // nothing landed, so nothing may tell the caller it did
     expect(onImported).not.toHaveBeenCalled();
     expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
+  });
+
+  it('uses the confirm response for zero inserted rows, without success ink or clearing an empty new account', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({ accepted: 10, skipped: 2, newRows: 2, alreadyPresent: 8 })),
+      'POST /api/imports/imp-1/confirm': () => ok({ ...CONFIRMED, inserted: 0, skipped: 2, total: 12 }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    const heading = await screen.findByRole('heading', { name: 'Imported 0 of 12 rows' });
+    expect(heading).toHaveFocus();
+    expect(heading).not.toHaveClass('import-outcome-success');
+    const card = heading.closest('.import-confirmed') as HTMLElement;
+    expect(card).toHaveClass('card');
+    expect(card).not.toHaveClass('import-outcome-success');
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      "2 rows didn't import.",
+      '8 were already in the database — this export overlaps one you imported before. Nothing was duplicated.',
+      "2 of the rows this summary called new were written by another import while it waited here. They're in your data — under that import, not this one.",
+    ]);
+    expect(screen.getByText(/"statement" was created when you pressed Import/)).toBeInTheDocument();
   });
 });
 
@@ -1001,7 +1034,12 @@ describe('discard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
 
     // anchor: the discarded notice, which exists only once the discard came back
-    expect(await screen.findByText(/Discarded — nothing was imported/)).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    expect(heading.closest('.import-discarded')).toHaveTextContent(
+      'The file is untouched, so you can fix the column layout or the account above and upload it again.',
+    );
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
@@ -1010,6 +1048,27 @@ describe('discard', () => {
     // outlives the import it was created for, and the discard notice above says the
     // opposite on its own
     expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  it('keeps the review actions and shows a refused discard beside the review', async () => {
+    const refusal = 'The staged upload could not be discarded. Keep the file and retry the discard.';
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/discard': () => fail(409, { error: refusal }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(refusal)).toBeInTheDocument();
+    expect(alert.parentElement).toBe(screen.getByRole('region', { name: 'Import review or result' }));
+    expect(screen.getByRole('heading', { name: /nothing imported yet/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+    expect(screen.queryByRole('heading', { name: /Discarded —/ })).not.toBeInTheDocument();
   });
 });
 
@@ -1023,18 +1082,17 @@ describe('a file that is already in', () => {
     await upload(container);
 
     // anchor: the duplicate card, which exists only once the upload came back
-    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/^You uploaded it on .+\. It wasn't read again, and nothing was duplicated\.$/),
-    ).toBeInTheDocument();
-    expect(screen.getByText('It had 1 row when it was read.')).toBeInTheDocument();
-    // toBe on the whole card: toHaveTextContent with a string passes on any part of it
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        'It had 1 row when it was read.',
-    );
+    const heading = await screen.findByRole('heading', { name: "You've already imported this file" });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    const card = heading.closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 1 row when it was read.',
+      'Nothing was duplicated.',
+    ]);
+    expect(heading).not.toHaveClass('import-outcome-success');
+    expect(card).not.toHaveClass('import-outcome-success');
     expect(screen.queryByText(/didn't import/)).not.toBeInTheDocument();
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
 
@@ -1050,15 +1108,13 @@ describe('a file that is already in', () => {
     await upload(container);
 
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText("It had 73 rows when it was read, and 1 of them didn't import."),
-    ).toBeInTheDocument();
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        "It had 73 rows when it was read, and 1 of them didn't import.",
-    );
+    const card = screen.getByRole('heading', { name: "You've already imported this file" }).closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 73 rows when it was read.',
+      "1 of them didn't import.",
+      'Nothing was duplicated.',
+    ]);
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 
@@ -1068,15 +1124,13 @@ describe('a file that is already in', () => {
     await upload(container);
 
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText("It had 73 rows when it was read, and 4 of them didn't import."),
-    ).toBeInTheDocument();
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        "It had 73 rows when it was read, and 4 of them didn't import.",
-    );
+    const card = screen.getByRole('heading', { name: "You've already imported this file" }).closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 73 rows when it was read.',
+      "4 of them didn't import.",
+      'Nothing was duplicated.',
+    ]);
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 });
@@ -1315,7 +1369,9 @@ describe('the account the create arm makes', () => {
 
     // the server's own sentence, never a class this screen derived from a status: the
     // holder is hidden and so is in no picker, which nothing here could have said
-    expect(await screen.findByText(/^Error:/)).toHaveTextContent(HIDDEN_HOLDER);
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(HIDDEN_HOLDER)).toBeInTheDocument();
     expect(countOf('POST /api/imports')).toBe(0);
     // and the arm is still filled in, because the name is the only thing to fix
     expect(screen.getByPlaceholderText('Sparkasse Giro')).toHaveValue('Old DKB');
@@ -1338,7 +1394,7 @@ describe('the account the create arm makes', () => {
     const { container } = mount();
     await fillCreateArm(container, 'Third Bank');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await screen.findByText(/^Error:/);
+    await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
     await screen.findByText(/Read 12 of 14 rows/);
@@ -1353,11 +1409,17 @@ describe('the account the create arm makes', () => {
     await fillCreateArm(container, 'Third Bank');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 
-    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText('HTTP 500')).toBeInTheDocument();
+    expect(alert.closest('.import-setup')).toBeInTheDocument();
     // the write the user did not press a button called "Create" for, named
-    expect(
-      screen.getByText(/"Third Bank" was created when you pressed Import/),
-    ).toBeInTheDocument();
+    const created = screen.getByRole('complementary', { name: 'Account created' });
+    expect(within(created).getByText(/"Third Bank" was created when you pressed Import/))
+      .toBeInTheDocument();
+    expect(created.closest('.import-results')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Read .*nothing imported yet|Imported .*rows|Discarded|already imported/ }))
+      .not.toBeInTheDocument();
     // and the caller is told here, on the one path where telling it is the whole
     // mechanism: no confirm follows to fire onImported, and onBack reloads nothing,
     // so an account announced to nobody is on the server and on no screen
@@ -1373,6 +1435,8 @@ describe('the account the create arm makes', () => {
     // Back does not reload the caller, so nothing else would put this account on the
     // rail: it would exist on the server and appear on no screen
     expect(onAccountCreated).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('complementary', { name: 'Account created' }))
+      .toHaveTextContent('The account "statement" was created when you pressed Import');
     // in the LIST the picker is derived from, not only in the key that is pressed —
     // a key with no row renders a picker with nothing selected and Import disabled
     expect(screen.getByRole('button', { name: 'statement' })).toHaveAttribute(

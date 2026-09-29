@@ -275,7 +275,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     setBusy(true);
     try {
       setError(null);
-      setConfirmed(await api.confirmImport(summary.importId));
+      const answer = await api.confirmImport(summary.importId);
+      setConfirmed(answer);
       // rows are in it now, so it is no longer an account standing on nothing — and
       // the subject is cleared rather than the sentence gated on `confirmed`, which
       // newInput() resets on the next file chosen in this same mount.
@@ -285,7 +286,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // sentence exists for. One slot is an accepted limit and not an oversight — a
       // second create overwrites the first, so an account made two presses ago is
       // announced nowhere; a list of them is a different screen's problem.
-      if (created?.id === summary.accountId) setCreated(null);
+      if (answer.inserted > 0 && created?.id === summary.accountId) setCreated(null);
       onImported();
       // a refresh of a list another tab may have moved; the account this screen
       // created went in when it was created, and does not arrive here

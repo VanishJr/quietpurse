@@ -538,6 +538,12 @@ of the rows that were unreadable, filtered by a status or moved no money — the
 before Confirm, and a cause repeated afterwards would be a claim about rows none of the three can
 see.
 
+`CsvImport` keeps a newly created account visible as its own notice until Confirm reports that rows
+landed in that account. A zero-insert confirmation leaves it standing: the account was written before
+the upload, and the lack of imported rows does not undo that write. Successful reads, confirmations
+and discards move focus to their new review or result heading, outside the normal Tab sequence, so
+the person reaches the answer without having to find it below setup.
+
 `CsvImport`'s re-upload card and the note `deduplicated` gates in `ImportHistory` never say where a
 file's rows are now. Of the two, only the card states what the earlier import recorded when its file
 was read: its counts are that import row's own, written when the import was staged or copied in by a
