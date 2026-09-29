@@ -220,8 +220,10 @@ describe('the setup steps', () => {
     await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
     expect(screen.getByRole('button', { name: 'Reading…' })).toBeDisabled();
+    expect(screen.getByRole('region', { name: 'Set up your import' })).toHaveAttribute('aria-busy', 'true');
     await act(async () => answer(ok(summaryResult())));
     expect(await screen.findByRole('button', { name: 'Import' })).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'Set up your import' })).toHaveAttribute('aria-busy', 'false');
   });
 });
 
@@ -842,6 +844,7 @@ describe('confirm', () => {
     expect(discard.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(confirm);
     expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(screen.getByRole('region', { name: /Read 12 of 14 rows/ })).toHaveAttribute('aria-busy', 'true');
     expect(discard).toBeDisabled();
     fireEvent.click(discard);
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(0);

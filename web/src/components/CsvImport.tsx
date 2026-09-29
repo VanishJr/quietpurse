@@ -397,7 +397,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       </header>
 
       <div className="import-layout">
-        <section className="import-setup" aria-labelledby="import-setup-heading">
+        <section className="import-setup" aria-labelledby="import-setup-heading" aria-busy={busy && !summary}>
           <h2 id="import-setup-heading">Set up your import</h2>
 
       <div className="import-step" aria-labelledby="import-file-heading">
@@ -458,7 +458,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           Pasting here replaces the chosen file.
         </p>
         <textarea
-          className="input csv-input"
+          className="input import-paste-input"
           value={csvText}
           onChange={(e) => {
             newInput();
@@ -607,7 +607,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       )}
 
       {summary && !confirmed && (
-        <section className="card import-review" aria-labelledby="import-review-heading">
+        <section className="card import-review" aria-labelledby="import-review-heading" aria-busy={busy}>
           <h2 id="import-review-heading" className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
             Read {summary.accepted} of {summary.total} rows — nothing imported yet
           </h2>

@@ -9,6 +9,10 @@
   margin-bottom: 24px;
 }
 
+.import-page .import-header .btn-link {
+  min-height: 44px;
+}
+
 .import-page .import-header .title {
   margin: 12px 0 0;
   font-size: 30px;
@@ -107,6 +111,12 @@
 
 .import-page .import-step input.input {
   min-height: 44px;
+}
+
+.import-page .import-step input.input:focus-visible,
+.import-page .import-paste .input:focus-visible {
+  outline: 2px solid var(--ink-accent);
+  outline-offset: 2px;
 }
 
 .import-page .import-accounts-error {
@@ -449,7 +459,7 @@
   margin: 8px 0;
 }
 
-.import-page .import-paste .csv-input {
+.import-page .import-paste .import-paste-input {
   display: block;
   min-height: 96px;
   margin-top: 8px;
