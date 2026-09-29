@@ -22,7 +22,7 @@ import {
 import { seedDefaults } from '../src/db';
 import { freshTestDb } from './pglite';
 
-type RouteLayer = { route?: { path: unknown; stack: { handle: unknown }[] } };
+type RouteLayer = { name?: string; route?: { path: unknown; stack: { handle: unknown }[] } };
 
 let agent: request.Agent;
 
@@ -147,6 +147,10 @@ describe('the page, served from wherever the checkout lives', () => {
     serveClient(t, '/nowhere');
     expect(fallbackSource(t)).toHaveLength(1);
     expect(fallbackSource(app)).toEqual(fallbackSource(t));
+    const layers = app.router.stack as RouteLayer[];
+    const fallbackAt = layers.findIndex((l) => l.route && String(l.route.path) === String(/^\/(?!api(?:\/|$)).*/));
+    expect(fallbackAt).toBeLessThan(layers.findIndex((l) => l.name === 'errorHandler'));
+    expect(layers.filter((l) => l.name === 'serveStatic')).toHaveLength(1);
   });
 });
 
