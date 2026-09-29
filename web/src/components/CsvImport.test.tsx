@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { fmtDate } from '../format';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
@@ -101,7 +101,7 @@ async function upload(container: HTMLElement): Promise<void> {
   // still null neither the picker nor the create arm has rendered
   const name = await screen.findByPlaceholderText('Sparkasse Giro');
   fireEvent.change(name, { target: { value: 'statement' } });
-  await screen.findByText(/click to choose another/);
+  await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 }
 
@@ -113,10 +113,138 @@ const fillCreateArm = async (container: HTMLElement, name: string): Promise<void
   fireEvent.click(await screen.findByRole('button', { name: '+ New account' }));
   fireEvent.change(screen.getByPlaceholderText('Sparkasse Giro'), { target: { value: name } });
   chooseFile(container);
-  await screen.findByText(/click to choose another/);
+  await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 };
 
 const countOf = (key: string): number => requests().filter((r) => r === key).length;
+
+describe('the Import page foundation', () => {
+  it('opens with a short device-local introduction and three separate guidance items', () => {
+    mockFetch(BASE);
+    mount();
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Import a statement' })).toBeInTheDocument();
+    expect(screen.getByText('Bring in a CSV, Excel or PDF statement. Finto reads it on this device.'))
+      .toBeInTheDocument();
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    expect(within(setup).getByRole('button', { name: /choose a CSV, Excel or PDF/i })).toBeInTheDocument();
+    expect(within(setup).getByRole('button', { name: 'Import' })).toBeInTheDocument();
+
+    const guide = screen.getByRole('complementary', { name: 'Before you import' });
+    expect(within(guide).getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([
+      'Getting the file', 'Your file stays here', 'Re-imports are safe',
+    ]);
+    expect(guide).toHaveTextContent(/Export or Download.*PDF.*CSV or Excel export/s);
+    expect(guide).toHaveTextContent(/read on this device.*file and its rows stay in your Finto folder/s);
+    expect(guide).toHaveTextContent(/matched by content.*wider date range/s);
+    expect(within(guide).getAllByRole('paragraph').map((p) => p.textContent?.trim())).toEqual([
+      "In your bank's transaction list, choose Export or Download. Finto can read a PDF only if it recognises the layout; otherwise, use the CSV or Excel export.",
+      'Statements are read on this device. The file and its rows stay in your Finto folder.',
+      "Rows are matched by content, so re-importing won't duplicate them. You can safely export a wider date range than you need.",
+    ]);
+  });
+
+  it('places the review between setup and guidance after the file is read', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container } = mount();
+    await upload(container);
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    const result = await screen.findByRole('region', { name: 'Import review or result' });
+    const guide = screen.getByRole('complementary', { name: 'Before you import' });
+    expect(setup.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(result.compareDocumentPosition(guide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(result).getByText(/nothing imported yet/)).toBeInTheDocument();
+  });
+});
+
+describe('the setup steps', () => {
+  it('numbers file, layout, and account in order and keeps the submit helper after them', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    mount();
+    await screen.findByRole('button', { name: 'N26' });
+
+    const setup = screen.getByRole('region', { name: 'Set up your import' });
+    expect(within(setup).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent))
+      .toEqual(['01 Choose a file', '02 Column layout', '03 Account']);
+    const steps = [...setup.querySelectorAll<HTMLElement>('.import-step')];
+    expect(steps).toHaveLength(3);
+    expect(within(steps[0]).getByText('…or paste the contents instead')).toBeInTheDocument();
+    expect(within(steps[1]).getByRole('group', { name: 'Statement preset' })).toBeInTheDocument();
+    expect(within(steps[2]).getByRole('group', { name: 'Account for this import' })).toBeInTheDocument();
+    expect(within(steps[0]).getByText('Choose a statement from your bank, or drop it below.'))
+      .toBeInTheDocument();
+    expect(within(steps[1]).getByText('Tell Finto how to read the columns in your statement.'))
+      .toBeInTheDocument();
+    expect(within(steps[1]).getByText(
+      'Pick your bank if it\'s listed. "Any statement" reads the header and finds the date, amount and description columns on its own — try it first.',
+    )).toBeInTheDocument();
+    expect(within(steps[2]).getByText("Choose where this statement's transactions belong."))
+      .toBeInTheDocument();
+    expect(within(steps[2]).getByText("Hidden accounts aren't listed here — unhide one first."))
+      .toBeInTheDocument();
+    expect(within(steps[2]).getByText(
+      "Pick the account this statement belongs to — its rows join what's already there, and nothing is duplicated.",
+    )).toBeInTheDocument();
+    expect(screen.getByText('No transactions are added until you review and confirm.'))
+      .toBeInTheDocument();
+  });
+
+  it('shows every server preset with Any statement initially pressed', async () => {
+    const choices = [
+      ...PRESETS.presets,
+      ...Array.from({ length: 8 }, (_, i) => ({ key: `bank-${i}`, title: `Bank ${i} statement` })),
+    ];
+    mockFetch({ ...BASE, 'GET /api/imports/presets': () => ok({ presets: choices }) });
+    mount();
+    const group = screen.getByRole('group', { name: 'Statement preset' });
+    await screen.findByRole('button', { name: choices.at(-1)!.title });
+    expect(within(group).getAllByRole('button').map((button) => button.textContent))
+      .toEqual(choices.map((choice) => choice.title));
+    expect(within(group).getByRole('button', { name: choices[0].title }))
+      .toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  it('requires both input and destination; paste can replace the file', async () => {
+    mockFetch(ACCOUNT_ROUTES);
+    const { container } = mount();
+    const destination = await screen.findByRole('button', { name: 'N26' });
+    const submit = screen.getByRole('button', { name: 'Import' });
+    expect(submit).toBeDisabled();
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(submit).toBeDisabled();
+    fireEvent.click(destination);
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents', hidden: true }), {
+      target: { value: 'date;amount\n2026-06-01;-10' },
+    });
+    expect(screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' }))
+      .toBeInTheDocument();
+    expect(submit).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents', hidden: true }), {
+      target: { value: '  ' },
+    });
+    expect(submit).toBeDisabled();
+  });
+
+  it('reads Reading… only while the upload request is pending', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({ ...ACCOUNT_ROUTES, 'POST /api/imports': () => new Promise((resolve) => { answer = resolve; }) });
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(screen.getByRole('button', { name: 'Reading…' })).toBeDisabled();
+    expect(screen.getByRole('region', { name: 'Set up your import' })).toHaveAttribute('aria-busy', 'true');
+    await act(async () => answer(ok(summaryResult())));
+    expect(await screen.findByRole('button', { name: 'Import' })).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'Set up your import' })).toHaveAttribute('aria-busy', 'false');
+  });
+});
 
 describe('the formats the screen offers', () => {
   /** Lets the preset load, and any read takeFile started, finish inside act. */
@@ -161,12 +289,12 @@ describe('the formats the screen offers', () => {
   it('shows a CSV its row count and a PDF its size, never a row count', async () => {
     mockFetch(BASE);
     const { container } = mount();
-    const preview = () => screen.getByText(/click to choose another/);
+    const preview = () => screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     const csv = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
     fireEvent.change(fileInput(container), { target: { files: [csv] } });
     await settle();
-    expect(preview()).toHaveTextContent(/1 rows/);
+    expect(preview()).toHaveTextContent('1 rows · 1 kB');
 
     // several lines on purpose: a build that ignored the %PDF signature would count
     // them, so the assertion below has something to catch
@@ -175,21 +303,128 @@ describe('the formats the screen offers', () => {
     });
     fireEvent.change(fileInput(container), { target: { files: [pdf] } });
     await settle();
-    expect(preview()).toHaveTextContent(/kB/);
+    expect(preview()).toHaveTextContent('1 kB');
     expect(preview()).not.toHaveTextContent(/rows/);
+  });
+
+  it('uses a native button with a decorative icon and opens the same picker on click', () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const picker = screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' });
+    expect(picker).toBeInstanceOf(HTMLButtonElement);
+    expect(picker).toHaveAttribute('type', 'button');
+    expect(picker.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    const input = fileInput(container);
+    const click = vi.spyOn(input, 'click');
+    picker.focus();
+    expect(picker).toHaveFocus();
+    fireEvent.click(picker);
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('distinguishes drag-over from an empty or selected file without replacing the target', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const picker = screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' });
+    expect(picker).toHaveClass('import-dropzone');
+    expect(picker).not.toHaveClass('import-dropzone-active', 'import-dropzone-selected');
+    fireEvent.dragOver(picker);
+    expect(picker).toHaveClass('import-dropzone-active');
+    fireEvent.dragLeave(picker);
+    expect(picker).not.toHaveClass('import-dropzone-active');
+
+    const csv = new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' });
+    fireEvent.drop(picker, { dataTransfer: { files: [csv] } });
+    await settle();
+    expect(picker).toHaveClass('import-dropzone-selected');
+    expect(picker).not.toHaveClass('import-dropzone-active');
+    expect(fileInput(container).getAttribute('accept')).toContain('.csv');
+    expect(screen.getByText('Click to choose another').closest('button')).toBe(picker);
+    expect(picker.querySelector('a, button')).toBeNull();
+  });
+
+  it('shows a long file name whole and marks only the empty status as an error', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    const name = 'statement-' + 'very-long-name-'.repeat(10) + '.csv';
+    fireEvent.change(fileInput(container), {
+      target: { files: [new File(['date;amount\n2026-06-01;-10'], name, { type: 'text/csv' })] },
+    });
+    await settle();
+    const picker = screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(picker).toHaveAttribute('aria-describedby', 'import-selected-file');
+    expect(screen.getByText(name)).toHaveClass('import-file-name');
+    expect(screen.getByText(name)).toHaveTextContent(name);
+    expect(picker).toHaveTextContent('1 rows · 1 kB');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    fireEvent.change(fileInput(container), {
+      target: { files: [new File([], 'empty.csv', { type: 'text/csv' })] },
+    });
+    await settle();
+    expect(picker).toHaveTextContent('0 rows · 0 kB');
+    expect(screen.getByRole('status')).toHaveClass('import-file-empty');
+    expect(screen.getByRole('status')).toHaveTextContent('Empty file');
+    expect(picker).not.toHaveClass('import-file-empty');
+  });
+
+  it('does not label a newer binary file with the earlier text file\'s late row count', async () => {
+    mockFetch(BASE);
+    const { container } = mount();
+    let release!: (text: string) => void;
+    const stalled = new Promise<string>((resolve) => { release = resolve; });
+    const first = new File(['date;amount\n2026-06-01;-10'], 'first.csv', { type: 'text/csv' });
+    const read = vi.fn(() => stalled);
+    Object.defineProperty(first, 'text', { value: read });
+    fireEvent.change(fileInput(container), { target: { files: [first] } });
+    await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+
+    const next = new File(['%PDF-1.7\nobj'], 'next.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput(container), { target: { files: [next] } });
+    await settle();
+    await act(async () => release('date;amount\n2026-06-01;-10\n2026-06-02;-20'));
+    const picker = screen.getByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    expect(picker).toHaveTextContent('next.pdf');
+    expect(picker).toHaveTextContent('1 kB');
+    expect(picker).not.toHaveTextContent(/rows/);
+  });
+});
+
+describe('the paste fallback', () => {
+  it('starts collapsed, opens natively, and replaces the file and previous review', async () => {
+    mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
+    const { container } = mount();
+    const disclosure = screen.getByText('…or paste the contents instead').closest('details')!;
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(disclosure.querySelector('summary')).toBeInstanceOf(HTMLElement);
+    fireEvent.click(disclosure.querySelector('summary')!);
+    expect(disclosure).toHaveAttribute('open');
+    expect(within(disclosure).getByText('Pasting here replaces the chosen file.')).toBeInTheDocument();
+
+    await upload(container);
+    expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Statement contents' }), {
+      target: { value: 'date;amount\n2026-06-01;-10' },
+    });
+    expect(screen.getByRole('button', { name: 'Choose a CSV, Excel or PDF statement file' }))
+      .not.toHaveTextContent('statement.csv');
+    expect(screen.queryByText(/Read 12 of 14 rows/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
   });
 });
 
 describe('the summary panel', () => {
+  const details = async () => within((await screen.findByRole('heading', { name: 'Details' })).parentElement as HTMLElement);
   it('reports the counts, says nothing is imported, and names the account', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
     const { container } = mount();
     await upload(container);
 
     // anchor: the summary panel, which exists only once the upload came back
-    expect(await screen.findByText(/Read 12 of 14 rows/)).toHaveTextContent(
-      /nothing imported yet/,
-    );
+    const heading = await screen.findByRole('heading', { name: /Read 12 of 14 rows/ });
+    expect(heading).toHaveTextContent(/nothing imported yet/);
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
     // an upload goes to an account that already exists, so the sentence has one arm:
     // the name arm is retired, on the wire as well as here
     expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
@@ -238,11 +473,14 @@ describe('the summary panel', () => {
         ok(
           summaryResult({
             accepted: 8,
-            newRows: 8,
+            newRows: 6,
+            alreadyPresent: 2,
             skipped: 6,
             unreadable: 2,
             filtered: 3,
             noMovement: 1,
+            balances: { opening: 1200, closing: 59.76, currency: 'EUR' },
+            supersededImportId: 'imp-0',
             problems: [
               '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
             ],
@@ -252,15 +490,22 @@ describe('the summary panel', () => {
     const { container } = mount();
     await upload(container);
 
-    const card = (await screen.findByText(/Read 8 of 14 rows/)).parentElement as HTMLElement;
-    expect([...card.querySelectorAll('p.hint')].map((p) => p.textContent)).toEqual([
-      expect.stringContaining("which found the columns in the file's own header"),
-      expect.stringContaining('in total'),
-      "2 rows couldn't be read. If it's the whole file, the column layout is probably" +
-        " wrong — discard this and try your bank's preset above.",
+    const card = (await screen.findByText(/Read 8 of 14 rows/)).closest('.import-review') as HTMLElement;
+    expect([...card.querySelectorAll('.import-review-reader, .import-review-details p, .import-review-warnings p')]
+      .map((p) => p.textContent)).toEqual([
+      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
+      'They\'ll join your existing "statement".',
+      "Checked against the statement's own balances: 1,200 EUR at the start, 59.76 EUR at the end. The rows add up.",
+      '6 of them are new; 2 are already in the database — this export overlaps one you imported before. Nothing will be duplicated.',
+      'An earlier upload of this same file was still waiting to be confirmed. It has been dropped in favour of this one — it had imported nothing.',
+      "2 rows couldn't be read. If it's the whole file, the column layout is probably wrong — discard this and try your bank's preset above.",
       '1 row moved no money, so there was nothing to import.',
       '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
     ]);
+    expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
+      .toEqual(['Rows', 'Period', 'Net', 'Statement balance']);
+    expect([...card.querySelectorAll('.import-review-metric-value')].map((m) => m.textContent?.trim()))
+      .toEqual(['8 of 14', '01.06.2026 to 30.06.2026', '−420.50 EUR', '1,200 EUR → 59.76 EUR']);
     // the pre-fix render, and the one the backend's line contradicts word for word
     expect(screen.queryByText(/6 rows couldn't be read/)).not.toBeInTheDocument();
   });
@@ -270,6 +515,20 @@ describe('the summary panel', () => {
    * for a fortnight. Both client sentences at n = 1, because a correct helper with one
    * call site not using it is the defect itself.
    */
+  it('separates mixed-currency totals in text as well as in visual lines', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({
+        totals: [{ currency: 'EUR', net: -420.5 }, { currency: 'USD', net: 115.25 }],
+      })),
+    });
+    const { container } = mount();
+    await upload(container);
+    const card = await screen.findByRole('heading', { name: /Read 12 of 14 rows/ });
+    const net = card.closest('.import-review')!.querySelector('.import-review-net')!;
+    expect(net.textContent).toBe('−420.50 EUR ·\n115.25 USD');
+  });
+
   it('says one row rather than 1 rows, in every sentence that counts rows', async () => {
     mockFetch({
       ...BASE,
@@ -316,9 +575,12 @@ describe('the summary panel', () => {
     // the chip's own label and the summary's title are one string, off one backend
     // list — a second dictionary in this package is what the field exists to avoid
     expect(screen.getByRole('button', { name: 'Revolut (Statement CSV)' })).toBeInTheDocument();
-    // first paragraph of the card, above the date range and everything below it
-    const card = line.closest('.card') as HTMLElement;
-    expect(card.querySelectorAll('p.hint')[0]).toBe(line);
+    // directly beneath the heading, before even the first metric
+    const card = line.closest('.import-review') as HTMLElement;
+    expect(card.querySelector('.import-review-reader')).toBe(line);
+    expect(line.previousElementSibling).toBe(card.querySelector('.import-review-heading'));
+    expect(line.compareDocumentPosition(card.querySelector('.import-review-metrics')!)
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     unmount();
 
     mockFetch({
@@ -348,6 +610,16 @@ describe('the summary panel', () => {
     expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
     expect(screen.queryByText(/Checked against the statement/)).not.toBeInTheDocument();
     expect(screen.queryByText(/running balance/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Statement balance')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Warnings' })).not.toBeInTheDocument();
+    const card = screen.getByRole('heading', { name: /Read 12 of 14 rows/ }).closest('.import-review')!;
+    expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
+      .toEqual(['Rows', 'Period', 'Net']);
+    expect([...card.querySelectorAll('.import-review-reader, .import-review-details p')]
+      .map((p) => p.textContent)).toEqual([
+      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
+      'They\'ll join your existing "statement".',
+    ]);
     unmount();
 
     mockFetch({
@@ -360,9 +632,13 @@ describe('the summary panel', () => {
     // the numbers, not the shape: the sentence names two of them and reads the same
     // either way round, so an assertion over its wording alone passes on a card that
     // tells the user their statement began at what it ended with
-    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /1,200 EUR at the start, 59\.76 EUR at the end\. The rows add up\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/1,200 EUR → 59\.76 EUR/);
+    expect(metric).not.toHaveTextContent(/The rows add up/);
+    expect(screen.getAllByText(/Checked against the statement/)).toHaveLength(1);
   });
 
   /**
@@ -391,9 +667,12 @@ describe('the summary panel', () => {
     });
     const { container, unmount } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 579\.85 EUR/);
+    expect(screen.getAllByText(/Checked against the 2 running balances/)).toHaveLength(1);
     expect(screen.queryByText(/The rows add up/)).not.toBeInTheDocument();
     unmount();
 
@@ -414,9 +693,11 @@ describe('the summary panel', () => {
     });
     const single = mount();
     await upload(single.container);
-    expect(await screen.findByText(/Checked against the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Checked against the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 134\.85 EUR at the end\. The rows read run unbroken from one to the other\./,
     );
+    expect(screen.getByText('Statement balance').closest('.import-review-metric'))
+      .toHaveTextContent(/From a running balance in the file\. 72\.40 EUR → 134\.85 EUR/);
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
   });
 
@@ -444,9 +725,13 @@ describe('the summary panel', () => {
     });
     const { container } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 579\.85 EUR/);
+    expect(metric).not.toHaveTextContent(/Checked against|nothing could check/);
+    expect(screen.getAllByText(/Checked against the 2 running balances/)).toHaveLength(1);
     // the unqualified claim, which is true of neither of these two numbers
     expect(screen.queryByText(/The rows read run unbroken/)).not.toBeInTheDocument();
   });
@@ -474,9 +759,13 @@ describe('the summary panel', () => {
     });
     const { container, unmount } = mount();
     await upload(container);
-    expect(await screen.findByText(/2 running balances/)).toHaveTextContent(
+    expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
       /Read from the 2 running balances this statement states, added together: 387\.40 EUR at the start, 511\.72 EUR at the end\. Each of them states a single row, so nothing here was checked\./,
     );
+    const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
+    expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 511\.72 EUR/);
+    expect(metric).not.toHaveTextContent(/checked/);
+    expect(screen.getAllByText(/Read from the 2 running balances/)).toHaveLength(1);
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Checked against/)).not.toBeInTheDocument();
     unmount();
@@ -499,9 +788,11 @@ describe('the summary panel', () => {
     });
     const single = mount();
     await upload(single.container);
-    expect(await screen.findByText(/Read from the statement/)).toHaveTextContent(
+    expect((await details()).getByText(/Read from the statement/)).toHaveTextContent(
       /72\.40 EUR at the start, 66\.72 EUR at the end\. It states a single row, so nothing here was checked\./,
     );
+    expect(screen.getByText('Statement balance').closest('.import-review-metric'))
+      .toHaveTextContent(/From a running balance in the file\. 72\.40 EUR → 66\.72 EUR/);
     expect(screen.queryByText(/run unbroken/)).not.toBeInTheDocument();
     expect(screen.queryByText(/running balances/)).not.toBeInTheDocument();
   });
@@ -528,10 +819,32 @@ describe('the summary panel', () => {
       const { container, unmount } = mount();
       await upload(container);
       expect(await screen.findByText(sentence)).toBeInTheDocument();
+      expect(screen.queryByText('Statement balance')).not.toBeInTheDocument();
+      expect(screen.getAllByText(/^(Rows|Period|Net)$/)).toHaveLength(3);
       // and never a pair alongside the reason it could not be derived
       expect(screen.queryByText(/at the start,/)).not.toBeInTheDocument();
       unmount();
     }
+  });
+
+  it('keeps parser warnings whole, separately from details, and limits them to three', async () => {
+    const longProblem = 'Unrecognised column value '.repeat(45).trim();
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({
+        problems: [longProblem, 'Second parser warning', 'Third parser warning', 'Fourth parser warning'],
+      })),
+    });
+    const { container } = mount();
+    await upload(container);
+    const heading = await screen.findByRole('heading', { name: 'Warnings' });
+    const warnings = heading.parentElement as HTMLElement;
+    expect([...warnings.querySelectorAll('p')].map((p) => p.textContent))
+      .toEqual([longProblem, 'Second parser warning', 'Third parser warning']);
+    expect(warnings).not.toHaveClass('error');
+    expect(screen.queryByText('Fourth parser warning')).not.toBeInTheDocument();
+    expect(warnings.compareDocumentPosition(screen.getByRole('button', { name: 'Confirm' }))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -544,6 +857,31 @@ describe('confirm', () => {
   const ACCOUNT_MISSING =
     'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
 
+  it('keeps both review actions disabled and shows no success until Confirm returns', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/confirm': () => new Promise((resolve) => { answer = resolve; }),
+    });
+    const { container } = mount();
+    await upload(container);
+    const discard = await screen.findByRole('button', { name: 'Discard' });
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    expect(discard.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(confirm);
+    expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(screen.getByRole('region', { name: /Read 12 of 14 rows/ })).toHaveAttribute('aria-busy', 'true');
+    expect(discard).toBeDisabled();
+    fireEvent.click(discard);
+    expect(countOf('POST /api/imports/imp-1/discard')).toBe(0);
+    expect(screen.getByRole('heading', { name: /nothing imported yet/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
+    await act(async () => answer(ok(CONFIRMED)));
+    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    expect(countOf('POST /api/imports/imp-1/confirm')).toBe(1);
+  });
+
   it('requests the confirm once, replaces the summary, and tells the caller once', async () => {
     mockFetch({
       ...BASE,
@@ -555,7 +893,12 @@ describe('confirm', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
 
     // anchor: the confirmed panel, which exists only once the confirm came back
-    expect(await screen.findByText(/Imported 12 of 12 rows/)).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Imported 12 of 12 rows' });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    expect(heading).toHaveClass('import-outcome-success');
+    expect(heading.closest('.import-confirmed')).toHaveClass('card');
+    expect(heading.closest('.import-confirmed')).not.toHaveClass('import-outcome-success');
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(1);
     expect(onImported).toHaveBeenCalledTimes(1);
@@ -632,7 +975,7 @@ describe('confirm', () => {
     const { container } = mount();
     await fillCreateArm(container, 'Foo');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await screen.findByText(/^Error:/);
+    await screen.findByRole('alert');
     expect(screen.getByText(/"Foo" was created when you pressed Import/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sparkasse Giro' }));
@@ -669,7 +1012,10 @@ describe('confirm', () => {
 
     // the server's own sentence and all of it: its last clause is the way out, so a
     // message this client cut or classified would lose exactly the half that acts
-    expect(await screen.findByText(/^Error:/)).toHaveTextContent(ACCOUNT_MISSING);
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(ACCOUNT_MISSING)).toBeInTheDocument();
+    expect(alert.parentElement).toBe(screen.getByRole('region', { name: 'Import review or result' }));
     // the control the sentence points at, still there and still pressable, on a card
     // the refused confirm left standing
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
@@ -677,6 +1023,30 @@ describe('confirm', () => {
     // nothing landed, so nothing may tell the caller it did
     expect(onImported).not.toHaveBeenCalled();
     expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
+  });
+
+  it('uses the confirm response for zero inserted rows, without success ink or clearing an empty new account', async () => {
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult({ accepted: 10, skipped: 2, newRows: 2, alreadyPresent: 8 })),
+      'POST /api/imports/imp-1/confirm': () => ok({ ...CONFIRMED, inserted: 0, skipped: 2, total: 12 }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    const heading = await screen.findByRole('heading', { name: 'Imported 0 of 12 rows' });
+    expect(heading).toHaveFocus();
+    expect(heading).not.toHaveClass('import-outcome-success');
+    const card = heading.closest('.import-confirmed') as HTMLElement;
+    expect(card).toHaveClass('card');
+    expect(card).not.toHaveClass('import-outcome-success');
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      "2 rows didn't import.",
+      '8 were already in the database — this export overlaps one you imported before. Nothing was duplicated.',
+      "2 of the rows this summary called new were written by another import while it waited here. They're in your data — under that import, not this one.",
+    ]);
+    expect(screen.getByText(/"statement" was created when you pressed Import/)).toBeInTheDocument();
   });
 });
 
@@ -694,7 +1064,12 @@ describe('discard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
 
     // anchor: the discarded notice, which exists only once the discard came back
-    expect(await screen.findByText(/Discarded — nothing was imported/)).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    expect(heading.closest('.import-discarded')).toHaveTextContent(
+      'The file is untouched, so you can fix the column layout or the account above and upload it again.',
+    );
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
@@ -703,6 +1078,49 @@ describe('discard', () => {
     // outlives the import it was created for, and the discard notice above says the
     // opposite on its own
     expect(screen.getByText(/was created when you pressed Import/)).toBeInTheDocument();
+  });
+
+  it('holds the review without announcing discard until its response arrives', async () => {
+    let answer!: (response: Response) => void;
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/discard': () => new Promise((resolve) => { answer = resolve; }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(screen.getByRole('region', { name: /Read 12 of 14 rows/ })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(screen.queryByRole('heading', { name: /Discarded/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Importing…' }));
+    expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
+    await act(async () => answer(ok({ discarded: true, importId: 'imp-1' })));
+    expect(await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' }))
+      .toHaveFocus();
+    expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
+  });
+
+  it('keeps the review actions and shows a refused discard beside the review', async () => {
+    const refusal = 'The staged upload could not be discarded. Keep the file and retry the discard.';
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/discard': () => fail(409, { error: refusal }),
+    });
+    const { container } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(refusal)).toBeInTheDocument();
+    expect(alert.parentElement).toBe(screen.getByRole('region', { name: 'Import review or result' }));
+    expect(screen.getByRole('heading', { name: /nothing imported yet/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
+    expect(screen.queryByRole('heading', { name: /Discarded —/ })).not.toBeInTheDocument();
   });
 });
 
@@ -716,18 +1134,17 @@ describe('a file that is already in', () => {
     await upload(container);
 
     // anchor: the duplicate card, which exists only once the upload came back
-    expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/^You uploaded it on .+\. It wasn't read again, and nothing was duplicated\.$/),
-    ).toBeInTheDocument();
-    expect(screen.getByText('It had 1 row when it was read.')).toBeInTheDocument();
-    // toBe on the whole card: toHaveTextContent with a string passes on any part of it
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        'It had 1 row when it was read.',
-    );
+    const heading = await screen.findByRole('heading', { name: "You've already imported this file" });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    const card = heading.closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 1 row when it was read.',
+      'Nothing was duplicated.',
+    ]);
+    expect(heading).not.toHaveClass('import-outcome-success');
+    expect(card).not.toHaveClass('import-outcome-success');
     expect(screen.queryByText(/didn't import/)).not.toBeInTheDocument();
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
 
@@ -743,15 +1160,13 @@ describe('a file that is already in', () => {
     await upload(container);
 
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText("It had 73 rows when it was read, and 1 of them didn't import."),
-    ).toBeInTheDocument();
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        "It had 73 rows when it was read, and 1 of them didn't import.",
-    );
+    const card = screen.getByRole('heading', { name: "You've already imported this file" }).closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 73 rows when it was read.',
+      "1 of them didn't import.",
+      'Nothing was duplicated.',
+    ]);
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 
@@ -761,15 +1176,13 @@ describe('a file that is already in', () => {
     await upload(container);
 
     expect(await screen.findByText(/You've already imported this file/)).toBeInTheDocument();
-    expect(
-      screen.getByText("It had 73 rows when it was read, and 4 of them didn't import."),
-    ).toBeInTheDocument();
-    const card = screen.getByText(/You've already imported this file/).closest('.card') as HTMLElement;
-    expect(card.textContent).toBe(
-      "You've already imported this file" +
-        `You uploaded it on ${uploadedOn}. It wasn't read again, and nothing was duplicated.` +
-        "It had 73 rows when it was read, and 4 of them didn't import.",
-    );
+    const card = screen.getByRole('heading', { name: "You've already imported this file" }).closest('.import-duplicate') as HTMLElement;
+    expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
+      `You uploaded it on ${uploadedOn}. It wasn't read again.`,
+      'It had 73 rows when it was read.',
+      "4 of them didn't import.",
+      'Nothing was duplicated.',
+    ]);
     expect(screen.queryByText(/in your data/)).not.toBeInTheDocument();
   });
 });
@@ -806,26 +1219,38 @@ describe('the account picker', () => {
     expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'false');
     // and the way out of the list, for a bank that has no account yet
     expect(screen.getByRole('button', { name: '+ New account' })).toBeInTheDocument();
+    expect(screen.getByText("Hidden accounts aren't listed here — unhide one first."))
+      .toBeInTheDocument();
     // the create arm stays shut until it is asked for: an account chosen by the
     // screen rather than by the person is how rows land in the wrong one
     expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
   });
 
   /**
-   * The heading is a <div> and not a <label>, because Chips renders no control for
-   * htmlFor to point at. The group's own name has to differ from that heading:
-   * TransactionsScreen's account filter is already a group called "Account", and this
-   * row is what made the name ambiguous. jsdom cannot see the collision itself —
-   * neither screen mounts the other — so what is held here is the distinctness.
+   * The group's name differs from its heading so it cannot be confused with the
+   * TransactionsScreen account filter, which is named "Account" too.
    */
   it('heads the picker, and does not name its group what the transactions filter is named', async () => {
     mockFetch(ACCOUNT_ROUTES);
     mount();
     await screen.findByRole('button', { name: 'Sparkasse Giro' });
 
-    expect(screen.getByText('Account')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: 'Account' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Account' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: /account/i })).toBeInTheDocument();
+  });
+
+  it('keeps long account names intact and offers new account as another chip', async () => {
+    const name = 'Long account name '.repeat(12).trim();
+    mockFetch({ ...ACCOUNT_ROUTES, 'GET /api/accounts': () => ok([...PICKABLE, { ...PICKABLE[0], id: 'acc-long', name }]) });
+    mount();
+    const long = await screen.findByRole('button', { name });
+    const group = screen.getByRole('group', { name: 'Account for this import' });
+    expect(long).toHaveTextContent(name);
+    expect(long).toHaveClass('chip');
+    expect(within(group).getByRole('button', { name: '+ New account' })).toHaveClass('chip');
+    fireEvent.click(within(group).getByRole('button', { name: '+ New account' }));
+    expect(screen.getByLabelText('Account name')).toBeInTheDocument();
   });
 
   it('keeps Import disabled until an account is picked', async () => {
@@ -833,7 +1258,7 @@ describe('the account picker', () => {
     const { container } = mount();
     await screen.findByRole('button', { name: 'N26' });
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
 
@@ -847,7 +1272,7 @@ describe('the account picker', () => {
     const { container } = mount();
     fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
     await screen.findByText(/Read 12 of 14 rows/);
 
@@ -873,24 +1298,51 @@ describe('the account picker', () => {
     const { container } = mount();
     chooseFile(container);
 
-    expect(await screen.findByText(/Your accounts couldn't be loaded/)).toBeInTheDocument();
+    const error = await screen.findByText(/Your accounts couldn't be loaded/);
+    expect(error).toHaveTextContent('Nothing can be imported until the list is there');
+    expect(error.closest('.import-step')).toContainElement(
+      screen.getByRole('heading', { level: 3, name: 'Account' }),
+    );
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
     // and no create arm to fall through to
     expect(screen.queryByPlaceholderText('Sparkasse Giro')).not.toBeInTheDocument();
     expect(countOf('POST /api/imports')).toBe(0);
   });
 
+  it('keeps a loaded picker usable when the post-confirm account reload fails', async () => {
+    let reads = 0;
+    mockFetch({
+      ...ACCOUNT_ROUTES,
+      'GET /api/accounts': () => ++reads === 1 ? ok(PICKABLE) : fail(500),
+      'POST /api/imports': () => ok(summaryResult({ accountId: 'acc-3', accountName: 'N26' })),
+      'POST /api/imports/imp-1/confirm': () => ok(CONFIRMED),
+    });
+    const { container } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'N26' }));
+    chooseFile(container);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }));
+
+    const error = await screen.findByText(/Your accounts couldn't be loaded/);
+    expect(error).not.toHaveTextContent('Nothing can be imported until the list is there');
+    expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
+    expect(reads).toBe(2);
+  });
+
   /**
-   * With every account removed the endpoint answers `[]`, so the picker is gone and
+   * With no visible accounts the endpoint answers `[]`, so the picker is gone and
    * the create arm is the only state — and this sentence is then the one thing on
-   * screen saying why the bank the user is looking for is missing. It renders on any
-   * loaded list, empty included, which is why it is not inside the picker.
+   * screen saying why a hidden bank is missing. It renders on any loaded list,
+   * empty included, which is why it is not inside the picker.
    */
-  it("says removed accounts aren't listed even when the list is empty", async () => {
+  it("says hidden accounts aren't listed even when the list is empty", async () => {
     mockFetch(BASE);
     mount();
 
-    expect(await screen.findByText(/Accounts you've removed aren't listed/)).toBeInTheDocument();
+    expect(await screen.findByText("Hidden accounts aren't listed here — unhide one first.")).toBeInTheDocument();
+    expect(screen.getByLabelText('Account name')).toHaveValue('');
     // the empty-list state, not the populated one: there is no picker above it
     expect(screen.queryByRole('button', { name: '+ New account' })).not.toBeInTheDocument();
   });
@@ -905,7 +1357,7 @@ describe('the account picker', () => {
     const { container } = mount();
     const name = await screen.findByPlaceholderText('Sparkasse Giro');
     chooseFile(container, 'sparkasse-2026-07.csv');
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(name).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled();
@@ -969,7 +1421,9 @@ describe('the account the create arm makes', () => {
 
     // the server's own sentence, never a class this screen derived from a status: the
     // holder is hidden and so is in no picker, which nothing here could have said
-    expect(await screen.findByText(/^Error:/)).toHaveTextContent(HIDDEN_HOLDER);
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText(HIDDEN_HOLDER)).toBeInTheDocument();
     expect(countOf('POST /api/imports')).toBe(0);
     // and the arm is still filled in, because the name is the only thing to fix
     expect(screen.getByPlaceholderText('Sparkasse Giro')).toHaveValue('Old DKB');
@@ -992,7 +1446,7 @@ describe('the account the create arm makes', () => {
     const { container } = mount();
     await fillCreateArm(container, 'Third Bank');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-    await screen.findByText(/^Error:/);
+    await screen.findByRole('alert');
 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
     await screen.findByText(/Read 12 of 14 rows/);
@@ -1007,11 +1461,17 @@ describe('the account the create arm makes', () => {
     await fillCreateArm(container, 'Third Bank');
     fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 
-    expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Error')).toBeInTheDocument();
+    expect(within(alert).getByText('HTTP 500')).toBeInTheDocument();
+    expect(alert.closest('.import-setup')).toBeInTheDocument();
     // the write the user did not press a button called "Create" for, named
-    expect(
-      screen.getByText(/"Third Bank" was created when you pressed Import/),
-    ).toBeInTheDocument();
+    const created = screen.getByRole('complementary', { name: 'Account created' });
+    expect(within(created).getByText(/"Third Bank" was created when you pressed Import/))
+      .toBeInTheDocument();
+    expect(created.closest('.import-results')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Read .*nothing imported yet|Imported .*rows|Discarded|already imported/ }))
+      .not.toBeInTheDocument();
     // and the caller is told here, on the one path where telling it is the whole
     // mechanism: no confirm follows to fire onImported, and onBack reloads nothing,
     // so an account announced to nobody is on the server and on no screen
@@ -1027,6 +1487,8 @@ describe('the account the create arm makes', () => {
     // Back does not reload the caller, so nothing else would put this account on the
     // rail: it would exist on the server and appear on no screen
     expect(onAccountCreated).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('complementary', { name: 'Account created' }))
+      .toHaveTextContent('The account "statement" was created when you pressed Import');
     // in the LIST the picker is derived from, not only in the key that is pressed —
     // a key with no row renders a picker with nothing selected and Import disabled
     expect(screen.getByRole('button', { name: 'statement' })).toHaveAttribute(
@@ -1041,6 +1503,8 @@ describe('the account the create arm makes', () => {
     await screen.findByPlaceholderText('Sparkasse Giro');
 
     expect(screen.queryByLabelText('Account currency')).toBeNull();
+    expect(screen.getByLabelText('Account name')).toBeInTheDocument();
+    expect(screen.getByText(/created when you press Import, before the file is read/)).toBeInTheDocument();
     expect(screen.getByText(/It will hold amounts in EUR/)).toBeInTheDocument();
   });
 
@@ -1055,7 +1519,7 @@ describe('the account the create arm makes', () => {
     const name = await screen.findByPlaceholderText('Sparkasse Giro');
     fireEvent.change(name, { target: { value: 'Third Bank' } });
     chooseFile(container);
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     expect(screen.queryByText(/It will hold amounts in/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();

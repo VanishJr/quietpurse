@@ -194,7 +194,10 @@ describe('the page heading', () => {
   it('opens the import panel for a URL that names it', async () => {
     mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
 
-    expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
+    const heading = await screen.findByRole('heading', { name: 'Import a statement' });
+    expect(heading).toBeInTheDocument();
+    expect(heading.closest('.import-page')).toBeInTheDocument();
+    expect(heading.closest('.screen-inner')).toBeNull();
   });
 
   it('drops the panel from the URL on the way out, which is what the bar reads', async () => {
@@ -1018,7 +1021,7 @@ describe('the empty states', () => {
         files: [new File(['date;amount\n2026-06-01;-10'], 'statement.csv', { type: 'text/csv' })],
       },
     });
-    await screen.findByText(/click to choose another/);
+    await screen.findByRole('button', { name: 'Choose another CSV, Excel or PDF statement file' });
 
     // the reload is the observable, and the request count is how it is read: the panel
     // replaces this screen while it is open, so the rail the created account has to

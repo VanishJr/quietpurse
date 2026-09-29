@@ -372,7 +372,6 @@ textarea {
 .sheet-title,
 .fig-title,
 .settings-title,
-.dropzone-title,
 .ov-spend-title,
 .welcome-title,
 .acct-blank-title {
@@ -2400,7 +2399,7 @@ textarea {
 /*
  * Dashed, and that is the whole of the difference from a card: the border says "this
  * is where a chart would be" without the panel pretending to be one. It is the same
- * device `.dropzone` uses one screen over, for the same sentence.
+ * device the Import file picker uses, for the same sentence.
  *
  * Three things in it now — a mark, a line and a button — where it used to hold two
  * paragraphs as well, so the gaps are set for a stack that short: the heading close
@@ -3122,57 +3121,6 @@ textarea {
   color: var(--ink-secondary);
   margin-top: 8px;
   line-height: 1.4;
-}
-
-.csv-input {
-  min-height: 96px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  resize: vertical;
-}
-
-/* ---------- file drop zone ---------- */
-
-.dropzone {
-  border: 2px dashed var(--ink-grid);
-  border-radius: 12px;
-  background: var(--ink-surface);
-  padding: 28px 16px;
-  text-align: center;
-  cursor: pointer;
-  margin: 12px 0;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
-}
-
-.dropzone:hover {
-  border-color: var(--ink-accent);
-}
-
-/* the dragged file is over the zone — make the target unmistakable */
-.dropzone-active {
-  border-color: var(--ink-accent);
-  border-style: solid;
-  background: var(--ink-grid);
-}
-
-.dropzone-icon {
-  font-size: 28px;
-  line-height: 1;
-  color: var(--ink-accent);
-  margin-bottom: 8px;
-}
-
-.dropzone-title {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.dropzone-sub {
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-top: 4px;
 }
 
 details > summary {

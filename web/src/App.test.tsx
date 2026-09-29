@@ -100,7 +100,10 @@ describe('the shell', () => {
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
     fireEvent.click(tabs.getByRole('link', { name: 'Import' }));
 
-    expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeVisible();
+    const heading = await screen.findByRole('heading', { name: 'Import a statement' });
+    expect(heading).toBeVisible();
+    expect(heading.closest('.import-page')?.parentElement).toHaveClass('screen');
+    expect(screen.getByRole('group', { name: 'Theme' })).toBeVisible();
     expect(tabs.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
     expect(tabs.getByRole('link', { name: 'Overview' })).not.toHaveAttribute('aria-current');
 

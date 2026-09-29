@@ -280,16 +280,14 @@ export function OverviewScreen({
 
   if (panel === 'import') {
     return (
-      <div className="screen-inner">
-        <CsvImport
-          onBack={() => setUrl({ panel: null })}
-          onImported={load}
-          // the same reload, and deliberately not the same prop: onBack closes the
-          // panel without one, so an account created in there reaches the rail here
-          onAccountCreated={load}
-          baseCurrency={baseCurrency}
-        />
-      </div>
+      <CsvImport
+        onBack={() => setUrl({ panel: null })}
+        onImported={load}
+        // the same reload, and deliberately not the same prop: onBack closes the
+        // panel without one, so an account created in there reaches the rail here
+        onAccountCreated={load}
+        baseCurrency={baseCurrency}
+      />
     );
   }
 
