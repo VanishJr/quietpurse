@@ -9,10 +9,10 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, attachmentDisposition } from '../src/app';
 import { clearImportDocument, createImport, recordImportDocument, seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 import {
   DOCUMENT_DELETE_REFUSED,
@@ -25,7 +25,7 @@ import { storageRoot } from '../src/storage';
 const csvFor = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
 
-let agent: request.Agent;
+let agent: Agent;
 
 interface Uploaded {
   importId: string;
@@ -97,7 +97,7 @@ const blobExists = (importId: string, stem = 'statement'): Promise<boolean> =>
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('GET /api/imports/:id/document', () => {

@@ -6,14 +6,14 @@
  * saying so.
  */
 import crypto from 'crypto';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { insertTransactions, seedDefaults } from '../src/db';
 import { NewTransaction, Transaction } from '../src/types';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 let accountId: string;
 
 /** An expense in the one account; the day keeps the rows apart. */
@@ -58,7 +58,7 @@ const listRules = async (): Promise<{ id: number; description: string; matches: 
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   const created = await agent.post('/api/accounts').send({ name: 'Rules Bank', currency: 'EUR' });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   accountId = created.body.id as string;

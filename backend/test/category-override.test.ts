@@ -12,7 +12,6 @@
  * starts from an empty database of its own because every figure it asserts is exact.
  */
 import { sql } from 'drizzle-orm';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
@@ -38,6 +37,7 @@ import {
 } from '../src/db';
 import { Account, NewTransaction, Transaction } from '../src/types';
 import { idOf } from './helpers';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 // ---------- describe 1: the data layer ----------
@@ -355,18 +355,18 @@ const pastStatement = Buffer.from(
   'utf8',
 );
 
-let agent: request.Agent;
+let agent: Agent;
 let walletId: string;
 let shopId: string;
 let clearId: string;
 
-const makeAccount = async (a: request.Agent, name: string): Promise<string> => {
+const makeAccount = async (a: Agent, name: string): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency: 'EUR' });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body.id as string;
 };
 
-const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Promise<void> => {
+const importCsv = async (a: Agent, accountId: string, file: Buffer): Promise<void> => {
   const staged = await a
     .post('/api/imports')
     .field('accountId', accountId)
@@ -376,19 +376,19 @@ const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Pro
   expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
 };
 
-const listed = async (a: request.Agent): Promise<Transaction[]> => {
+const listed = async (a: Agent): Promise<Transaction[]> => {
   const res = await a.get('/api/transactions?limit=1000');
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body as Transaction[];
 };
 
-const one = async (a: request.Agent, description: string): Promise<Transaction> => {
+const one = async (a: Agent, description: string): Promise<Transaction> => {
   const found = (await listed(a)).filter((t) => t.description === description);
   expect(found, `expected exactly one "${description}"`).toHaveLength(1);
   return found[0];
 };
 
-const patchCategory = (a: request.Agent, id: string, body: unknown) =>
+const patchCategory = (a: Agent, id: string, body: unknown) =>
   a.patch(`/api/transactions/${id}/category`).send(body as object);
 
 describe('over HTTP: the route, and every surface that reports a category', () => {
@@ -398,7 +398,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     await freshTestDb();
     await seedDefaults();
 
-    agent = request.agent(app);
+    agent = await serve(app);
 
     walletId = await makeAccount(agent, 'Wallet');
     const pastAccountId = await makeAccount(agent, 'Past');

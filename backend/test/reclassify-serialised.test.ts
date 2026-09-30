@@ -5,8 +5,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reclassifyAll, reclassifyIdle, reclassifyIfRulesChanged } from '../src/classify';
 import { addCategoryRule, dbInstance, insertTransactions, seedDefaults, setMeta } from '../src/db';
+import { REQUEST_TIMEOUT_MS } from '../src/rates';
 import { NewTransaction } from '../src/types';
 import { findTx, rejectionOf } from './helpers';
+import { settleRecomputes } from './idle';
 import { freshTestDb } from './pglite';
 
 const MONOBANK = 'https://api.monobank.ua/bank/currency';
@@ -225,14 +227,35 @@ describe('the recompute runs one at a time', () => {
   it('lets a held run finish inside its own case when its rate call times out', async () => {
     await insertTransactions([row('Serial timed out')]);
     const timeout = new AbortController();
-    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    const budget = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
     holding = true;
     const a = track('a', reclassifyAll());
     await vi.waitFor(() => expect(rateCalls).toBe(1));
+    expect(budget).toHaveBeenNthCalledWith(1, REQUEST_TIMEOUT_MS);
 
     timeout.abort(new Error('the rate call timed out'));
     await vi.waitFor(() => expect(a.settled(), 'a held run outlived the timeout of its own rate call').toBe(true));
     await a.promise;
     expect(rateCalls).toBe(1);
+  });
+});
+
+describe('settling the queue between cases', () => {
+  it('puts the network offline before it waits, so a run queued behind a parked call makes no call of its own', async () => {
+    await insertTransactions([row('Serial settled')]);
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    holding = true;
+    track('a', reclassifyAll());
+    await vi.waitFor(() => expect(rateCalls).toBe(1));
+
+    await addCategoryRule('settled', 'food');
+    const check = track('check', reclassifyIfRulesChanged());
+    const followUp = track('follow-up', reclassifyAll());
+    const settled = track('settled', settleRecomputes(realFetch));
+    timeout.abort(new Error('the rate call timed out'));
+    await vi.waitFor(() => expect(settled.settled(), 'the wait outlived the one call that was parked').toBe(true));
+    expect(rateCalls, 'a run queued behind the parked call reached the network').toBe(1);
+    expect([check.settled(), followUp.settled()]).toEqual([true, true]);
   });
 });

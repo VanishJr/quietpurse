@@ -6,10 +6,10 @@
  * body carries. A per-account body that answered `baseCurrency` would render a UAH
  * figure labelled EUR, and nothing below the route can see that.
  */
-import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const FROM = '2026-01-01';
@@ -53,17 +53,17 @@ const mixedStatement = Buffer.from(
   'utf8',
 );
 
-let agent: request.Agent;
+let agent: Agent;
 let walletId: string;
 let foreignId: string;
 
-const makeAccount = async (a: request.Agent, name: string, currency = 'EUR'): Promise<string> => {
+const makeAccount = async (a: Agent, name: string, currency = 'EUR'): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body.id as string;
 };
 
-const importCsv = async (a: request.Agent, accountId: string, file: Buffer): Promise<void> => {
+const importCsv = async (a: Agent, accountId: string, file: Buffer): Promise<void> => {
   const staged = await a
     .post('/api/imports')
     .field('accountId', accountId)
@@ -90,7 +90,7 @@ const ALL_EXPENSE = EXPENSE + FOREIGN_BASE_EXPENSE;
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 
   walletId = await makeAccount(agent, 'Wallet');
   foreignId = await makeAccount(agent, 'Hryvnia', 'UAH');

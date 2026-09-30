@@ -5,15 +5,15 @@
  * file: a rule deleted without one leaves every row it re-tagged wearing a category
  * the rule no longer justifies, with nothing on screen saying so.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
 import { insertTransactions, seedDefaults } from '../src/db';
 import { Transaction } from '../src/types';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 let ruleId: number;
 
 const rewe = async (): Promise<Transaction> => {
@@ -33,7 +33,7 @@ const listRules = async (): Promise<{ id: number }[]> => {
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   const created = await agent.post('/api/accounts').send({ name: 'Rules Bank', currency: 'EUR' });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   await insertTransactions([

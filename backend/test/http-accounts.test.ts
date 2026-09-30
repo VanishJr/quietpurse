@@ -8,13 +8,13 @@
  * are both invisible from the data layer.
  */
 import { sql } from 'drizzle-orm';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { ACCOUNT_NAME_MAX, dbInstance, seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 
 const csvFile = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
@@ -64,7 +64,7 @@ const readAccount = async (id: string) => {
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('POST /api/accounts', () => {

@@ -7,13 +7,13 @@
  * The dates are built from today: the route reads a fixed window back from now, so
  * a literal year is green until it is not, for a reason nobody connects to this file.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { recurringKey } from '../src/categorizer';
 import { RecurringGroup, applyClassification, insertTransactions, seedDefaults } from '../src/db';
 import { NewTransaction } from '../src/types';
 import { idOf } from './helpers';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const RENT = 900;
@@ -36,7 +36,7 @@ interface RecurringSummary {
   groups: RecurringGroup[];
 }
 
-let agent: request.Agent;
+let agent: Agent;
 
 const recurring = async (): Promise<RecurringSummary> => {
   const res = await agent.get('/api/recurring');
@@ -52,7 +52,7 @@ const ignore = (body: object) => agent.post('/api/recurring/ignore').send(body);
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   const created = await agent.post('/api/accounts').send({ name: 'Rent Bank', currency: 'EUR' });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const accountId = created.body.id as string;

@@ -5,13 +5,13 @@
  * than updateAppSettings directly: the defect being pinned was a 200 answered on a
  * change that never happened, and only the route can be wrong about that.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 
 /**
  * Everything asserted below is exact, so the file starts from an empty database. The
@@ -22,7 +22,7 @@ let agent: request.Agent;
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 const settings = async () => (await agent.get('/api/app-settings')).body;
