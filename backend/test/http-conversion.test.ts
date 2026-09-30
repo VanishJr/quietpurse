@@ -56,8 +56,8 @@ describe('GET /api/conversion', () => {
     try {
       const patched = await agent.patch('/api/app-settings').send({ baseCurrency: 'USD' });
       expect(patched.status, JSON.stringify(patched.body)).toBe(200);
-      // no count yet: the refill fills the base-currency rows after this answer, and on
-      // Postgres this read can land first; they are filled before its first rate call
+      // no count yet: the refill fills the base-currency rows after this answer; they are
+      // filled before its first rate call
       expect(await conversion()).toMatchObject({ baseCurrency: 'USD', converting: true });
 
       await vi.waitFor(() => expect(held.length).toBeGreaterThan(0));

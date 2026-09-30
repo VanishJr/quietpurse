@@ -1,10 +1,3 @@
-/**
- * The one way a test reaches a server. supertest handed an app listens on the
- * unspecified address itself, which can be given a port another program already holds
- * on 127.0.0.1 - and the URL it builds names 127.0.0.1, so that program answers the
- * request. A server started here listens on 127.0.0.1 before supertest sees it, and
- * supertest neither listens on nor closes a server it was handed listening.
- */
 import http from 'http';
 import request from 'supertest';
 

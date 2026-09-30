@@ -5,7 +5,7 @@ import { addTransferRule, allTransactions, exportBackup, insertTransactions, lis
 import { matchesTransferRule } from '../src/transaction-description';
 import type { NewTransaction } from '../src/types';
 import type { TransferRule, TransferRulePreview } from '../src/wire';
-import { type Agent, serve } from './loopback';
+import { serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const agent = await serve(app);

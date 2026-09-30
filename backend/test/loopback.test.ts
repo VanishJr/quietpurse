@@ -2,6 +2,7 @@ import fs from 'fs';
 import type http from 'http';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
+import { configDefaults } from 'vitest/config';
 import { closeServers, serve } from './loopback';
 
 const ROOT = path.resolve(process.cwd(), 'test');
@@ -9,8 +10,8 @@ const HARNESS = path.join(ROOT, 'loopback.ts');
 
 const NAMES_SUPERTEST = /(['"`])(?:@types\/)?supertest(?:\/[^'"`\n]*)?\1/;
 const LISTENS = /\.listen\s*\(/;
+const COLLECTED = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
-/** Assembled, so that this file's own text never carries the name the walk refuses. */
 const PACKAGE = ['super', 'test'].join('');
 
 const scripts = (dir: string): string[] =>
@@ -18,6 +19,14 @@ const scripts = (dir: string): string[] =>
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) return scripts(full);
     return /\.[cm]?[jt]sx?$/.test(entry.name) ? [full] : [];
+  });
+
+const collected = (dir: string): string[] =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === 'node_modules') return [];
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return collected(full);
+    return COLLECTED.test(entry.name) ? [full] : [];
   });
 
 describe('what the harness serves', () => {
@@ -71,6 +80,18 @@ describe('no test reaches a server except through the harness', () => {
         ];
       });
     expect(offenders).toEqual([]);
+  });
+
+  it('finds every file the suite collects in the package under the directory it reads', () => {
+    expect(configDefaults.include, "the walk's pattern copies a default vitest no longer has").toEqual([
+      '**/*.{test,spec}.?(c|m)[jt]s?(x)',
+    ]);
+    const files = collected(process.cwd());
+    expect(files).toContain(path.join(ROOT, 'loopback.test.ts'));
+    const outside = files
+      .filter((file) => !file.startsWith(ROOT + path.sep))
+      .map((file) => path.relative(process.cwd(), file));
+    expect(outside).toEqual([]);
   });
 
   it('reads every way of naming the package as a quoted name, and prose as none', () => {

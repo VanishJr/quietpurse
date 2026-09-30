@@ -4,7 +4,7 @@ import { reclassifyAll } from '../src/classify';
 import { allTransactions, createGoal, insertTransactions, seedDefaults, setBaseForBaseCurrency } from '../src/db';
 import { getGoalProgress } from '../src/goals';
 import type { NewTransaction } from '../src/types';
-import { type Agent, serve } from './loopback';
+import { serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const agent = await serve(app);

@@ -99,10 +99,15 @@ either written as a quoted literal — the one spelling an import, a type-only i
 `require`, an `import()`, a `typeof import()` and a triple-slash directive share — and a call
 written `.listen(`, and requires that file to be among those read and to carry both, because a
 request supertest builds from an app reaches whatever holds its port on `127.0.0.1`, and only the
-text shows the next file written that way; a specifier assembled at run time, a listen reached
-through an alias or a computed key, and a listener started in a child process are not seen, and
-none is closed here, while a quoted name in a comment or a string that names no module is refused,
-which costs a word to rephrase and never a silence;
+text shows the next file written that way; it also reads the name of every file in the package
+outside `node_modules` that vitest's default include collects, pinning that default to the pattern
+it copies, requires its own name among them, and refuses any that sits outside `backend/test/`,
+because the suite runs such a file and the text check does not read it; a specifier assembled at
+run time, a listen reached through an alias or a computed key, a listener started in a child
+process, and a test file collected only through an `include` written into
+`backend/vitest.config.ts` or reached through a symlinked directory are not seen, and none is
+closed here, while a quoted name in a comment or a string that names no module is refused, which
+costs a word to rephrase and never a silence;
 `backend/test/specs.test.ts` reads every spec this repository declares — the documents at the root
 and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
 included, and an untracked probe dropped under either package included — enumerated through
