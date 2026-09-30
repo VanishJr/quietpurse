@@ -1922,13 +1922,7 @@ app.post(
 /** The built client, when `npm run setup` has produced one. */
 export const WEB_DIST = path.join(__dirname, '..', '..', 'web', 'dist');
 
-/**
- * Below every /api route, so nothing here can shadow one, and for GET alone: a POST to
- * an unknown path is refused, never answered with a page. Only what Vite wrote under
- * assets/ carries a content hash in its name, so only that may be cached for good; the
- * page and the favicon are revalidated, or a rebuilt client never reaches the browser.
- */
-const CLIENT_NOT_BUILT =
+export const CLIENT_NOT_BUILT =
   'the web client is not built - run `npm run setup` from the repository root, then start again';
 
 /**
@@ -1938,8 +1932,8 @@ const CLIENT_NOT_BUILT =
  * caching, and the person's browser then never sees a new version of the app at all.
  * Only Vite puts a content hash in a name, and only under that one folder.
  */
-export function cacheControlFor(filePath: string): string {
-  const relative = path.relative(WEB_DIST, filePath);
+export function cacheControlFor(dist: string, filePath: string): string {
+  const relative = path.relative(dist, filePath);
   return relative.startsWith(`assets${path.sep}`)
     ? 'public, max-age=31536000, immutable'
     : 'no-cache';
@@ -1960,30 +1954,38 @@ export function cacheControlFor(filePath: string): string {
 export const servesTheApp = (pathname: string, acceptsHtml: boolean): boolean =>
   acceptsHtml && !/\.[A-Za-z0-9]+$/.test(pathname.split('/').pop() ?? '');
 
-app.use(
-  express.static(WEB_DIST, {
-    index: false,
-    setHeaders: (res, filePath) => {
-      res.setHeader('Cache-Control', cacheControlFor(filePath));
-    },
-  }),
-);
+/**
+ * Below every /api route, so nothing here can shadow one, and for GET alone: a POST to
+ * an unknown path is refused, never answered with a page. Only what Vite wrote under
+ * assets/ carries a content hash in its name, so only that may be cached for good; the
+ * page and the favicon are revalidated, or a rebuilt client never reaches the browser.
+ */
+export function serveClient(target: express.Express, dist: string): void {
+  target.use(
+    express.static(dist, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        res.setHeader('Cache-Control', cacheControlFor(dist, filePath));
+      },
+    }),
+  );
 
-app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
-  const index = path.join(WEB_DIST, 'index.html');
-  // before the shape test, and deliberately: with no build there is nothing to
-  // serve for any path, and this sentence is the one that says why
-  if (!fs.existsSync(index)) {
-    res.status(503).type('text/plain').send(CLIENT_NOT_BUILT);
-    return;
-  }
-  if (!servesTheApp(req.path, Boolean(req.accepts('html')))) {
-    res.status(404).type('text/plain').send('not found');
-    return;
-  }
-  res.setHeader('Cache-Control', 'no-cache');
-  res.sendFile(index);
-});
+  target.get(/^\/(?!api(?:\/|$)).*/, (req, res) => {
+    const index = path.join(dist, 'index.html');
+    if (!fs.existsSync(index)) {
+      res.status(503).type('text/plain').send(CLIENT_NOT_BUILT);
+      return;
+    }
+    if (!servesTheApp(req.path, Boolean(req.accepts('html')))) {
+      res.status(404).type('text/plain').send('not found');
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile('index.html', { root: dist });
+  });
+}
+
+serveClient(app, WEB_DIST);
 
 const ECHO_MAX = 200;
 const BODY_NOT_JSON_PREFIX = 'the request body could not be read as JSON: ';
