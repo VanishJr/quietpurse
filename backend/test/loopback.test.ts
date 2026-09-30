@@ -7,33 +7,27 @@ import { closeServers, serve } from './loopback';
 
 const ROOT = path.resolve(process.cwd(), 'test');
 const HARNESS = path.join(ROOT, 'loopback.ts');
+const SCRIPTS = path.resolve(process.cwd(), 'scripts');
+const CONFIG = path.resolve(process.cwd(), 'vitest.config.ts');
 
 const NAMES_SUPERTEST = /(['"`])(?:@types\/)?supertest(?:\/[^'"`\n]*)?\1/;
 const LISTENS = /\.listen\s*\(/;
 const COLLECTED = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
-const NAME_ROOTS = [process.cwd()];
-const LISTEN_ROOTS = [ROOT, path.resolve(process.cwd(), 'scripts')];
-
 const PACKAGE = ['super', 'test'].join('');
 
-const scripts = (dir: string): string[] =>
+const walk = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     if (entry.name === 'node_modules') return [];
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return scripts(full);
-    return /\.[cm]?[jt]sx?$/.test(entry.name) ? [full] : [];
+    return entry.isDirectory() ? walk(full) : [full];
   });
 
-const read = (roots: string[]): string[] => roots.flatMap(scripts);
+const within = (...dirs: string[]) => (file: string): boolean => dirs.some((dir) => file.startsWith(dir + path.sep));
 
-const collected = (dir: string): string[] =>
-  fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.name === 'node_modules') return [];
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return collected(full);
-    return COLLECTED.test(entry.name) ? [full] : [];
-  });
+const FILES = walk(process.cwd());
+const NAME_READING = FILES.filter((file) => /\.[cm]?[jt]sx?$/.test(file));
+const LISTEN_READING = NAME_READING.filter(within(ROOT, SCRIPTS));
 
 describe('what the harness serves', () => {
   it('answers from a server listening on 127.0.0.1, as that server reads its own address', async () => {
@@ -68,21 +62,26 @@ describe('what the harness serves', () => {
 
 describe('no test reaches a server except through the harness', () => {
   it('reads the harness, which names the package and listens', () => {
-    expect(read(NAME_ROOTS)).toContain(HARNESS);
-    expect(read(LISTEN_ROOTS)).toContain(HARNESS);
+    expect(NAME_READING).toContain(HARNESS);
+    expect(LISTEN_READING).toContain(HARNESS);
     const own = fs.readFileSync(HARNESS, 'utf8');
     expect(own).toMatch(NAMES_SUPERTEST);
     expect(own).toMatch(LISTENS);
   });
 
+  it('reads past the directory the harness sits in', () => {
+    expect(NAME_READING, 'the name reading stops short of the package root').toContain(CONFIG);
+    expect(LISTEN_READING.some(within(SCRIPTS)), 'the listen reading stops short of the scripts directory').toBe(true);
+  });
+
   it('finds the package named, and a server listened on, in no other file', () => {
-    const offending = (roots: string[], pattern: RegExp, says: string): string[] =>
-      read(roots)
+    const offending = (reading: string[], pattern: RegExp, says: string): string[] =>
+      reading
         .filter((file) => file !== HARNESS && pattern.test(fs.readFileSync(file, 'utf8')))
         .map((file) => `${path.relative(process.cwd(), file)} ${says}`);
     const offenders = [
-      ...offending(NAME_ROOTS, NAMES_SUPERTEST, 'names the package'),
-      ...offending(LISTEN_ROOTS, LISTENS, 'listens'),
+      ...offending(NAME_READING, NAMES_SUPERTEST, 'names the package'),
+      ...offending(LISTEN_READING, LISTENS, 'listens'),
     ];
     expect(offenders).toEqual([]);
   });
@@ -97,12 +96,11 @@ describe('no test reaches a server except through the harness', () => {
       ),
     );
     expect(expanded.filter((name) => !COLLECTED.test(name)), 'the walk collects less than that default').toEqual([]);
-    const files = collected(process.cwd());
-    expect(files).toContain(path.join(ROOT, 'loopback.test.ts'));
-    const outside = files
-      .filter((file) => !file.startsWith(ROOT + path.sep))
-      .map((file) => path.relative(process.cwd(), file));
-    expect(outside).toEqual([]);
+    const collects = (file: string): boolean => COLLECTED.test(path.basename(file));
+    expect(FILES.filter(collects)).toContain(path.join(ROOT, 'loopback.test.ts'));
+    const outside = FILES.filter((file) => !within(ROOT)(file));
+    expect(outside, 'the reading for collected files stops short of the package root').toContain(CONFIG);
+    expect(outside.filter(collects).map((file) => path.relative(process.cwd(), file))).toEqual([]);
   });
 
   it('reads every way of naming the package as a quoted name, and prose as none', () => {

@@ -8,9 +8,7 @@ parent: module-backend
 
 What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
 `AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
-database it runs against, what jsdom cannot see, what skips on this platform — and nothing below
-repeats it; where a harness file's header carries its own reasoning, nothing below repeats that
-either.
+database it runs against, what jsdom cannot see, what skips on this platform.
 
 ## Responsibility
 
@@ -106,9 +104,9 @@ well as by naming it, and only the text shows the next file written that way; it
 name of every file in the package outside `node_modules` that vitest's default include collects,
 pinning that default to the pattern it copies, requires its own name among them, and refuses any
 that sits outside `backend/test/`, because the suite runs such a file wherever it sits and the
-reading for `.listen(` stops at those two directories; a specifier assembled at run time, a listen
+reading for `.listen(` stops at those directories; a specifier assembled at run time, a listen
 reached through an alias or a computed key, a listen in a module under `backend/src/` or anywhere
-else outside those two directories, a listener started in a child process, and a test file
+else outside those directories, a listener started in a child process, and a test file
 collected only through an `include` written into `backend/vitest.config.ts` or reached through a
 symlinked directory are not seen, and none is closed here, while a quoted name in a comment or a
 string that names no module is refused, which costs a word to rephrase and never a silence;
