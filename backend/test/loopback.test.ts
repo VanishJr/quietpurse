@@ -12,14 +12,20 @@ const NAMES_SUPERTEST = /(['"`])(?:@types\/)?supertest(?:\/[^'"`\n]*)?\1/;
 const LISTENS = /\.listen\s*\(/;
 const COLLECTED = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
+const NAME_ROOTS = [process.cwd()];
+const LISTEN_ROOTS = [ROOT, path.resolve(process.cwd(), 'scripts')];
+
 const PACKAGE = ['super', 'test'].join('');
 
 const scripts = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === 'node_modules') return [];
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) return scripts(full);
     return /\.[cm]?[jt]sx?$/.test(entry.name) ? [full] : [];
   });
+
+const read = (roots: string[]): string[] => roots.flatMap(scripts);
 
 const collected = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -62,23 +68,22 @@ describe('what the harness serves', () => {
 
 describe('no test reaches a server except through the harness', () => {
   it('reads the harness, which names the package and listens', () => {
-    expect(scripts(ROOT)).toContain(HARNESS);
+    expect(read(NAME_ROOTS)).toContain(HARNESS);
+    expect(read(LISTEN_ROOTS)).toContain(HARNESS);
     const own = fs.readFileSync(HARNESS, 'utf8');
     expect(own).toMatch(NAMES_SUPERTEST);
     expect(own).toMatch(LISTENS);
   });
 
   it('finds the package named, and a server listened on, in no other file', () => {
-    const offenders = scripts(ROOT)
-      .filter((file) => file !== HARNESS)
-      .flatMap((file) => {
-        const text = fs.readFileSync(file, 'utf8');
-        const name = path.relative(ROOT, file);
-        return [
-          ...(NAMES_SUPERTEST.test(text) ? [`${name} names the package`] : []),
-          ...(LISTENS.test(text) ? [`${name} listens`] : []),
-        ];
-      });
+    const offending = (roots: string[], pattern: RegExp, says: string): string[] =>
+      read(roots)
+        .filter((file) => file !== HARNESS && pattern.test(fs.readFileSync(file, 'utf8')))
+        .map((file) => `${path.relative(process.cwd(), file)} ${says}`);
+    const offenders = [
+      ...offending(NAME_ROOTS, NAMES_SUPERTEST, 'names the package'),
+      ...offending(LISTEN_ROOTS, LISTENS, 'listens'),
+    ];
     expect(offenders).toEqual([]);
   });
 
@@ -86,6 +91,12 @@ describe('no test reaches a server except through the harness', () => {
     expect(configDefaults.include, "the walk's pattern copies a default vitest no longer has").toEqual([
       '**/*.{test,spec}.?(c|m)[jt]s?(x)',
     ]);
+    const expanded = ['test', 'spec'].flatMap((kind) =>
+      ['', 'c', 'm'].flatMap((module) =>
+        ['j', 't'].flatMap((language) => ['', 'x'].map((jsx) => `a.${kind}.${module}${language}s${jsx}`)),
+      ),
+    );
+    expect(expanded.filter((name) => !COLLECTED.test(name)), 'the walk collects less than that default').toEqual([]);
     const files = collected(process.cwd());
     expect(files).toContain(path.join(ROOT, 'loopback.test.ts'));
     const outside = files

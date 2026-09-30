@@ -8,8 +8,9 @@ parent: module-backend
 
 What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
 `AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
-database it runs against, what jsdom cannot see, what skips on this platform — and the harness files
-carry their own reasoning in their headers. Nothing below repeats them.
+database it runs against, what jsdom cannot see, what skips on this platform — and nothing below
+repeats it; where a harness file's header carries its own reasoning, nothing below repeats that
+either.
 
 ## Responsibility
 
@@ -93,21 +94,24 @@ route written any of those ways; the shape rule's one instrument is the token `r
 spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
 `req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
 and none is closed here;
-`backend/test/loopback.test.ts` reads every script under `backend/test/` and refuses, in any of
-them but `backend/test/loopback.ts`, the name `supertest`, its types package or a path inside
-either written as a quoted literal — the one spelling an import, a type-only import, a re-export, a
-`require`, an `import()`, a `typeof import()` and a triple-slash directive share — and a call
-written `.listen(`, and requires that file to be among those read and to carry both, because a
-request supertest builds from an app reaches whatever holds its port on `127.0.0.1`, and only the
-text shows the next file written that way; it also reads the name of every file in the package
-outside `node_modules` that vitest's default include collects, pinning that default to the pattern
-it copies, requires its own name among them, and refuses any that sits outside `backend/test/`,
-because the suite runs such a file and the text check does not read it; a specifier assembled at
-run time, a listen reached through an alias or a computed key, a listener started in a child
-process, and a test file collected only through an `include` written into
-`backend/vitest.config.ts` or reached through a symlinked directory are not seen, and none is
-closed here, while a quoted name in a comment or a string that names no module is refused, which
-costs a word to rephrase and never a silence;
+`backend/test/loopback.test.ts` reads every script in the package outside `node_modules` and
+refuses, in any of them but `backend/test/loopback.ts`, the name `supertest`, its types package or
+a path inside either written as a quoted literal — the one spelling an import, a type-only import,
+a re-export, a `require`, an `import()`, a `typeof import()` and a triple-slash directive share —
+and reads every script under `backend/test/` and `backend/scripts/` and refuses, in any of them but
+that file, a call written `.listen(`, and requires that file to be among the scripts each of those
+readings takes in and to carry both, because a request supertest builds from an app reaches
+whatever holds its port on `127.0.0.1`, a test reaches supertest through any module it imports as
+well as by naming it, and only the text shows the next file written that way; it also reads the
+name of every file in the package outside `node_modules` that vitest's default include collects,
+pinning that default to the pattern it copies, requires its own name among them, and refuses any
+that sits outside `backend/test/`, because the suite runs such a file wherever it sits and the
+reading for `.listen(` stops at those two directories; a specifier assembled at run time, a listen
+reached through an alias or a computed key, a listen in a module under `backend/src/` or anywhere
+else outside those two directories, a listener started in a child process, and a test file
+collected only through an `include` written into `backend/vitest.config.ts` or reached through a
+symlinked directory are not seen, and none is closed here, while a quoted name in a comment or a
+string that names no module is refused, which costs a word to rephrase and never a silence;
 `backend/test/specs.test.ts` reads every spec this repository declares — the documents at the root
 and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
 included, and an untracked probe dropped under either package included — enumerated through
