@@ -6,6 +6,7 @@
  */
 import { config } from './config';
 import {
+  type BaseWrite,
   applyBaseRate,
   currentBaseCurrency,
   getFxRate,
@@ -179,7 +180,13 @@ export async function backfillBaseAmounts(
 
 async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
   const base = await currentBaseCurrency();
-  let done = await setBaseForBaseCurrency(base);
+  const moved = (stored: string, converted: number): number => {
+    log(`base currency changed from ${base} to ${stored} during this refill; the refill that change started converts the rest`);
+    return converted;
+  };
+  const own = await setBaseForBaseCurrency(base);
+  if (own.moved) return moved(own.stored, 0);
+  let done = own.written;
 
   const keys = await listUnconvertedDays();
   if (keys.length === 0) return done;
@@ -204,14 +211,18 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
       log(`rate ${currency} -> ${base} on ${day}: no provider returned one`);
       continue;
     }
+    let write: BaseWrite;
     try {
-      done += await applyBaseRate(day, currency, k);
-      ratesApplied++;
+      write = await applyBaseRate(day, currency, k, base);
     } catch (e) {
       // local to one day's rows (an amount whose product overruns an integer, say),
       // so the remaining days still get converted
       log(`base_amount for ${currency} on ${day} not written: ${sqlReason(e)}`);
+      continue;
     }
+    if (write.moved) return moved(write.stored, done);
+    done += write.written;
+    ratesApplied++;
   }
   const left = keys.length - ratesApplied;
   if (left > 0) {

@@ -300,8 +300,16 @@ export async function setSetting(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: [s.settings.key], set: { value } });
 }
 
+const STORED_BASE = (lock: boolean): SQL =>
+  sql`COALESCE((SELECT value FROM settings WHERE key = 'base_currency'${
+    // a write reads every other row from its own snapshot, so a change of currency has to wait
+    // for it or be seen by it; KEY SHARE would not hold an update of the value back
+    lock ? sql` FOR SHARE` : sql``
+  }), ${config.baseCurrency})`;
+
 export async function currentBaseCurrency(): Promise<string> {
-  return (await getSetting('base_currency')) ?? config.baseCurrency;
+  const [row] = await rowsOf<{ base: string }>(sql`SELECT ${STORED_BASE(false)} AS base`);
+  return row.base;
 }
 
 export async function getMeta(key: string): Promise<string | undefined> {
@@ -2427,10 +2435,32 @@ export async function saveFxRate(day: string, currency: string, rate: number): P
     });
 }
 
-export async function setBaseForBaseCurrency(baseCurrency: string): Promise<number> {
-  return execCount(sql`
-    UPDATE transactions SET base_amount_cents = amount_cents, fx_rate = 1
-    WHERE base_amount_cents IS NULL AND currency = ${baseCurrency}`);
+export type BaseWrite = { moved: false; written: number } | { moved: true; stored: string };
+
+/**
+ * The stored base comes back from the statement that wrote: read again after a zero, it is a
+ * check and a write in two statements.
+ */
+async function writeBaseAmounts(base: string, set: SQL, where: SQL): Promise<BaseWrite> {
+  const [row] = await rowsOf<{ stored: string; written: number }>(sql`
+    WITH stored AS MATERIALIZED (SELECT ${STORED_BASE(true)} AS base),
+    written AS (
+      UPDATE transactions SET ${set}
+      WHERE base_amount_cents IS NULL AND ${where} AND (SELECT base FROM stored) = ${base}
+      RETURNING 1
+    )
+    SELECT (SELECT base FROM stored) AS stored, (SELECT COUNT(*) FROM written)::int AS written`);
+  return row.stored === base
+    ? { moved: false, written: row.written }
+    : { moved: true, stored: row.stored };
+}
+
+export async function setBaseForBaseCurrency(baseCurrency: string): Promise<BaseWrite> {
+  return writeBaseAmounts(
+    baseCurrency,
+    sql`base_amount_cents = amount_cents, fx_rate = 1`,
+    sql`currency = ${baseCurrency}`,
+  );
 }
 
 /**
@@ -2457,18 +2487,24 @@ export async function listUnconvertedDays(): Promise<{ day: string; currency: st
 
 /**
  * Fills base_amount for every unconverted row of that day in that currency.
- * k - units of the base currency per unit of `currency` on that day.
+ * k - units of `base` per unit of `currency` on that day.
  * The cast is on the parameter, not on the product: amount_cents is an integer
  * column, so `amount_cents * $1` types $1 as integer too and every fractional
  * rate is rejected before a cast on the result can matter. ::numeric and not
  * ::float8 - ROUND(numeric) is half away from zero, like toCents(); ROUND(double)
  * is half to even.
  */
-export async function applyBaseRate(day: string, currency: string, k: number): Promise<number> {
-  return execCount(sql`
-    UPDATE transactions
-    SET base_amount_cents = CAST(ROUND(amount_cents * ${k}::numeric) AS integer), fx_rate = ${k}
-    WHERE base_amount_cents IS NULL AND currency = ${currency} AND SUBSTR(date, 1, 10) = ${day}`);
+export async function applyBaseRate(
+  day: string,
+  currency: string,
+  k: number,
+  base: string,
+): Promise<BaseWrite> {
+  return writeBaseAmounts(
+    base,
+    sql`base_amount_cents = CAST(ROUND(amount_cents * ${k}::numeric) AS integer), fx_rate = ${k}`,
+    sql`currency = ${currency} AND SUBSTR(date, 1, 10) = ${day}`,
+  );
 }
 
 export async function setRecurringIgnored(description: string, ignored: boolean): Promise<void> {

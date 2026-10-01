@@ -74,8 +74,13 @@ Stated because they are decisions, not oversights.
 
 ## What Finto does not do
 
-- Does not send financial data anywhere. There is no telemetry, no analytics, and no third-party
-  request in the transaction path.
+- Does not send financial data anywhere. There is no telemetry and no analytics. The transaction
+  path does make third-party requests, for exchange rates, and none of them carries an amount, a
+  description or an account: Frankfurter or the NBU receive the date of a transaction in a currency
+  other than the base currency, that currency's code and the base currency's, and the NBU, when it
+  published nothing for that date, the days before it; Monobank receives a request for its public
+  rates that carries nothing of the person's. Like any request, each one also shows its provider
+  this machine's public address and when it was made.
 - Does not hold bank credentials or API tokens. Direct bank connections were removed; a statement
   is a file the user uploads.
 - Outbound network access is limited to exchange-rate providers: the ECB's rates through Frankfurter

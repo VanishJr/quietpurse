@@ -22,6 +22,7 @@ import {
   insertTransactions,
   resetBaseAmounts,
   saveFxRate,
+  seedDefaults,
 } from '../src/db';
 import { backfillBaseAmounts } from '../src/fxrates';
 import { toCents } from '../src/money';
@@ -248,5 +249,32 @@ describe('backfillBaseAmounts', () => {
     expect((await rowOf('tbilisi bakery')).base_amount_cents).toBe(
       roundHalfAway(toCents(GEL_AMOUNT) * K_GEL),
     );
+  });
+
+  it('converts under the configured base currency while its setting is missing', async () => {
+    const rows = [
+      tx({ amount: UAH_AMOUNT, description: 'kyiv taxi' }),
+      tx({ amount: EUR_AMOUNT, currency: 'EUR', description: 'berlin coffee' }),
+    ];
+    await saveFxRate(CONVERTED_DAY, 'EUR', UAH_PER_EUR);
+    await insertTransactions(rows);
+    try {
+      await dbInstance().execute(sql`DELETE FROM settings WHERE key = 'base_currency'`);
+      await resetBaseAmounts();
+
+      expect(await backfillBaseAmounts(() => {})).toBe(rows.length);
+      expect(await rowOf('kyiv taxi')).toEqual({
+        description: 'kyiv taxi',
+        base_amount_cents: roundHalfAway(toCents(UAH_AMOUNT) * K),
+        fx_rate: K,
+      });
+      expect(await rowOf('berlin coffee')).toEqual({
+        description: 'berlin coffee',
+        base_amount_cents: toCents(EUR_AMOUNT),
+        fx_rate: 1,
+      });
+    } finally {
+      await seedDefaults();
+    }
   });
 });
