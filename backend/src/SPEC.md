@@ -323,9 +323,10 @@ leaves no figure in a currency that is no longer the base: each of a refill's wr
 stored base currency with the one the refill read, inside the statement that writes and under a lock
 that makes a change of currency either wait for the write or be seen by it, and a refill that finds
 the base moved stops and leaves the rest to the refill that follows the change — except on a server
-while the setting's row is missing, as a restore can leave it until the next start writes it again,
-when there is nothing to lock. Stopping is not finishing: a rate that could not be fetched leaves its
-rows without a base amount until the next recompute, and `unconverted` is what says so.
+while a restore is replacing the setting's row or has left it missing until the next start writes it
+again: a write that waited on the deleted row, or found none, compares with the configured default.
+Stopping is not finishing: a rate that could not be fetched leaves its rows without a base amount
+until the next recompute, and `unconverted` is what says so.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217

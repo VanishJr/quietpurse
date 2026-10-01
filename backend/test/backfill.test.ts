@@ -50,6 +50,8 @@ const UNSEEDED_DAY = '2026-05-08';
 const SEEDED_DAY = '2026-05-09';
 /** Two currencies on this one date - two rates and one day. */
 const TWO_RATE_DAY = '2026-05-10';
+const ACCOUNT_NUMBER = 'PL61109010140000071219812874';
+const ACCOUNT_NUMBER_DAY = '2026-04-01';
 
 /** ROUND(numeric) is half away from zero; Math.round is half toward +infinity. */
 const roundHalfAway = (n: number): number => (n < 0 ? -Math.round(-n) : Math.round(n));
@@ -275,6 +277,31 @@ describe('backfillBaseAmounts', () => {
       });
     } finally {
       await seedDefaults();
+    }
+  });
+
+  it('asks no provider for a rate when the row carries something other than a currency code', async () => {
+    await insertTransactions([
+      tx({
+        amount: -100,
+        currency: ACCOUNT_NUMBER,
+        date: `${ACCOUNT_NUMBER_DAY}T09:00:00.000Z`,
+        description: 'rent april',
+      }),
+    ]);
+    const urls: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      urls.push(String(input));
+      return Promise.reject(new Error('network disabled in tests'));
+    }) as typeof fetch;
+    try {
+      await backfillBaseAmounts(() => {});
+
+      expect(urls).toEqual([]);
+      expect((await rowOf('rent april')).base_amount_cents).toBe(null);
+    } finally {
+      globalThis.fetch = before;
     }
   });
 });

@@ -1,6 +1,3 @@
-/**
- * A refill that read one base currency, writing after the stored base has moved on.
- */
 import { sql } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import type { Pool } from 'pg';
@@ -154,7 +151,7 @@ beforeEach(async () => {
 });
 
 describe('a refill whose base currency moved under it', () => {
-  it('leaves the row to the refill the change started, whichever answer arrives first', async () => {
+  it('leaves the row to the refill the change started when the old answer arrives first', async () => {
     await insertTransactions([row('Warsaw lunch')]);
     const net = rateNetwork();
     try {
@@ -264,8 +261,6 @@ describe('a refill whose base currency moved under it', () => {
     try {
       await blocker.query('BEGIN');
       open = true;
-      // the route's order, setting then reset: the reverse deadlocks with the write, and the
-      // case would then hold the deadlock detector instead of the guard
       await blocker.query(
         `INSERT INTO settings (key, value) VALUES ('base_currency', 'USD')
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
@@ -315,6 +310,38 @@ describe('a refill whose base currency moved under it', () => {
       net.failAll();
       net.restore();
       await refill?.catch(() => undefined);
+    }
+  });
+});
+
+describe('a refill whose first write throws', () => {
+  it('logs that write as not written and converts the base-currency row in the loop', async () => {
+    await insertTransactions([row('Berlin coffee', { amount: -12.5, currency: 'EUR' })]);
+    await resetBaseAmounts();
+
+    const db = dbInstance();
+    const run = db.execute.bind(db);
+    const dialect = new PgDialect();
+    const deadlock = new Error('Failed query', {
+      cause: Object.assign(new Error('deadlock detected'), { code: '40P01' }),
+    });
+    let matched = 0;
+    const execute = vi.spyOn(db, 'execute').mockImplementation((q) => {
+      const text = typeof q === 'string' ? q : dialect.sqlToQuery(q.getSQL()).sql;
+      if (!text.includes('base_amount_cents = amount_cents')) return run(q);
+      matched += 1;
+      if (matched > 1) return run(q);
+      return Promise.reject(deadlock) as unknown as ReturnType<typeof run>;
+    });
+    const lines: string[] = [];
+    try {
+      await expect(backfillBaseAmounts((s) => lines.push(s))).resolves.toBe(1);
+
+      expect(matched, 'the spy did not meet the first write exactly once').toBe(1);
+      expect(lines.filter((l) => l === 'base_amount for EUR not written: [40P01] deadlock detected')).toHaveLength(1);
+      expect(await rowOf('Berlin coffee')).toEqual({ base_amount_cents: -1250, fx_rate: 1 });
+    } finally {
+      execute.mockRestore();
     }
   });
 });

@@ -61,6 +61,7 @@ export const ecbProvider: RateProvider = {
 const NBU = 'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange';
 /** how many days back to look for a rate if the NBU didn't publish one for the requested date */
 const MAX_LOOKBACK_DAYS = 7;
+const CURRENCY_CODE = /^[A-Z]{3}$/;
 
 function shiftDay(day: string, deltaDays: number): string {
   const d = new Date(`${day}T00:00:00.000Z`);
@@ -105,9 +106,10 @@ export async function rateToUah(currency: string, day: string): Promise<number |
 
 export const nbuProvider: RateProvider = {
   name: 'nbu',
-  // cross-rate through UAH: the pair counts as supported if the NBU publishes both
-  // legs; that is not known in advance, hence "yes" - and getRate returns null if not
-  supports: () => true,
+  // cross-rate through UAH: whether the NBU publishes both legs is not known in advance,
+  // so any two codes count - and getRate returns null if not. Codes only: each one goes
+  // into a request, and a statement's currency column can hold any text at all
+  supports: (from, to) => CURRENCY_CODE.test(from) && CURRENCY_CODE.test(to),
   async getRate(day, from, to) {
     const rFrom = await rateToUah(from, day);
     const rTo = await rateToUah(to, day);
@@ -184,9 +186,14 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
     log(`base currency changed from ${base} to ${stored} during this refill; the refill that change started converts the rest`);
     return converted;
   };
-  const own = await setBaseForBaseCurrency(base);
-  if (own.moved) return moved(own.stored, 0);
-  let done = own.written;
+  let own: BaseWrite | undefined;
+  try {
+    own = await setBaseForBaseCurrency(base);
+  } catch (e) {
+    log(`base_amount for ${base} not written: ${sqlReason(e)}`);
+  }
+  if (own?.moved) return moved(own.stored, 0);
+  let done = own?.written ?? 0;
 
   const keys = await listUnconvertedDays();
   if (keys.length === 0) return done;
