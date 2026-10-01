@@ -12,14 +12,14 @@
  * good. A guard that only checked one of them would be green on a table that varied
  * all three together.
  */
-import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
 import { config } from '../src/config';
 import { seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 
 /**
  * The sentence is asserted by equality wherever a refusal is checked: it must name no
@@ -32,7 +32,7 @@ const REFUSAL =
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('the request has to have come from this machine', () => {

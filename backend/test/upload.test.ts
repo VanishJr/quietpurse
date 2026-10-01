@@ -11,10 +11,10 @@ import http from 'http';
 import { AddressInfo } from 'net';
 import { sql } from 'drizzle-orm';
 import ExcelJS from 'exceljs';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { dbInstance, seedDefaults } from '../src/db';
+import { type Agent, listening, serve } from './loopback';
 import { freshTestDb } from './pglite';
 import { ACCOUNT_NOT_FOUND, ACCOUNT_REMOVED } from '../src/providers/statement';
 import { buildPdf, buildSignedContainer } from './pdffixture';
@@ -32,7 +32,7 @@ async function xlsxFile(label: string, skippedSheet = false): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
-let agent: request.Agent;
+let agent: Agent;
 
 /** Every import, newest first. */
 const imports = async (): Promise<
@@ -58,7 +58,7 @@ const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confi
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 /**
@@ -904,49 +904,40 @@ async function sendInPieces(
   body: Buffer,
   pieces: number,
 ): Promise<{ status: number; body: Record<string, unknown> }> {
-  const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-  try {
-    const { port } = server.address() as AddressInfo;
-    return await new Promise((resolve, reject) => {
-      const req = http.request(
-        {
-          host: '127.0.0.1',
-          port,
-          method: 'POST',
-          path,
-          agent: false,
-          headers: {
-            'content-type': contentType,
-            'content-length': String(body.length),
-            connection: 'close',
-          },
+  const { port } = (await listening(app)).address() as AddressInfo;
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path,
+        agent: false,
+        headers: {
+          'content-type': contentType,
+          'content-length': String(body.length),
+          connection: 'close',
         },
-        (res) => {
-          const chunks: Buffer[] = [];
-          res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.on('end', () => {
-            const text = Buffer.concat(chunks).toString('utf8');
-            resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : {} });
-          });
-        },
-      );
-      req.on('error', reject);
-      const size = Math.ceil(body.length / pieces);
-      void (async () => {
-        for (let at = 0; at < body.length; at += size) {
-          if (at > 0) await new Promise((r) => setTimeout(r, 15));
-          req.write(body.subarray(at, at + size));
-        }
-        req.end();
-      })();
-    });
-  } finally {
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-      server.closeAllConnections();
-    });
-  }
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolve({ status: res.statusCode ?? 0, body: text ? JSON.parse(text) : {} });
+        });
+      },
+    );
+    req.on('error', reject);
+    const size = Math.ceil(body.length / pieces);
+    void (async () => {
+      for (let at = 0; at < body.length; at += size) {
+        if (at > 0) await new Promise((r) => setTimeout(r, 15));
+        req.write(body.subarray(at, at + size));
+      }
+      req.end();
+    })();
+  });
 }
 
 /**

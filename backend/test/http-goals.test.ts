@@ -1,12 +1,12 @@
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { createGoal, dbInstance, listGoals, seedDefaults, upsertAccount } from '../src/db';
 import { GOALS_MAX, type GoalCreate } from '../src/wire';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 import { sql } from 'drizzle-orm';
 
-let agent: request.Agent;
+let agent: Agent;
 const ids = new Map<string, string>();
 
 const writes: GoalCreate[] = [
@@ -70,7 +70,7 @@ beforeAll(async () => {
   await upsertAccount({ id: 'cash', provider: 'upload', name: 'Cash', currency: 'EUR', balance: 2000 });
   await upsertAccount({ id: 'debt', provider: 'upload', name: 'Debt', currency: 'EUR', balance: -4000 });
   await upsertAccount({ id: 'debt-two', provider: 'upload', name: 'Debt two', currency: 'EUR', balance: -1000 });
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('Goals HTTP API', () => {

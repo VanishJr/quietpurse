@@ -8,14 +8,14 @@ parent: module-backend
 
 What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
 `AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
-database it runs against, what jsdom cannot see, what skips on this platform — and the harness files
-carry their own reasoning in their headers. Nothing below repeats them.
+database it runs against, what jsdom cannot see, what skips on this platform.
 
 ## Responsibility
 
 - **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
   that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
-  before anything reads config, which is why the database modules there are dynamic imports.
+  before anything reads config, which is why everything it loads from `backend/src`, directly or
+  through a harness module, is a dynamic import.
   It is a vitest setup file, so it runs once per test file and truncates before each one — what
   the files share is the engine instance and the module registry, never the rows.
   `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
@@ -25,6 +25,32 @@ carry their own reasoning in their headers. Nothing below repeats them.
   file issues from its own `afterAll` has no case left to fail — and it needs the setup file's hook
   to run after the test file's own, which `sequence.hooks` pinned to `'stack'` in
   `backend/vitest.config.ts` is what provides.
+
+  `backend/test/loopback.ts` is the one way a test reaches a server: it serves the target it is
+  given — `app`, or an app a file builds for itself — on a server of its own listening on
+  `127.0.0.1`, and hands back a supertest agent on it, because supertest handed an app listens on
+  the unspecified address, which can be handed a port another program holds on `127.0.0.1`, and
+  the URL supertest builds then carries the request to that program. The servers it opens stay
+  open until the setup file closes every one of them in an `afterAll` that runs after the test
+  file's own hooks, which rests on the same `sequence.hooks` ordering as the drain. A server the
+  harness has closed cannot listen again, because supertest listens on the unspecified address
+  itself whenever the server it was handed is not listening. `backend/test/idle.ts` is the wait
+  the setup file's after hooks run: `settleRecomputes` puts the offline `fetch` back and then waits
+  until the recompute queue is idle, because that queue lives in the module registry the files
+  share, and a run still in it would finish inside the next file's freshly truncated tables. So a
+  `fetch` mock lives for one case: it is installed in the case or in `beforeEach`, never in
+  `beforeAll` or at file scope, where every case after the first runs offline whether or not an
+  assertion notices. A mock that parks a call rejects it when the request's signal aborts: a
+  parked call that ignores the signal never settles, and the wait then fails every later case in
+  every later file. A module instance imported after `vi.resetModules()` keeps a queue of its own,
+  and the wait does not see it. The wait contains every run queued before it returns, and none
+  queued after: when the test timeout fails a case while its body is suspended on a held run, the
+  body can resume after the wait has returned and queue into the next case's tables, and no hook
+  can stop it. So a hold case awaits nothing that settles only after a held run — the run's own
+  promise, or a call that queues behind it — until it has released that run, and it waits for a
+  held run to reach a point only through `vi.waitFor`. A refill the base-currency route starts
+  does not run on that queue, so nothing waits for it, and a case that parks one releases it in
+  its own `finally`.
 - **The checks that read another file as text** instead of importing it. They exist where an
   invariant spans something no type can carry: a rule about the *shape* of code. A value that has
   to agree with one in the other package is no longer that kind of invariant: the client derives
@@ -66,6 +92,24 @@ route written any of those ways; the shape rule's one instrument is the token `r
 spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
 `req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
 and none is closed here;
+`backend/test/loopback.test.ts` reads every script in the package outside `node_modules` and
+refuses, in any of them but `backend/test/loopback.ts`, the name `supertest`, its types package or
+a path inside either written as a quoted literal — the one spelling an import, a type-only import,
+a re-export, a `require`, an `import()`, a `typeof import()` and a triple-slash directive share —
+and reads every script under `backend/test/` and `backend/scripts/` and refuses, in any of them but
+that file, a call written `.listen(`, and requires that file to be among the scripts each of those
+readings takes in and to carry both, because a request supertest builds from an app reaches
+whatever holds its port on `127.0.0.1`, a test reaches supertest through any module it imports as
+well as by naming it, and only the text shows the next file written that way; it also reads the
+name of every file in the package outside `node_modules` that vitest's default include collects,
+pinning that default to the pattern it copies, requires its own name among them, and refuses any
+that sits outside `backend/test/`, because the suite runs such a file wherever it sits and the
+reading for `.listen(` stops at those directories; a specifier assembled at run time, a listen
+reached through an alias or a computed key, a listen in a module under `backend/src/` or anywhere
+else outside those directories, a listener started in a child process, and a test file
+collected only through an `include` written into `backend/vitest.config.ts` or reached through a
+symlinked directory are not seen, and none is closed here, while a quoted name in a comment or a
+string that names no module is refused, which costs a word to rephrase and never a silence;
 `backend/test/specs.test.ts` reads every spec this repository declares — the documents at the root
 and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
 included, and an untracked probe dropped under either package included — enumerated through

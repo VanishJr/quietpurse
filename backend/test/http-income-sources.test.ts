@@ -8,10 +8,10 @@
  * them nothing in web/src called three of these four routes, so every refusal below was
  * unreachable and therefore unwritten; that control is what makes them a door.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { INCOME_SOURCE_LABEL_MAX, seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const SOURCES = '/api/income-sources';
@@ -24,7 +24,7 @@ interface SourceBody {
   builtin: boolean;
 }
 
-let agent: request.Agent;
+let agent: Agent;
 
 /** The catalog as the API answers it. */
 const list = async (): Promise<SourceBody[]> => {
@@ -50,7 +50,7 @@ const created = async (body: unknown): Promise<SourceBody> => {
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('GET /api/income-sources', () => {

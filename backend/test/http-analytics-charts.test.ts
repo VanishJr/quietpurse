@@ -8,7 +8,6 @@
  * request echoed. A route that answers with what it was sent reports a write that
  * did not happen as a success, and nothing below the route can see that.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CHARTS_STALE, app } from '../src/app';
 import {
@@ -19,6 +18,7 @@ import {
   CHART_TITLE_MAX,
   seedDefaults,
 } from '../src/db';
+import { type Agent, type Response, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const CHARTS = '/api/analytics/charts';
@@ -49,24 +49,24 @@ const chart = (over: Partial<ChartBody> = {}): ChartBody => ({
   ...over,
 });
 
-let agent: request.Agent;
+let agent: Agent;
 let walletId: string;
 
-const makeAccount = async (a: request.Agent, name: string): Promise<string> => {
+const makeAccount = async (a: Agent, name: string): Promise<string> => {
   const res = await a.post('/api/accounts').send({ name, currency: 'EUR' });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return res.body.id as string;
 };
 
 /** The stored list, and the version to send with the next write. */
-const read = async (a: request.Agent): Promise<{ version: number; charts: ChartBody[] }> => {
+const read = async (a: Agent): Promise<{ version: number; charts: ChartBody[] }> => {
   const res = await a.get(CHARTS);
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body;
 };
 
 /** A save from the version the server last answered - never from a literal. */
-const save = async (a: request.Agent, charts: ChartBody[]): Promise<request.Response> => {
+const save = async (a: Agent, charts: ChartBody[]): Promise<Response> => {
   const { version } = await read(a);
   return a.put(CHARTS).send({ version, charts });
 };
@@ -80,7 +80,7 @@ const save = async (a: request.Agent, charts: ChartBody[]): Promise<request.Resp
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   walletId = await makeAccount(agent, 'Wallet');
 });
 

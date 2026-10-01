@@ -4,11 +4,11 @@
  * ceiling its two body parsers have to agree on, and that the restored rows are tagged
  * by today's rules rather than by the file's.
  */
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { insertTransactions, seedDefaults } from '../src/db';
 import { NewTransaction, Transaction } from '../src/types';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const SQLITE_REFUSAL =
@@ -43,7 +43,7 @@ const paddedBackup = (size: number): string => {
 
 const BODY_TYPES = ['application/json', 'application/octet-stream'];
 
-let agent: request.Agent;
+let agent: Agent;
 
 const restore = (contentType: string, body: Buffer | string) =>
   agent.post('/api/restore').set('Content-Type', contentType).send(body);
@@ -51,7 +51,7 @@ const restore = (contentType: string, body: Buffer | string) =>
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('what the door refuses', () => {

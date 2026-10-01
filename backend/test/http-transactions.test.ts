@@ -5,23 +5,23 @@
  * no-body refusal every JSON route shares is http-body.test.ts's and is not re-pinned.
  */
 import crypto from 'crypto';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
 import { insertTransactions, seedDefaults } from '../src/db';
 import { NewTransaction } from '../src/types';
 import { idOf } from './helpers';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-let agent: request.Agent;
+let agent: Agent;
 let incomeId: string;
 let expenseId: string;
 
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   const created = await agent.post('/api/accounts').send({ name: 'Marks Bank', currency: 'EUR' });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   const accountId = created.body.id as string;

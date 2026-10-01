@@ -13,6 +13,7 @@ jobs:
   backend:
     name: backend (typecheck + tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -33,6 +34,7 @@ jobs:
   backend-postgres:
     name: backend (tests on real Postgres)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
@@ -72,6 +74,7 @@ jobs:
   web:
     name: web (typecheck + tests + build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -103,6 +106,7 @@ jobs:
   app:
     name: app (setup + start)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The two commands a person runs, from the root and as README.md gives them, with
     # no DATABASE_URL: the jobs above never start the process, and the suite's PGlite
     # is in memory - so the database folder, the lock beside it and what a SIGKILL

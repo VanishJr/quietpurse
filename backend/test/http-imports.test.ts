@@ -9,12 +9,12 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { seedDefaults } from '../src/db';
 import { storageRoot } from '../src/storage';
 import { Transaction } from '../src/types';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 /** The three rows the import under test owns; one of them is a transfer's outgoing leg. */
@@ -34,7 +34,7 @@ const OWNED_CSV = statement([
 ]);
 const OTHER_CSV = statement([`2026-03-05,50.00,${LEG_IN}`, `2026-03-08,-13.00,${CONTROL}`]);
 
-let agent: request.Agent;
+let agent: Agent;
 let ownedId: string;
 
 const makeAccount = async (name: string): Promise<string> => {
@@ -87,7 +87,7 @@ const blobExists = (importId: string): Promise<boolean> =>
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
   ownedId = await committed(await makeAccount('Deleted Bank'), OWNED_CSV);
   await committed(await makeAccount('Other Bank'), OTHER_CSV);
 });

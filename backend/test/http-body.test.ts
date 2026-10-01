@@ -9,10 +9,10 @@
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, errorHandler } from '../src/app';
 import { seedDefaults } from '../src/db';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const NOT_A_JSON_OBJECT =
@@ -55,12 +55,12 @@ const JSON_ROUTES: [Method, string][] = [
   ['post', '/api/category-rules/preview'],
 ];
 
-let agent: request.Agent;
+let agent: Agent;
 
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
-  agent = request.agent(app);
+  agent = await serve(app);
 });
 
 describe('a write with no body', () => {
@@ -177,11 +177,11 @@ describe('what the last handler answers', () => {
    * errorHandler export, an app built at collection time would take every case in
    * this file down with it.
    */
-  const bare = (route: express.RequestHandler) => {
+  const bare = async (route: express.RequestHandler) => {
     const throwaway = express();
     throwaway.get('/t', route);
     throwaway.use(errorHandler);
-    return request(throwaway).get('/t');
+    return (await serve(throwaway)).get('/t');
   };
 
   it('a plain Error is still a 500 whose message stays out of the body', async () => {

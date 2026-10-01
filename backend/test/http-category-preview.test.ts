@@ -1,13 +1,13 @@
-import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
 import { allTransactions, insertTransactions, listCategoryRules, seedDefaults, setCategoryOverride } from '../src/db';
 import type { NewTransaction } from '../src/types';
 import type { CategoryRulePreview } from '../src/wire';
+import { serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-const agent = request(app);
+const agent = await serve(app);
 let accountId: string;
 const row = (description = 'REWE Berlin Wertstellung 31.08.2026', date = '2026-08-31'): NewTransaction => ({
   accountId, provider: 'upload', description, date, amount: -20, currency: 'EUR', category: 'other', fee: null,

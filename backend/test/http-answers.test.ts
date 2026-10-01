@@ -5,7 +5,6 @@
  * real app does not have; the real app appears only as the control at the end.
  */
 import express from 'express';
-import request from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   ANSWER_CHECK,
@@ -18,41 +17,42 @@ import {
 } from '../src/app';
 import { seedDefaults } from '../src/db';
 import { installAnswerCheck } from './answers';
+import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-const throwaway = (reporter = true) => {
+const throwaway = async (reporter = true) => {
   const t = express();
   t.use(answerCheck);
   const check = reporter ? installAnswerCheck(t) : undefined;
-  return { app: t, drain: () => check?.drain() ?? [] };
+  return { app: t, agent: await serve(t), drain: () => check?.drain() ?? [] };
 };
 
 describe('what the wrapper records', () => {
   it('a 2xx JSON body answered by no route at all', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.use((_req, res) => {
       res.json({ ok: true });
     });
-    const res = await request(t).get('/anything');
+    const res = await agent.get('/anything');
     expect(res.status).toBe(200);
     expect(drain()).toEqual(['GET /anything (no route) answered 200: no route matched']);
   });
 
   it('a 2xx JSON body from a route the registry does not carry', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/probe', (_req, res) => {
       res.json({ ok: true });
     });
-    await request(t).get('/api/probe');
+    await agent.get('/api/probe');
     expect(drain()).toEqual(['GET /api/probe (GET /api/probe) answered 200: not declared in ANSWERS']);
   });
 
   it('a field the declaration lacks, named', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/health', (_req, res) => {
       res.json({ ok: true, extra: 1 });
     });
-    await request(t).get('/api/health');
+    await agent.get('/api/health');
     const [only, ...rest] = drain();
     expect(rest).toEqual([]);
     expect(only).toContain('GET /api/health (GET /api/health) answered 200');
@@ -60,36 +60,36 @@ describe('what the wrapper records', () => {
   });
 
   it('a field the declaration has under another name, with the path', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/goals', (_req, res) => {
       res.json({ items: [] });
     });
-    await request(t).get('/api/goals');
+    await agent.get('/api/goals');
     const [only] = drain();
     expect(only).toContain('goals:');
     expect(only).toContain('Unrecognized key: "items"');
   });
 
   it('a status other than the declared one', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.post('/api/accounts', (_req, res) => {
       res.status(200).json({ id: 'a', provider: 'upload', name: 'n', currency: 'EUR', balance: 0, hidden: false });
     });
-    await request(t).post('/api/accounts');
+    await agent.post('/api/accounts');
     expect(drain()).toEqual(['POST /api/accounts (POST /api/accounts) answered 200: declared 201']);
   });
 
   it('a JSON body on a route declared as not JSON', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/export.csv', (_req, res) => {
       res.json({ rows: [] });
     });
-    await request(t).get('/api/export.csv');
+    await agent.get('/api/export.csv');
     expect(drain()).toEqual(['GET /api/export.csv (GET /api/export.csv) answered 200: declared not-json, answered JSON']);
   });
 
   it('a refusal that is not the envelope, and the charts 409 that is its own', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/health', (_req, res) => {
       res.status(400).json({ message: 'no' });
     });
@@ -99,33 +99,33 @@ describe('what the wrapper records', () => {
     t.get('/api/accounts', (_req, res) => {
       res.status(409).json({ error: 'stale', version: 3, charts: [] });
     });
-    await request(t).get('/api/health');
+    await agent.get('/api/health');
     const [refusal] = drain();
     expect(refusal).toContain('GET /api/health (GET /api/health) answered 400');
     expect(refusal).toContain('error:');
     expect(refusal).toContain('Unrecognized key: "message"');
 
-    await request(t).put('/api/analytics/charts');
+    await agent.put('/api/analytics/charts');
     expect(drain()).toEqual([]);
 
-    await request(t).get('/api/accounts');
+    await agent.get('/api/accounts');
     const [elsewhere] = drain();
     expect(elsewhere).toContain('GET /api/accounts (GET /api/accounts) answered 409');
     expect(elsewhere).toContain('Unrecognized keys: "version", "charts"');
   });
 
   it('a refusal answered before any route matched is held to the envelope', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.use((_req, res) => {
       res.status(403).json({ error: 'not from here' });
     });
-    const res = await request(t).get('/api/health');
+    const res = await agent.get('/api/health');
     expect(res.status).toBe(403);
     expect(drain()).toEqual([]);
   });
 
   it('a declared JSON route answering through res.send, and a not-json route that may', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/health', (_req, res) => {
       res.type('json').send(JSON.stringify({ ok: true }));
     });
@@ -135,23 +135,23 @@ describe('what the wrapper records', () => {
     t.get('/api/accounts', (_req, res) => {
       res.status(503).type('text/plain').send('later');
     });
-    const res = await request(t).get('/api/health');
+    const res = await agent.get('/api/health');
     expect(res.body).toEqual({ ok: true });
     expect(drain()).toEqual([
       'GET /api/health (GET /api/health) answered 200: declared JSON route answered through res.send',
     ]);
-    await request(t).get('/api/export.csv');
-    await request(t).get('/api/accounts');
+    await agent.get('/api/export.csv');
+    await agent.get('/api/accounts');
     expect(drain()).toEqual([]);
   });
 
   it('a body the serialiser refuses is recorded, and the original is still called', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/health', (_req, res) => {
       res.json({ n: 1n });
     });
     t.use(errorHandler);
-    const res = await request(t).get('/api/health');
+    const res = await agent.get('/api/health');
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ error: 'internal error' });
     const [threw] = drain();
@@ -160,31 +160,31 @@ describe('what the wrapper records', () => {
   });
 
   it('the body the case reads is the body the route answered, mismatch or not', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/health', (_req, res) => {
       res.json({ ok: true, extra: 1 });
     });
-    const res = await request(t).get('/api/health');
+    const res = await agent.get('/api/health');
     expect(res.body).toEqual({ ok: true, extra: 1 });
     expect(drain()).toHaveLength(1);
   });
 
   it('drains once: a second drain answers nothing', async () => {
-    const { app: t, drain } = throwaway();
+    const { app: t, agent, drain } = await throwaway();
     t.get('/api/probe', (_req, res) => {
       res.json({});
     });
-    await request(t).get('/api/probe');
+    await agent.get('/api/probe');
     expect(drain()).toHaveLength(1);
     expect(drain()).toEqual([]);
   });
 
   it('with no reporter set, the wrapper changes nothing and records nothing', async () => {
-    const { app: t } = throwaway(false);
+    const { app: t, agent } = await throwaway(false);
     t.get('/api/health', (_req, res) => {
       res.json({ ok: true, extra: 1 });
     });
-    const res = await request(t).get('/api/health');
+    const res = await agent.get('/api/health');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, extra: 1 });
     expect(t.get('answer check')).toBeUndefined();
@@ -282,12 +282,12 @@ describe('what the walk refuses at import', () => {
 });
 
 describe('the real app under the reporter', () => {
-  let agent: request.Agent;
+  let agent: Agent;
 
   beforeAll(async () => {
     await freshTestDb();
     await seedDefaults();
-    agent = request.agent(app);
+    agent = await serve(app);
   });
 
   /**

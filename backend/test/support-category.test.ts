@@ -1,13 +1,13 @@
-import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
 import { allTransactions, createGoal, insertTransactions, seedDefaults, setBaseForBaseCurrency } from '../src/db';
 import { getGoalProgress } from '../src/goals';
 import type { NewTransaction } from '../src/types';
+import { serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-const agent = request(app);
+const agent = await serve(app);
 let accountId: string;
 const row = (description: string, amount: number, date = '2026-08-10'): NewTransaction => ({
   accountId, provider: 'upload', description, amount, date, currency: 'EUR', category: 'other', fee: null,
