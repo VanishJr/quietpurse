@@ -52,6 +52,13 @@ const SEEDED_DAY = '2026-05-09';
 const TWO_RATE_DAY = '2026-05-10';
 const ACCOUNT_NUMBER = 'PL61109010140000071219812874';
 const ACCOUNT_NUMBER_DAY = '2026-04-01';
+const NOT_A_CODE = 'TAX';
+const NOT_A_CODE_DAY = '2026-04-01';
+/** Hryvnia per kuna. The kuna is withdrawn, and it is not an ECB currency either. */
+const UAH_PER_HRK = 4.0712;
+const K_HRK = UAH_PER_HRK / UAH_PER_EUR;
+const HRK_AMOUNT = -75.5;
+const HRK_DAY = '2022-06-15';
 
 /** ROUND(numeric) is half away from zero; Math.round is half toward +infinity. */
 const roundHalfAway = (n: number): number => (n < 0 ? -Math.round(-n) : Math.round(n));
@@ -303,5 +310,50 @@ describe('backfillBaseAmounts', () => {
     } finally {
       globalThis.fetch = before;
     }
+  });
+
+  it('asks no provider for a rate when the row carries three capitals that are no currency code', async () => {
+    await insertTransactions([
+      tx({
+        amount: -100,
+        currency: NOT_A_CODE,
+        date: `${NOT_A_CODE_DAY}T09:00:00.000Z`,
+        description: 'city tax',
+      }),
+    ]);
+    const urls: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      urls.push(String(input));
+      return Promise.reject(new Error('network disabled in tests'));
+    }) as typeof fetch;
+    try {
+      await backfillBaseAmounts(() => {});
+
+      expect(urls).toEqual([]);
+      expect((await rowOf('city tax')).base_amount_cents).toBe(null);
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('converts a row in a withdrawn currency through the NBU', async () => {
+    await saveFxRate(HRK_DAY, 'EUR', UAH_PER_EUR);
+    await saveFxRate(HRK_DAY, 'HRK', UAH_PER_HRK);
+    await insertTransactions([
+      tx({
+        amount: HRK_AMOUNT,
+        currency: 'HRK',
+        date: `${HRK_DAY}T09:00:00.000Z`,
+        description: 'split ferry',
+      }),
+    ]);
+
+    expect(await backfillBaseAmounts(() => {})).toBe(1);
+    expect(await rowOf('split ferry')).toEqual({
+      description: 'split ferry',
+      base_amount_cents: roundHalfAway(toCents(HRK_AMOUNT) * K_HRK),
+      fx_rate: K_HRK,
+    });
   });
 });
