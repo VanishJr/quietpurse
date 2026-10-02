@@ -22,6 +22,7 @@ import {
   insertTransactions,
   resetBaseAmounts,
   saveFxRate,
+  seedDefaults,
 } from '../src/db';
 import { backfillBaseAmounts } from '../src/fxrates';
 import { toCents } from '../src/money';
@@ -49,6 +50,15 @@ const UNSEEDED_DAY = '2026-05-08';
 const SEEDED_DAY = '2026-05-09';
 /** Two currencies on this one date - two rates and one day. */
 const TWO_RATE_DAY = '2026-05-10';
+const ACCOUNT_NUMBER = 'PL61109010140000071219812874';
+const ACCOUNT_NUMBER_DAY = '2026-04-01';
+const NOT_A_CODE = 'TAX';
+const NOT_A_CODE_DAY = '2026-04-01';
+/** Hryvnia per kuna. The kuna is withdrawn, and it is not an ECB currency either. */
+const UAH_PER_HRK = 4.0712;
+const K_HRK = UAH_PER_HRK / UAH_PER_EUR;
+const HRK_AMOUNT = -75.5;
+const HRK_DAY = '2022-06-15';
 
 /** ROUND(numeric) is half away from zero; Math.round is half toward +infinity. */
 const roundHalfAway = (n: number): number => (n < 0 ? -Math.round(-n) : Math.round(n));
@@ -248,5 +258,102 @@ describe('backfillBaseAmounts', () => {
     expect((await rowOf('tbilisi bakery')).base_amount_cents).toBe(
       roundHalfAway(toCents(GEL_AMOUNT) * K_GEL),
     );
+  });
+
+  it('converts under the configured base currency while its setting is missing', async () => {
+    const rows = [
+      tx({ amount: UAH_AMOUNT, description: 'kyiv taxi' }),
+      tx({ amount: EUR_AMOUNT, currency: 'EUR', description: 'berlin coffee' }),
+    ];
+    await saveFxRate(CONVERTED_DAY, 'EUR', UAH_PER_EUR);
+    await insertTransactions(rows);
+    try {
+      await dbInstance().execute(sql`DELETE FROM settings WHERE key = 'base_currency'`);
+      await resetBaseAmounts();
+
+      expect(await backfillBaseAmounts(() => {})).toBe(rows.length);
+      expect(await rowOf('kyiv taxi')).toEqual({
+        description: 'kyiv taxi',
+        base_amount_cents: roundHalfAway(toCents(UAH_AMOUNT) * K),
+        fx_rate: K,
+      });
+      expect(await rowOf('berlin coffee')).toEqual({
+        description: 'berlin coffee',
+        base_amount_cents: toCents(EUR_AMOUNT),
+        fx_rate: 1,
+      });
+    } finally {
+      await seedDefaults();
+    }
+  });
+
+  it('asks no provider for a rate when the row carries something other than a currency code', async () => {
+    await insertTransactions([
+      tx({
+        amount: -100,
+        currency: ACCOUNT_NUMBER,
+        date: `${ACCOUNT_NUMBER_DAY}T09:00:00.000Z`,
+        description: 'rent april',
+      }),
+    ]);
+    const urls: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      urls.push(String(input));
+      return Promise.reject(new Error('network disabled in tests'));
+    }) as typeof fetch;
+    try {
+      await backfillBaseAmounts(() => {});
+
+      expect(urls).toEqual([]);
+      expect((await rowOf('rent april')).base_amount_cents).toBe(null);
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('asks no provider for a rate when the row carries three capitals that are no currency code', async () => {
+    await insertTransactions([
+      tx({
+        amount: -100,
+        currency: NOT_A_CODE,
+        date: `${NOT_A_CODE_DAY}T09:00:00.000Z`,
+        description: 'city tax',
+      }),
+    ]);
+    const urls: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request) => {
+      urls.push(String(input));
+      return Promise.reject(new Error('network disabled in tests'));
+    }) as typeof fetch;
+    try {
+      await backfillBaseAmounts(() => {});
+
+      expect(urls).toEqual([]);
+      expect((await rowOf('city tax')).base_amount_cents).toBe(null);
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('converts a row in a withdrawn currency through the NBU', async () => {
+    await saveFxRate(HRK_DAY, 'EUR', UAH_PER_EUR);
+    await saveFxRate(HRK_DAY, 'HRK', UAH_PER_HRK);
+    await insertTransactions([
+      tx({
+        amount: HRK_AMOUNT,
+        currency: 'HRK',
+        date: `${HRK_DAY}T09:00:00.000Z`,
+        description: 'split ferry',
+      }),
+    ]);
+
+    expect(await backfillBaseAmounts(() => {})).toBe(1);
+    expect(await rowOf('split ferry')).toEqual({
+      description: 'split ferry',
+      base_amount_cents: roundHalfAway(toCents(HRK_AMOUNT) * K_HRK),
+      fx_rate: K_HRK,
+    });
   });
 });
