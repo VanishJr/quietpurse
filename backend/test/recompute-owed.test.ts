@@ -1,7 +1,10 @@
+import { sql } from 'drizzle-orm';
+import type { Pool } from 'pg';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
 import { reclassifyAll, reclassifyIfStale } from '../src/classify';
 import {
+  type CategoryOverride,
   allTransactions,
   dbInstance,
   deleteAccount,
@@ -41,6 +44,23 @@ async function control(): Promise<void> {
   await reclassifyAll();
   expect(await reclassifyIfStale(), 'the control found something owed').toBe(false);
 }
+
+const waitForBlockedQuery = async (pool: Pool, pattern: string): Promise<void> => {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const result = await pool.query<{ blocked: boolean }>(`
+      SELECT EXISTS (
+        SELECT 1 FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE $1
+      ) AS blocked
+    `, [pattern]);
+    if (result.rows[0]?.blocked) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for blocked query ${pattern}`);
+};
 
 beforeAll(async () => {
   agent = await serve(app);
@@ -133,6 +153,41 @@ describe('a row write leaves a recompute owed until a run has read past it', () 
     expect(await reclassifyIfStale(), 'a category the classifier does not read left a debt').toBe(false);
   });
 
+  it('a manual category leaving a Support committed while it waited on the row', async () => {
+    await insertTransactions([incoming()]);
+    const { id } = await findTx((t) => t.amount > 0);
+    const url = process.env.TEST_DATABASE_URL;
+    if (!url) {
+      await dbInstance().execute(sql`UPDATE transactions SET category_manual = 'support' WHERE id = ${id}`);
+      const left = await setCategoryOverride(id, 'food');
+      expect(left?.reclassify, 'leaving Support asked for no recompute').toBe(true);
+      return;
+    }
+
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: url, allowExitOnIdle: true });
+    const blocker = await pool.connect();
+    let open = false;
+    let override: Promise<CategoryOverride | undefined> | undefined;
+    try {
+      await blocker.query('BEGIN');
+      open = true;
+      await blocker.query(`UPDATE transactions SET category_manual = 'support' WHERE id = $1`, [id]);
+      override = setCategoryOverride(id, 'food');
+      await waitForBlockedQuery(pool, '%transactions%WHERE id%');
+
+      await blocker.query('COMMIT');
+      open = false;
+      const left = await override;
+      expect(left?.reclassify, 'leaving Support asked for no recompute').toBe(true);
+    } finally {
+      if (open) await blocker.query('ROLLBACK');
+      blocker.release();
+      await override?.catch(() => undefined);
+      await pool.end();
+    }
+  });
+
   it('is paid by the run of the door that wrote it', async () => {
     const made = await agent.post('/api/accounts').send({ name: 'Owed by a door', currency: 'EUR' });
     expect(made.status).toBe(201);
@@ -203,6 +258,7 @@ describe('a run held at its rate call', () => {
       await run.catch(() => undefined);
     }
 
+    expect(await run, 'the held run did not finish').toBe(0);
     expect(await transfers()).toEqual({ 'Incoming amount': false, 'Outgoing amount': false });
     expect(await reclassifyIfStale(), 'the run paid a write its rows never received').toBe('rows');
     expect(await transfers()).toEqual({ 'Incoming amount': true, 'Outgoing amount': true });

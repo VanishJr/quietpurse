@@ -99,12 +99,17 @@ transaction stopped the whole app until it finished. So a write over a set is on
 that set, in bounded batches sized against the driver's parameter ceiling, and it is outside a
 single long transaction wherever a partial result is one the app converges out of rather than one
 it can be stuck in. The re-tag qualifies because what a run records about itself — the signature of
-the rules it loaded, and the debt it loaded, as paid — is written after it returns: a run that a rule
-change or a marked row write started, and that dies half way, leaves the old signature or the debt
-unpaid, and the next start recomputes everything. A run that neither started rewrites the tags the
-last complete run wrote, except where the pairing rates have moved since, and the next start does
-not see it die. **Neither suite can see this.** They run sequentially, so nothing is ever waiting
-behind the transaction, and the driver that CI's second job uses does not have the property at all.
+the rules it loaded, and the debt it loaded, as paid — is written after it returns: a run that a
+marked row write or a rule change the signature sees started, and that dies half way, leaves the
+debt unpaid or the old signature, and the next start recomputes everything. The signature does not
+see every rule change: different lists of income patterns or of owner names can sign alike, and the
+category rules sign as a set while the matcher takes the newest one that matches. A run that such a
+change started, and that dies half way, leaves rows the new rules would tag differently, and the
+next start does not see it die. A run that neither a rule change nor a marked row write started
+rewrites the tags the last complete run wrote, except where the pairing rates have moved since or a
+rule has changed unseen, and the next start does not see it die either. **Neither suite can see the
+freeze.** They run sequentially, so nothing is ever waiting behind the transaction, and the driver
+that CI's second job uses does not have the property at all.
 
 **A function that writes a row or a column the classifier reads marks a recompute owed, on its own
 transaction's handle.** The mark is a fresh value in `meta`, written in the transaction that writes
@@ -112,8 +117,11 @@ the rows, so a write that commits carries it and a rollback drops both; the door
 pays it, and a start that finds it unpaid recomputes. It lives in the function and never in a route,
 so a new caller cannot leave it out. A new function that writes such rows without it is silent:
 nothing holds this rule but this sentence and review. A write the classifier never reads — a manual
-transfer mark, a base amount, a deduplication key — and a rule write, which the signature already
-carries, do not mark.
+transfer mark, a base amount, a deduplication key — does not mark. Neither does a rule write: the
+signature carries a rule change it sees, and one it does not see leaves nothing owed, so the next
+start does not see a run that change started die half way. Of a manual category the classifier
+reads only whether it is Support, so a category override marks, and its door recomputes, only when
+Support is entered or left.
 
 ## What the schema's shape commits a future producer to
 
