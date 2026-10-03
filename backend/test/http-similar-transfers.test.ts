@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
-import { reclassifyAll, reclassifyIfRulesChanged } from '../src/classify';
+import { reclassifyAll, reclassifyIfStale } from '../src/classify';
 import { addTransferRule, allTransactions, exportBackup, insertTransactions, listTransferRules, parseBackup, restoreBackup, seedDefaults, setTransferOverride } from '../src/db';
 import { matchesTransferRule } from '../src/transaction-description';
 import type { NewTransaction } from '../src/types';
@@ -175,12 +175,12 @@ describe('similar transfer rules over HTTP', () => {
     await reclassifyAll();
     expect((await allTransactions()).map((t) => t.transfer)).toEqual([true, false]);
     expect((await preview(source.id)).activeRule?.matchMode).toBe('similar-v1');
-    expect(await reclassifyIfRulesChanged()).toBe(false);
+    expect(await reclassifyIfStale()).toBe(false);
 
     const legacy = await exportBackup();
     legacy.tables.transfer_rules = [{ description: source.description, accountId, createdAt: '2026-09-01' }];
     await restoreBackup(parseBackup(legacy));
-    expect(await reclassifyIfRulesChanged()).toBe(true);
+    expect(await reclassifyIfStale()).toBe('rules');
     expect((await listTransferRules())[0].matchMode).toBe('exact');
     expect((await allTransactions()).map((t) => t.transfer)).toEqual([true, false]);
   });

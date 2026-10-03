@@ -316,7 +316,7 @@ of the field.
 **A refill in flight is said, not left for a reader to infer.** A change of base currency answers
 with every converted amount reset and refills them in the background, because the refill fetches
 rates and a request cannot wait on the network. `GET /api/conversion` says whether any refill is
-running — the start-up refill that runs when the rules have not changed, a recompute's refill and a
+running — the start-up refill that runs when no recompute is owed, a recompute's refill and a
 currency change's refill can overlap — and how many rows still have no base amount, so a client that
 re-reads its figures once `converting` is false does not show the gap as the data. The overlap
 leaves no figure in a currency that is no longer the base: each of a refill's writes compares the
@@ -560,10 +560,22 @@ a change the signature cannot see, so every existing row keeps a tag the current
 it. A source's *kind* is deliberately outside the signature — it moves summaries and not tags.
 
 **The recompute is driven from the doors that change a rule or the rows the rules read, and from a
-startup check on the signature**, and it is a full recomputation from each transaction's own source
-fields rather than an increment, so no state accumulates and running it twice is running it once. A
-door that changes something the signature does not carry recomputes for itself; nothing about the
-signature makes that unnecessary.
+startup check on the signature and on a recompute still owed**, and it is a full recomputation from
+each transaction's own source fields rather than an increment, so no state accumulates and running
+it twice is running it once. A door that changes something the signature does not carry recomputes
+for itself; nothing about the signature makes that unnecessary.
+
+**A write to the rows the rules read leaves a recompute owed until a run has read past it.** The
+signature covers the rules and not the rows, so a process that dies between such a write and its
+door's own recompute would start again with an equal signature and the rows as written: rows parsed
+without the rules, a surviving leg still paired with one that is gone. So every data-layer write the
+classifier would read — rows inserted, an import or an account deleted, a restore, a manual category
+entering or leaving Support — replaces a record in `meta` with a fresh value inside its own
+transaction, and a start recomputes while that value is unpaid. A start recomputes when the stored
+signature differs from the rules it loads or when that record is unpaid, and says which; with
+neither, it only refills base amounts. The record is a value and never a flag: a flag set again over
+itself cannot tell a write that landed after a run's load from the one before it, and the run that
+paid the first would pay the second with it.
 
 Runs happen one at a time, because the re-tag holds no transaction: two runs side by side interleave
 their writes, and the one that loaded first can overwrite a pairing the later one found. A caller
@@ -579,6 +591,14 @@ computed from the same read the matchers were built from. Read again after the w
 rule saved while the run was in flight, one the rows never received, and a start that finds that
 signature equal then repairs nothing — so the mismatch outlives a process that dies before the
 saving door's own run.
+
+**A run pays the debt it loaded, not the debt as it stands after its writes.** The record is read in
+the same load as the rules, before the rows, and the run writes that value back as paid in the
+statement that writes its signature, after the re-tag returns. Read after the rows, it can name a
+write the rows never received — one that landed while the run waited on its rates — and a start that
+finds it paid then repairs nothing. It is never part of the signature: the signature's string is what
+every existing database compares against at its next start, so anything added to it makes each of
+them recompute once, and a start could no longer say whether the rules or the rows sent it.
 
 **A hidden account's transactions stay in the database.** Hiding an account takes it off the screen
 and its rows out of the figures; it does not delete them, because the classifier still needs them as

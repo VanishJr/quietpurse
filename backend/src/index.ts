@@ -1,12 +1,17 @@
 import os from 'os';
 import { app } from './app';
-import { reclassifyIfRulesChanged } from './classify';
+import { type Stale, reclassifyIfStale } from './classify';
 import { config } from './config';
 import { closeDatabase, connectDatabase, seedDefaults } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { acquireLock, releaseLock } from './lock';
 import { logClassify, logger, reasonFirst } from './logger';
 import { assertStorageWritable } from './storage';
+
+const SAID: Record<Stale, string> = {
+  rules: 're-tagged every transaction with the new rules',
+  rows: 're-tagged every transaction: rows written before the last stop had not been re-tagged',
+};
 
 async function main(): Promise<void> {
   await acquireLock();
@@ -15,11 +20,11 @@ async function main(): Promise<void> {
   await seedDefaults();
 
   // In the background: the recompute fetches exchange rates and must not delay the
-  // start. If the rules did not change, still backfill base_amount - some rows may
+  // start. If nothing was owed, still backfill base_amount - some rows may
   // have been left without a rate when the provider was unavailable.
   void (async () => {
-    const done = await reclassifyIfRulesChanged();
-    if (done) logClassify.info('re-tagged every transaction with the new rules');
+    const stale = await reclassifyIfStale();
+    if (stale) logClassify.info(SAID[stale]);
     else await backfillBaseAmounts();
   })().catch((e: Error) => logClassify.error(`recompute failed: ${reasonFirst(e)}`));
 

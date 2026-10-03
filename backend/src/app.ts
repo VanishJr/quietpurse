@@ -617,9 +617,9 @@ app.patch('/api/transactions/:id/category', async (req, res) => {
     res.status(400).json({ error: `category must be one of: ${CATEGORIES.join(', ')}` });
     return;
   }
-  const before = await getTransaction(req.params.id);
-  let tx = await setCategoryOverride(req.params.id, category);
-  if (tx && (before?.category === 'support' || tx.category === 'support')) {
+  const written = await setCategoryOverride(req.params.id, category);
+  let tx = written?.transaction;
+  if (written?.reclassify) {
     await reclassifyAll();
     tx = await getTransaction(req.params.id);
   }

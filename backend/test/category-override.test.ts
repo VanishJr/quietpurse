@@ -188,8 +188,8 @@ describe('the data layer: a manual category, and what may not touch it', () => {
 
       // so handing the row back to auto-detection lands on the CURRENT answer
       const cleared = await setCategoryOverride(id, null);
-      expect(cleared!.category).toBe('shopping');
-      expect(cleared!.categoryManual).toBe(false);
+      expect(cleared!.transaction.category).toBe('shopping');
+      expect(cleared!.transaction.categoryManual).toBe(false);
     } finally {
       expect(await deleteCategoryRule(rule.id)).toBe(true);
       await setCategoryOverride(id, null);

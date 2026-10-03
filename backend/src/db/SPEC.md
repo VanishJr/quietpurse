@@ -98,10 +98,22 @@ this module answers nothing at all — a re-tag that issued one statement per ro
 transaction stopped the whole app until it finished. So a write over a set is one statement over
 that set, in bounded batches sized against the driver's parameter ceiling, and it is outside a
 single long transaction wherever a partial result is one the app converges out of rather than one
-it can be stuck in. The re-tag qualifies because its version stamp is written after it returns: a
-run that dies half way leaves the old stamp and the next start recomputes everything. **Neither
-suite can see this.** They run sequentially, so nothing is ever waiting behind the transaction, and
-the driver that CI's second job uses does not have the property at all.
+it can be stuck in. The re-tag qualifies because what a run records about itself — the signature of
+the rules it loaded, and the debt it loaded, as paid — is written after it returns: a run that a rule
+change or a marked row write started, and that dies half way, leaves the old signature or the debt
+unpaid, and the next start recomputes everything. A run that neither started rewrites the tags the
+last complete run wrote, except where the pairing rates have moved since, and the next start does
+not see it die. **Neither suite can see this.** They run sequentially, so nothing is ever waiting
+behind the transaction, and the driver that CI's second job uses does not have the property at all.
+
+**A function that writes a row or a column the classifier reads marks a recompute owed, on its own
+transaction's handle.** The mark is a fresh value in `meta`, written in the transaction that writes
+the rows, so a write that commits carries it and a rollback drops both; the door's own recompute
+pays it, and a start that finds it unpaid recomputes. It lives in the function and never in a route,
+so a new caller cannot leave it out. A new function that writes such rows without it is silent:
+nothing holds this rule but this sentence and review. A write the classifier never reads — a manual
+transfer mark, a base amount, a deduplication key — and a rule write, which the signature already
+carries, do not mark.
 
 ## What the schema's shape commits a future producer to
 
@@ -237,6 +249,13 @@ documents of the import rows it deletes stay on disk, and of those, the ones who
 back in the file are still removable through the delete path while the ones whose row is not
 reinstated are referenced by nothing but the folder. Both are lines about a folder the person can
 open, not bugs to fix in the restore.
+
+**A restore leaves a recompute owed, whatever the dump says.** It writes the mark after its table
+loop, in the same transaction, because a dump that carries `meta` replaces every row of it; and it
+writes a fresh value rather than keeping one the dump carries, because a run in flight may have
+loaded that same value and would then pay for rows it never read. The mark is never added to the
+dump's own rows: that would change what the restore reports, and a sparse dump that omits `meta`
+would then clear the current one, signature included.
 
 **One status may never survive a restore, and it is typed rather than listed as a string.** A
 renamed status value is then a compile error instead of a set that quietly stops matching — the
