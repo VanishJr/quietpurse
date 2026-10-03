@@ -327,6 +327,43 @@ export async function setMeta(key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: [s.meta.key], set: { value } });
 }
 
+const CLASSIFY_VERSION = 'classify_version';
+const CLASSIFY_OWED = 'classify_owed';
+const CLASSIFY_PAID = 'classify_paid';
+
+/**
+ * A fresh value every time and never a flag: a run pays the value it loaded, so a write
+ * landing after that load has to leave one the run never saw.
+ */
+async function markClassifyOwed(d: Executor): Promise<void> {
+  await d.execute(sql`
+    INSERT INTO meta (key, value) VALUES (${CLASSIFY_OWED}, ${crypto.randomUUID()})
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+}
+
+export function getClassifyOwed(): Promise<string | undefined> {
+  return getMeta(CLASSIFY_OWED);
+}
+
+export async function getClassifyStamp(): Promise<{ signature?: string; paid?: string }> {
+  const rows = await getDb()
+    .select()
+    .from(s.meta)
+    .where(inArray(s.meta.key, [CLASSIFY_VERSION, CLASSIFY_PAID]));
+  const valueOf = (key: string): string | undefined => rows.find((r) => r.key === key)?.value;
+  return { signature: valueOf(CLASSIFY_VERSION), paid: valueOf(CLASSIFY_PAID) };
+}
+
+export async function setClassifyStamp(signature: string, paid: string | undefined): Promise<void> {
+  await getDb()
+    .insert(s.meta)
+    .values([
+      { key: CLASSIFY_VERSION, value: signature },
+      ...(paid === undefined ? [] : [{ key: CLASSIFY_PAID, value: paid }]),
+    ])
+    .onConflictDoUpdate({ target: [s.meta.key], set: { value: sql`excluded.value` } });
+}
+
 export async function upsertAccount(a: Omit<Account, 'hidden'>): Promise<void> {
   await upsertAccountOn(getDb(), a);
 }
@@ -662,6 +699,7 @@ export async function insertTransactionsOn(
       .returning({ id: s.transactions.id });
     inserted += res.length;
   }
+  if (inserted > 0) await markClassifyOwed(d);
   return inserted;
 }
 
@@ -1842,6 +1880,7 @@ export async function deleteImport(
       .delete(s.imports)
       .where(eq(s.imports.id, id));
     await renumberGroups(tx, groups);
+    await markClassifyOwed(tx);
   });
 
   // The rows are gone; the blob goes second, on its own, and before the balance
@@ -1998,6 +2037,7 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
       // top of this transaction, so the row cannot have gone missing under us and
       // zero rows here can only be the guard
       if (!removed) throw new AccountHoldsStagedRows();
+      await markClassifyOwed(tx);
     });
   } catch (e) {
     if (e instanceof NoSuchAccount) return { ok: false, reason: 'not-found' };
@@ -2081,11 +2121,7 @@ export const CLASSIFY_BATCH = 500;
  * transaction and the app answers nothing until the re-tag finishes. Nothing sees it
  * - the suite runs sequentially, and the node-postgres side never had the property.
  *
- * Dropping the transaction is safe because of the order in reclassifyAll: the
- * classify_version signature is written AFTER this returns, so a run that dies half
- * way leaves the old signature, and the next start recomputes every row again.
- * A partial re-tag is a state this converges out of rather than one it can be stuck
- * in - which is the only reason atomicity was worth anything here.
+ * What a run that dies half way leaves behind without one is in this module's SPEC.md.
  *
  * The casts are on the first VALUES row's business, not decoration: a bound
  * parameter in a VALUES list arrives as `unknown` and Postgres will not compare it
@@ -2131,6 +2167,11 @@ export async function setTransferOverride(
   return getTransaction(id);
 }
 
+export interface CategoryOverride {
+  transaction: Transaction;
+  reclassify: boolean;
+}
+
 /**
  * The user's own category for one transaction; null hands the decision back to
  * auto-detection. Takes a Category rather than a string: an unvalidated slug here is
@@ -2139,12 +2180,24 @@ export async function setTransferOverride(
 export async function setCategoryOverride(
   id: string,
   category: Category | null,
-): Promise<Transaction | undefined> {
-  await getDb()
-    .update(s.transactions)
-    .set({ categoryManual: category })
-    .where(eq(s.transactions.id, id));
-  return getTransaction(id);
+): Promise<CategoryOverride | undefined> {
+  return getDb().transaction(async (tx) => {
+    // FOR UPDATE: unlocked, on a server, this reads past an override that has not committed
+    // yet, and leaving the Support that override enters would then mark nothing
+    const [was] = await rowsVia<TxRow>(
+      tx,
+      sql`SELECT * FROM transactions WHERE id = ${id} FOR UPDATE`,
+    );
+    if (!was) return undefined;
+    const [now] = await rowsVia<TxRow>(
+      tx,
+      sql`UPDATE transactions SET category_manual = ${category} WHERE id = ${id} RETURNING *`,
+    );
+    const transaction = rowToTx(now);
+    const reclassify = rowToTx(was).category === 'support' || transaction.category === 'support';
+    if (reclassify) await markClassifyOwed(tx);
+    return { transaction, reclassify };
+  });
 }
 
 export async function setIncomeSourceOverride(
@@ -3804,6 +3857,8 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
       if (provided.has(name) || valuesIn.length > 0) tables++;
       rows += valuesIn.length;
     }
+    // after the loop: a dump that carries meta replaces every row of it, this one included
+    await markClassifyOwed(tx);
   });
   return { tables, rows };
 }

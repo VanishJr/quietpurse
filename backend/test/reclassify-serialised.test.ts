@@ -3,7 +3,7 @@
  * cached, and the next run would then make no call to count.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { reclassifyAll, reclassifyIdle, reclassifyIfRulesChanged } from '../src/classify';
+import { reclassifyAll, reclassifyIdle, reclassifyIfStale } from '../src/classify';
 import { addCategoryRule, dbInstance, insertTransactions, seedDefaults, setMeta } from '../src/db';
 import { REQUEST_TIMEOUT_MS } from '../src/rates';
 import { NewTransaction } from '../src/types';
@@ -143,7 +143,7 @@ describe('the recompute runs one at a time', () => {
     await a.promise;
     expect(await categoryOf('Zorblat Qwv'), 'the run loaded its rules after the hold, not before').toBe('other');
 
-    expect(await reclassifyIfRulesChanged(), 'the signature names a rule the rows never received').toBe(true);
+    expect(await reclassifyIfStale(), 'the signature names a rule the rows never received').toBe('rules');
     expect(await categoryOf('Zorblat Qwv')).toBe('food');
   });
 
@@ -213,7 +213,7 @@ describe('the recompute runs one at a time', () => {
     const a = track('a', reclassifyAll());
     await vi.waitFor(() => expect(rateCalls).toBe(1));
 
-    const check = track('check', reclassifyIfRulesChanged());
+    const check = track('check', reclassifyIfStale());
     await sleep(WINDOW_MS);
     expect(check.settled(), 'the start-up check settled while a run was in flight').toBe(false);
 
@@ -250,7 +250,7 @@ describe('settling the queue between cases', () => {
     await vi.waitFor(() => expect(rateCalls).toBe(1));
 
     await addCategoryRule('settled', 'food');
-    const check = track('check', reclassifyIfRulesChanged());
+    const check = track('check', reclassifyIfStale());
     const followUp = track('follow-up', reclassifyAll());
     const settled = track('settled', settleRecomputes(realFetch));
     timeout.abort(new Error('the rate call timed out'));

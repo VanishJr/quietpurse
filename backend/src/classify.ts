@@ -4,11 +4,12 @@ import {
   Classification,
   allTransactions,
   applyClassification,
-  getMeta,
+  getClassifyOwed,
+  getClassifyStamp,
   listCategoryRules,
   listIncomeSources,
   listTransferRules,
-  setMeta,
+  setClassifyStamp,
 } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { getRatesToUAH } from './rates';
@@ -64,6 +65,18 @@ async function loadTaggingRules(): Promise<TaggingRules> {
   const transferRules = await listTransferRules();
   const categoryRules = await listCategoryRules();
   return { ownerNames, incomeSources, transferRules, categoryRules };
+}
+
+interface RunLoad {
+  rules: TaggingRules;
+  owed: string | undefined;
+}
+
+async function loadRun(): Promise<RunLoad> {
+  // before the rows, which reclassifyWith reads itself: read after them, it can name a
+  // write the rows never received
+  const owed = await getClassifyOwed();
+  return { rules: await loadTaggingRules(), owed };
 }
 
 /**
@@ -195,7 +208,7 @@ async function ratesOrEmpty(): Promise<Record<string, number>> {
   }
 }
 
-async function reclassifyWith(rules: TaggingRules): Promise<number> {
+async function reclassifyWith({ rules, owed }: RunLoad): Promise<number> {
   const isOwner = makeOwnerMatcher(rules.ownerNames);
   const sourceFor = makeSourceMatcher(rules.incomeSources);
   const matchesRule = makeTransferRuleMatcher(rules.transferRules);
@@ -279,7 +292,7 @@ async function reclassifyWith(rules: TaggingRules): Promise<number> {
 
   const rows = [...result.values()];
   await applyClassification(rows);
-  await setMeta('classify_version', rulesSignature(rules));
+  await setClassifyStamp(rulesSignature(rules), owed);
 
   await backfillBaseAmounts();
 
@@ -322,19 +335,28 @@ export async function reclassifyAll(): Promise<number> {
     // cleared as the run starts, not as it ends: a caller arriving after this point may
     // have written after this run's load, so it has to get the next run, not this one
     queued = undefined;
-    return reclassifyWith(await loadTaggingRules());
+    return reclassifyWith(await loadRun());
   });
   return queued;
 }
 
-export async function reclassifyIfRulesChanged(): Promise<boolean> {
+export type Stale = 'rules' | 'rows';
+
+export async function reclassifyIfStale(): Promise<Stale | false> {
   return serialised(async () => {
-    const rules = await loadTaggingRules();
-    if ((await getMeta('classify_version')) === rulesSignature(rules)) return false;
+    const load = await loadRun();
+    const stamp = await getClassifyStamp();
+    const stale: Stale | false =
+      stamp.signature !== rulesSignature(load.rules)
+        ? 'rules'
+        : load.owed !== undefined && load.owed !== stamp.paid
+          ? 'rows'
+          : false;
+    if (!stale) return false;
     // the body and not reclassifyAll: this job already holds the queue, and the wrapper
     // would wait on it forever
-    await reclassifyWith(rules);
-    return true;
+    await reclassifyWith(load);
+    return stale;
   });
 }
 
