@@ -99,16 +99,14 @@ transaction stopped the whole app until it finished. So a write over a set is on
 that set, in bounded batches sized against the driver's parameter ceiling, and it is outside a
 single long transaction wherever a partial result is one the app converges out of rather than one
 it can be stuck in. The re-tag qualifies because what a run records about itself — the signature of
-the rules it loaded, and the debt it loaded, as paid — is written after it returns: a run that a
-marked row write or a rule change the signature sees started, and that dies half way, leaves the
-debt unpaid or the old signature, and the next start recomputes everything. The signature does not
-see every rule change: different lists of income patterns or of owner names can sign alike, and the
-category rules sign as a set while the matcher takes the newest one that matches. A run that such a
-change started, and that dies half way, leaves rows the new rules would tag differently, and the
-next start does not see it die. A run that neither a rule change nor a marked row write started
-rewrites the tags the last complete run wrote, except where the pairing rates have moved since or a
-rule has changed unseen, and the next start does not see it die either. **Neither suite can see the
-freeze.** They run sequentially, so nothing is ever waiting behind the transaction, and the driver
+the rules it loaded, and the debt it loaded, as paid — is written after it returns: a run whose load
+found the debt unpaid or the signature differing from the stored one, and that dies half way, leaves
+them so, and the next start recomputes everything. The signature does not see every rule change:
+different lists of income patterns or of owner names can sign alike, and the category rules sign as
+a set while the matcher takes the newest one that matches. A run whose load found neither — whatever
+door started it — rewrites the tags the last complete run wrote, except where the pairing rates have
+moved since or a rule has changed unseen, and the next start does not see it die. **Neither suite
+can see the freeze.** They run sequentially, so nothing is ever waiting behind the transaction, and the driver
 that CI's second job uses does not have the property at all.
 
 **A function that writes a row or a column the classifier reads marks a recompute owed, on its own

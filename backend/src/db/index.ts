@@ -2121,7 +2121,7 @@ export const CLASSIFY_BATCH = 500;
  * transaction and the app answers nothing until the re-tag finishes. Nothing sees it
  * - the suite runs sequentially, and the node-postgres side never had the property.
  *
- * Why a run that dies half way is safe without one is in this module's SPEC.md.
+ * What a run that dies half way leaves behind without one is in this module's SPEC.md.
  *
  * The casts are on the first VALUES row's business, not decoration: a bound
  * parameter in a VALUES list arrives as `unknown` and Postgres will not compare it
