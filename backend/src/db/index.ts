@@ -3556,11 +3556,13 @@ type SchemaTable = {
 }[keyof typeof s];
 type TableName = SchemaTable['_']['name'];
 type Named<N extends string> = PgTable<any> & { readonly _: { readonly name: N } };
+type Widened<T extends string> = T extends unknown ? ({} extends Record<T, 1> ? T : never) : never;
 
 /**
  * Every table a backup carries, under the name the file gives it, in the order restore inserts
- * them. The constraint's first branch is what refuses a table whose SQL name is typed a plain
- * string: TableName would widen to string, and this check and LOCAL_TABLES' would pass anything.
+ * them. The constraint's condition is what refuses a table whose SQL name is typed as anything but
+ * a literal: a mapped type over such a name requires no key, so that table would pass this check
+ * and LOCAL_TABLES' undecided.
  */
 const BACKUP_TABLES = {
   accounts: s.accounts,
@@ -3585,9 +3587,9 @@ const BACKUP_TABLES = {
   settings: s.settings,
   meta: s.meta,
   analytics_charts: s.analyticsCharts,
-} as const satisfies (string extends TableName
-  ? { 'every schema table needs a literal SQL name': never }
-  : { [N in TableName]?: Named<N> });
+} as const satisfies ([Widened<TableName>] extends [never]
+  ? { [N in TableName]?: Named<N> }
+  : { 'every schema table needs a literal SQL name': never });
 
 type BackupTable = keyof typeof BACKUP_TABLES;
 

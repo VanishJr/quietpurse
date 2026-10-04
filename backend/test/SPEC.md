@@ -20,8 +20,9 @@ database it runs against, what jsdom cannot see, what skips on this platform.
   so a table added to the schema is cleared between files without anyone listing it. A table added
   to or renamed in the schema without `npm run db:generate` fails every file at its truncate, and
   one removed without it fails the truncate-list case in `backend/test/harness.test.ts`.
-  It is a vitest setup file, so it runs once per test file and truncates before each one — what
-  the files share is the engine instance and the module registry, never the rows.
+  `backend/test/setup.ts` is a vitest setup file, so it runs once per test file and truncates
+  before each one — what the files share is the engine instance and the module registry, never the
+  rows.
   `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
   door records an answer mismatch into and the drain the setup file empties in its after hooks, so
   the case that produced the mismatch is the case that fails with it; the rule it holds is

@@ -326,8 +326,9 @@ the base moved stops and leaves the rest to the refill that follows the change â
 while a restore is replacing the setting's row or has left it missing until the next start writes it
 again: a write that waited on the deleted row, or found none, compares with the configured default.
 Stopping is not finishing: a rate that could not be fetched leaves its rows without a base amount
-until the next recompute, a rate every provider that handles the pair answered it does not have
-leaves them so until the first recompute after that answer has aged, and `unconverted` counts both.
+until the next recompute, a rate every provider that handles the pair answered it does not have,
+by an answer that is remembered, leaves them so until the first recompute after that answer has
+aged, and `unconverted` counts both.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
@@ -625,9 +626,10 @@ published after it was asked for, so the answer is remembered for an age and the
 age is one constant, and its reason sits beside it in `backend/src/fxrates.ts`. The answer is kept
 apart from the rates, in `meta`, so no reader of the rate cache can take it for a rate or for an
 absence, and a rate stored for the same key wins over it. It is a fact about exactly what was
-asked, and the NBU's is about one day: a remembered answer for a day skips that day's request and
-never ends the lookback for the day a row needs. A time recorded ahead of the clock is stale, so
-neither a clock moved back nor a crafted backup can make one permanent.
+asked, and the NBU's is about one day already past; its answer for a day not yet past is not
+remembered, because that day's rate can still be set. A remembered answer for a day skips that
+day's request and never ends the lookback for the day a row needs. A time recorded ahead of the
+clock is stale, so neither a clock moved back nor a crafted backup can make one permanent.
 
 **No provider covering a pair is an error in the log, never a silent absence.** A rate that cannot
 be resolved leaves the row unconverted and says so; the alternatives â€” a zero, or a rate from the

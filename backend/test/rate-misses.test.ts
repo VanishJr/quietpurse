@@ -282,6 +282,28 @@ describe('a remembered "no rate"', () => {
     expect(await getFxRate(d, 'EUR')).toBe(50);
   });
 
+  it('a day not yet past is asked again, and its line promises the next recompute', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const [tomorrow, yesterday] = [shift(today, 1), shift(today, -1)];
+    await insertTransactions([row('ARS', tomorrow, 'pesos, tomorrow')]);
+    await saveFxRate(tomorrow, 'EUR', UAH_PER_EUR);
+    const asked = network({ nbu: () => json([]) });
+    const lines: string[] = [];
+
+    await backfillBaseAmounts((s) => lines.push(s));
+
+    const log = lines.join('\n');
+    expect(log).toContain(`rate ARS -> EUR on ${tomorrow}: no provider returned one`);
+    expect(log).toContain('rates left unapplied: 1 of 1 (picked up on the next recompute)');
+    expect(await getFxRateOrMiss('ARS', nbuMiss(tomorrow, 'ARS'))).toBeUndefined();
+    expect(await getFxRateOrMiss('ARS', nbuMiss(yesterday, 'ARS'))).toEqual({
+      missedAt: expect.any(String),
+    });
+    const first = asked.nbu.length;
+    await backfillBaseAmounts(() => {});
+    expect(asked.nbu.slice(first)).toContainEqual({ currency: 'ARS', day: tomorrow });
+  });
+
   it('gives way to a rate stored for the same day', async () => {
     await insertTransactions([row('GEL', DAY, 'lari, rate and miss')]);
     await saveFxMiss(nbuMiss(DAY, 'GEL'));
