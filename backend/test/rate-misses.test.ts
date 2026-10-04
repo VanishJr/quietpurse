@@ -229,6 +229,19 @@ describe('a remembered "no rate"', () => {
     expect((await stored('future dollars')).k).toBe(0.9);
   });
 
+  it('from Frankfurter covers its own day and pair alone', async () => {
+    await insertTransactions([row('USD', DAY, 'dollars, other pairs missed')]);
+    await saveFxMiss(ecbMiss(DAY, 'USD', 'GBP'));
+    await saveFxMiss(ecbMiss(DAY, 'GBP', 'EUR'));
+    await saveFxMiss(ecbMiss(shift(DAY, -1), 'USD', 'EUR'));
+    const asked = network({ frankfurter: () => json({ rates: { EUR: 0.9 } }) });
+
+    await backfillBaseAmounts(() => {});
+
+    expect(asked.frankfurter).toEqual([{ day: DAY, from: 'USD', to: 'EUR' }]);
+    expect((await stored('dollars, other pairs missed')).k).toBe(0.9);
+  });
+
   it('on the row\'s own day does not end the lookback: a stored rate the day before converts it', async () => {
     await insertTransactions([row('GEL', DAY, 'lari, stored the day before')]);
     await saveFxMiss(nbuMiss(DAY, 'GEL'));

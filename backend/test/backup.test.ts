@@ -25,6 +25,7 @@ import { DocumentMissing, getDocument, putDocument } from '../src/documents';
 import { storageRoot } from '../src/storage';
 import { NewTransaction } from '../src/types';
 import { accountFor, idOf, importAndConfirm, markImportCommitted } from './helpers';
+import { schemaTables } from './pglite';
 
 const queryRows = async <T>(query: ReturnType<typeof sql>): Promise<T[]> =>
   ((await dbInstance().execute(query)) as unknown as { rows: T[] }).rows;
@@ -698,6 +699,16 @@ describe('backup and restore (JSON)', () => {
       'transactions',
       'transfer_rules',
     ]);
+  });
+
+  /**
+   * Beside the typecheck, not instead of it: tsc reads the schema's types, and a table typed out
+   * of its sight passes it undecided.
+   */
+  it('every table the schema exports is carried by a backup or local, once, under its SQL name', async () => {
+    expect(
+      [...Object.keys((await exportBackup()).tables), ...Object.keys(LOCAL_TABLES)].sort(),
+    ).toEqual((await schemaTables()).sort());
   });
 
   /**

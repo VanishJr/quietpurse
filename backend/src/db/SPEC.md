@@ -341,9 +341,14 @@ valued by its reason. `tsc` holds the decision, and holds it on the local set it
 test reads — rather than on a type nothing references, which an editor greys out as unused and a
 tidy-up deletes with the typecheck still green. The tables are read from the schema's exports by
 shape, so another kind of export neither breaks the decision nor slips past it. A table decided
-neither way or both ways, or a backup key that is not its own table's SQL name, fails
-`npm run typecheck`. A test holds what a type cannot:
+neither way or both ways, or a backup key that is not the name its table's type declares, fails
+`npm run typecheck`, and so does a table whose SQL name is typed as a string no literal pins. `tsc`
+reads only types, so a table whose type hides it — a name typed `never`, an export typed `object`
+or `unknown` — passes the typecheck undecided. A test holds what a type cannot:
 
+- every table the schema exports, read from its values rather than its types, is carried by a
+  backup or local, once, under its SQL name — which holds a table its type hides, and a backup key
+  that is the name its table's type declares but not its SQL name;
 - the insertion order of `BACKUP_TABLES` is the order a restore inserts in, held against the
   foreign keys the migrated database declares, and a table a backup carries never references a
   local one — its export would succeed and its restore fail on every other machine;

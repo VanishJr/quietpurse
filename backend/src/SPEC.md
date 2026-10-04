@@ -622,8 +622,9 @@ that cache is changed by adding another and never by reinterpreting the one alre
 `backend/src/db` owns the table; this is the rule about what may be written into it.
 
 **A provider's answer that it has no rate is not historical, so it expires.** A rate can be
-published after it was asked for, so the answer is remembered for an age and then asked again; the
-age is one constant, and its reason sits beside it in `backend/src/fxrates.ts`. The answer is kept
+published after it was asked for, so the answer is remembered for an age and then asked again; an
+answer with an error status is never one, whatever its body says, and records nothing; the age is
+one constant, and its reason sits beside it in `backend/src/fxrates.ts`. The answer is kept
 apart from the rates, in `meta`, so no reader of the rate cache can take it for a rate or for an
 absence, and a rate stored for the same key wins over it. It is a fact about exactly what was
 asked, and the NBU's is about one day already past; its answer for a day not yet past is not

@@ -3560,9 +3560,11 @@ type Widened<T extends string> = T extends unknown ? ({} extends Record<T, 1> ? 
 
 /**
  * Every table a backup carries, under the name the file gives it, in the order restore inserts
- * them. The constraint's condition is what refuses a table whose SQL name is typed as anything but
- * a literal: a mapped type over such a name requires no key, so that table would pass this check
- * and LOCAL_TABLES' undecided.
+ * them. The constraint's condition is what refuses a table whose SQL name is typed as a string no
+ * literal pins: a mapped type over such a name requires no key, so that table would pass this check
+ * and LOCAL_TABLES' undecided. A table out of every type's sight here - its name typed never, its
+ * export typed object or unknown - passes both; the case in backup.test.ts that reads the schema's
+ * values holds it.
  */
 const BACKUP_TABLES = {
   accounts: s.accounts,
