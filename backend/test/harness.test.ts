@@ -25,10 +25,6 @@ describe('assertTestDatabase', () => {
   });
 });
 
-/**
- * The truncate is what isolates one file from the next, so a table it leaves out carries
- * rows across files with nothing to say so.
- */
 describe('the truncate list', () => {
   it('is every table the migrated database has, and nothing else', async () => {
     const res = (await dbInstance().execute(

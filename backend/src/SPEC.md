@@ -326,8 +326,8 @@ the base moved stops and leaves the rest to the refill that follows the change �
 while a restore is replacing the setting's row or has left it missing until the next start writes it
 again: a write that waited on the deleted row, or found none, compares with the configured default.
 Stopping is not finishing: a rate that could not be fetched leaves its rows without a base amount
-until the next recompute, a rate a provider answered it does not have leaves them so until the
-first recompute after that answer has aged, and `unconverted` counts both.
+until the next recompute, a rate every provider that handles the pair answered it does not have
+leaves them so until the first recompute after that answer has aged, and `unconverted` counts both.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
@@ -632,9 +632,10 @@ neither a clock moved back nor a crafted backup can make one permanent.
 **No provider covering a pair is an error in the log, never a silent absence.** A rate that cannot
 be resolved leaves the row unconverted and says so; the alternatives — a zero, or a rate from the
 wrong pair — put a wrong number into every figure downstream with nothing to notice it. An
-unconverted row is picked up by the next recompute — or, when a provider's answer that it has none
-is remembered, by the first recompute after that answer has aged, and the refill's line for the
-rate says which — so the cost of saying nothing is bounded and the cost of guessing is not.
+unconverted row is picked up by the next recompute — or, when every provider that handles the pair
+has answered that it has none, and that answer is remembered, by the first recompute after that
+answer has aged, and the refill's line for the rate says which — so the cost of saying nothing is
+bounded and the cost of guessing is not.
 
 **A derivation whose content is its arithmetic is written whole in the code, at the site it governs,
 and this document says only that it exists.** Each is stated once and in one place:

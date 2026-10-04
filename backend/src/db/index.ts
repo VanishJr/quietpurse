@@ -2490,10 +2490,6 @@ export async function saveFxRate(day: string, currency: string, rate: number): P
 
 export const FX_MISS_PREFIX = 'fx_miss:';
 
-/**
- * What a provider was asked when it answered that it has no rate: the NBU one currency on one
- * exact day, Frankfurter one pair on one day.
- */
 export type FxMiss =
   | { provider: 'nbu'; day: string; currency: string }
   | { provider: 'ecb'; day: string; from: string; to: string };
@@ -2506,8 +2502,8 @@ const fxMissKey = (m: FxMiss): string =>
 export type FxRateOrMiss = { rate: number } | { missedAt: string } | undefined;
 
 /**
- * A stored rate wins over a miss. One day, the miss's own: with two, a caller in the lookback
- * could read the rate for one day and the miss for another.
+ * One day, the miss's own: with two, a caller in the lookback could read the rate for one day and
+ * the miss for another.
  */
 export async function getFxRateOrMiss(rateKey: string, miss: FxMiss): Promise<FxRateOrMiss> {
   const rate = await getFxRate(miss.day, rateKey);
@@ -3563,7 +3559,8 @@ type Named<N extends string> = PgTable<any> & { readonly _: { readonly name: N }
 
 /**
  * Every table a backup carries, under the name the file gives it, in the order restore inserts
- * them.
+ * them. The constraint's first branch is what refuses a table whose SQL name is typed a plain
+ * string: TableName would widen to string, and this check and LOCAL_TABLES' would pass anything.
  */
 const BACKUP_TABLES = {
   accounts: s.accounts,
@@ -3588,7 +3585,9 @@ const BACKUP_TABLES = {
   settings: s.settings,
   meta: s.meta,
   analytics_charts: s.analyticsCharts,
-} as const satisfies { [N in TableName]?: Named<N> };
+} as const satisfies (string extends TableName
+  ? { 'every schema table needs a literal SQL name': never }
+  : { [N in TableName]?: Named<N> });
 
 type BackupTable = keyof typeof BACKUP_TABLES;
 

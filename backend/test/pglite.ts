@@ -20,7 +20,6 @@ import { getTableName, is, sql } from 'drizzle-orm';
 import { PgTable } from 'drizzle-orm/pg-core';
 import type { Db } from '../src/db';
 
-/** Every table the schema exports, by SQL name: what the truncate clears between test files. */
 export async function schemaTables(): Promise<string[]> {
   const schema = await import('../src/db/schema');
   return Object.values<unknown>(schema)

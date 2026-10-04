@@ -17,9 +17,9 @@ database it runs against, what jsdom cannot see, what skips on this platform.
   before anything reads config, which is why everything it loads from `backend/src`, directly or
   through a harness module, is a dynamic import. The truncate names every table
   `backend/src/db/schema.ts` exports, read from the schema when it runs rather than written down,
-  so a table added to the schema is cleared between files without anyone listing it, and a schema
-  edit made without `npm run db:generate` fails every file at its truncate, naming a table the
-  migrated database lacks.
+  so a table added to the schema is cleared between files without anyone listing it. A table added
+  to or renamed in the schema without `npm run db:generate` fails every file at its truncate, and
+  one removed without it fails the truncate-list case in `backend/test/harness.test.ts`.
   It is a vitest setup file, so it runs once per test file and truncates before each one — what
   the files share is the engine instance and the module registry, never the rows.
   `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
@@ -183,9 +183,9 @@ connection-string path honest.
 directory also imports its compiler API as a library.** That import is deliberate rather than a
 transitive accident: an invariant about the *shape* of source has no other reader.
 
-**The lists that pin the schema's tables are literals in this directory on purpose** — the names a
-backup carries and the tables a deleted account reaches — so that a change to either is an edit to
-a test. What each list governs is written once, in `backend/src/db/SPEC.md`, rather than twice.
+**A list in this directory that pins which tables a backup or an account delete reaches is a
+literal on purpose**, so that a change to it is an edit to a test; what each governs is written
+once, in `backend/src/db/SPEC.md`.
 
 **`backend/test/specs.test.ts` holds that a spec declares one of two statuses, and holds nothing
 about which one is true.** The flip out of draft follows the owner's review, and no check can tell

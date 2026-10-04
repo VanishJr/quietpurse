@@ -247,8 +247,8 @@ are files in a folder the person can copy on their own.
 
 **A provider's remembered answer that it has no rate travels in `meta` like every other stamp.** A
 crafted backup that plants one can hold a key's rows unconverted, and counted, for one age of that
-answer at most — a time recorded ahead of the clock counts as stale — which is less than a planted
-rate already gives it.
+answer at most — a time recorded ahead of the clock counts as stale — or make them convert at an
+earlier probe day's rate, and neither is more than a planted rate already gives it.
 
 **A restore clears each table the dump provides and loads it in one transaction**, skipping tables
 the current schema does not know and preserving current tables an older or sparse dump omits. A

@@ -1,7 +1,4 @@
 /**
- * A provider's answer that it has no rate is remembered for an age: what records one, what a
- * remembered one skips, and what it never stands in for.
- *
  * A miss's recorded time is planted through the data layer and the clock is never moved: a
  * faked timer also stops the timeouts the fetch and the idle hook run on, and a faked Date
  * left behind under isolate: false runs every later file in a moved clock.
@@ -16,6 +13,7 @@ import {
   countUnconverted,
   createAccount,
   dbInstance,
+  getFxRate,
   getFxRateOrMiss,
   insertTransactions,
   saveFxMiss,
@@ -43,7 +41,6 @@ const shift = (day: string, deltaDays: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
-/** Every day the NBU's lookback probes for a row dated `day`, that day first. */
 const probeDays = (day: string): string[] =>
   Array.from({ length: MAX_LOOKBACK_DAYS + 1 }, (_, back) => shift(day, -back));
 
@@ -208,6 +205,30 @@ describe('a remembered "no rate"', () => {
     expect(asked.nbu).toEqual(probeDays(DAY).map((day) => ({ currency: 'ARS', day })));
   });
 
+  it('from Frankfurter is asked again once it is older than the age', async () => {
+    await insertTransactions([row('USD', DAY, 'stale dollars')]);
+    const planted = new Date(Date.now() - MISS_AGE_MS - 60_000);
+    await saveFxMiss(ecbMiss(DAY, 'USD', 'EUR'), planted);
+    const asked = network({ frankfurter: () => json({ rates: { EUR: 0.9 } }) });
+
+    await backfillBaseAmounts(() => {});
+
+    expect(asked.frankfurter).toEqual([{ day: DAY, from: 'USD', to: 'EUR' }]);
+    expect((await stored('stale dollars')).k).toBe(0.9);
+  });
+
+  it('from Frankfurter is asked again when it was recorded ahead of the clock', async () => {
+    await insertTransactions([row('USD', DAY, 'future dollars')]);
+    const planted = new Date(Date.now() + 60 * 60 * 1000);
+    await saveFxMiss(ecbMiss(DAY, 'USD', 'EUR'), planted);
+    const asked = network({ frankfurter: () => json({ rates: { EUR: 0.9 } }) });
+
+    await backfillBaseAmounts(() => {});
+
+    expect(asked.frankfurter).toEqual([{ day: DAY, from: 'USD', to: 'EUR' }]);
+    expect((await stored('future dollars')).k).toBe(0.9);
+  });
+
   it('on the row\'s own day does not end the lookback: a stored rate the day before converts it', async () => {
     await insertTransactions([row('GEL', DAY, 'lari, stored the day before')]);
     await saveFxMiss(nbuMiss(DAY, 'GEL'));
@@ -236,6 +257,29 @@ describe('a remembered "no rate"', () => {
 
     expect(asked.nbu).toEqual([{ currency: 'GEL', day: shift(DAY, -1) }]);
     expect((await stored('lari, fetched the day before')).k).toBe(UAH_PER_GEL / UAH_PER_EUR);
+  });
+
+  it('is never recorded for a day not yet past: the rate the NBU sets for it later converts it', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const [prev, d, next] = [today, shift(today, 1), shift(today, 2)];
+    const calendar = new Map([[`EUR|${prev}`, 45]]);
+    const asked = network({
+      nbu: (currency, day) => {
+        const rate = calendar.get(`${currency}|${day}`);
+        return json(rate === undefined ? [] : [{ cc: currency, rate }]);
+      },
+    });
+
+    await insertTransactions([row('UAH', next, 'hryvnia, two days ahead')]);
+    await backfillBaseAmounts(() => {});
+    calendar.set(`EUR|${d}`, 50);
+    const first = asked.nbu.length;
+    await insertTransactions([row('UAH', d, 'hryvnia, a day ahead')]);
+    await backfillBaseAmounts(() => {});
+
+    expect(asked.nbu.slice(first)).toEqual([{ currency: 'EUR', day: d }]);
+    expect((await stored('hryvnia, a day ahead')).k).toBe(1 / 50);
+    expect(await getFxRate(d, 'EUR')).toBe(50);
   });
 
   it('gives way to a rate stored for the same day', async () => {
@@ -281,22 +325,51 @@ describe('a remembered "no rate"', () => {
       missedAt: expect.any(String),
     });
   });
+
+  it('a null leg beats a remembered one', async () => {
+    await insertTransactions([row('ARS', DAY, 'pesos, euro leg not a rate')]);
+    network({ nbu: (c) => json(c === 'EUR' ? [{ cc: 'EUR', rate: 0 }] : []) });
+    const lines: string[] = [];
+
+    await backfillBaseAmounts((s) => lines.push(s));
+
+    expect(lines.join('\n')).toContain(`rate ARS -> EUR on ${DAY}: no provider returned one`);
+  });
+
+  it('a null provider beats a remembered one', async () => {
+    await insertTransactions([row('USD', DAY, 'dollars, Frankfurter not a rate')]);
+    network({
+      frankfurter: () => json({ rates: { EUR: null } }),
+      nbu: (c) => json(c === 'EUR' ? [{ cc: 'EUR', rate: UAH_PER_EUR }] : []),
+    });
+    const lines: string[] = [];
+
+    await backfillBaseAmounts((s) => lines.push(s));
+
+    expect(lines.join('\n')).toContain(`rate USD -> EUR on ${DAY}: no provider returned one`);
+  });
 });
 
 describe('an answer that does not say "no rate" records nothing, and is asked again', () => {
-  const nbuAnswers: [string, () => Answer][] = [
-    ['a thrown fetch', () => new Error('connection reset')],
-    ['a non-OK status', () => json({}, 503)],
-    ['a body that is not an array', () => json({})],
-    ['a rate that is not positive', () => json([{ cc: 'GEL', rate: 0 }])],
+  const askedAgainLog = [
+    `rate GEL -> EUR on ${DAY}: no provider returned one`,
+    'rates left unapplied: 1 of 1 (picked up on the next recompute)',
   ];
-  for (const [shape, answer] of nbuAnswers) {
+  const nbuAnswers: [string, () => Answer, string[]][] = [
+    ['a thrown fetch', () => new Error('connection reset'), []],
+    ['a non-OK status', () => json({}, 503), []],
+    ['a body that is not an array', () => json({}), askedAgainLog],
+    ['a rate that is not positive', () => json([{ cc: 'GEL', rate: 0 }]), askedAgainLog],
+  ];
+  for (const [shape, answer, log] of nbuAnswers) {
     it(`the NBU: ${shape}`, async () => {
       await insertTransactions([row('GEL', DAY, `lari, ${shape}`)]);
       await saveFxRate(DAY, 'EUR', UAH_PER_EUR);
       const asked = network({ nbu: answer });
+      const lines: string[] = [];
 
-      await backfillBaseAmounts(() => {});
+      await backfillBaseAmounts((s) => lines.push(s));
+      for (const line of log) expect(lines.join('\n')).toContain(line);
       const first = asked.nbu.slice();
       expect(first.length).toBeGreaterThan(0);
       for (const { day } of first) {

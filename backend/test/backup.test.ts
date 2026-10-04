@@ -644,8 +644,7 @@ describe('backup and restore (JSON)', () => {
 
   /**
    * Export and restore iterate one object, so its order is the order a restore inserts in; if
-   * the two ever stop sharing it, this holds the export alone. The references are the
-   * database's own, so a table added in the wrong place reds with no edit here.
+   * the two ever stop sharing it, this holds the export alone.
    */
   it('a table a backup carries follows every table it references, and references none it leaves out', async () => {
     const references = await queryRows<{ child: string; parent: string }>(sql`

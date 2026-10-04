@@ -35,10 +35,10 @@ export interface RateProvider {
 }
 
 /**
- * The NBU answers "no rate" for a currency it does not publish, which is permanent, and for a day
- * whose rate it has not set yet, where the lookback finds the day before: a shorter age buys
- * re-asks that find nothing in either case. What it costs is how long a rate published after the
- * answer waits for the recompute that converts with it.
+ * A remembered NBU "no rate" is for a day already past, where it means a currency the NBU does not
+ * publish, and asking again sooner finds the same: a shorter age buys re-asks that find nothing.
+ * What it costs is how long a rate published after the answer waits for the recompute that
+ * converts with it.
  */
 export const MISS_AGE_MS = 24 * 60 * 60 * 1000;
 const MISS_AGE = `${MISS_AGE_MS / (60 * 60 * 1000)} hours`;
@@ -149,7 +149,8 @@ const MISSED = Symbol('the NBU has no rate for that day');
 
 /**
  * NBU rate (hryvnia per unit of currency) for exactly that day, no fallbacks. MISSED = it answered
- * that it has none, recorded here; null = an answer that is not a rate.
+ * that it has none for a day already past, recorded here; null = any other answer that is not a
+ * rate.
  */
 async function fetchNbuRate(currency: string, day: string): Promise<number | typeof MISSED | null> {
   const url = `${NBU}?valcode=${encodeURIComponent(currency)}&date=${day.replace(/-/g, '')}&json`;
@@ -157,6 +158,9 @@ async function fetchNbuRate(currency: string, day: string): Promise<number | typ
   if (!res.ok) throw new Error(`NBU ${url} -> ${res.status}`);
   const rows = (await res.json()) as NbuRow[];
   if (Array.isArray(rows) && rows.length === 0) {
+    // a day the NBU has not set yet answers the same; remembered, it would be skipped once its
+    // rate is out, and the lookback would cache the day before's under it for good
+    if (day >= new Date().toISOString().slice(0, 10)) return null;
     await saveFxMiss({ provider: 'nbu', day, currency });
     return MISSED;
   }
