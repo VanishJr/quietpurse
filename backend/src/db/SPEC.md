@@ -238,9 +238,17 @@ row recorded are refused whoever wrote them.
 
 ## What a backup carries, and what a restore may never keep
 
-**"My data is mine" is one button.** A backup is a JSON dump of every row in every user table, so
-it moves between machines freely. The stored statements are not in it; they are files in a folder
-the person can copy on their own.
+**"My data is mine" is one button.** A backup is a JSON dump of every row in every table but the
+local ones, so it moves between machines freely. A table is local when its rows are not the
+person's data to move: staged rows are an upload nobody has confirmed yet, which is also why an
+import awaiting confirmation cannot survive a restore. Each local table carries its reason beside
+it, and a dump that names one restores nothing into it. The stored statements are not in it; they
+are files in a folder the person can copy on their own.
+
+**A provider's remembered answer that it has no rate travels in `meta` like every other stamp.** A
+crafted backup that plants one can hold a key's rows unconverted, and counted, for one age of that
+answer at most — a time recorded ahead of the clock counts as stale — or make them convert at an
+earlier probe day's rate, and neither is more than a planted rate already gives it.
 
 **A restore clears each table the dump provides and loads it in one transaction**, skipping tables
 the current schema does not know and preserving current tables an older or sparse dump omits. A
@@ -326,12 +334,34 @@ summary answers the derived source's id as its label and composes no display wor
 Transfer rules carry their matching mode explicitly. An old database or backup defaults to exact
 matching; widening that mode requires the previewed group action.
 
-**Adding a table means editing lists by hand, and nothing connects any of them to
-`backend/src/db/schema.ts`.** They are `BACKUP_TABLES` in `backend/src/db/index.ts`, which decides
-what a backup contains, and `TABLES` in `backend/test/pglite.ts`, the truncate list. Nothing holds
-that list of lists either, so another may exist and be named nowhere. Missing one is silent in the
-direction that matters: the export succeeds, the restore succeeds, and what the reader built is in
-neither.
+**Every table `backend/src/db/schema.ts` exports is decided once: a backup carries it, or it is
+local.** A backed-up table is a key of `BACKUP_TABLES` in `backend/src/db/index.ts`, under the name
+the backup file gives it, which is its SQL name; a local one is a key of `LOCAL_TABLES` beside it,
+valued by its reason. `tsc` holds the decision, and holds it on the local set itself — a value a
+test reads — rather than on a type nothing references, which an editor greys out as unused and a
+tidy-up deletes with the typecheck still green. The tables are read from the schema's exports by
+shape, so another kind of export neither breaks the decision nor slips past it. A table decided
+neither way or both ways, or a backup key that is not the name its table's type declares, fails
+`npm run typecheck`, and so does a table whose SQL name is typed as a string no literal pins. `tsc`
+reads only types, so a table whose type hides it — a name typed `never`, an export typed `object`
+or `unknown` — passes the typecheck undecided. A test holds what a type cannot:
+
+- every table the schema exports, read from its values rather than its types, is carried by a
+  backup or local, once, under its SQL name — which holds a table its type hides, and a backup key
+  that is the name its table's type declares but not its SQL name;
+- the insertion order of `BACKUP_TABLES` is the order a restore inserts in, held against the
+  foreign keys the migrated database declares, and a table a backup carries never references a
+  local one — its export would succeed and its restore fail on every other machine;
+- the names an export carries are written out in a test, because moving a table to the local set
+  drops it from every backup while export and restore both succeed, so that move has to be an edit
+  to a test;
+- a dump's rows under a local name are never restored, held over the local set itself.
+
+The truncate list in `backend/test/pglite.ts` is the same schema read at run time, held against
+the tables the migrated database has. The backup path still keeps lists by hand that nothing
+derives: `GOAL_BACKUP_TABLES`, the family a restore clears as one unit, and `IDENTITY_TABLES`, the
+tables whose ids it regenerates. Their members are typed as backup names, so a name that stops
+matching is a compile error; a new table that belongs in one is noticed in review or not at all.
 
 **The tables a deleted account leaves rows in are derived from the schema rather than remembered.**
 Every account-owned table carrying an account id is one of them. Goal-account links and debt-goal
@@ -342,8 +372,10 @@ path that removes them or silently chooses another account.
 **`settings` and `meta` are the same shape, and which one a value belongs in is a convention with
 no enforcement.** `settings` holds what a person edits, such as `base_currency` and `owner_names`.
 `meta` holds what the app keeps about itself, a stamp it compares against on the next start or the
-next write. Goal configuration belongs to neither: it is normalized into the goal tables. The
-legacy `meta.settings` key is read only by version-one restore conversion, then removed.
+next write — among them a provider's remembered answer that it has no rate, under a key that names
+the provider and exactly what it was asked, read and written by that key alone. Goal configuration
+belongs to neither: it is normalized into the goal tables. The legacy `meta.settings` key is read
+only by version-one restore conversion, then removed.
 
 **A Financial independence goal owns its baseline lines.** Their identity and label uniqueness are
 scoped by goal, and deleting the goal cascades them. The write that replaces that goal's

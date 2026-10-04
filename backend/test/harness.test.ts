@@ -1,5 +1,7 @@
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { assertTestDatabase } from './pglite';
+import { dbInstance } from '../src/db';
+import { assertTestDatabase, schemaTables } from './pglite';
 
 /**
  * The suite's first act against any database it is pointed at is TRUNCATE. The
@@ -20,5 +22,15 @@ describe('assertTestDatabase', () => {
 
   it('is not fooled by a name that merely ends in those letters', () => {
     expect(() => assertTestDatabase('postgres://u:p@host/protest')).toThrow();
+  });
+});
+
+describe('the truncate list', () => {
+  it('is every table the migrated database has, and nothing else', async () => {
+    const res = (await dbInstance().execute(
+      sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`,
+    )) as unknown as { rows: { tablename: string }[] };
+
+    expect((await schemaTables()).sort()).toEqual(res.rows.map((r) => r.tablename).sort());
   });
 });

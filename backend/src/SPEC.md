@@ -326,7 +326,9 @@ the base moved stops and leaves the rest to the refill that follows the change �
 while a restore is replacing the setting's row or has left it missing until the next start writes it
 again: a write that waited on the deleted row, or found none, compares with the configured default.
 Stopping is not finishing: a rate that could not be fetched leaves its rows without a base amount
-until the next recompute, and `unconverted` is what says so.
+until the next recompute, a rate every provider that handles the pair answered it does not have,
+by an answer that is remembered, leaves them so until the first recompute after that answer has
+aged, and `unconverted` counts both.
 
 **A currency that arrives as a number is named, and one that is not in the map is not guessed at.**
 The numeric-to-alphabetic map exists because the live rate feed reports currencies as ISO 4217
@@ -619,11 +621,24 @@ the row format: rows written by the first version are still read by the current 
 that cache is changed by adding another and never by reinterpreting the one already there.
 `backend/src/db` owns the table; this is the rule about what may be written into it.
 
+**A provider's answer that it has no rate is not historical, so it expires.** A rate can be
+published after it was asked for, so the answer is remembered for an age and then asked again; an
+answer with an error status is never one, whatever its body says, and records nothing; the age is
+one constant, and its reason sits beside it in `backend/src/fxrates.ts`. The answer is kept
+apart from the rates, in `meta`, so no reader of the rate cache can take it for a rate or for an
+absence, and a rate stored for the same key wins over it. It is a fact about exactly what was
+asked, and the NBU's is about one day already past; its answer for a day not yet past is not
+remembered, because that day's rate can still be set. A remembered answer for a day skips that
+day's request and never ends the lookback for the day a row needs. A time recorded ahead of the
+clock is stale, so neither a clock moved back nor a crafted backup can make one permanent.
+
 **No provider covering a pair is an error in the log, never a silent absence.** A rate that cannot
 be resolved leaves the row unconverted and says so; the alternatives — a zero, or a rate from the
 wrong pair — put a wrong number into every figure downstream with nothing to notice it. An
-unconverted row is picked up by the next recompute, so the cost of saying nothing is bounded and the
-cost of guessing is not.
+unconverted row is picked up by the next recompute — or, when every provider that handles the pair
+has answered that it has none, and that answer is remembered, by the first recompute after that
+answer has aged, and the refill's line for the rate says which — so the cost of saying nothing is
+bounded and the cost of guessing is not.
 
 **A derivation whose content is its arithmetic is written whole in the code, at the site it governs,
 and this document says only that it exists.** Each is stated once and in one place:

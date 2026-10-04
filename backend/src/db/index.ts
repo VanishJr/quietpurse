@@ -5,7 +5,7 @@ import fs from 'fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle as drizzlePg } from 'drizzle-orm/node-postgres';
 import { migrate as migratePg } from 'drizzle-orm/node-postgres/migrator';
-import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
+import type { PgDatabase, PgQueryResultHKT, PgTable } from 'drizzle-orm/pg-core';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { Pool } from 'pg';
@@ -2488,6 +2488,34 @@ export async function saveFxRate(day: string, currency: string, rate: number): P
     });
 }
 
+export const FX_MISS_PREFIX = 'fx_miss:';
+
+export type FxMiss =
+  | { provider: 'nbu'; day: string; currency: string }
+  | { provider: 'ecb'; day: string; from: string; to: string };
+
+const fxMissKey = (m: FxMiss): string =>
+  m.provider === 'nbu'
+    ? `${FX_MISS_PREFIX}nbu:${m.day}:${m.currency}`
+    : `${FX_MISS_PREFIX}ecb:${m.day}:${m.from}:${m.to}`;
+
+export type FxRateOrMiss = { rate: number } | { missedAt: string } | undefined;
+
+/**
+ * One day, the miss's own: with two, a caller in the lookback could read the rate for one day and
+ * the miss for another.
+ */
+export async function getFxRateOrMiss(rateKey: string, miss: FxMiss): Promise<FxRateOrMiss> {
+  const rate = await getFxRate(miss.day, rateKey);
+  if (rate !== undefined) return { rate };
+  const missedAt = await getMeta(fxMissKey(miss));
+  return missedAt === undefined ? undefined : { missedAt };
+}
+
+export async function saveFxMiss(miss: FxMiss, at: Date = new Date()): Promise<void> {
+  await setMeta(fxMissKey(miss), at.toISOString());
+}
+
 export type BaseWrite = { moved: false; written: number } | { moved: true; stored: string };
 
 /**
@@ -3523,7 +3551,21 @@ export interface BackupData {
   tables: Record<string, unknown[]>;
 }
 
-/** Every user table, in the order restore inserts them. */
+type SchemaTable = {
+  [K in keyof typeof s]: (typeof s)[K] extends PgTable<any> ? (typeof s)[K] : never;
+}[keyof typeof s];
+type TableName = SchemaTable['_']['name'];
+type Named<N extends string> = PgTable<any> & { readonly _: { readonly name: N } };
+type Widened<T extends string> = T extends unknown ? ({} extends Record<T, 1> ? T : never) : never;
+
+/**
+ * Every table a backup carries, under the name the file gives it, in the order restore inserts
+ * them. The constraint's condition is what refuses a table whose SQL name is typed as a string no
+ * literal pins: a mapped type over such a name requires no key, so that table would pass this check
+ * and LOCAL_TABLES' undecided. A table out of every type's sight here - its name typed never, its
+ * export typed object or unknown - passes both; the case in backup.test.ts that reads the schema's
+ * values holds it.
+ */
 const BACKUP_TABLES = {
   accounts: s.accounts,
   // before transactions: import_id points at it, and restore inserts in this order
@@ -3547,9 +3589,32 @@ const BACKUP_TABLES = {
   settings: s.settings,
   meta: s.meta,
   analytics_charts: s.analyticsCharts,
-} as const;
+} as const satisfies ([Widened<TableName>] extends [never]
+  ? { [N in TableName]?: Named<N> }
+  : { 'every schema table needs a literal SQL name': never });
 
-const IDENTITY_TABLES = new Set(['category_rules', 'transfer_rules', 'baseline_items']);
+type BackupTable = keyof typeof BACKUP_TABLES;
+
+/**
+ * Rows of an upload nobody has confirmed are not the person's data yet - the same reason a
+ * restore turns an import that was awaiting confirmation into a discarded one.
+ */
+const UNCONFIRMED = Symbol('an upload nobody has confirmed');
+
+/**
+ * Every schema table a backup does not carry, with its reason: a dump that names one restores
+ * nothing into it. The second half of the constraint is what refuses a table decided both ways:
+ * that table leaves the first half's keys, and an empty first half checks nothing.
+ */
+export const LOCAL_TABLES = {
+  staged_transactions: UNCONFIRMED,
+} as const satisfies { [N in Exclude<TableName, BackupTable>]: symbol } & {
+  [N in BackupTable]?: never;
+};
+
+const IDENTITY_TABLES = new Set<string>(
+  ['category_rules', 'transfer_rules', 'baseline_items'] satisfies BackupTable[],
+);
 
 export async function exportBackup(): Promise<BackupData> {
   return getDb().transaction(
@@ -3610,7 +3675,7 @@ const GOAL_BACKUP_TABLES = [
   'category_spending_goals',
   'goal_accounts',
   'baseline_items',
-] as const;
+] as const satisfies readonly BackupTable[];
 
 const legacyNumber = (
   settings: Record<string, unknown>,
