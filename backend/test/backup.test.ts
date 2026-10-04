@@ -15,6 +15,7 @@ import {
   listAccounts,
   listImports,
   listTransactions,
+  LOCAL_TABLES,
   parseBackup,
   recordImportDocument,
   restoreBackup,
@@ -639,5 +640,102 @@ describe('backup and restore (JSON)', () => {
     expect(() =>
       parseBackup({ format: 'finto-backup', version: 1, tables: { accounts: 'oops' } }),
     ).toThrow(/is not an array/);
+  });
+
+  /**
+   * Export and restore iterate one object, so its order is the order a restore inserts in; if
+   * the two ever stop sharing it, this holds the export alone. The references are the
+   * database's own, so a table added in the wrong place reds with no edit here.
+   */
+  it('a table a backup carries follows every table it references, and references none it leaves out', async () => {
+    const references = await queryRows<{ child: string; parent: string }>(sql`
+      SELECT c.relname AS child, p.relname AS parent
+      FROM pg_constraint k
+      JOIN pg_class c ON c.oid = k.conrelid
+      JOIN pg_class p ON p.oid = k.confrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE k.contype = 'f' AND n.nspname = 'public'`);
+    expect(references).toContainEqual({ child: 'transactions', parent: 'imports' });
+
+    const order = Object.keys((await exportBackup()).tables);
+    for (const { child, parent } of references) {
+      if (child === parent || !order.includes(child)) continue;
+      expect(order, `${child} references ${parent}, which a backup does not carry`).toContain(
+        parent,
+      );
+      expect(
+        order.indexOf(parent),
+        `${parent} is restored after ${child}, which references it`,
+      ).toBeLessThan(order.indexOf(child));
+    }
+  });
+
+  /**
+   * A literal on purpose: moving a table to the local set is one line in the classification,
+   * it drops that table out of every backup, and export and restore both still succeed. The
+   * move has to show up as an edit here.
+   */
+  it('an export carries exactly these tables', async () => {
+    expect(Object.keys((await exportBackup()).tables).sort()).toEqual([
+      'accounts',
+      'analytics_charts',
+      'baseline_items',
+      'category_rules',
+      'category_spending_goals',
+      'debt_payoff_goals',
+      'emergency_fund_goals',
+      'financial_independence_goals',
+      'fx_rates',
+      'goal_accounts',
+      'goals',
+      'imports',
+      'income_sources',
+      'meta',
+      'monthly_income_goals',
+      'recurring_ignores',
+      'savings_balance_goals',
+      'savings_rate_goals',
+      'settings',
+      'transactions',
+      'transfer_rules',
+    ]);
+  });
+
+  /**
+   * Over the local set itself, so a table classified local later is held the day it is. No
+   * imports in the dump: deleting them cascades into staged rows, which is intended and is not
+   * what this asserts.
+   */
+  it('a dump restores nothing into a local table it names', async () => {
+    const goalTables = [
+      'goals',
+      'financial_independence_goals',
+      'emergency_fund_goals',
+      'savings_balance_goals',
+      'debt_payoff_goals',
+      'monthly_income_goals',
+      'savings_rate_goals',
+      'category_spending_goals',
+      'goal_accounts',
+      'baseline_items',
+    ];
+    for (const name of Object.keys(LOCAL_TABLES)) {
+      const stored = () =>
+        queryRows<{ row: string }>(
+          sql`SELECT t::text AS row FROM ${sql.raw(name)} t ORDER BY 1`,
+        );
+      const before = await stored();
+      const dump = parseBackup({
+        format: 'finto-backup',
+        version: 2,
+        tables: {
+          ...Object.fromEntries(goalTables.map((goal) => [goal, []])),
+          [name]: [{ marker: 'a row a dump carried under a local name' }],
+        },
+      });
+
+      expect(await restoreBackup(dump), name).toEqual({ tables: goalTables.length, rows: 0 });
+      expect(await stored(), name).toEqual(before);
+    }
   });
 });

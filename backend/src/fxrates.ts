@@ -7,21 +7,49 @@
 import { config } from './config';
 import {
   type BaseWrite,
+  type FxMiss,
   applyBaseRate,
   currentBaseCurrency,
-  getFxRate,
+  getFxRateOrMiss,
   listUnconvertedDays,
+  saveFxMiss,
   saveFxRate,
   setBaseForBaseCurrency,
 } from './db';
 import { logFx } from './logger';
 
+/**
+ * No rate, and every answer that said so is a fresh miss - read now or recorded now - so nothing
+ * is asked for it again before MISS_AGE_MS has passed. null stays "no rate" for every other reason.
+ */
+export const REMEMBERED_NONE = Symbol('no rate, remembered');
+
+type Rate = number | null | typeof REMEMBERED_NONE;
+
 export interface RateProvider {
   name: string;
   /** whether the provider handles this pair (without hitting the network) */
   supports: (from: string, to: string) => boolean;
-  /** units of `to` per unit of `from` on that day (or the nearest previous); null = no rate */
-  getRate: (day: string, from: string, to: string) => Promise<number | null>;
+  /** units of `to` per unit of `from` on that day (or the nearest previous) */
+  getRate: (day: string, from: string, to: string) => Promise<Rate>;
+}
+
+/**
+ * The NBU answers "no rate" for a currency it does not publish, which is permanent, and for a day
+ * whose rate it has not set yet, where the lookback finds the day before: a shorter age buys
+ * re-asks that find nothing in either case. What it costs is how long a rate published after the
+ * answer waits for the recompute that converts with it.
+ */
+export const MISS_AGE_MS = 24 * 60 * 60 * 1000;
+const MISS_AGE = `${MISS_AGE_MS / (60 * 60 * 1000)} hours`;
+
+/**
+ * Ahead of the clock is stale: a clock moved back, or a crafted backup, would otherwise keep a
+ * miss fresh until the clock caught up with it.
+ */
+function fresh(missedAt: string, now = Date.now()): boolean {
+  const at = Date.parse(missedAt);
+  return at <= now && now - at < MISS_AGE_MS;
 }
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -80,14 +108,22 @@ export const ecbProvider: RateProvider = {
   supports: (from, to) => ECB_CURRENCIES.has(from) && ECB_CURRENCIES.has(to),
   async getRate(day, from, to) {
     const cacheKey = `${from}:${to}`;
-    const cached = await getFxRate(day, cacheKey);
-    if (cached !== undefined) return cached;
+    const miss: FxMiss = { provider: 'ecb', day, from, to };
+    const known = await getFxRateOrMiss(cacheKey, miss);
+    if (known && 'rate' in known) return known.rate;
+    if (known && fresh(known.missedAt)) return REMEMBERED_NONE;
 
     const url = `${FRANKFURTER}/${day}?base=${encodeURIComponent(from)}&symbols=${encodeURIComponent(to)}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`frankfurter ${url} -> ${res.status}`);
     const data = (await res.json()) as { rates?: Record<string, number> };
-    const rate = data.rates?.[to];
+    const rates = data.rates;
+    const ratesObject = typeof rates === 'object' && rates !== null && !Array.isArray(rates);
+    if (ratesObject && !Object.hasOwn(rates, to)) {
+      await saveFxMiss(miss);
+      return REMEMBERED_NONE;
+    }
+    const rate = rates?.[to];
     if (typeof rate !== 'number' || rate <= 0) return null;
     await saveFxRate(day, cacheKey, rate);
     return rate;
@@ -96,7 +132,7 @@ export const ecbProvider: RateProvider = {
 
 const NBU = 'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange';
 /** how many days back to look for a rate if the NBU didn't publish one for the requested date */
-const MAX_LOOKBACK_DAYS = 7;
+export const MAX_LOOKBACK_DAYS = 7;
 
 function shiftDay(day: string, deltaDays: number): string {
   const d = new Date(`${day}T00:00:00.000Z`);
@@ -109,46 +145,64 @@ interface NbuRow {
   cc: string;
 }
 
-/** NBU rate (hryvnia per unit of currency) for exactly that day, no fallbacks. null = the NBU returned nothing. */
-async function fetchNbuRate(currency: string, day: string): Promise<number | null> {
+const MISSED = Symbol('the NBU has no rate for that day');
+
+/**
+ * NBU rate (hryvnia per unit of currency) for exactly that day, no fallbacks. MISSED = it answered
+ * that it has none, recorded here; null = an answer that is not a rate.
+ */
+async function fetchNbuRate(currency: string, day: string): Promise<number | typeof MISSED | null> {
   const url = `${NBU}?valcode=${encodeURIComponent(currency)}&date=${day.replace(/-/g, '')}&json`;
   const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`NBU ${url} -> ${res.status}`);
   const rows = (await res.json()) as NbuRow[];
+  if (Array.isArray(rows) && rows.length === 0) {
+    await saveFxMiss({ provider: 'nbu', day, currency });
+    return MISSED;
+  }
   const rate = rows[0]?.rate;
   return typeof rate === 'number' && rate > 0 ? rate : null;
 }
 
 /** Throws on a network error - the caller decides what to do. */
-export async function rateToUah(currency: string, day: string): Promise<number | null> {
+export async function rateToUah(currency: string, day: string): Promise<Rate> {
   if (currency === 'UAH') return 1;
-  const cached = await getFxRate(day, currency);
-  if (cached !== undefined) return cached;
-
+  let everyProbeMissed = true;
   for (let back = 0; back <= MAX_LOOKBACK_DAYS; back++) {
     const probeDay = shiftDay(day, -back);
-    const probeCached = back > 0 ? await getFxRate(probeDay, currency) : undefined;
-    const rate = probeCached ?? (await fetchNbuRate(currency, probeDay));
-    if (rate !== null && rate !== undefined) {
-      // cache it under the REQUESTED day: weekends always resolve to Friday, and
-      // a repeat request for the same day then never goes to the network
-      await saveFxRate(day, currency, rate);
-      return rate;
+    const known = await getFxRateOrMiss(currency, { provider: 'nbu', day: probeDay, currency });
+    if (known && 'rate' in known) {
+      if (back > 0) await saveFxRate(day, currency, known.rate);
+      return known.rate;
     }
+    // a fresh miss is a fact about probeDay alone: it skips that day's request and never
+    // ends the lookback
+    if (known && fresh(known.missedAt)) continue;
+    const rate = await fetchNbuRate(currency, probeDay);
+    if (rate === MISSED) continue;
+    if (rate === null) {
+      everyProbeMissed = false;
+      continue;
+    }
+    // cache it under the REQUESTED day: weekends always resolve to Friday, and
+    // a repeat request for the same day then never goes to the network
+    await saveFxRate(day, currency, rate);
+    return rate;
   }
-  return null;
+  return everyProbeMissed ? REMEMBERED_NONE : null;
 }
 
 export const nbuProvider: RateProvider = {
   name: 'nbu',
   // cross-rate through UAH: whether the NBU publishes both legs is not known in advance,
-  // so any two codes count - and getRate returns null if not. Codes only: each one goes
+  // so any two codes count - and getRate answers no rate if not. Codes only: each one goes
   // into a request
   supports: (from, to) => ISO_CURRENCIES.has(from) && ISO_CURRENCIES.has(to),
   async getRate(day, from, to) {
     const rFrom = await rateToUah(from, day);
     const rTo = await rateToUah(to, day);
     if (rFrom === null || rTo === null || rTo === 0) return null;
+    if (rFrom === REMEMBERED_NONE || rTo === REMEMBERED_NONE) return REMEMBERED_NONE;
     return rFrom / rTo;
   },
 };
@@ -165,17 +219,23 @@ function activeProviders(): RateProvider[] {
 }
 
 /**
- * The first provider that handles the pair. null = no provider can do it, or there is
- * no rate - the caller logs it. Network errors propagate.
+ * The first rate a provider that handles the pair has. REMEMBERED_NONE = every provider that
+ * handles it answered so, and a provider's remembered answer is never the pair's while another
+ * is left to ask; null = no provider can do it, or no rate for another reason. The caller logs
+ * either. Network errors propagate.
  */
-export async function resolveRate(day: string, from: string, to: string): Promise<number | null> {
+export async function resolveRate(day: string, from: string, to: string): Promise<Rate> {
   if (from === to) return 1;
+  let supported = false;
+  let everyAnswerRemembered = true;
   for (const p of activeProviders()) {
     if (!p.supports(from, to)) continue;
+    supported = true;
     const rate = await p.getRate(day, from, to);
-    if (rate !== null) return rate;
+    if (typeof rate === 'number') return rate;
+    if (rate === null) everyAnswerRemembered = false;
   }
-  return null;
+  return supported && everyAnswerRemembered ? REMEMBERED_NONE : null;
 }
 
 /**
@@ -238,9 +298,10 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
   log(`converting to ${base}: rates needed: ${keys.length}...`);
   let ratesApplied = 0;
   let attempted = 0;
+  let remembered = 0;
   for (const { day, currency } of keys) {
     attempted++;
-    let k: number | null;
+    let k: Rate;
     try {
       k = await resolveRate(day, currency, base);
     } catch (e) {
@@ -248,6 +309,13 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
       // a network error is almost certainly global - don't bother the providers with the rest
       log(`stopping: ${keys.length - attempted} of ${keys.length} rates were not tried this run`);
       break;
+    }
+    if (k === REMEMBERED_NONE) {
+      remembered++;
+      log(
+        `rate ${currency} -> ${base} on ${day}: no provider has one, by an answer remembered for ${MISS_AGE}; not asked for until it is that old`,
+      );
+      continue;
     }
     if (k === null || k === 0) {
       log(`rate ${currency} -> ${base} on ${day}: no provider returned one`);
@@ -268,7 +336,11 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
   }
   const left = keys.length - ratesApplied;
   if (left > 0) {
-    log(`rates left unapplied: ${left} of ${keys.length} (picked up on the next recompute)`);
+    log(
+      remembered === 0
+        ? `rates left unapplied: ${left} of ${keys.length} (picked up on the next recompute)`
+        : `rates left unapplied: ${left} of ${keys.length} (${remembered} remembered as having none, asked again once that answer is ${MISS_AGE} old; any other on the next recompute)`,
+    );
   }
   log(`transactions converted: ${done}`);
   return done;

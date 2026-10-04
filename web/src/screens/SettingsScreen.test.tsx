@@ -288,7 +288,7 @@ describe('financial setup', () => {
     fireEvent.change(currency(), { target: { value: 'USD' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await within(cardFor('Financial setup')).findByRole('alert')).toHaveTextContent(
-      '2 transactions have no amount in USD yet: no exchange rate could be fetched for them. Finto tries again the next time it starts.',
+      '2 transactions have no amount in USD yet: no exchange rate could be fetched for them. Finto tries again later.',
     );
     expect(changed).toHaveBeenCalledTimes(1);
   });

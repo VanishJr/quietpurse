@@ -16,36 +16,17 @@
  * modules are imported dynamically so the unused one is never loaded at all.
  */
 import path from 'path';
-import { sql } from 'drizzle-orm';
+import { getTableName, is, sql } from 'drizzle-orm';
+import { PgTable } from 'drizzle-orm/pg-core';
 import type { Db } from '../src/db';
 
-/** Truncated between test files. The order does not matter: CASCADE follows the foreign keys. */
-const TABLES = [
-  'accounts',
-  'imports',
-  'transactions',
-  // CASCADE would reach it through the foreign key on imports; listed so the next
-  // reader does not have to work that out
-  'staged_transactions',
-  'fx_rates',
-  'category_rules',
-  'transfer_rules',
-  'recurring_ignores',
-  'goals',
-  'financial_independence_goals',
-  'emergency_fund_goals',
-  'savings_balance_goals',
-  'debt_payoff_goals',
-  'monthly_income_goals',
-  'savings_rate_goals',
-  'category_spending_goals',
-  'goal_accounts',
-  'baseline_items',
-  'income_sources',
-  'settings',
-  'meta',
-  'analytics_charts',
-];
+/** Every table the schema exports, by SQL name: what the truncate clears between test files. */
+export async function schemaTables(): Promise<string[]> {
+  const schema = await import('../src/db/schema');
+  return Object.values<unknown>(schema)
+    .filter((v): v is PgTable => is(v, PgTable))
+    .map((t) => getTableName(t));
+}
 
 const g = globalThis as typeof globalThis & { __fintoTestDb?: Db };
 
@@ -98,7 +79,8 @@ export async function freshTestDb(): Promise<Db> {
   return g.__fintoTestDb;
 }
 
+/** The order does not matter: CASCADE follows the foreign keys. */
 async function truncateAll(db: Db): Promise<void> {
-  const list = TABLES.map((t) => `"${t}"`).join(', ');
+  const list = (await schemaTables()).map((t) => `"${t}"`).join(', ');
   await db.execute(sql.raw(`TRUNCATE ${list} RESTART IDENTITY CASCADE`));
 }

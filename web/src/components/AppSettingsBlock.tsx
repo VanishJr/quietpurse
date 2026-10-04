@@ -221,7 +221,7 @@ export function AppSettingsBlock({ onChanged = () => {} }: Props) {
               {refill.unconverted === 1
                 ? `1 transaction has no amount in ${refill.currency} yet: no exchange rate could be fetched for it.`
                 : `${refill.unconverted} transactions have no amount in ${refill.currency} yet: no exchange rate could be fetched for them.`}
-              {' '}Finto tries again the next time it starts.
+              {' '}Finto tries again later.
             </p>
           )}
           {refill?.state === 'unreadable' && (
