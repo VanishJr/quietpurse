@@ -178,6 +178,62 @@ describe('GoalsScreen', () => {
     expect(screen.queryByText(/Edit this goal/)).not.toBeInTheDocument();
   });
 
+  it('keeps goal-only consequences and secondary Cancel before final destructive confirmation', async () => {
+    mockFetch({ 'GET /api/goals': () => ok({ goals: [SAVINGS_GOAL] }) });
+    renderThemed(<GoalsScreen />);
+    await screen.findByRole('heading', { name: 'Emergency savings' });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Emergency savings' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('This removes the goal only. Accounts and transactions are unchanged.')).toBeVisible();
+    const actions = within(dialog).getAllByRole('button');
+    expect(actions.map((button) => button.textContent)).toEqual(['Cancel', 'Delete goal']);
+    expect(actions[0]).toHaveClass('action-button--secondary');
+    expect(actions[1]).toHaveClass('action-button--destructive-primary');
+    expect(actions[1]).not.toHaveClass('btn', 'btn-danger');
+    expect(actions.map((button) => button.getAttribute('type'))).toEqual(['button', 'button']);
+    fireEvent.click(actions[0]);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests()).toEqual(['GET /api/goals']);
+  });
+
+  it('keeps deletion pending identity, blocks duplicates and dismissal, then retains a failed draft', async () => {
+    let finish!: (response: Response) => void;
+    mockFetch({
+      'GET /api/goals': () => ok({ goals: [SAVINGS_GOAL] }),
+      'DELETE /api/goals/goal-savings': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    renderThemed(<GoalsScreen />);
+    await screen.findByRole('heading', { name: 'Emergency savings' });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Emergency savings' }));
+    const remove = screen.getByRole('button', { name: 'Delete goal' });
+    remove.focus();
+    fireEvent.click(remove);
+
+    expect(remove).toHaveFocus();
+    expect(remove).toHaveAttribute('aria-busy', 'true');
+    expect(remove).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Deleting goal…');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    fireEvent.click(remove);
+    fireEvent.click(remove, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(remove, { key: 'Escape' });
+    fireEvent.click(document.querySelector('.backdrop')!);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(requests()).toEqual(['GET /api/goals', 'DELETE /api/goals/goal-savings']);
+
+    finish(fail(500, { error: 'database busy' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('database busy');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeVisible();
+    expect(remove).not.toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests()).toEqual(['GET /api/goals', 'DELETE /api/goals/goal-savings']);
+  });
+
   it('keeps the confirmation open with the server error when delete fails', async () => {
     mockFetch({
       'GET /api/goals': () => ok({ goals: [SAVINGS_GOAL] }),

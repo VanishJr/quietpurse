@@ -654,6 +654,18 @@ Grouped surfaces remain flat, subordinate relationships use spacing, and transie
 separate radius from ordinary cards. Focus is visible on the actual ground; reduced-motion behavior
 does not depend on transitions to establish the final state.
 
+`Button` owns native action presentation with explicit type, variant and size. Foreground and ground
+are a pair; legacy action classes do not choose either for a migrated button. Pending and
+focus-retaining locked actions refuse activation without substituting a different label.
+`FormActions` keeps supporting navigation before dismissal and completion in reading order;
+narrow layouts put completion on its own row rather than reshuffling keyboard order.
+
+`Field` renders an explicitly identified native control with a persistent visible label and
+associated help and correction. It supplies no validation rules. `Notice` renders facts and
+remedies chosen by its owner; its tone does not establish success, emptiness or availability,
+and live announcements are deliberate caller choices. `PageHeader` groups orientation, return
+context and the leading action without introducing another outer page anchor.
+
 ## Overview presentation
 
 Overview keeps each account's native currency. Its summaries are loaded together after the recent

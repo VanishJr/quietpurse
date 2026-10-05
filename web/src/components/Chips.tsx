@@ -15,10 +15,11 @@ interface Props {
 
 export function Chips({ options, selected, onSelect, label, locked = false }: Props) {
   return (
-    <div className="chips" role="group" aria-label={label}>
+    <div className="chips choice-chips" role="group" aria-label={label}>
       {options.map((o) => (
         <button
           key={o.key}
+          type="button"
           className="chip"
           aria-pressed={o.key === selected}
           aria-disabled={locked || undefined}

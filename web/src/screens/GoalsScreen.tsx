@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { Button } from '../components/Button';
+import { FormActions } from '../components/FormActions';
+import { Notice } from '../components/Notice';
 import { GoalCard } from '../components/GoalCard';
 import { GoalEditor } from '../components/GoalEditor';
 import { Sheet } from '../components/Sheet';
@@ -143,15 +146,20 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
           <>
             <h2>Delete “{deleteTarget.name}”?</h2>
             <p className="body-text">This removes the goal only. Accounts and transactions are unchanged.</p>
-            {deleteError && <p className="error-text">{deleteError}</p>}
-            <div className="sheet-actions">
-              <button className="btn" disabled={deleting} onClick={() => setDeleteTarget(null)}>
-                Cancel
-              </button>
-              <button className="btn btn-danger" disabled={deleting} onClick={() => void confirmDelete()}>
-                {deleting ? 'Deleting…' : 'Delete goal'}
-              </button>
-            </div>
+            {deleteError && <Notice tone="error" role="alert">{deleteError}</Notice>}
+            {deleting && <Notice role="status">Deleting goal…</Notice>}
+            <FormActions
+              cancel={
+                <Button type="button" variant="secondary" size="standard" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+                  Cancel
+                </Button>
+              }
+              completion={
+                <Button type="button" variant="destructive-primary" size="standard" pending={deleting} onClick={() => void confirmDelete()}>
+                  Delete goal
+                </Button>
+              }
+            />
           </>
         )}
       </Sheet>

@@ -3234,3 +3234,373 @@ details > summary::marker {
     padding-bottom: 20px;
   }
 }
+
+.action-button.action-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: var(--control-standard);
+  min-height: var(--control-standard);
+  max-width: 100%;
+  padding: var(--space-2) var(--space-6);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: var(--leading-body);
+  text-align: center;
+  overflow-wrap: anywhere;
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+
+.action-button.action-button--primary {
+  background: var(--ink-action);
+  color: var(--ink-onAction);
+}
+
+.action-button.action-button--primary:where(:not(:disabled, [aria-disabled='true'])):hover {
+  background: var(--ink-actionHover);
+}
+
+.action-button.action-button--primary:where(:not(:disabled, [aria-disabled='true'])):active {
+  background: var(--ink-actionPressed);
+}
+
+.action-button.action-button--secondary {
+  background: var(--ink-surface);
+  border-color: var(--ink-controlBorder);
+  color: var(--ink-primary);
+}
+
+.action-button.action-button--tertiary {
+  background: transparent;
+  color: var(--ink-primary);
+}
+
+.action-button.action-button--secondary:where(:not(:disabled, [aria-disabled='true'])):hover,
+.action-button.action-button--tertiary:where(:not(:disabled, [aria-disabled='true'])):hover {
+  background: var(--ink-raised);
+}
+
+.action-button.action-button--secondary:where(:not(:disabled, [aria-disabled='true'])):active,
+.action-button.action-button--tertiary:where(:not(:disabled, [aria-disabled='true'])):active {
+  background: var(--ink-selected);
+  color: var(--ink-onSelected);
+}
+
+.action-button.action-button--destructive-primary {
+  background: var(--ink-danger);
+  color: var(--ink-onDanger);
+}
+
+.action-button.action-button--destructive-primary:where(:not(:disabled, [aria-disabled='true'])):hover {
+  background: var(--ink-dangerHover);
+}
+
+.action-button.action-button--destructive-primary:where(:not(:disabled, [aria-disabled='true'])):active {
+  background: var(--ink-dangerPressed);
+}
+
+.action-button.action-button--destructive-secondary {
+  background: var(--ink-surface);
+  border-color: var(--ink-error);
+  color: var(--ink-error);
+}
+
+.action-button.action-button--destructive-secondary:where(:not(:disabled, [aria-disabled='true'])):hover,
+.action-button.action-button--destructive-secondary:where(:not(:disabled, [aria-disabled='true'])):active {
+  background: var(--ink-raised);
+}
+
+.action-button.action-button--compact {
+  min-width: var(--control-compact);
+  min-height: var(--control-compact);
+  padding: var(--space-1) var(--space-4);
+}
+
+.action-button.action-button--touch {
+  min-width: var(--control-touch);
+  min-height: var(--control-touch);
+}
+
+.action-button.action-button--icon {
+  padding: var(--space-2);
+}
+
+.action-button--icon > svg {
+  width: var(--space-6);
+  height: var(--space-6);
+  flex: none;
+}
+
+.action-button.action-button:disabled,
+.action-button.action-button[aria-disabled='true'] {
+  opacity: 1;
+  cursor: default;
+  border-style: dashed;
+}
+
+.action-button[data-pending='true']::after {
+  content: '';
+  position: absolute;
+  inset-inline: var(--space-2);
+  bottom: var(--space-1);
+  height: 2px;
+  background: currentColor;
+}
+
+.action-button.action-button:focus-visible,
+.choice-chips .chip:focus-visible,
+.native-field__control:focus-visible {
+  outline: 2px solid var(--ink-focus);
+  outline-offset: 2px;
+}
+
+.form-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.form-actions > div {
+  min-width: 0;
+}
+
+.form-actions__back {
+  grid-column: 1;
+}
+
+.form-actions__cancel {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.form-actions__completion {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.native-field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.native-field__label {
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--ink-primary);
+  overflow-wrap: anywhere;
+}
+
+.native-field__control {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-standard);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--ink-controlBorder);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+  color: var(--ink-primary);
+  font: inherit;
+  line-height: var(--leading-body);
+}
+
+textarea.native-field__control {
+  min-height: calc(var(--control-standard) * 2);
+  resize: vertical;
+}
+
+.native-field__control::placeholder {
+  color: var(--ink-muted);
+}
+
+.native-field__control[readonly] {
+  border-style: dashed;
+}
+
+.native-field__control:disabled {
+  background: var(--ink-page);
+  color: var(--ink-secondary);
+  cursor: not-allowed;
+}
+
+.native-field__control[aria-invalid='true'] {
+  border-color: var(--ink-error);
+  border-width: 2px;
+}
+
+.native-field__help,
+.native-field__error {
+  margin: 0;
+  font-size: var(--text-helper);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.native-field__help {
+  color: var(--ink-secondary);
+}
+
+.native-field__error {
+  color: var(--ink-error);
+}
+
+.notice {
+  min-width: 0;
+  margin-block: var(--space-3);
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--ink-controlBorder);
+  color: var(--ink-primary);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.notice--content {
+  padding-block: var(--space-6);
+}
+
+.notice--success {
+  border-color: var(--ink-success);
+}
+
+.notice--warning {
+  border-color: var(--ink-warning);
+}
+
+.notice--error {
+  border-color: var(--ink-error);
+}
+
+.notice__title {
+  margin: 0 0 var(--space-2);
+  font-weight: 600;
+}
+
+.notice__facts > :first-child {
+  margin-top: 0;
+}
+
+.notice__facts > :last-child {
+  margin-bottom: 0;
+}
+
+.notice__remedy {
+  margin-top: var(--space-3);
+}
+
+.page-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+
+.page-header__return {
+  grid-column: 1 / -1;
+}
+
+.page-header__identity {
+  min-width: 0;
+}
+
+.page-header__identity h1 {
+  margin: 0;
+  font-size: var(--text-page);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+  overflow-wrap: anywhere;
+}
+
+.page-header__context {
+  margin-top: var(--space-2);
+  max-width: 65ch;
+  color: var(--ink-secondary);
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.page-header__action {
+  max-width: 100%;
+}
+
+.choice-chips {
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--space-2);
+  padding: var(--space-1);
+  scroll-padding-inline: var(--space-1);
+}
+
+.choice-chips .chip {
+  min-width: var(--control-compact);
+  min-height: var(--control-compact);
+  max-width: min(20rem, 100%);
+  padding: var(--space-2) var(--space-3);
+  border-color: var(--ink-controlBorder);
+  border-radius: var(--r-sm);
+  background: var(--ink-surface);
+  color: var(--ink-secondary);
+  font-size: var(--text-label);
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.choice-chips .chip:where(:not([aria-disabled='true'])):hover {
+  background: var(--ink-raised);
+}
+
+.choice-chips .chip[aria-pressed='true'],
+.choice-chips .chip:where(:not([aria-disabled='true'])):active {
+  background: var(--ink-selected);
+  border-color: var(--ink-controlBorder);
+  color: var(--ink-onSelected);
+}
+
+.choice-chips .chip[aria-disabled='true'] {
+  border-style: dashed;
+}
+
+@media (max-width: 899px), (pointer: coarse) {
+  .action-button.action-button--compact,
+  .choice-chips .chip {
+    min-width: var(--control-touch);
+    min-height: var(--control-touch);
+  }
+}
+
+@media (max-width: 599px) {
+  .form-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-actions__back,
+  .form-actions__cancel {
+    grid-row: 1;
+  }
+
+  .form-actions__completion {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: stretch;
+  }
+
+  .form-actions__completion > .action-button {
+    width: 100%;
+  }
+
+  .native-field__control {
+    font-size: 1rem;
+  }
+
+  .page-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
