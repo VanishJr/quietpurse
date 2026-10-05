@@ -2,113 +2,87 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { darkInk, lightInk } from './theme';
 
-/**
- * A token declared in styles/tokens.css and reached by nothing.
- *
- * That file is the one place two stylesheets were meant to agree, and the failure it
- * has is silent in both directions: CSS has no compiler, an unread custom property
- * costs nothing at run time, and a rule naming one that does not exist falls back to
- * the initial value rather than erroring. So a token outlives whatever deleted its
- * last caller, and the next person wanting that value writes a second declaration
- * beside it - which is the drift tokens.css was written to end. Deleting the public
- * page left a batch of them behind, and every suite stayed green.
- *
- * SRC resolves from import.meta.url, not process.cwd(), for the reason copy.test.ts
- * states: the root of this walk IS the directory this file sits in.
- *
- * What this does NOT hold, so nobody reads it as more than it is:
- *
- * - The other direction. A `var(--typo)` naming nothing is the worse defect and is
- *   not checked here, because the declarations live in three places with different
- *   shapes - this file, styles.css's own aliases, and the `--ink-*` set theme.tsx
- *   publishes from TypeScript at run time - and a check that modelled two of the
- *   three would report the third as a typo.
- * - A token read only by another token that is itself unread. A reference is a
- *   reference here; a self-contained island of two would pass.
- * - Anything outside this package. Nothing else loads this file.
- */
-describe('every design token has a reader', () => {
-  const SRC = dirname(fileURLToPath(import.meta.url));
-  const TOKENS = 'styles/tokens.css';
+const SRC = dirname(fileURLToPath(import.meta.url));
+const TOKENS = 'styles/tokens.css';
+const walk = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    return entry.isDirectory() ? walk(full) : [full];
+  });
+const SHELLS = readdirSync(resolve(SRC, '..'), { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith('.html'))
+  .map((entry) => `../${entry.name}`);
+const FILES = [
+  ...walk(SRC)
+    .map((full) => relative(SRC, full).split(sep).join('/'))
+    .filter((file) => /\.(css|ts|tsx|html)$/.test(file) && !/\.test\.tsx?$/.test(file) && !file.startsWith('test/')),
+  ...SHELLS,
+];
+const textOf = (file: string) => readFileSync(resolve(SRC, file), 'utf8');
+const source = textOf(TOKENS);
+const declarations = (text: string) => [...text.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map((m) => m[1]);
+const references = (text: string) => [...text.matchAll(/var\(\s*(--[\w-]+)\s*[),]/g)].map((m) => m[1]);
+const declared = [...new Set(declarations(source))];
+const product = FILES.map((file) => ({ file, text: textOf(file) }));
 
-  const walk = (dir: string): string[] =>
-    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const full = join(dir, entry.name);
-      return entry.isDirectory() ? walk(full) : [full];
-    });
-
-  /**
-   * The page shell sits beside src/ and can name a token in an inline style, so it is
-   * read too - derived the same way copy.test.ts derives it, so a second page added to
-   * the build is covered the day it appears.
-   */
-  const SHELLS = readdirSync(resolve(SRC, '..'), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.html'))
-    .map((entry) => `../${entry.name}`);
-
-  const READABLE = /\.(css|ts|tsx|html)$/;
-
-  const FILES = [
-    ...walk(SRC)
-      .map((full) => relative(SRC, full).split(sep).join('/'))
-      .filter((file) => READABLE.test(file)),
-    ...SHELLS,
-  ];
-
-  const source = readFileSync(resolve(SRC, TOKENS), 'utf8');
-
-  /**
-   * The declaration side is this file's own `--name:` lines. A `var(--name)` never
-   * matches, so the declarations and the references cannot be confused for each other
-   * and the file may be scanned for both.
-   */
-  const declared = [...source.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((m) => m[1]);
-
-  it('reads tokens.css and the whole client source tree', () => {
-    // written out rather than compared against the lists themselves, which would be
-    // the same values on both sides of the assertion and green however short they got:
-    // one token per family the file still carries — radii, motion, stacking
-    for (const token of ['--r-md', '--dur-1', '--z-raised']) {
-      expect(declared).toContain(token);
-    }
+describe('live design tokens', () => {
+  it('reads every token family, product styles and page shells', () => {
+    for (const token of [
+      '--r-md', '--r-dialog', '--dur-1', '--z-raised', '--space-1', '--space-12',
+      '--text-page', '--text-helper', '--text-financial-primary', '--control-touch',
+      '--page-wide', '--page-normal', '--page-editing', '--page-gutter',
+    ]) expect(declared).toContain(token);
     expect(FILES).toContain(TOKENS);
     expect(FILES).toContain('styles.css');
+    expect(FILES).toContain('styles/import.css');
     expect(FILES).toContain('../index.html');
+    expect(FILES).not.toContain('tokens.test.ts');
+    expect(FILES).not.toContain('test/fixtures.ts');
   });
 
-  it('declares no token that nothing reaches', () => {
-    const readers = new Map<string, string[]>();
-    for (const file of FILES) {
-      const text = readFileSync(resolve(SRC, file), 'utf8');
-      for (const token of declared) {
-        // the closing paren is not matched: var() takes a fallback after a comma
-        // `\b` would end the name at the hyphen that STARTS a longer one, so
-        // var(--c-paper-hi) would answer for --c-paper. The close paren and the
-        // comma are the only two things that may follow a name inside var().
-        if (new RegExp(`var\\(\\s*${token}\\s*[),]`).test(text)) {
-          readers.set(token, [...(readers.get(token) ?? []), file]);
+  it('declares no token that the product does not reach', () => {
+    const readers = new Set(product.flatMap(({ text }) => references(text)));
+    expect(declared.filter((token) => !readers.has(token))).toEqual([]);
+  });
+
+  it('connects aliases to a rule rather than only to other unread aliases', () => {
+    const cssRules = product.filter(({ file }) => file.endsWith('.css'))
+      .map(({ text }) => text.replace(/^\s*--[\w-]+\s*:[^;]+;/gm, '')).join('\n');
+    const reachable = new Set(references(cssRules));
+    for (const { file, text } of product) {
+      if (!file.endsWith('.css')) for (const token of references(text)) reachable.add(token);
+    }
+    const aliases = [...source.matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [, token, value] of aliases) {
+        if (!reachable.has(token)) continue;
+        for (const dependency of references(value)) {
+          if (!reachable.has(dependency)) { reachable.add(dependency); changed = true; }
         }
       }
     }
-
-    const unread = declared.filter((token) => !readers.has(token));
-    expect(
-      unread,
-      `declared in ${TOKENS} and named by no var() anywhere in this package: ` +
-        `${unread.join(', ')} - delete it, or point at it from the rule that wrote its value out by hand`,
-    ).toEqual([]);
+    expect(declared.filter((token) => !reachable.has(token))).toEqual([]);
   });
 
-  /**
-   * A popover left open behind a sheet shares `--z-raised`, and at an equal layer the
-   * later element in the document paints on top — over the backdrop, and clickable.
-   */
+  it('resolves every literal variable through styles or either published palette', () => {
+    const known = new Set([
+      ...product.filter(({ file }) => file.endsWith('.css')).flatMap(({ text }) => declarations(text)),
+      ...Object.keys(lightInk).map((key) => `--ink-${key}`),
+    ]);
+    expect(Object.keys(darkInk).sort()).toEqual(Object.keys(lightInk).sort());
+    const missing = product.flatMap(({ file, text }) =>
+      references(text).filter((token) => !known.has(token)).map((token) => `${file}: ${token}`));
+    expect(missing).toEqual([]);
+  });
+
   it('stacks the modal backdrop above every raised layer', () => {
-    const value = (token: string) =>
-      Number(source.match(new RegExp(`^\\s*${token}\\s*:\\s*(\\d+)`, 'm'))?.[1]);
+    const value = (token: string) => Number(source.match(new RegExp(`^\\s*${token}\\s*:\\s*(\\d+)`, 'm'))?.[1]);
     expect(value('--z-modal')).toBeGreaterThan(value('--z-raised'));
-    const backdrop = readFileSync(resolve(SRC, 'styles.css'), 'utf8').match(/^\.backdrop \{[^}]*\}/m)?.[0];
+    const backdrop = textOf('styles.css').match(/^\.backdrop \{[^}]*\}/m)?.[0];
     expect(backdrop).toMatch(/z-index:\s*var\(--z-modal\)/);
   });
 });

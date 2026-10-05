@@ -115,7 +115,7 @@
 
 .import-page .import-step input.input:focus-visible,
 .import-page .import-paste .input:focus-visible {
-  outline: 2px solid var(--ink-accent);
+  outline: 2px solid var(--ink-focus);
   outline-offset: 2px;
 }
 

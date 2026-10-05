@@ -182,12 +182,12 @@ source as text**, and all three resolve their root differently from the checks i
 on purpose. `backend/test/SPEC.md` states that rule and the reason for the divergence; it is not
 restated here.
 
-**A design token with no `var()` behind it is refused**, by `tokens.test.ts`, because
-`web/src/styles/tokens.css` is the one place the radii, motion and stacking values two stylesheets
-had to agree on were pulled into — the palette left it for `theme.tsx` — and CSS fails silently at
-both ends: an unread declaration costs nothing, and a rule naming one that does not exist takes the
-initial value rather than erroring. The check holds one direction only; its own header says which
-and why the other needs three declaration sources modelled at once.
+**A design token with no product reader, and a literal variable with no declaration, are refused**
+by `tokens.test.ts`, because CSS fails silently at both ends. The reader walk excludes tests and
+fixtures so an assertion cannot keep an unused role alive, and follows aliases from styling rules
+rather than accepting a self-contained island of declarations. Variable resolution includes the
+stylesheets and the palettes published by `theme.tsx`; the source check does not prove cascade
+ownership, computed contrast or layout. Those require a rendered browser.
 
 `API_BASE` is empty because the API is always this page's own origin: `web/vite.config.ts` proxies
 `/api` to the backend while the dev server runs, and `npm start` serves the built client from the
@@ -636,6 +636,23 @@ coloured as that category.
 `.swatch`. As measured, and enforced by nothing, every `.dot` in the product's markup marks a
 category or a sector of a ring — the donut's key, the Overview ring's legend, and the Transactions
 list and its category picker — and every `.swatch` marks a series or a period.
+
+## Presentation foundations
+
+`styles/tokens.css` owns shared type, spacing, control, radius, motion and measure roles; color
+remains the palette's. Text roles separate orientation, reading, labels, helper text and metadata
+from comparable financial numbers. Numeric styling changes neither signs nor formatting. Inputs
+stay readable on narrow layouts; ordinary text and controls may grow with the reader's text size.
+
+`screen-inner` establishes the shared outer page anchor and responsive gutters. Wide data, normal
+composition and narrow editing measures limit breadth without independently centering subordinate
+regions. Settings uses the normal outer measure with a narrower financial form inside it. Existing
+scoped screen compositions retain their own treatment rather than acquiring a new wrapper. Screen
+scrolling, hidden-screen exclusion and navigation safe-area clearance remain the shell's concern.
+
+Grouped surfaces remain flat, subordinate relationships use spacing, and transient dialogs have a
+separate radius from ordinary cards. Focus is visible on the actual ground; reduced-motion behavior
+does not depend on transitions to establish the final state.
 
 ## Overview presentation
 
