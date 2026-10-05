@@ -639,7 +639,7 @@ list and its category picker — and every `.swatch` marks a series or a period.
 
 ## Presentation foundations
 
-`styles/tokens.css` owns shared type, spacing, control, radius, motion and measure roles; color
+`web/src/styles/tokens.css` owns shared type, spacing, control, radius, motion and measure roles; color
 remains the palette's. Text roles separate orientation, reading, labels, helper text and metadata
 from comparable financial numbers. Numeric styling changes neither signs nor formatting. Inputs
 stay readable on narrow layouts; ordinary text and controls may grow with the reader's text size.
