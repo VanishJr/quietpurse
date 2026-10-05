@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useId, useState } from 'react';
 import { ApiError, api } from '../api';
 import { CATEGORIES, categoryLabel } from '../categories';
 import {
@@ -9,6 +9,8 @@ import {
 } from '../goals';
 import type { Account, GoalCreate, GoalDetail, GoalType } from '../types';
 import { Sheet } from './Sheet';
+import { Button } from './Button';
+import { FormActions } from './FormActions';
 
 interface Props {
   goalId: string | null;
@@ -263,6 +265,7 @@ const WindowField = ({ value, onChange }: { value: string; onChange: (value: str
 );
 
 export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Props) {
+  const formId = useId();
   const open = goalId !== null;
   const editing = goalId !== null && goalId !== 'new';
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -326,6 +329,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (saving) return;
     const parsed = writeOf(draft);
     if (!parsed.goal) {
       setError(parsed.error ?? 'Check the goal fields.');
@@ -549,9 +553,20 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
   };
 
   return (
-    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} position="center" wide title={editing ? 'Edit goal' : 'New goal'}>
+    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} position="center" wide
+      title={editing ? 'Edit goal' : 'New goal'} pattern="builder"
+      stepKey={loading ? 'loading' : loadError ? 'load-error' : draft.type ?? 'types'} busy={saving}
+      header={<h2>{editing ? 'Edit goal' : draft.type ? GOAL_TYPE_DEFS[draft.type].label : 'Choose a goal type'}</h2>}
+      restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
+      footer={!loading && !loadError && baseCurrency !== null && draft.type ? (
+        <FormActions
+          back={!editing ? <Button type="button" variant="tertiary" size="standard" aria-disabled={saving} onClick={returnToTypes}>Back</Button> : undefined}
+          cancel={<Button type="button" variant="secondary" size="standard" aria-disabled={saving} onClick={onClose}>Cancel</Button>}
+          completion={<Button type="submit" form={formId} variant="primary" size="standard" pending={saving}>{editing ? 'Save' : 'Create goal'}</Button>}
+        />
+      ) : undefined}
+    >
       <div className="goal-editor">
-        <h2>{editing ? 'Edit goal' : draft.type ? GOAL_TYPE_DEFS[draft.type].label : 'Choose a goal type'}</h2>
         {loading && <p className="state-note">Loading goal…</p>}
         {!loading && loadError && (
           <div className="error-row" role="alert">
@@ -580,16 +595,12 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
           </>
         )}
         {!loading && !loadError && baseCurrency !== null && draft.type && (
-          <form onSubmit={(event) => void submit(event)}>
+          <form id={formId} onSubmit={(event) => void submit(event)}>
             <p className="goal-currency">Currency: {draft.type === 'savings-rate' ? 'percentage' : selectedCurrency}</p>
             <label className="field"><span>Name</span><input className="input" value={draft.name} onChange={(event) => update('name', event.target.value)} /></label>
             {fields()}
             {error && <p className="error-text" role="alert">{error}</p>}
-            <div className="sheet-actions">
-              {!editing && <button type="button" className="btn" disabled={saving} onClick={returnToTypes}>Back</button>}
-              <button type="button" className="btn" disabled={saving} onClick={onClose}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save' : 'Create goal'}</button>
-            </div>
+            {saving && <p className="state-note" role="status">Saving goal…</p>}
           </form>
         )}
         {!loading && !loadError && error && !draft.type && <p className="error-text" role="alert">{error}</p>}

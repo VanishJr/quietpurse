@@ -64,7 +64,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
     <section className="screen-inner">
       <header className="header goals-header">
         <div>
-          <h1>Goals</h1>
+          <h1 tabIndex={-1}>Goals</h1>
         </div>
         <button
           className="btn btn-primary"
@@ -140,6 +140,9 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
           if (!deleting) setDeleteTarget(null);
         }}
         position="center"
+        pattern="confirmation"
+        busy={deleting}
+        restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
         title={deleteTarget ? `Delete ${deleteTarget.name}` : 'Delete goal'}
       >
         {deleteTarget && (

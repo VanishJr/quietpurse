@@ -395,6 +395,10 @@ export function TransactionsScreen({
         open={selected !== null}
         onClose={() => { if (!busy) setSelected(null); }}
         position="bottom"
+        pattern={ruleEditor ? 'long-editor' : 'short-editor'}
+        stepKey={ruleEditor ?? 'transaction'}
+        busy={busy}
+        restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
         title={ruleEditor === 'transfer' ? 'Transfer rules' : ruleEditor === 'category' ? 'Apply category' : 'Transaction'}
       >
         {selected && ruleEditor === 'category' ? (

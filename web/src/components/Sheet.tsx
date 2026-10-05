@@ -1,101 +1,270 @@
-import { useContext, useEffect, useRef } from 'react';
+import { useContext, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { isAvailable } from '../dismiss';
 import { ScreenShown } from '../screen';
+import { Button } from './Button';
+import { CloseIcon } from './SettingsActionIcons';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  /** 'bottom' — on the bottom edge on a phone; 'center' — a dialog. */
   position?: 'bottom' | 'center';
   wide?: boolean;
   title?: string;
-  children: React.ReactNode;
+  pattern?: 'confirmation' | 'short-editor' | 'long-editor' | 'builder';
+  stepKey?: string;
+  busy?: boolean;
+  initialFocus?: () => HTMLElement | null;
+  restoreFocus?: () => HTMLElement | null;
+  header?: ReactNode;
+  footer?: ReactNode;
+  guard?: ReactNode;
+  children: ReactNode;
 }
 
-/**
- * What a caller relies on is stated in `web/src/SPEC.md`, under *What the shared
- * controls promise*.
- */
-export function Sheet({ open, onClose, position = 'bottom', wide = false, title, children }: Props) {
+function controlsIn(card: HTMLElement): HTMLElement[] {
+  return Array.from(card.querySelectorAll<HTMLElement>(
+    'button, a[href], input, select, textarea, summary, [tabindex], [contenteditable="true"]',
+  )).filter((element) => element.tabIndex >= 0 && isAvailable(element));
+}
+
+function focus(element: HTMLElement): boolean {
+  if (!isAvailable(element)) return false;
+  element.focus({ preventScroll: true });
+  return document.activeElement === element;
+}
+
+function lockScroll(element: HTMLElement): () => void {
+  const properties = ['overflow', 'overflow-x', 'overflow-y'];
+  const previous = properties.map((property) => [
+    property, element.style.getPropertyValue(property), element.style.getPropertyPriority(property),
+  ]);
+  element.style.overflow = 'hidden';
+  return () => {
+    for (const property of properties) element.style.removeProperty(property);
+    for (const [property, value, priority] of previous) {
+      if (value) element.style.setProperty(property, value, priority);
+    }
+  };
+}
+
+export function Sheet({
+  open, onClose, position = 'bottom', wide = false, title, pattern, stepKey,
+  busy = false, initialFocus, restoreFocus, header, footer, guard, children,
+}: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const guardRef = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  const active = useRef(false);
+  const backdropPress = useRef(false);
+  const phase = useRef({ stepKey, guarded: false });
   const shown = useContext(ScreenShown);
   const live = open && shown;
+  const guarded = guard != null && guard !== false;
+  const current = useRef({ onClose, busy, pattern, initialFocus, restoreFocus, stepKey, guarded, shown });
+  current.current = { onClose, busy, pattern, initialFocus, restoreFocus, stepKey, guarded, shown };
 
-  useEffect(() => {
+  // Render precedes child autoFocus; a commit effect would capture the child instead.
+  if (open && !wasOpen.current) {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasOpen.current = open;
+
+  const enter = () => {
+    const card = cardRef.current;
+    if (!card || !isAvailable(card)) return;
+    const options = current.current;
+    const target = options.guarded
+      ? guardRef.current?.querySelector<HTMLElement>('[data-sheet-focus]')
+      : options.initialFocus?.();
+    if (target && card.contains(target) && focus(target)) return;
+    if (options.pattern || options.guarded) {
+      const region = options.guarded ? guardRef.current : card;
+      const heading = Array.from(region?.querySelectorAll<HTMLElement>('h2, h3') ?? []).find(isAvailable);
+      if (heading) {
+        if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1;
+        if (focus(heading)) {
+          heading.scrollIntoView?.({ block: 'start' });
+          return;
+        }
+      }
+    }
+    focus(card);
+  };
+  const enterRef = useRef(enter);
+  enterRef.current = enter;
+
+  useLayoutEffect(() => {
     if (!live) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key !== 'Tab') return;
-      const card = cardRef.current;
-      if (!card || card.closest('[hidden]')) return;
-      const controls = Array.from(card.querySelectorAll<HTMLElement>(
-        ':is(button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"])',
-      )).filter((el) => !el.closest('[hidden]'));
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      const fromPanel = document.activeElement instanceof HTMLElement &&
-        card.contains(document.activeElement) && !controls.includes(document.activeElement);
-      if (!first) {
-        e.preventDefault();
-        card.focus();
-      } else if (e.shiftKey && (document.activeElement === first || fromPanel)) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (document.activeElement === last || fromPanel)) {
-        e.preventDefault();
-        first.focus();
+    const card = cardRef.current;
+    const backdrop = backdropRef.current;
+    if (!card || !backdrop) return;
+    const inert = new Map<HTMLElement, string | null>();
+    let unlock: (() => void)[] = [];
+
+    const restoreInert = (element: HTMLElement, value: string | null) => {
+      if (value === null) element.removeAttribute('inert');
+      else element.setAttribute('inert', value);
+    };
+    const syncInert = () => {
+      const siblings = new Set<HTMLElement>();
+      for (let branch: HTMLElement | null = backdrop; branch?.parentElement; branch = branch.parentElement) {
+        for (const sibling of branch.parentElement.children) {
+          if (sibling !== branch && sibling instanceof HTMLElement) siblings.add(sibling);
+        }
+      }
+      for (const [element, value] of inert) {
+        if (!siblings.has(element)) {
+          restoreInert(element, value);
+          inert.delete(element);
+        }
+      }
+      for (const sibling of siblings) {
+        if (!inert.has(sibling)) {
+          inert.set(sibling, sibling.getAttribute('inert'));
+          sibling.setAttribute('inert', '');
+        }
       }
     };
-    document.addEventListener('keydown', onKey);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prev;
+    const recover = () => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && card.contains(focused) && isAvailable(focused)) return;
+      focus(controlsIn(card)[0] ?? card);
     };
-  }, [live, onClose]);
-
-  /*
-   * The opener is taken once per opening, not once per showing: a return to the screen
-   * finds the navigation link that brought the reader back in focus, and that is not
-   * where a close should send them.
-   */
-  useEffect(() => {
-    if (!open) return;
-    const opener = document.activeElement;
+    const onFocus = () => {
+      if (active.current && isAvailable(card)) recover();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (!active.current || !isAvailable(card) || event.defaultPrevented) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (!current.current.busy) current.current.onClose();
+      }
+      if (event.key !== 'Tab') return;
+      const controls = controlsIn(card);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      const focused = document.activeElement;
+      const fromPanel = !controls.includes(focused as HTMLElement);
+      if (!first) {
+        event.preventDefault();
+        focus(card);
+      } else if (fromPanel || (event.shiftKey ? focused === first : focused === last)) {
+        event.preventDefault();
+        focus(event.shiftKey ? last : first);
+      }
+    };
+    const suspend = () => {
+      active.current = false;
+      backdropPress.current = false;
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocus);
+      for (const [element, value] of inert) restoreInert(element, value);
+      inert.clear();
+      for (const release of unlock) release();
+      unlock = [];
+    };
+    const reconcile = () => {
+      if (!isAvailable(card)) {
+        if (active.current) suspend();
+        return;
+      }
+      if (!active.current) {
+        active.current = true;
+        const scrollAreas = new Set<HTMLElement>([document.body]);
+        for (let node = backdrop.parentElement; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (node.matches('.screen') || /auto|scroll/.test(`${style.overflow} ${style.overflowY}`)) {
+            scrollAreas.add(node);
+          }
+        }
+        unlock = Array.from(scrollAreas, lockScroll);
+        syncInert();
+        document.addEventListener('keydown', onKey);
+        document.addEventListener('focusin', onFocus);
+        phase.current = { stepKey: current.current.stepKey, guarded: current.current.guarded };
+        enterRef.current();
+      } else {
+        syncInert();
+        recover();
+      }
+    };
+    reconcile();
+    const observer = new MutationObserver(reconcile);
+    observer.observe(card, {
+      subtree: true, childList: true, attributes: true,
+      attributeFilter: ['hidden', 'inert', 'style', 'class', 'disabled', 'open', 'tabindex'],
+    });
+    for (let node = backdrop.parentElement; node; node = node.parentElement) {
+      observer.observe(node, {
+        childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'],
+      });
+    }
     return () => {
-      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+      observer.disconnect();
+      suspend();
+    };
+  }, [live]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    return () => {
+      if (!current.current.shown) return;
+      const target = opener.current;
+      if (target && target !== document.body && focus(target)) return;
+      const fallback = current.current.restoreFocus?.();
+      if (fallback) focus(fallback);
     };
   }, [open]);
 
-  /*
-   * Moving the keyboard in is its own effect, keyed on nothing but `live`: a caller may
-   * pass a fresh `onClose` arrow on each render, and in the first effect this would
-   * re-run — and re-focus the card, taking the caret out of an input mid-word — every
-   * time the parent rendered for any reason at all.
-   */
-  useEffect(() => {
-    if (live) cardRef.current?.focus();
-  }, [live]);
+  useLayoutEffect(() => {
+    if (!active.current) return;
+    if (phase.current.stepKey !== stepKey || (guarded && !phase.current.guarded)) enterRef.current();
+    phase.current = { stepKey, guarded };
+  });
 
   if (!open) return null;
 
   return (
     <div
+      ref={backdropRef}
       className={`backdrop backdrop-${position}`}
-      onClick={onClose}
       role="presentation"
+      onPointerDown={(event) => {
+        backdropPress.current = active.current && event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => { backdropPress.current = false; }}
+      onClick={(event) => {
+        const dismiss = backdropPress.current && event.target === event.currentTarget;
+        backdropPress.current = false;
+        if (dismiss && active.current && !busy && pattern !== 'long-editor' && pattern !== 'builder') onClose();
+      }}
     >
-      {/* stop propagation so a click on the card itself doesn't close it */}
       <div
         ref={cardRef}
         className={wide ? 'sheet sheet-wide' : 'sheet'}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-busy={busy || undefined}
         tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
       >
-        {children}
+        <div className="sheet-header">
+          {header != null && <div className="sheet-heading">{header}</div>}
+          <Button
+            type="button" variant="tertiary" size="touch" iconOnly aria-label="Close dialog"
+            aria-disabled={busy} className="sheet-close" onClick={onClose}
+          >
+            <CloseIcon />
+          </Button>
+        </div>
+        <div className="sheet-body">
+          <div className="sheet-content" hidden={guarded}>{children}</div>
+          {guarded && <div ref={guardRef} className="sheet-guard">{guard}</div>}
+        </div>
+        {busy && <p className="sheet-status">Working. Please wait before closing.</p>}
+        {footer != null && <div className="sheet-footer" hidden={guarded}>{footer}</div>}
       </div>
     </div>
   );

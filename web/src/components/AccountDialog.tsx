@@ -212,7 +212,11 @@ export function AccountDialog({
   const leave = () => (atOrigin ? onClose() : onStep('menu'));
 
   return (
-    <Sheet open onClose={onClose} position="bottom" title={title}>
+    <Sheet open onClose={onClose} position="bottom" title={title}
+      pattern={kind === 'add' || kind === 'rename' ? 'short-editor' : 'confirmation'}
+      stepKey={kind} busy={busy}
+      restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) .rail-add')}
+    >
       {kind === 'add' && (
         <form onSubmit={submitName}>
           <h2 className="sheet-title">New account</h2>
@@ -227,7 +231,7 @@ export function AccountDialog({
             id="acct-new-name"
             className="input"
             value={name}
-            autoFocus
+            readOnly={busy}
             placeholder="Sparkasse, cash, Revolut…"
             onChange={(e) => setName(e.target.value)}
           />
@@ -300,7 +304,7 @@ export function AccountDialog({
             id="acct-name"
             className="input"
             value={name}
-            autoFocus
+            readOnly={busy}
             onChange={(e) => setName(e.target.value)}
           />
           <p className="hint" style={{ marginTop: 6 }}>
@@ -426,10 +430,6 @@ export function AccountDialog({
               <label className="setting-label" htmlFor="acct-delete-confirm">
                 Type <strong>{account.name}</strong> to confirm
               </label>
-              {/* no autoFocus, unlike the rename field: this input mounts when the
-                  preview's reads come back, so focus would jump here an unpredictable
-                  number of seconds after the panel opened and throw the reader off the
-                  counts they are meant to be reading */}
               <input
                 id="acct-delete-confirm"
                 className="input"

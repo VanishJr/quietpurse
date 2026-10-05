@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AnalyticsIcon,
   GoalsIcon,
@@ -58,6 +58,19 @@ export function Shell() {
 
   const onOverview = tab === 'overview';
   const importing = onOverview && url.panel === 'import';
+  const place = `${tab}:${url.panel ?? ''}`;
+  const previousPlace = useRef(place);
+  useEffect(() => {
+    if (previousPlace.current === place) return;
+    previousPlace.current = place;
+    const screen = document.querySelector<HTMLElement>('.screen:not([hidden])');
+    if (screen?.querySelector('[role="dialog"]')) return;
+    const heading = screen?.querySelector<HTMLElement>('h1, h2');
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }, [place]);
 
   const go = (key: TabKey) => {
     // on `tab`, not the URL: the app opens on `/`, where Overview is current without being

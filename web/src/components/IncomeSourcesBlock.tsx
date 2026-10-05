@@ -313,6 +313,9 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       <Sheet
         open={open?.form === 'add' || open?.form === 'edit'}
         onClose={close}
+        pattern="short-editor"
+        stepKey={open?.form}
+        busy={busy}
         title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
       >
         {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}

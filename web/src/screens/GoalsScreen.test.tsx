@@ -186,7 +186,7 @@ describe('GoalsScreen', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('This removes the goal only. Accounts and transactions are unchanged.')).toBeVisible();
-    const actions = within(dialog).getAllByRole('button');
+    const actions = within(dialog).getAllByRole('button').filter((button) => button.getAttribute('aria-label') !== 'Close dialog');
     expect(actions.map((button) => button.textContent)).toEqual(['Cancel', 'Delete goal']);
     expect(actions[0]).toHaveClass('action-button--secondary');
     expect(actions[1]).toHaveClass('action-button--destructive-primary');

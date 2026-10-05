@@ -241,7 +241,7 @@ describe('IncomeSourcesBlock', () => {
     const add = screen.getByRole('button', { name: 'Add source' });
     add.focus();
     fireEvent.click(add);
-    expect(screen.getByRole('dialog', { name: 'Add source' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Add source' })).toHaveFocus();
     // the Sheet takes its opener as it opens, and a disabled one is already out of focus
     expect(add).not.toBeDisabled();
     expect(add).toHaveAttribute('aria-disabled', 'true');
@@ -251,11 +251,13 @@ describe('IncomeSourcesBlock', () => {
     const edit = screen.getByRole('button', { name: 'Edit Stipend' });
     edit.focus();
     fireEvent.click(edit);
-    expect(screen.getByRole('dialog', { name: 'Edit source' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Edit source' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(edit).toHaveFocus();
     fireEvent.click(edit);
-    fireEvent.click(screen.getByRole('dialog', { name: 'Edit source' }).parentElement!);
+    const backdrop = screen.getByRole('dialog', { name: 'Edit source' }).parentElement!;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(edit).toHaveFocus();
   });

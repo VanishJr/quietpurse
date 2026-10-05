@@ -22,6 +22,12 @@ export const MoreIcon = () => (
   </svg>
 );
 
+export const CloseIcon = () => (
+  <svg {...ICON_BOX}>
+    <path d="m5 5 10 10M15 5 5 15" />
+  </svg>
+);
+
 export const ChevronIcon = () => (
   <svg {...ICON_BOX}>
     <path d="m8 5 5 5-5 5" />

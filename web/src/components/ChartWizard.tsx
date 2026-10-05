@@ -124,6 +124,9 @@ export function ChartWizard({
       position="center"
       wide
       title={editing ? 'Edit chart' : 'New chart'}
+      pattern="builder"
+      stepKey={step}
+      restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
     >
       {step === 'kind' || !draft ? (
         <KindStep

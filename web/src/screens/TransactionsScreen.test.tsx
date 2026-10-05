@@ -586,7 +586,7 @@ describe('category rules with a preview', () => {
     await openCategoryPreview();
     fireEvent.click(screen.getByRole('button', { name: 'View rule: REWE → Food' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Remove category rule' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('Category rule removed');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Category rule removed'));
     expect(requests()).toContain('DELETE /api/category-rules/7');
     expect(requests()).not.toContain('POST /api/category-rules');
     expect(screen.getByRole('dialog', { name: 'Transaction' })).toBeInTheDocument();

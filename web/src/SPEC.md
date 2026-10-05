@@ -770,34 +770,28 @@ case the strip's paging effect follows.
 
 ## What the shared controls promise
 
-`Sheet` is described here as it behaves while it is the only sheet open, and not while more than one
-sheet is open. `Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed.
-Open, it calls its `onClose` on an Escape keydown that reaches the document and on a click whose
-target is its backdrop, and not on a click inside the card — though a press begun inside the card
-and released over the backdrop can be a click on the backdrop — and whether that call closes it is
-the caller's. It keeps Tab and Shift+Tab, while focus is inside the card, among the card's focusable
-controls that are not hidden, or on the card itself when there are none, and sets `overflow: hidden`
-on the document's body, putting back what it found there when it last set it once it closes or its
-screen is hidden. It does not
-bring back focus that has left a card with controls in it — as when a step change unmounts the
-control that held it — so from there Tab and Shift+Tab move as the browser moves them, and Shift+Tab
-can reach the page behind the sheet. Once it has rendered open it calls `focus()` on the card, and
-when it closes it makes the same call on whatever held focus just before, if that is still in the
-document — so where a child takes focus with `autoFocus` as the sheet opens, the card takes focus
-from that child and, on close, focus returns to nothing. The browser ignores that call on an element
-that cannot take focus, and nothing on a screen the Shell has hidden can: a sheet that opens on a
-hidden screen does not take focus, and one that closes on a hidden screen gives none back to an
-element there. While the Shell has hidden the screen holding it — `ScreenShown` is false there — an
-open sheet stays open and keeps what it holds, but takes nothing from the page: no scroll lock, no
-Escape, no Tab trap. They come back with the screen, and the card takes focus again, while a close
-still returns focus to what held it when the sheet opened. The Shell renders each screen's `hidden`
-and its `ScreenShown` from one value. The Tab trap also stands down while the card sits inside any
-other `hidden` ancestor. Its backdrop is on `--z-modal`, above the `--z-raised` layer a popover
-uses, so a popover left open behind a sheet stays under the backdrop. A caller relies on this
-rather than restating it beside its own sheet.
+`Sheet` owns modal containment, reversible background inertness and scrolling while its screen
+is visible. Tab recovers even after the focused control disappears. Opening and deliberate step
+changes enter the caller's target or heading; draft renders do not move the caret. The opener is
+captured before children can take focus. Restoration requires a usable surviving target, with a
+caller-supplied section or record fallback when the opener is gone. Income-source refresh retains
+its own asynchronous fallback rather than competing with generic restoration.
 
-`useDismiss` is the Escape-and-outside-press close that the recurring menu and `ChartDock`'s
-popover share. Like a sheet, it hears nothing while the Shell hides the screen it sits on.
+Long editors and builders ignore the backdrop; a pristine short editor or confirmation may request
+close only from a press that began on the backdrop. Escape and the named close control request the
+same caller dismissal policy. Pending non-cancellable writes block conflicting dismissal. The
+shared frame provides a primary scrolling body and optional header/action regions; subordinate
+fields and preview records do not establish competing scroll areas.
+
+An open sheet on an inactive screen retains its state but releases focus, inertness, scroll locks
+and keyboard ownership. Returning re-enters without replacing the original opener. Shell drives
+`hidden` and `ScreenShown` from the same value. Modal layering stays above raised popovers.
+Accepted screen or panel navigation orients the reader at the visible heading, not on background
+refresh or filter changes and not over an editor's own focus policy.
+
+`useDismiss` is the Escape-and-outside-press seam for lightweight popovers. A live child receives
+Escape before its sheet; a background popover beneath the modal cannot consume that dismissal.
+Like a sheet, it hears nothing while its screen is hidden.
 `Chips` takes `locked`, which marks every chip `aria-disabled` and ignores a press, for a form
 whose values are already on their way.
 
