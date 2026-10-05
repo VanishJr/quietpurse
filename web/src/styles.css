@@ -78,7 +78,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 2px solid var(--ink-accent);
+  outline: 2px solid var(--ink-focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -212,8 +212,8 @@ textarea {
   background: var(--ink-raised);
 }
 .nav-item[aria-current='page'] {
-  background: var(--ink-raised);
-  color: var(--ink-accent);
+  background: var(--ink-selected);
+  color: var(--ink-onSelected);
   font-weight: 500;
 }
 .nav-import {
@@ -250,8 +250,8 @@ textarea {
   color: var(--ink-primary);
 }
 .theme-option[aria-pressed='true'] {
-  background: var(--ink-accent);
-  color: var(--ink-onAccent);
+  background: var(--ink-action);
+  color: var(--ink-onAction);
 }
 .device-note {
   display: flex;
@@ -266,7 +266,7 @@ textarea {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--ink-good);
+  background: var(--ink-success);
 }
 @media (max-width: 899px) {
   .app {
@@ -386,7 +386,7 @@ textarea {
 }
 
 .error {
-  color: var(--ink-bad);
+  color: var(--ink-error);
   margin: 4px 0;
 }
 
@@ -418,13 +418,22 @@ textarea {
 }
 
 .btn {
-  background: var(--ink-brand);
-  color: var(--ink-onBrand);
+  background: var(--ink-action);
+  color: var(--ink-onAction);
   border-radius: var(--r-sm);
   padding: 12px 20px;
   font-size: 15px;
   font-weight: 600;
   text-align: center;
+  transition: background var(--dur-1) var(--ease-out);
+}
+
+.btn:where(:not(.btn-ghost, .btn-danger, :disabled, [aria-disabled='true'])):hover {
+  background: var(--ink-actionHover);
+}
+
+.btn:where(:not(.btn-ghost, .btn-danger, :disabled, [aria-disabled='true'])):active {
+  background: var(--ink-actionPressed);
 }
 
 .btn:disabled,
@@ -432,11 +441,17 @@ textarea {
   opacity: 0.5;
 }
 
-/* The only destructive primary in the app: everything but the two colours comes from
-   .btn, so it stays the same pill in the same row. 5.9:1 light, 6.7:1 dark. */
 .btn-destroy {
-  background: var(--ink-bad);
-  color: var(--ink-onBad);
+  background: var(--ink-danger);
+  color: var(--ink-onDanger);
+}
+
+.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):hover {
+  background: var(--ink-dangerHover);
+}
+
+.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):active {
+  background: var(--ink-dangerPressed);
 }
 
 .btn-sm {
@@ -601,7 +616,7 @@ textarea {
 }
 
 .input {
-  border: 1px solid var(--ink-grid);
+  border: 1px solid var(--ink-controlBorder);
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 14px;
@@ -615,8 +630,9 @@ textarea {
 }
 
 .input:focus-visible {
-  outline: none;
-  border-color: var(--ink-accent);
+  outline: 2px solid var(--ink-focus);
+  outline-offset: 2px;
+  border-color: var(--ink-focus);
 }
 
 .card {
@@ -1222,10 +1238,10 @@ textarea {
   font-weight: 500;
 }
 .fig-delta.is-good {
-  color: var(--ink-good);
+  color: var(--ink-favorable);
 }
 .fig-delta.is-bad {
-  color: var(--ink-bad);
+  color: var(--ink-unfavorable);
 }
 .fig-delta-note {
   color: var(--ink-secondary);
@@ -1288,7 +1304,7 @@ textarea {
 }
 .series-mark {
   width: 16px;
-  border-top: 3px solid var(--ink-good);
+  border-top: 3px solid var(--ink-income);
 }
 .series-expense {
   border-color: var(--ink-lavender);
@@ -2991,6 +3007,10 @@ textarea {
 .goal-status {
   color: var(--ink-secondary);
   font-size: 13px;
+}
+
+.goal-card-at-risk .goal-status {
+  color: var(--ink-warning);
 }
 
 .sheet-actions {

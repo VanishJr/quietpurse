@@ -145,9 +145,9 @@ export function AccountFlows({
               name="Income"
               dataKey="income"
               type="linear"
-              stroke={ink.good}
+              stroke={ink.income}
               strokeWidth={2.5}
-              dot={dot ? { r: 3.5, strokeWidth: 0, fill: ink.good } : false}
+              dot={dot ? { r: 3.5, strokeWidth: 0, fill: ink.income } : false}
               activeDot={{ r: 4.5, strokeWidth: 0 }}
               isAnimationActive={false}
             />

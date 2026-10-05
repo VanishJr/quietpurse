@@ -22,6 +22,25 @@ export interface Ink {
   raised: string;
   lavender: string;
   sand: string;
+
+  action: string;
+  actionHover: string;
+  actionPressed: string;
+  onAction: string;
+  selected: string;
+  onSelected: string;
+  danger: string;
+  dangerHover: string;
+  dangerPressed: string;
+  onDanger: string;
+  controlBorder: string;
+  focus: string;
+  success: string;
+  error: string;
+  warning: string;
+  income: string;
+  favorable: string;
+  unfavorable: string;
 }
 
 export const lightInk: Ink = {
@@ -45,6 +64,24 @@ export const lightInk: Ink = {
   raised: '#e8eee2',
   lavender: '#7955ab',
   sand: '#936921',
+  action: '#365323',
+  actionHover: '#2e471e',
+  actionPressed: '#263b19',
+  onAction: '#ffffff',
+  selected: '#e8eee2',
+  onSelected: '#365323',
+  danger: '#a70000',
+  dangerHover: '#910000',
+  dangerPressed: '#7a0000',
+  onDanger: '#ffffff',
+  controlBorder: '#747b70',
+  focus: '#365323',
+  success: '#267347',
+  error: '#a70000',
+  warning: '#8a5700',
+  income: '#08766c',
+  favorable: '#28713b',
+  unfavorable: '#a03b32',
 };
 
 export const darkInk: Ink = {
@@ -68,6 +105,24 @@ export const darkInk: Ink = {
   raised: '#20251f',
   lavender: '#b69ae3',
   sand: '#d9c6a0',
+  action: '#b8d88a',
+  actionHover: '#c7e89a',
+  actionPressed: '#a5c675',
+  onAction: '#182111',
+  selected: '#303a25',
+  onSelected: '#c7e89a',
+  danger: '#eea49b',
+  dangerHover: '#f4b4ac',
+  dangerPressed: '#df948b',
+  onDanger: '#101211',
+  controlBorder: '#788271',
+  focus: '#c7e89a',
+  success: '#83d0a0',
+  error: '#eea49b',
+  warning: '#e6c278',
+  income: '#67c8b8',
+  favorable: '#92cf9c',
+  unfavorable: '#eda49c',
 };
 
 // keyed by the backend's slugs; the dark palette is the same hue per category, lightened

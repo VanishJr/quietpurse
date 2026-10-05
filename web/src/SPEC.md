@@ -590,7 +590,13 @@ claiming that they match transactions; full phrases belong in the source editor 
 
 `ink` is the palette published a second time: the custom properties `ThemeProvider` sets on the
 document root are the styling truth, and `ink` exists because recharts wants real colour strings.
-Where the theme is kept is *Boundary*'s ruling and is not restated here.
+Where the theme is kept is *Boundary*'s ruling and is not restated here. Action and selected-state
+foregrounds belong to their grounds, not to whichever text role a consumer happened to inherit.
+Brand identifies the product; success confirms an outcome; income identifies a financial series;
+favorable and unfavorable interpret a comparison whose direction the caller supplies. Those roles
+are independent even where hues are related. Legacy `good` and `bad` retain their existing readers'
+meaning and are not aliases that reclassify every signed amount. Control boundaries and focus
+have their own contrasting roles; a field's focus feedback is not merely a changed border.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value. A ground is named for the `Ink` key of its own fill, so nothing states twice what colour a
@@ -700,8 +706,8 @@ Dark is the initial theme; an existing saved choice takes precedence. The shell 
 Light and Dark as explicit choices, with System following the OS preference. Its theme control
 moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
 indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
-together. The action accent and income may share a colour,
-so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
+together. Income series and their legend marks use the income role, independent of action and
+success colors; expense series retain `lavender`. Chart tooltips use
 a raised surface with its own text colours rather than inheriting colours from the plotted series.
 
 ## Accounts and statements, as the client handles them
