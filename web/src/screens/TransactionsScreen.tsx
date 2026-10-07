@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api';
 import { useEditorSession } from '../editor';
 import { CATEGORIES, Category, categoryLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
+import { FormActions } from '../components/FormActions';
 import { Notice } from '../components/Notice';
 import { PageHeader } from '../components/PageHeader';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
@@ -32,6 +34,7 @@ const PERIODS = [
 ] as const;
 
 type PeriodKey = (typeof PERIODS)[number]['key'];
+type MutationOwner = 'category' | 'transfer' | 'one-off' | 'income source';
 
 interface FilterOption {
   key: string;
@@ -89,6 +92,9 @@ export function TransactionsScreen({
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingOwner, setSavingOwner] = useState<MutationOwner | null>(null);
+  const [mutationError, setMutationError] = useState<{ owner: MutationOwner; message: string } | null>(null);
+  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
   const [refreshingSelected, setRefreshingSelected] = useState(false);
   const [ruleEditor, setRuleEditor] = useState<'transfer' | 'category' | null>(null);
   const [ruleDirty, setRuleDirty] = useState(false);
@@ -227,45 +233,54 @@ export function TransactionsScreen({
 
   /** Transfer flag: null hands the decision back to the backend's auto-detection. */
   const applyTransfer = async (tx: Transaction, value: boolean | null) => {
+    if (busy) return;
     setSaving(true);
+    setSavingOwner('transfer');
+    setMutationError(null);
     try {
-      setError(null);
       const updated = await api.setTransfer(tx.id, value);
       setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
-      setError((e as Error).message);
+      setMutationError({ owner: 'transfer', message: (e as Error).message });
     } finally {
       setSaving(false);
+      setSavingOwner(null);
     }
   };
 
   /** Manual income source: null hands the decision back to auto-detection. */
   const applySource = async (tx: Transaction, source: IncomeSource | null) => {
+    if (busy) return;
     setSaving(true);
+    setSavingOwner('income source');
+    setMutationError(null);
     try {
-      setError(null);
       const updated = await api.setIncomeSource(tx.id, source);
       setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
-      setError((e as Error).message);
+      setMutationError({ owner: 'income source', message: (e as Error).message });
     } finally {
       setSaving(false);
+      setSavingOwner(null);
     }
   };
 
   const applyOneOff = async (tx: Transaction, value: boolean) => {
+    if (busy) return;
     setSaving(true);
+    setSavingOwner('one-off');
+    setMutationError(null);
     try {
-      setError(null);
       const updated = await api.setOneOff(tx.id, value);
       setTxs((list) => list?.map((t) => (t.id === updated.id ? updated : t)) ?? null);
       setSelected(updated);
     } catch (e) {
-      setError((e as Error).message);
+      setMutationError({ owner: 'one-off', message: (e as Error).message });
     } finally {
       setSaving(false);
+      setSavingOwner(null);
     }
   };
 
@@ -274,9 +289,11 @@ export function TransactionsScreen({
    * not a no-op — it pins the row against any rule.
    */
   const applyCategory = async (tx: Transaction, next: Category | null) => {
+    if (busy) return;
     setSaving(true);
+    setSavingOwner('category');
+    setMutationError(null);
     try {
-      setError(null);
       setNotice(null);
       const updated = await api.setCategory(tx.id, next);
       if (tx.category === 'support' || updated.category === 'support') {
@@ -293,9 +310,10 @@ export function TransactionsScreen({
       }
       setSelected(updated);
     } catch (e) {
-      setError((e as Error).message);
+      setMutationError({ owner: 'category', message: (e as Error).message });
     } finally {
       setSaving(false);
+      setSavingOwner(null);
     }
   };
 
@@ -311,6 +329,14 @@ export function TransactionsScreen({
     setNotice(message);
     editor.finish(returnToTransaction);
   };
+
+  const mutationFeedback = (owner: MutationOwner) => (
+    <>
+      {savingOwner === owner && <Notice role="status">Saving {owner}…</Notice>}
+      {mutationError?.owner === owner && <Notice tone="error" role="alert">Error: {mutationError.message}</Notice>}
+    </>
+  );
+  const previewActions = (actions: ReactNode) => actionHost ? createPortal(actions, actionHost) : null;
 
   return (
     <div className="screen-inner page-wide transactions-screen">
@@ -330,18 +356,10 @@ export function TransactionsScreen({
         {!selected && error && <Notice tone="error" role="alert" remedy={
           <Button type="button" variant="secondary" size="compact" onClick={load}>Retry transactions</Button>
         }>Error: {error}</Notice>}
-        {!selected && sourceError && (
-          <p className="error" role="alert">
-            Couldn’t load income sources: {sourceError}{' '}
-            <button
-              type="button"
-              className="btn-link"
-              onClick={() => setSourceLoadAttempt((value) => value + 1)}
-            >
-              Retry income sources
-            </button>
-          </p>
-        )}
+        {!selected && mutationError && <Notice tone="error" role="alert">Couldn’t save {mutationError.owner}: {mutationError.message}</Notice>}
+        {!selected && sourceError && <Notice tone="error" role="alert" remedy={
+          <Button type="button" variant="secondary" size="compact" onClick={() => setSourceLoadAttempt((value) => value + 1)}>Retry income sources</Button>
+        }>Couldn’t load income sources: {sourceError}</Notice>}
         {!selected && notice && <Notice role="status">{notice}</Notice>}
       </div>
       {txs === null && !error && <Notice placement="content" role="status">Loading transactions…</Notice>}
@@ -361,6 +379,7 @@ export function TransactionsScreen({
               setRuleEditor(null);
               setNotice(null);
               setError(null);
+              setMutationError(null);
               setSelected(item);
             }}
           >
@@ -406,6 +425,10 @@ export function TransactionsScreen({
         busy={busy}
         restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
         title={ruleEditor === 'transfer' ? 'Transfer rules' : ruleEditor === 'category' ? 'Apply category' : 'Transaction'}
+        header={!ruleEditor && selected ? <h2 className="sheet-title">{selected.displayDescription ?? (selected.description || '(no description)')}</h2> : undefined}
+        footer={ruleEditor ? <div ref={setActionHost} /> : <FormActions completion={
+          <Button type="button" variant="secondary" size="touch" aria-disabled={busy} onClick={editor.requestClose}>Close</Button>
+        } />}
       >
         {selected && ruleEditor === 'category' ? (
           <CategoryRuleEditor
@@ -415,6 +438,7 @@ export function TransactionsScreen({
             onBusyChange={setSaving}
             onDraftChange={setRuleDirty}
             onApplied={ruleApplied}
+            renderActions={previewActions}
           />
         ) : selected && ruleEditor === 'transfer' ? (
           <TransferRuleEditor
@@ -423,11 +447,11 @@ export function TransactionsScreen({
             onBack={returnToTransaction}
             onBusyChange={setSaving}
             onApplied={ruleApplied}
+            renderActions={previewActions}
           />
         ) : selected && (
           <>
-            <h2 className="sheet-title">{selected.displayDescription ?? (selected.description || '(no description)')}</h2>
-            <div className="sheet-amount">
+            <div className={`sheet-amount transaction-detail__amount${selected.amount > 0 && !selected.refund && !selected.transfer ? ' transaction-value--income' : ''}`}>
               {selected.amount > 0 ? '+' : ''}
               {fmtMoney(selected.amount, selected.currency)}
             </div>
@@ -445,168 +469,146 @@ export function TransactionsScreen({
                 <p>{selected.description}</p>
               </details>
             )}
-            {refreshingSelected && <p className="state-note" role="status">Refreshing transaction…</p>}
-            {error && <p className="error" role="alert">Error: {error}</p>}
-            {sourceError && (
-              <p className="error" role="alert">
-                Couldn’t load income sources: {sourceError}{' '}
-                <button
-                  type="button"
-                  className="btn-link"
-                  onClick={() => setSourceLoadAttempt((value) => value + 1)}
-                >
-                  Retry income sources
-                </button>
-              </p>
-            )}
-            {notice && <p className="hint" role="status">{notice}</p>}
+            <div className="transaction-detail__flags">
+              {selected.transfer && <span className="badge">transfer</span>}
+              {selected.refund && <span className="badge">refund</span>}
+              {selected.oneOff && <span className="badge">one-off</span>}
+            </div>
+            {refreshingSelected && <Notice role="status">Refreshing transaction…</Notice>}
+            {error && <Notice tone="error" role="alert">Error: {error}</Notice>}
+            {sourceError && <Notice tone="error" role="alert" remedy={
+              <Button type="button" variant="secondary" size="compact" onClick={() => setSourceLoadAttempt((value) => value + 1)}>Retry income sources</Button>
+            }>Couldn’t load income sources: {sourceError}</Notice>}
+            {notice && <Notice role="status">{notice}</Notice>}
 
             {/* outside the description gate below it: a rule needs a pattern to hang on
                 and an empty description is exactly the row no rule can ever reach */}
-            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--ink-grid)' }}>
-              <div className="switch-label">Category</div>
-              <div className="switch-hint">
+            <section className="transaction-detail__section" aria-labelledby="tx-category-label">
+              <h3 id="tx-category-label" className="transaction-detail__label">Category</h3>
+              <p className="transaction-detail__help">
                 This transaction only
                 {selected.categoryManual ? ' · set manually' : ' · auto-detected'}
-              </div>
+              </p>
               {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category === 'support' && (
-                <p className="hint" role="status" style={{ marginTop: 6 }}>
-                  Support counts as income, but not as earnings for income-based goals.
-                </p>
+                <Notice role="status">Support counts as income, but not as earnings for income-based goals.</Notice>
               )}
               <div className="chip-wrap">
                 {CATEGORIES.map((c) => (
-                  <button
+                  <Button
+                    type="button" variant="secondary" size="compact"
                     key={c}
-                    className="chip-cat"
+                    className="transaction-choice"
                     aria-label={`${categoryLabel(c)}, this transaction only`}
                     aria-pressed={c === selected.category}
-                    disabled={busy}
+                    aria-disabled={busy}
                     onClick={() => applyCategory(selected, c)}
                   >
                     <span className="dot" style={{ background: categoryColor(c) }} />
                     {categoryLabel(c)}
-                  </button>
+                  </Button>
                 ))}
               </div>
               {selected.categoryManual && (
-                <button
-                  className="btn-ghost transaction-secondary-button"
-                  disabled={busy}
-                  onClick={() => applyCategory(selected, null)}
-                >
+                <Button type="button" variant="tertiary" size="compact" className="transaction-secondary-button"
+                  aria-disabled={busy} onClick={() => applyCategory(selected, null)}>
                   Category: back to auto-detection
-                </button>
+                </Button>
               )}
-            </div>
+              {mutationFeedback('category')}
+            </section>
 
             {selected.description.trim() !== '' && (
-              <button
+              <Button
+                type="button" variant="secondary" size="touch"
                 ref={categoryButton}
-                className="btn-ghost transaction-rule-button"
-                disabled={busy || !CATEGORIES.includes(selected.category as Category)}
+                className="transaction-rule-button"
+                aria-disabled={busy || !CATEGORIES.includes(selected.category as Category)}
                 onClick={() => setRuleEditor('category')}
               >
                 Apply to similar transactions <span aria-hidden="true">›</span>
-              </button>
+              </Button>
             )}
 
             <div className="switch-row">
               <label className="row-main" htmlFor="tx-transfer">
-                <div className="switch-label">Transfer between own accounts</div>
+                <div className="transaction-detail__label">Transfer between own accounts</div>
               </label>
               <input
                 id="tx-transfer"
                 type="checkbox"
                 className="switch"
                 checked={selected.transfer}
-                disabled={busy}
-                onChange={(e) => applyTransfer(selected, e.target.checked)}
+                aria-disabled={busy}
+                onChange={(e) => { if (!busy) applyTransfer(selected, e.target.checked); }}
               />
             </div>
 
             {selected.description.trim() !== '' && (
-              <button
+              <Button
+                type="button" variant="secondary" size="touch"
                 ref={transferButton}
-                className="btn-ghost transaction-rule-button"
-                disabled={busy}
+                className="transaction-rule-button"
+                aria-disabled={busy}
                 onClick={() => setRuleEditor('transfer')}
               >
                 Manage transfer rules <span aria-hidden="true">›</span>
-              </button>
-            )}
-
-            {selected.amount < 0 && !selected.transfer && (
-              <div className="switch-row">
-                <label className="row-main" htmlFor="tx-oneoff">
-                  <div className="switch-label">One-off large purchase</div>
-                </label>
-                <input
-                  id="tx-oneoff"
-                  type="checkbox"
-                  className="switch"
-                  checked={selected.oneOff}
-                  disabled={busy}
-                  onChange={(e) => applyOneOff(selected, e.target.checked)}
-                />
-              </div>
-            )}
-
-            {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
-              <div
-                style={{
-                  marginTop: 20,
-                  paddingTop: 16,
-                  borderTop: '1px solid var(--ink-grid)',
-                }}
-              >
-                <div className="switch-label">Income source</div>
-                <div className="switch-hint">
-                  Support does not count toward earnings goals. Manage income sources in Settings.
-                  {selected.incomeSourceManual ? ' Set manually.' : ' Auto-detected.'}
-                </div>
-                <div className="chip-wrap">
-                  {(sources ?? []).map((o) => (
-                    <button
-                      key={o.id}
-                      className="chip"
-                      aria-pressed={selected.incomeSource === o.id}
-                      disabled={busy}
-                      onClick={() => applySource(selected, o.id)}
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-                {selected.incomeSourceManual && (
-                  <button
-                    className="btn-ghost transaction-secondary-button"
-                    disabled={busy}
-                    onClick={() => applySource(selected, null)}
-                  >
-                    Source: back to auto-detection
-                  </button>
-                )}
-              </div>
+              </Button>
             )}
 
             {selected.transferManual !== null && (
-              <button
-                className="btn-ghost transaction-secondary-button"
-                disabled={busy}
-                onClick={() => applyTransfer(selected, null)}
-              >
-                Back to auto-detection
-              </button>
+              <Button type="button" variant="tertiary" size="compact" className="transaction-secondary-button"
+                aria-disabled={busy} onClick={() => applyTransfer(selected, null)}>Back to auto-detection</Button>
+            )}
+            {mutationFeedback('transfer')}
+
+            {selected.amount < 0 && !selected.transfer && (
+              <>
+                <div className="switch-row">
+                  <label className="row-main" htmlFor="tx-oneoff">
+                    <div className="transaction-detail__label">One-off large purchase</div>
+                  </label>
+                  <input
+                    id="tx-oneoff"
+                    type="checkbox"
+                    className="switch"
+                    checked={selected.oneOff}
+                    aria-disabled={busy}
+                    onChange={(e) => { if (!busy) applyOneOff(selected, e.target.checked); }}
+                  />
+                </div>
+                {mutationFeedback('one-off')}
+              </>
             )}
 
-            <button
-              disabled={busy}
-              className="btn-ghost transaction-close-button"
-              onClick={editor.requestClose}
-            >
-              Close
-            </button>
+            {selected.amount > 0 && !selected.refund && !selected.transfer && selected.category !== 'support' && (
+              <section className="transaction-detail__section" aria-labelledby="tx-source-label">
+                <h3 id="tx-source-label" className="transaction-detail__label">Income source</h3>
+                <p className="transaction-detail__help">
+                  Support does not count toward earnings goals. Manage income sources in Settings.
+                  {selected.incomeSourceManual ? ' Set manually.' : ' Auto-detected.'}
+                </p>
+                {sources === null && !sourceError && <Notice role="status">Loading income sources…</Notice>}
+                <div className="chip-wrap">
+                  {(sources ?? []).map((o) => (
+                    <Button
+                      type="button" variant="secondary" size="compact"
+                      key={o.id}
+                      className="transaction-choice"
+                      aria-pressed={selected.incomeSource === o.id}
+                      aria-disabled={busy}
+                      onClick={() => applySource(selected, o.id)}
+                    >
+                      {o.label}
+                    </Button>
+                  ))}
+                </div>
+                {selected.incomeSourceManual && (
+                  <Button type="button" variant="tertiary" size="compact" className="transaction-secondary-button"
+                    aria-disabled={busy} onClick={() => applySource(selected, null)}>Source: back to auto-detection</Button>
+                )}
+                {mutationFeedback('income source')}
+              </section>
+            )}
           </>
         )}
       </Sheet>

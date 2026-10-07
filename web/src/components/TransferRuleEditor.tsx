@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtMoney } from '../format';
 import type { Transaction, TransferRulePreview } from '../types';
+import { Button } from './Button';
+import { FormActions } from './FormActions';
+import { Notice } from './Notice';
 
 interface Props {
   transaction: Transaction;
@@ -9,9 +12,10 @@ interface Props {
   onBack: () => void;
   onBusyChange: (busy: boolean) => void;
   onApplied: (transaction: Transaction, notice: string) => Promise<void>;
+  renderActions?: (actions: ReactNode) => ReactNode;
 }
 
-export function TransferRuleEditor({ transaction, accountName, onBack, onBusyChange, onApplied }: Props) {
+export function TransferRuleEditor({ transaction, accountName, onBack, onBusyChange, onApplied, renderActions }: Props) {
   const [preview, setPreview] = useState<TransferRulePreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,7 +44,7 @@ export function TransferRuleEditor({ transaction, accountName, onBack, onBusyCha
   }, [transaction.id, refresh]);
 
   const apply = async (remove: boolean) => {
-    if (!preview || saving) return;
+    if (!preview || saving || loading || needsRefresh || (!remove && preview.matches === 0)) return;
     setSaving(true);
     onBusyChange(true);
     setError(null);
@@ -67,58 +71,82 @@ export function TransferRuleEditor({ transaction, accountName, onBack, onBusyCha
     }
   };
 
-  return (
-    <div className="rule-preview">
-      <h2 className="sheet-title" tabIndex={-1} ref={heading}>Transfer rules</h2>
-      <p className="sheet-meta">{accountName} · All dates</p>
-      <p className="hint">The rule also applies to future matching transactions on this account.</p>
-      {loading && <p role="status">Loading matching transactions…</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-      {preview && (
+  const actions = (
+    <FormActions
+      className="rule-preview__actions"
+      back={
+        <Button type="button" variant="tertiary" size="touch" aria-disabled={saving} onClick={onBack}>
+          Back to transaction
+        </Button>
+      }
+      cancel={
         <>
-          <p className="rule-preview-count">
-            {preview.matches} {preview.matches === 1 ? 'transaction matches' : 'transactions match'}
-          </p>
-          {preview.manualOverrides > 0 && (
-            <p className="hint">
-              {preview.manualOverrides} manual transfer {preview.manualOverrides === 1 ? 'setting will' : 'settings will'} be replaced.
-            </p>
-          )}
-          {preview.activeRule && (
-            <p className="hint">
-              {preview.activeRule.matchMode === 'exact'
-                ? 'An existing rule applies only to identical descriptions.'
-                : 'A transfer rule is active for these similar descriptions.'}
-            </p>
-          )}
-          <ul className="rule-preview-list" aria-label="Matching transactions">
-            {preview.transactions.map((tx) => (
-              <li key={tx.id}>
-                <div className="rule-preview-row">
-                  <span>{tx.displayDescription ?? (tx.description || '(no description)')}</span>
-                  <strong>{fmtMoney(tx.amount, tx.currency)}</strong>
-                </div>
-                <div className="sheet-meta">
-                  {fmtDate(tx.date)}
-                  {tx.transferManual !== null && (
-                    <span> · {tx.transferManual ? 'Manually marked as transfer' : 'Manually marked as not a transfer'}</span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-          <button className="btn" disabled={saving || loading || needsRefresh || preview.matches === 0} onClick={() => apply(false)}>
-            {saving ? 'Saving…' : 'Apply transfer rule'}
-          </button>
-          {preview.activeRule && (
-            <button className="btn-ghost rule-remove-button" disabled={saving || loading || needsRefresh} onClick={() => apply(true)}>
-              Remove transfer rule
-            </button>
+          <Button type="button" variant="secondary" size="touch" pending={loading} aria-disabled={saving || loading}
+            onClick={() => { if (!saving && !loading) setRefresh((value) => value + 1); }}>Refresh preview</Button>
+          {preview?.activeRule && (
+            <Button type="button" variant="destructive-secondary" size="touch" aria-disabled={saving || loading || needsRefresh}
+              onClick={() => apply(true)}>Remove transfer rule</Button>
           )}
         </>
+      }
+      completion={preview && (
+        <Button type="button" variant="primary" size="touch" pending={saving}
+          aria-disabled={saving || loading || needsRefresh || preview.matches === 0}
+          onClick={() => apply(false)}>Apply transfer rule</Button>
       )}
-      {!loading && <button className="btn-ghost" disabled={saving} onClick={() => setRefresh((v) => v + 1)}>Refresh preview</button>}
-      <button className="btn-ghost" disabled={saving} onClick={onBack}>Back to transaction</button>
+    />
+  );
+
+  return (
+    <div className="rule-preview">
+      <div className="rule-preview__scope">
+        <h2 className="sheet-title" tabIndex={-1} ref={heading}>Transfer rules</h2>
+        <p className="sheet-meta">{accountName} · All dates</p>
+        <p className="hint">The rule also applies to future matching transactions on this account.</p>
+      </div>
+      <div className="rule-preview__evidence">
+        {loading && <Notice role="status">Loading matching transactions…</Notice>}
+        {preview && (
+          <>
+            <p className="rule-preview-count">
+              {preview.matches} {preview.matches === 1 ? 'transaction matches' : 'transactions match'}
+            </p>
+            {preview.manualOverrides > 0 && (
+              <p className="hint">
+                {preview.manualOverrides} manual transfer {preview.manualOverrides === 1 ? 'setting will' : 'settings will'} be replaced.
+              </p>
+            )}
+            <ul className="rule-preview-list" aria-label="Matching transactions">
+              {preview.transactions.map((tx) => (
+                <li key={tx.id}>
+                  <div className="rule-preview-row">
+                    <span>{tx.displayDescription ?? (tx.description || '(no description)')}</span>
+                    <strong>{fmtMoney(tx.amount, tx.currency)}</strong>
+                  </div>
+                  <div className="sheet-meta">
+                    {fmtDate(tx.date)}
+                    {tx.transferManual !== null && (
+                      <span> · {tx.transferManual ? 'Manually marked as transfer' : 'Manually marked as not a transfer'}</span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+      <div className="rule-preview__warnings">
+        {preview?.activeRule && (
+          <p className="hint">
+            {preview.activeRule.matchMode === 'exact'
+              ? 'An existing rule applies only to identical descriptions.'
+              : 'A transfer rule is active for these similar descriptions.'}
+          </p>
+        )}
+        {error && <Notice tone="error" role="alert" remedy={needsRefresh ? 'Refresh the preview before applying or removing a rule.' : undefined}>{error}</Notice>}
+        {saving && <Notice role="status">Saving transfer rule…</Notice>}
+      </div>
+      {renderActions ? renderActions(actions) : actions}
     </div>
   );
 }

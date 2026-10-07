@@ -552,8 +552,8 @@ describe('category rules with a preview', () => {
     const input = screen.getByRole('textbox', { name: 'Description contains' });
     input.focus();
     fireEvent.change(input, { target: { value: 'REWE' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
-    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -583,8 +583,8 @@ describe('category rules with a preview', () => {
     await openCategoryPreview();
     const pattern = screen.getByRole('textbox', { name: 'Description contains' });
     fireEvent.change(pattern, { target: { value: 'REWE' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
-    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.click(remove ? screen.getByRole('button', { name: 'Remove category rule' }) : applyCategoryRule());
     const error = await screen.findByRole('alert');
     expect(error).toHaveTextContent(writeSucceeds ? 'Could not refresh the transaction: transaction refresh failed' : 'rule write refused');
@@ -622,8 +622,8 @@ describe('category rules with a preview', () => {
     mount();
     await openCategoryPreview();
     fireEvent.change(screen.getByRole('textbox', { name: 'Description contains' }), { target: { value: 'REWE' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
-    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.click(applyCategoryRule());
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not refresh the transaction: transaction refresh failed');
     expect(screen.getByRole('alert')).toHaveTextContent('The rule sets Food');
@@ -681,7 +681,7 @@ describe('category rules with a preview', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'View rule: REWE → Food' }));
     expect(await screen.findByText('Active rule: Food.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Support' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply Support' })).not.toHaveAttribute('aria-disabled', 'true'));
     expect(within(screen.getByRole('dialog')).queryByRole('combobox')).toBeNull();
     expect(sent).toEqual([]);
     fireEvent.click(screen.getByRole('button', { name: 'Apply Support' }));
@@ -701,7 +701,7 @@ describe('category rules with a preview', () => {
     expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByText(/01.01.2025/)).toHaveTextContent('Old DKB');
     expect(screen.getByText('1 transaction keeps its manually assigned category.')).toBeInTheDocument();
-    expect(applyCategoryRule()).toBeEnabled();
+    expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true');
     expect(within(screen.getByRole('dialog')).queryByRole('combobox')).toBeNull();
     expect(sent).toEqual([]);
     fireEvent.click(applyCategoryRule());
@@ -720,10 +720,12 @@ describe('category rules with a preview', () => {
     mount();
     await openCategoryPreview();
     fireEvent.change(screen.getByLabelText('Description contains'), { target: { value: 'REWE' } });
-    expect(applyCategoryRule()).toBeDisabled();
+    expect(applyCategoryRule()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(applyCategoryRule());
+    expect(sent).toEqual([]);
     expect(screen.queryByRole('list')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
-    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
+    await waitFor(() => expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.click(applyCategoryRule());
     await screen.findByRole('dialog', { name: 'Transaction' });
     expect(sent).toEqual([{ pattern: 'REWE', category: 'food', previewToken: 'd'.repeat(64) }]);
@@ -753,9 +755,11 @@ describe('category rules with a preview', () => {
     await openCategoryPreview();
     fireEvent.click(applyCategoryRule());
     expect(await screen.findByRole('alert')).toHaveTextContent('Refresh the preview');
-    expect(applyCategoryRule()).toBeDisabled();
+    expect(applyCategoryRule()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(applyCategoryRule());
+    expect(requests().filter((request) => request === 'POST /api/category-rules')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
-    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    await waitFor(() => expect(applyCategoryRule()).not.toHaveAttribute('aria-disabled', 'true'));
     expect(applyCategoryRule()).toHaveTextContent('Apply Food');
   });
 
@@ -784,13 +788,19 @@ describe('category rules with a preview', () => {
     mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules': () => new Promise<Response>((resolve) => { release = resolve; }) });
     mount();
     await openCategoryPreview();
+    applyCategoryRule().focus();
+    expect(applyCategoryRule().closest('.sheet-footer')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Back to transaction' }).closest('.sheet-footer')).not.toBeNull();
     fireEvent.click(applyCategoryRule());
-    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    expect(applyCategoryRule()).toHaveFocus();
+    expect(applyCategoryRule()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(applyCategoryRule());
+    expect(screen.getByRole('status')).toHaveTextContent('Saving category rule…');
     expect(screen.getByLabelText('Description contains')).toHaveAttribute('readonly');
     expect(screen.getByLabelText('Description contains')).toBeEnabled();
     fireEvent.change(screen.getByLabelText('Description contains'), { target: { value: 'Must not change' } });
     expect(screen.getByLabelText('Description contains')).toHaveValue('REWE Berlin');
-    expect(screen.getByRole('button', { name: 'Back to transaction' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back to transaction' })).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('dialog', { name: 'Apply category' })).toBeInTheDocument();
     release(ok(ruleAnswer('REWE Berlin', 2, 1)));
@@ -879,7 +889,7 @@ describe('the transfer flag', () => {
 
     fireEvent.click(transferSwitch());
 
-    expect(await screen.findByText('transfer')).toBeInTheDocument();
+    expect(await screen.findAllByText('transfer')).toHaveLength(2);
     expect(transferSwitch()).toBeChecked();
     expect(sent).toEqual([{ transfer: true }]);
 
@@ -928,7 +938,7 @@ describe('the one-off mark', () => {
 
     fireEvent.click(oneOffSwitch());
 
-    expect(await screen.findByText('one-off')).toBeInTheDocument();
+    expect(await screen.findAllByText('one-off')).toHaveLength(2);
     expect(oneOffSwitch()).toBeChecked();
     expect(sent).toEqual([{ oneOff: true }]);
   });
@@ -947,7 +957,7 @@ describe('the one-off mark', () => {
     });
     mount();
     await openSheet('REWE Berlin');
-    expect(screen.getByText('one-off')).toBeInTheDocument();
+    expect(screen.getAllByText('one-off')).toHaveLength(2);
     expect(oneOffSwitch()).toBeChecked();
 
     fireEvent.click(oneOffSwitch());
@@ -1057,7 +1067,7 @@ describe('the income source', () => {
     await waitFor(() => expect(reads).toBe(2));
     expect(opener).not.toBeInTheDocument();
     await act(async () => { releaseRead(ok([updated])); });
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Close$/ })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Close$/ })).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(heading).toHaveFocus();
@@ -1360,10 +1370,12 @@ describe('the transfer rule', () => {
     await openPreview();
     fireEvent.click(applyRuleButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('Refresh the preview');
-    expect(applyRuleButton()).toBeDisabled();
+    expect(applyRuleButton()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(applyRuleButton());
+    expect(sent).toHaveLength(1);
     expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh preview' }));
-    await waitFor(() => expect(applyRuleButton()).toBeEnabled());
+    await waitFor(() => expect(applyRuleButton()).not.toHaveAttribute('aria-disabled', 'true'));
     fireEvent.click(applyRuleButton());
     expect(await screen.findByText('2 transactions marked as transfers.')).toBeInTheDocument();
     expect(sent[1]).toEqual({ txId: 'tx-1', matchMode: 'similar-v1', previewToken: 'b'.repeat(64) });
@@ -1393,8 +1405,11 @@ describe('the transfer rule', () => {
     mount();
     await openPreview();
     fireEvent.click(applyRuleButton());
-    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Back to transaction' })).toBeDisabled();
+    expect(applyRuleButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(applyRuleButton().closest('.sheet-footer')).not.toBeNull();
+    fireEvent.click(applyRuleButton());
+    expect(screen.getByRole('status')).toHaveTextContent('Saving transfer rule…');
+    expect(screen.getByRole('button', { name: 'Back to transaction' })).toHaveAttribute('aria-disabled', 'true');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     release(ok({ rule: RULE, matches: 2 }));
@@ -1451,6 +1466,38 @@ describe('transaction descriptions', () => {
 });
 
 describe('while a write is in flight', () => {
+  it.each([
+    { owner: 'category', route: 'category', role: 'button', name: 'Food, this transaction only', income: false },
+    { owner: 'transfer', route: 'transfer', role: 'checkbox', name: 'Transfer between own accounts', income: false },
+    { owner: 'one-off', route: 'one-off', role: 'checkbox', name: 'One-off large purchase', income: false },
+    { owner: 'income source', route: 'source', role: 'button', name: 'Salary', income: true },
+  ] as const)('keeps $owner focus and announces its pending/refusal without duplicate writes', async ({ owner, route, role, name, income }) => {
+    let release!: (response: Response) => void;
+    mockFetch({ ...TX_ROUTES,
+      'GET /api/transactions': () => ok([income ? { ...INCOME, id: 'tx-1' } : EXPENSE]),
+      'GET /api/income-sources': () => ok(SOURCES),
+      [`PATCH /api/transactions/tx-1/${route}`]: () => new Promise<Response>((resolve) => { release = resolve; }),
+    });
+    mount();
+    await openSheet(income ? INCOME.description : EXPENSE.description);
+    const control = await screen.findByRole(role, { name });
+    control.focus();
+    fireEvent.click(control);
+    expect(control).toHaveFocus();
+    expect(control).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent(`Saving ${owner}…`);
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(requests().filter((request) => request === `PATCH /api/transactions/tx-1/${route}`)).toHaveLength(1);
+    await act(async () => release(fail(503, { error: `${owner} write refused` })));
+    expect(await screen.findByRole('alert')).toHaveTextContent(`${owner} write refused`);
+    expect(screen.queryByText(`Saving ${owner}…`)).toBeNull();
+    expect(control).toHaveFocus();
+    expect(control).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('disables every switch and chip in the sheet, and frees them when it lands', async () => {
     let release: (r: Response) => void = () => {};
     mockFetch({
@@ -1466,18 +1513,21 @@ describe('while a write is in flight', () => {
 
     fireEvent.click(transferSwitch());
 
-    expect(transferSwitch()).toBeDisabled();
-    expect(ruleButton()).toBeDisabled();
-    expect(oneOffSwitch()).toBeDisabled();
-    expect(foodChip()).toBeDisabled();
+    expect(transferSwitch()).toHaveAttribute('aria-disabled', 'true');
+    expect(ruleButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(oneOffSwitch()).toHaveAttribute('aria-disabled', 'true');
+    expect(foodChip()).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(foodChip());
+    fireEvent.click(oneOffSwitch());
+    expect(requests().filter((request) => request.startsWith('PATCH'))).toHaveLength(1);
 
     // "not a transfer, by hand": the row keeps every switch it had
     release(ok({ ...EXPENSE, transfer: false, transferManual: false }));
 
-    await waitFor(() => expect(transferSwitch()).toBeEnabled());
-    expect(ruleButton()).toBeEnabled();
-    expect(oneOffSwitch()).toBeEnabled();
-    expect(foodChip()).toBeEnabled();
+    await waitFor(() => expect(transferSwitch()).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(ruleButton()).not.toHaveAttribute('aria-disabled', 'true');
+    expect(oneOffSwitch()).not.toHaveAttribute('aria-disabled', 'true');
+    expect(foodChip()).not.toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Back to auto-detection' })).toBeEnabled();
   });
 });

@@ -226,6 +226,17 @@ change keeps the detail open even if the transaction leaves the current category
 person can immediately apply that choice to similar transactions. Returning to a category that
 matches the filter restores the row. Group changes return to the detail and restore focus.
 
+Transactions retains compact whole-row activation rather than adding record actions. Context wraps
+before financial values shrink; long signed amounts may take an aligned line of their own. Income
+uses its independent financial role only for incoming rows that are neither refunds nor transfers;
+their labels remain visible alongside neutral figures. Filter reads clear the previous answer and
+announce waiting separately from refusal and genuine no-results. Immediate edits announce pending
+and refusal beside the responsible classification, without introducing a global Save or a draft.
+Conflicting controls stay focusable while locked and refuse activation, so the initiating control
+survives a refused write. Rule previews keep scope before evidence and exceptions, with explicit
+refresh guidance after refusal. Their actions occupy the shared Sheet footer, not another scrolling
+region; when space is insufficient the same frame returns them to its single scrolling flow.
+
 **The word for money somebody else gives you is written in more than one place, across both
 packages, and nothing holds the copies to each other.** In this package it is the `support` entry
 of `CATEGORY_LABELS`, which the picker, the category filter, the rule captions and the Transactions

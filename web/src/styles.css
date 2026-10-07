@@ -486,9 +486,9 @@ textarea {
 }
 
 .transaction-original {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   color: var(--ink-secondary);
-  font-size: 13px;
+  font-size: var(--text-helper);
   overflow-wrap: anywhere;
 }
 
@@ -504,7 +504,7 @@ textarea {
   content: ' −';
 }
 
-.transaction-rule-button {
+.transaction-rule-button.action-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -525,24 +525,110 @@ textarea {
   margin-top: 12px;
 }
 
-.transaction-close-button {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 20px;
+.transaction-detail__section {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--ink-grid);
 }
 
-.rule-remove-button {
-  color: var(--ink-bad);
+.transaction-detail__label {
+  margin: 0;
+  font-size: var(--text-label);
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
-.rule-preview .btn-ghost {
-  min-height: 44px;
+.transaction-detail__help {
+  margin-block: var(--space-2);
+  color: var(--ink-secondary);
+  font-size: var(--text-helper);
+  line-height: var(--leading-body);
+}
+
+.transaction-detail__amount {
+  width: max-content;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.transaction-detail__amount.transaction-value--income {
+  color: var(--ink-income);
+}
+
+.transaction-detail__flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.transaction-choice.action-button {
+  justify-content: flex-start;
+  text-align: left;
+  padding-inline: var(--space-3);
+}
+
+.transaction-choice.action-button[aria-pressed='true']:not([aria-disabled='true']) {
+  background: var(--ink-selected);
+  color: var(--ink-onSelected);
+  border-color: var(--ink-action);
+}
+
+.transactions-screen .switch-row {
+  gap: var(--space-3);
+}
+
+.transactions-screen .switch {
+  height: var(--control-touch);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--ink-controlBorder);
+  background: var(--ink-surface);
+}
+
+.transactions-screen .switch::after {
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--ink-secondary);
+  box-shadow: none;
+}
+
+.transactions-screen .switch:checked {
+  background: var(--ink-action);
+}
+
+.transactions-screen .switch:checked::after {
+  transform: translate(18px, -50%);
+  background: var(--ink-onAction);
+}
+
+.transactions-screen .switch[aria-disabled='true'] {
+  border-style: dashed;
+  cursor: default;
+  background: var(--ink-page);
 }
 
 .rule-preview-form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
+}
+
+.rule-preview__actions {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--ink-grid);
+}
+
+.rule-preview__actions.form-actions {
+  margin-top: var(--space-3);
+}
+
+.rule-preview__actions .form-actions__cancel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  justify-self: stretch;
 }
 
 .rule-preview-rules {
@@ -558,7 +644,21 @@ textarea {
 .rule-preview {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-4);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+.rule-preview :is(.sheet-meta, .hint) {
+  color: var(--ink-secondary);
+  font-size: var(--text-helper);
+}
+
+.rule-preview :is(.rule-preview__scope, .rule-preview__evidence, .rule-preview__warnings) {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .rule-preview .sheet-title,
@@ -579,19 +679,22 @@ textarea {
 
 .rule-preview-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 12px;
-  font-size: 14px;
+  gap: var(--space-2) var(--space-3);
+  font-size: var(--text-financial-row);
 }
 
 .rule-preview-row > span {
-  flex: 1;
+  flex: 1 1 12rem;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .rule-preview-row > strong {
   flex-shrink: 0;
+  margin-inline-start: auto;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
@@ -774,24 +877,6 @@ textarea {
 
 .transaction-record .transaction-value--income {
   color: var(--ink-income);
-}
-
-/* chip with a category dot inside */
-.chip-cat {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 16px;
-  border: 1px solid var(--ink-grid);
-  font-size: 13px;
-  color: var(--ink-primary);
-  background: var(--ink-surface);
-}
-
-.chip-cat[aria-pressed='true'] {
-  border-color: var(--ink-accent);
-  background: var(--ink-grid);
 }
 
 .chip-wrap {
