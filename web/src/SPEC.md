@@ -611,7 +611,10 @@ surface only until the read begins; a review or outcome replaces it, retaining t
 and destination beside the server's answer. A staged source changes through explicit discard, not
 through editable setup beside Confirm. Optional presets belong to preparation and retry. Parser
 refusals remain whole, accompanied by web-supported next steps rather than a promised mapping editor.
-Every available staged problem remains visible before confirmation. Its reader sentence precedes
+Every available staged problem remains visible before confirmation. A failed confirmation is an
+unverified outcome, not proof that nothing was written. The review retains its raw refusal and a
+non-pending exit for checking persisted history or transactions; it never synthesizes confirmed
+counts or claims that leaving discards the import. Its reader sentence precedes
 every figure because it qualifies what those figures mean; the balance pair, when present,
 is opening to closing, while its claim stays in the details because a continuous run cannot prove
 the statement is complete. Without a pair the metric is absent, and a reason is shown only when the

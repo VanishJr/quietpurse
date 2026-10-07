@@ -176,9 +176,9 @@ describe('the Import page foundation', () => {
     expect(context).toHaveTextContent('Filestatement.csvDestinationstatement');
     expect(screen.getByRole('button', { name: 'Confirm import' })).toHaveClass('action-button--primary');
     expect(screen.getByRole('button', { name: 'Discard' })).toHaveClass('action-button--secondary');
-    expect(screen.getByRole('button', { name: /Back to accounts/ })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: /Back to accounts/ })).toHaveAttribute('aria-disabled', 'false');
     expect(screen.queryByRole('button', { name: 'Start another import' })).not.toBeInTheDocument();
-    expect(screen.getByText('To change the source or destination, discard this review first.')).toBeInTheDocument();
+    expect(screen.getByText(/To change the source or destination, discard this review first/)).toBeInTheDocument();
   });
 });
 
@@ -1075,10 +1075,40 @@ describe('confirm', () => {
     // the control the sentence points at, still there and still pressable, on a card
     // the refused confirm left standing
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
-    expect(screen.getByText(/nothing imported yet/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /confirmation not verified/ })).toBeInTheDocument();
     // nothing landed, so nothing may tell the caller it did
     expect(onImported).not.toHaveBeenCalled();
     expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
+  });
+
+  it('can leave review when a committed confirmation response is lost and both retries refuse', async () => {
+    let committed = false;
+    mockFetch({
+      ...BASE,
+      'POST /api/imports': () => ok(summaryResult()),
+      'POST /api/imports/imp-1/confirm': () => {
+        if (committed) return fail(409, { error: 'this import has already been confirmed' });
+        committed = true;
+        return fail(500, { error: 'confirmation response lost after commit' });
+      },
+      'POST /api/imports/imp-1/discard': () => fail(409, { error: 'committed imports cannot be discarded' }),
+    });
+    const { container, onBack, onImported } = mount();
+    await upload(container);
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm import' }));
+    expect(await screen.findByRole('heading', { name: /confirmation not verified/ })).toBeInTheDocument();
+    expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
+    expect(screen.getByText(/It may have committed despite the error/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
+    await screen.findByText('this import has already been confirmed');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    await screen.findByText('committed imports cannot be discarded');
+    fireEvent.click(screen.getByRole('button', { name: /Back to accounts/ }));
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(onImported).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: /^Imported|^Discarded/ })).not.toBeInTheDocument();
+    expect(countOf('POST /api/imports/imp-1/confirm')).toBe(2);
+    expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
   });
 
   it('uses the confirm response for zero inserted rows, without success ink or clearing an empty new account', async () => {
@@ -1647,7 +1677,7 @@ describe('phase recovery and source preservation', () => {
     await act(async () => uploadAnswer(ok(summaryResult({ accountName: 'New bank' }))));
     expect(screen.getByRole('region', { name: 'Import review or result' })).toHaveTextContent('DestinationNew bank');
     fireEvent.click(screen.getByRole('button', { name: /Back to accounts/ }));
-    expect(onBack).not.toHaveBeenCalled();
+    expect(onBack).toHaveBeenCalledTimes(1);
     expect(onImported).not.toHaveBeenCalled();
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(0);
   });

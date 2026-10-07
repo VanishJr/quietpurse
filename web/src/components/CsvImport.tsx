@@ -156,6 +156,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [result, setResult] = useState<StatementImportResult | null>(null);
   /** what landed once the summary was accepted — the backend's counts, not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
+  const [confirmationUncertain, setConfirmationUncertain] = useState(false);
   const [discarded, setDiscarded] = useState(false);
   const id = useId();
   const busyAction = useRef<'reading' | 'confirming' | 'discarding' | null>(null);
@@ -215,6 +216,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    */
   const newInput = (): number => {
     setFileRows(null);
+    setConfirmationUncertain(false);
     setError(null);
     setResult(null);
     setConfirmed(null);
@@ -271,6 +273,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     try {
       setError(null);
       setConfirmed(null);
+      setConfirmationUncertain(false);
       setDiscarded(false);
       // a throw here is the whole of the create arm's refusal: nothing below runs, so
       // a refused create never becomes an upload
@@ -312,6 +315,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // created went in when it was created, and does not arrive here
       await loadAccounts();
     } catch (e) {
+      setConfirmationUncertain(true);
       setErrorArea('result');
       setError((e as Error).message);
     } finally {
@@ -368,6 +372,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const startAnother = () => {
     if (busyAction.current || (summary && !confirmed)) return;
     setupFocusRequested.current = true;
+    setConfirmationUncertain(false);
     setError(null);
     setResult(null);
     setConfirmed(null);
@@ -442,7 +447,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
         context="Bring in a CSV, Excel or PDF statement. Finto reads it on this device."
         returnAction={
           <Button type="button" variant="tertiary" size="compact"
-            aria-disabled={busy || (!!summary && !confirmed)} onClick={onBack}>
+            aria-disabled={busy} onClick={() => { if (!busyAction.current) onBack(); }}>
             ← Back to accounts
           </Button>
         }
@@ -647,7 +652,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             {summary && !confirmed && (
               <section className="card import-review" aria-labelledby={`${id}-review-heading`} aria-busy={busy}>
                 <h2 id={`${id}-review-heading`} className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
-                  Read {summary.accepted} of {summary.total} rows — nothing imported yet
+                  Read {summary.accepted} of {summary.total} rows — {confirmationUncertain ? 'confirmation not verified' : 'nothing imported yet'}
                 </h2>
                 <p className="import-review-reader">{readAsSentence(summary.readAs)}</p>
                 {sourceContext}
@@ -736,7 +741,15 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                     {summary.problems.map((p, i) => <p key={i}>{p}</p>)}
                   </Notice>
                 )}
-                <p className="import-help">To change the source or destination, discard this review first.</p>
+                {confirmationUncertain ? (
+                  <Notice tone="warning">
+                    The confirmation could not be verified. It may have committed despite the error.
+                    Back to accounts leaves this review without claiming a discard; check Import history
+                    or Transactions before trying again.
+                  </Notice>
+                ) : (
+                  <p className="import-help">To change the source or destination, discard this review first. Back to accounts leaves it waiting.</p>
+                )}
                 {busy && (
                   <Notice role="status" className="import-pending">
                     {busyAction.current === 'confirming'
