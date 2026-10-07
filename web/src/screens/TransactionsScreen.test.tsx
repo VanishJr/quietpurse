@@ -214,6 +214,16 @@ describe('the transactions list', () => {
 });
 
 describe('the window the screen asks for', () => {
+  it('keeps the full selected account scope readable outside the native selector', async () => {
+    const name = 'Synthetic account with a long name that cannot fit in a narrow native selector';
+    mockFetch({ ...TX_ROUTES, 'GET /api/accounts': () => ok([{ ...ACCOUNTS[0], name }]) });
+    mount();
+    await screen.findByRole('option', { name });
+    chooseFilter('Account', ACCOUNTS[0].id);
+    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveAccessibleDescription(name);
+    expect(document.querySelector('.transaction-filter .native-field__help')).toHaveTextContent(name);
+  });
+
   it('keeps the existing choices and sends each selected filter to the API', async () => {
     mockFetch(TX_ROUTES);
     mount();

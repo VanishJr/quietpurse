@@ -227,10 +227,14 @@ person can immediately apply that choice to similar transactions. Returning to a
 matches the filter restores the row. Group changes return to the detail and restore focus.
 
 Transactions retains compact whole-row activation rather than adding record actions. Context wraps
-before financial values shrink; long signed amounts may take an aligned line of their own. Income
+before financial values shrink; long signed amounts may take an aligned line of their own. If an
+unbroken value exceeds even that line under text enlargement, only the value scrolls horizontally
+rather than shrinking or separating its sign and currency. Income
 uses its independent financial role only for incoming rows that are neither refunds nor transfers;
 their labels remain visible alongside neutral figures. Filter reads clear the previous answer and
-announce waiting separately from refusal and genuine no-results. Immediate edits announce pending
+announce waiting separately from refusal and genuine no-results. A selected account's full name
+remains beside its native filter, rather than relying on the selector to fit its whole scope.
+Immediate edits announce pending
 and refusal beside the responsible classification, without introducing a global Save or a draft.
 Conflicting controls stay focusable while locked and refuse activation, so the initiating control
 survives a refused write. Rule previews keep scope before evidence and exceptions, with explicit
@@ -877,7 +881,9 @@ case the strip's paging effect follows.
 ## What the shared controls promise
 
 `Sheet` owns modal containment, reversible background inertness and scrolling while its screen
-is visible. Tab recovers even after the focused control disappears. Opening and deliberate step
+is visible. Tab recovers even after the focused control disappears. A browser-native scroll region
+without an explicit tabindex keeps its ordinary keyboard progression; it is not a programmatic
+orientation target merely because the control query does not list it. Opening and deliberate step
 changes enter the caller's target or heading; draft renders do not move the caret. The opener is
 captured before children can take focus. Restoration requires a usable surviving target, with a
 caller-supplied section or record fallback when the opener is gone. A noninteractive fallback

@@ -70,6 +70,22 @@ describe('a sheet on a hidden screen', () => {
 });
 
 describe('account menu keyboard navigation', () => {
+  it('leaves native scroll-region Tab progression to the browser without an explicit tabindex', () => {
+    render(<Sheet open onClose={() => {}} title="Native scrolling">
+      <div data-testid="native-scroll-region">A signed amount with its currency</div>
+      <button>Continue</button>
+    </Sheet>);
+    const scroller = screen.getByTestId('native-scroll-region');
+    expect(scroller).not.toHaveAttribute('tabindex');
+    const active = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(scroller);
+    try {
+      expect(fireEvent.keyDown(scroller, { key: 'Tab' })).toBe(true);
+      expect(fireEvent.keyDown(scroller, { key: 'Tab', shiftKey: true })).toBe(true);
+    } finally {
+      active.mockRestore();
+    }
+  });
+
   it('includes description disclosures and keeps focus inside after a preview heading is focused', () => {
     render(
       <Sheet open onClose={() => {}} title="Transaction">

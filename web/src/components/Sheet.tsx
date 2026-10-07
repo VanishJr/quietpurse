@@ -157,7 +157,10 @@ export function Sheet({
       const first = controls[0];
       const last = controls[controls.length - 1];
       const focused = document.activeElement;
-      const fromPanel = !controls.includes(focused as HTMLElement);
+      const fromPanel = !controls.includes(focused as HTMLElement) && (
+        !(focused instanceof HTMLElement) || focused === card || !card.contains(focused) ||
+        !isAvailable(focused) || (focused.hasAttribute('tabindex') && focused.tabIndex < 0)
+      );
       if (!first) {
         event.preventDefault();
         focus(card);
