@@ -8,11 +8,16 @@ interface EditorOptions {
   open: boolean;
   dirty: boolean;
   busy?: boolean;
+  /** False where `busy` is an immediate write or a read, which settles behind a hidden screen;
+   *  a pending save of the draft holds navigation until it lands. */
+  busyHoldsNavigation?: boolean;
   onClose: () => void;
   onNavigationDiscard?: () => void;
 }
 
-export function useEditorSession({ open, dirty, busy = false, onClose, onNavigationDiscard }: EditorOptions) {
+export function useEditorSession({
+  open, dirty, busy = false, busyHoldsNavigation = true, onClose, onNavigationDiscard,
+}: EditorOptions) {
   const shown = useContext(ScreenShown);
   const [guarding, setGuarding] = useState(false);
   const [untracked, setUntracked] = useState(false);
@@ -20,8 +25,8 @@ export function useEditorSession({ open, dirty, busy = false, onClose, onNavigat
   const returnFocus = useRef<HTMLElement | null>(null);
   const bypass = useRef(false);
   const resumed = useRef(false);
-  const current = useRef({ open, dirty, busy, shown, onClose, onNavigationDiscard });
-  current.current = { open, dirty, busy, shown, onClose, onNavigationDiscard };
+  const current = useRef({ open, dirty, busy, busyHoldsNavigation, shown, onClose, onNavigationDiscard });
+  current.current = { open, dirty, busy, busyHoldsNavigation, shown, onClose, onNavigationDiscard };
 
   const finish = (action: () => void) => {
     pending.current = null;
@@ -53,21 +58,21 @@ export function useEditorSession({ open, dirty, busy = false, onClose, onNavigat
   };
 
   useEffect(() => {
-    if (!open || !shown || (!dirty && !busy)) return;
+    if (!open || !shown || (!dirty && !(busy && busyHoldsNavigation))) return;
     const leaveDocument = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', leaveDocument);
     return () => window.removeEventListener('beforeunload', leaveDocument);
-  }, [open, shown, dirty, busy]);
+  }, [open, shown, dirty, busy, busyHoldsNavigation]);
 
   useLayoutEffect(() => {
     if (!open || !shown) return;
     return registerNavigationGuard((proceed, unknownEntry = false) => {
       const options = current.current;
       if (bypass.current || !options.open || !options.shown) return false;
-      if (options.busy) return true;
+      if (options.busy) return options.busyHoldsNavigation;
       if (!options.dirty) return false;
       const commit = () => proceed(current.current.onNavigationDiscard);
       if (pending.current) pending.current = commit;

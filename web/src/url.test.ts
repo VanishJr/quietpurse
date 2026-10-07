@@ -320,6 +320,47 @@ describe('setUrl', () => {
     expect(pushState).toHaveBeenCalledTimes(1);
   });
 
+  it('still runs an accepted side effect for the URL already shown, behind the guards', () => {
+    setUrl({ screen: 'transactions' });
+    vi.clearAllMocks();
+    let accept!: () => void;
+    const accepted = vi.fn();
+    const release = registerNavigationGuard((proceed) => { accept = proceed; return true; });
+    setUrl({ screen: 'transactions' }, 'push', accepted);
+    expect(accepted).not.toHaveBeenCalled();
+    accept();
+    expect(accepted).toHaveBeenCalledOnce();
+    expect(pushState).not.toHaveBeenCalled();
+    expect(replaceState).not.toHaveBeenCalled();
+    release();
+    setUrl({ screen: 'transactions' }, 'push', accepted);
+    expect(accepted).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an older guard when a newer one unregisters, and asks every guard in turn', () => {
+    const accepts: Array<() => void> = [];
+    const olderDiscard = vi.fn();
+    const newerDiscard = vi.fn();
+    const older = vi.fn((proceed: (onAccepted?: () => void) => void) => { accepts.push(() => proceed(olderDiscard)); return true; });
+    const newer = vi.fn((proceed: (onAccepted?: () => void) => void) => { accepts.push(() => proceed(newerDiscard)); return true; });
+    registerNavigationGuard(older);
+    const releaseNewer = registerNavigationGuard(newer);
+    setUrl({ screen: 'settings' });
+    expect(newer).toHaveBeenCalledOnce();
+    expect(older).not.toHaveBeenCalled();
+    accepts[0]();
+    expect(older).toHaveBeenCalledOnce();
+    expect(current().search).toBe('');
+    accepts[1]();
+    expect(current().search).toBe('?screen=settings');
+    expect(newerDiscard).toHaveBeenCalledOnce();
+    expect(olderDiscard).toHaveBeenCalledOnce();
+    releaseNewer();
+    setUrl({ screen: 'goal' });
+    expect(older).toHaveBeenCalledTimes(2);
+    expect(current().search).toBe('?screen=settings');
+  });
+
   it('a later write keeps what an earlier one set', () => {
     setUrl({ screen: 'overview' });
     setUrl({ account: 'acc-1' });
@@ -1105,7 +1146,7 @@ describe('displaced source writes', () => {
     release();
   });
 
-  it('reports indexed restoration and an accepted afterRestore write without disturbing publication', () => {
+  it('keeps an indexed restoration and its accepted afterRestore write quiet without disturbing publication', () => {
     at('/?screen=overview');
     const staged: Proceed[] = [];
     let blocked = false;
@@ -1117,19 +1158,19 @@ describe('displaced source writes', () => {
     const original = useUrl();
     go(-1);
     flushOne();
-    expect(useNavigationStatus()).toBe('displaced');
+    expect(useNavigationStatus()).toBe('ready');
     expect(useUrl()).toBe(original);
     const accepted = vi.fn();
     setUrl({ goal: 'saved' }, 'replace', accepted);
     staged[2]();
-    expect(useNavigationStatus()).toBe('waiting');
+    expect(useNavigationStatus()).toBe('ready');
     expect(accepted).not.toHaveBeenCalled();
     flush();
     expect(index).toBe(1);
     expect(useNavigationStatus()).toBe('ready');
     expect(accepted).toHaveBeenCalledOnce();
     expect(current().search).toContain('goal=saved');
-    expect(status.changed).toHaveBeenCalledTimes(3);
+    expect(status.changed).not.toHaveBeenCalled();
     release();
     status.release();
   });

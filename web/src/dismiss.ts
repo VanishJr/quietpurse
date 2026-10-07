@@ -35,6 +35,8 @@ export function useDismiss(
       if (!available()) return;
       if (!(event.target instanceof Element && inside(event.target))) onOutsidePress();
     };
+    // Capture phase, with a press `inside` claims let through: that is what keeps a popover's
+    // own toggle a toggle, since otherwise the press closes it and the following click reopens it.
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPointer, true);
     return () => {

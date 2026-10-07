@@ -450,6 +450,8 @@ the primitive for exactly this — the URL is the store and every reader subscri
 also what stopped the readers being wired to each other, since a fact none of them owns is read
 from one place.
 
+`read` answers an unchanged address with the very object it answered last, because
+`useSyncExternalStore` compares snapshots by identity and a fresh object per read re-renders forever.
 Snapshot identity follows the full published address, including path and fragment, even though
 `AppUrl` exposes only the owned query values. Native hash navigation must refresh the real link
 destinations without resetting a draft whose keys are unchanged. The publication seam observes
@@ -501,8 +503,10 @@ preview freshness: reading an edited preview does not commit that text or clear 
 A successful rule mutation establishes the new opening pattern immediately; a failed follow-up
 transaction read remains a refresh error, not unsaved work that Discard could undo.
 Discarding a navigation closes or resets the abandoned local editor without rewriting the history
-entry being left; merely hiding a pristine editor retains its established screen lifetime. Pending non-cancellable writes lock dismissal; confirmed and optimistic
-completion retain their existing owners and bypass only their own leave guard.
+entry being left; merely hiding a pristine editor retains its established screen lifetime.
+Pending non-cancellable writes lock dismissal. A pending save of the draft also holds navigation
+until it lands; an immediate transaction write or a read does not, and settles behind the hidden
+screen instead. Confirmed and optimistic completion retain their existing owners and bypass only their own leave guard.
 
 `registerNavigationGuard` stages app navigation before history writes or accepted side effects.
 The published location is frozen during a blocked traversal, so an unrelated render cannot reset
@@ -510,10 +514,18 @@ an active editor from the address bar's new location. Managed entries carry name
 `__fintoNavigation` position metadata alongside foreign state. Opaque state remains untouched;
 a native browser entry index supplies its traversal offset where available. Cancellation returns
 to the original indexed entry, and acceptance replays the destination without pushing a duplicate
-or deleting Forward destinations. Derived replacements retain their history role.
+or deleting Forward destinations. Derived replacements retain their history role: `replace` is for
+a value the app derived rather than one the reader chose, and it leaves no entry, or Back would land
+on the address the app was about to correct and correct it again. Every open editor's guard is
+asked, newest first, and one that accepts hands the navigation to the older ones, so closing one
+editor never leaves another's draft unguarded. An address equal to the published one is not a
+navigation, but the caller's acceptance still runs behind the guards unless a traversal is
+unresolved.
 
 An entry whose offset neither managed state nor the browser identifies is not compensated by a
-guessed traversal. The draft and published location remain until explicit acceptance, while the
+guessed traversal, and only such an entry is reported as unverified: a restore or replay whose
+offset is known is already on its way back, and announcing it would flash a warning that is false
+by the next frame. The draft and published location remain until explicit acceptance, while the
 address bar follows the browser's existing entry. Keep editing leaves a visible explanation of
 that mismatch. An accepted app URL write waits at the source-entry boundary rather than replacing
 the browser's displaced entry; its original push or replace role and callbacks are retained until

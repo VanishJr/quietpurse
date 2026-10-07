@@ -144,7 +144,7 @@ export function TransactionsScreen({
 
   const busy = saving || refreshingSelected;
   const editor = useEditorSession({
-    open: selected !== null, dirty: ruleEditor === 'category' && ruleDirty, busy,
+    open: selected !== null, dirty: ruleEditor === 'category' && ruleDirty, busy, busyHoldsNavigation: false,
     onClose: () => setSelected(null), onNavigationDiscard: () => setRuleEditor(null),
   });
 

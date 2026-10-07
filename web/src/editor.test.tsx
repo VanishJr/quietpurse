@@ -6,12 +6,14 @@ import { useEditorSession } from './editor';
 import { setUrl, useUrl } from './url';
 import { ScreenShown } from './screen';
 
-function Editor({ busy = false, onClosed = () => {}, onDiscarded }: { busy?: boolean; onClosed?: () => void; onDiscarded?: () => void }) {
+function Editor({ busy = false, busyHoldsNavigation, onClosed = () => {}, onDiscarded }: {
+  busy?: boolean; busyHoldsNavigation?: boolean; onClosed?: () => void; onDiscarded?: () => void;
+}) {
   const [open, setOpen] = useState(true);
   const [name, setName] = useState('Salary');
   const url = useUrl();
   const session = useEditorSession({
-    open, dirty: name !== 'Salary', busy, onClose: () => { onClosed(); setOpen(false); },
+    open, dirty: name !== 'Salary', busy, busyHoldsNavigation, onClose: () => { onClosed(); setOpen(false); },
     onNavigationDiscard: () => { setName('Salary'); onDiscarded?.(); },
   });
   return <><p data-testid="place">{url.screen ?? 'overview'}</p>
@@ -150,6 +152,22 @@ describe('meaningful editor dismissal', () => {
     rerender(<Editor onClosed={closed} />);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+  });
+
+  it('lets an immediate write lock dismissal without holding navigation or reload', () => {
+    const closed = vi.fn();
+    const discarded = vi.fn();
+    render(<Editor busy busyHoldsNavigation={false} onClosed={closed} onDiscarded={discarded} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(closed).not.toHaveBeenCalled();
+    const leave = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leave);
+    expect(leave.defaultPrevented).toBe(false);
+    act(() => setUrl({ screen: 'goals' }));
+    expect(window.location.search).toContain('screen=goals');
+    expect(discarded).not.toHaveBeenCalled();
+    expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
   });
 
   it('lets confirmed success close without a discard prompt and hidden sessions do not block navigation', () => {

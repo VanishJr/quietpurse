@@ -39,7 +39,7 @@ let published: Entry | null = null;
 let cachedUrl: string | null = null;
 let observedBrowserUrl: string | null = null;
 let cached: AppUrl = EMPTY;
-let guard: { handler: Guard } | null = null;
+const guards: { handler: Guard }[] = [];
 let traversal: Traversal | null = null;
 let listening = false;
 let request = 0;
@@ -104,8 +104,9 @@ function sameEntry(a: Entry, b: Entry): boolean {
 }
 
 function updateNavigationStatus(): void {
-  const displaced = traversal && traversal.phase !== 'staged' &&
-    !sameEntry(currentEntry(), traversal.origin);
+  // A restore or replay whose offset is known is already on its way back; only an entry nothing
+  // can locate leaves the reader somewhere unverified.
+  const displaced = traversal?.phase === 'unknown' && !sameEntry(currentEntry(), traversal.origin);
   const next = displaced ? (traversal?.afterRestore ? 'waiting' : 'displaced') : 'ready';
   if (next === navigationStatus) return;
   navigationStatus = next;
@@ -143,7 +144,7 @@ function start(): void {
 }
 
 function stop(): void {
-  if (listeners.size || statusListeners.size || guard) return;
+  if (listeners.size || statusListeners.size || guards.length) return;
   if (traversal?.phase === 'staged' && !traversal.afterRestore) traversal = null;
   if (!listening || traversal) return;
   window.removeEventListener('popstate', onPopState);
@@ -174,9 +175,10 @@ function subscribeStatus(onChange: () => void): () => void {
 export function registerNavigationGuard(handler: Guard): () => void {
   start();
   const registration = { handler };
-  guard = registration;
+  guards.push(registration);
   return () => {
-    if (guard === registration) guard = null;
+    const index = guards.indexOf(registration);
+    if (index >= 0) guards.splice(index, 1);
     stop();
   };
 }
@@ -187,22 +189,37 @@ function attempt(run: (isCurrent: () => boolean, onAccepted?: () => void) => voi
     traversal.afterRestore = undefined;
     updateNavigationStatus();
   }
-  let checking = true;
-  let accepted = false;
+  const isCurrent = () => id === request;
+  const effects: (() => void)[] = [];
+  const remaining = [...guards].reverse();
   let finished = false;
-  let acceptanceEffect: (() => void) | undefined;
-  const proceed: Proceed = (onAccepted) => {
-    if (finished || id !== request) return;
-    if (onAccepted) acceptanceEffect = onAccepted;
-    accepted = true;
-    if (checking) return;
+  const finish = () => {
+    if (finished || !isCurrent()) return;
     finished = true;
-    run(() => id === request, acceptanceEffect);
+    run(isCurrent, effects.length ? () => { for (const effect of effects) effect(); } : undefined);
   };
-  const blocked = guard?.handler(proceed, untracked) ?? false;
-  checking = false;
-  if (!blocked || accepted) proceed();
-  return blocked && !accepted;
+  // Every open editor answers, newest first: one that accepts after its own prompt hands the
+  // navigation to the older ones rather than letting it through past their drafts.
+  const consult = (): boolean => {
+    while (remaining.length) {
+      const registration = remaining.shift()!;
+      if (!guards.includes(registration)) continue;
+      let checking = true;
+      let accepted = false;
+      const blocked = registration.handler((onAccepted) => {
+        if (accepted || finished || !isCurrent()) return;
+        accepted = true;
+        if (onAccepted) effects.push(onAccepted);
+        if (!checking && !consult()) finish();
+      }, untracked);
+      checking = false;
+      if (blocked && !accepted) return true;
+    }
+    return false;
+  };
+  const blocked = consult();
+  if (!blocked) finish();
+  return blocked;
 }
 
 function replay(pending: Traversal): void {
@@ -281,7 +298,7 @@ function handlePopState(): void {
       return;
     }
     // Equal URLs and opaque state are not proof of returning to the same entry.
-    if (destination.url === pending.origin.url && !guard) return;
+    if (destination.url === pending.origin.url && !guards.length) return;
   }
   const origin = published ?? destination;
   const hadBarrier = traversal !== null;
@@ -334,7 +351,14 @@ export function urlFor(patch: Partial<AppUrl>): string {
 export function setUrl(patch: Partial<AppUrl>, mode: 'push' | 'replace' = 'push', onAccepted?: () => void): void {
   const next = { ...read(), ...patch };
   const url = urlFor(patch);
-  if (url === (listening && published ? published.url : href())) return;
+  // A click on the section already showing is not a navigation. Without this it is a history
+  // entry identical to the one under it, and Back then has to be pressed once per click. The
+  // caller's acceptance still runs behind the guards, except while a traversal is unresolved:
+  // a new attempt there would supersede the write waiting on it.
+  if (url === (listening && published ? published.url : href())) {
+    if (onAccepted && !traversal) attempt((_, acceptanceEffect) => { acceptanceEffect?.(); onAccepted(); });
+    return;
+  }
   const write = (beforePublish?: () => void) => {
     traversal = null;
     const entry = managed(currentEntry());
@@ -361,6 +385,8 @@ export function setUrl(patch: Partial<AppUrl>, mode: 'push' | 'replace' = 'push'
   updateNavigationStatus();
 }
 
+// No `getServerSnapshot`: this app never renders on a server, and passing `read` as one would
+// claim that `window.location` is readable there.
 export function useUrl(): AppUrl {
   return useSyncExternalStore(subscribe, read);
 }
