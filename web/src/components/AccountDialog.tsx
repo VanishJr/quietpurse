@@ -7,7 +7,7 @@
  * and deleting an account are different things and have to read differently — and a
  * popover has nowhere to put a paragraph.
  */
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { Account, AccountDeleted } from '../types';
 import { useEditorSession } from '../editor';
@@ -103,6 +103,7 @@ export function AccountDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   /** The delete preview could not be read, so nothing may be said about what goes. */
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   const editor = useEditorSession({
     open: true,
     dirty: (kind === 'add' || kind === 'rename') && name.trim() !== (kind === 'rename' ? account?.name ?? '' : '').trim(),
@@ -233,6 +234,11 @@ export function AccountDialog({
     <Sheet open onClose={editor.requestClose} guard={editor.guard} position="bottom" title={title}
       pattern={kind === 'add' || kind === 'rename' ? 'short-editor' : 'confirmation'}
       stepKey={kind} busy={busy}
+      // Not the delete confirmation's field: it mounts when the preview's reads come back, and
+      // focus jumping there seconds later throws the reader off the counts they are reading.
+      // On a coarse pointer the title leads, so opening does not raise a keyboard over the form.
+      initialFocus={() => (kind === 'add' || kind === 'rename') &&
+        !window.matchMedia('(pointer: coarse)').matches ? nameRef.current : null}
       restoreFocus={restoreFocus}
     >
       {kind === 'add' && (
@@ -247,6 +253,7 @@ export function AccountDialog({
           </label>
           <input
             id="acct-new-name"
+            ref={nameRef}
             className="input"
             value={name}
             readOnly={busy}
@@ -320,6 +327,7 @@ export function AccountDialog({
               to something a tab can hold */}
           <input
             id="acct-name"
+            ref={nameRef}
             className="input"
             value={name}
             readOnly={busy}

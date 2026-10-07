@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { APP_SETTINGS, ACCOUNTS, SUMMARY } from '../test/fixtures';
 import { mockFetch, ok, renderThemed } from '../test/harness';
 import { AccountDialog } from './AccountDialog';
@@ -8,7 +8,10 @@ import { ChartWizard } from './ChartWizard';
 import { GoalEditor } from './GoalEditor';
 
 describe('modal callers supply deliberate focus transitions', () => {
-  it('returns New account to its actual initiating action without autofocus stealing the opener', () => {
+  it.each([false, true])('enters New account at its name field, or its title on a coarse pointer (%s), and returns to the opener', (coarse) => {
+    const matchMedia = window.matchMedia;
+    onTestFinished(() => { window.matchMedia = matchMedia; });
+    window.matchMedia = (query: string) => ({ ...matchMedia(query), matches: coarse && query === '(pointer: coarse)' });
     function AccountFlow() {
       const [open, setOpen] = useState(false);
       return <><button onClick={() => setOpen(true)}>Add account</button>{open && <AccountDialog
@@ -21,7 +24,8 @@ describe('modal callers supply deliberate focus transitions', () => {
     const opener = screen.getByRole('button', { name: 'Add account' });
     opener.focus();
     fireEvent.click(opener);
-    expect(screen.getByRole('heading', { name: 'New account' })).toHaveFocus();
+    if (coarse) expect(screen.getByRole('heading', { name: 'New account' })).toHaveFocus();
+    else expect(screen.getByRole('textbox', { name: 'Name' })).toHaveFocus();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(opener).toHaveFocus();
     expect(document.body.style.overflow).toBe('');
