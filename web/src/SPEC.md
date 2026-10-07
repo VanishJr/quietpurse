@@ -1,7 +1,7 @@
 ---
 id: module-web
 type: module-design
-status: draft
+status: active
 title: web — the client's requests, month arithmetic, sentences and entry point
 parent: architecture
 ---
@@ -546,7 +546,7 @@ Sheet repeats it inside the active modal while that screen surface is inert. If 
 exposes no usable source identity, automatic return cannot be promised;
 the interface does not guess a traversal or overwrite a foreign entry to fake completion.
 Full-document departure uses the browser's native unsaved-work prompt while an active session is
-dirty or pending, not browser storage or a recovery promise.
+dirty or its pending save holds navigation, not browser storage or a recovery promise.
 Inactive editors impose neither navigation nor document-departure guards. A committed write's
 follow-up refresh retains focus-recovery intent until a replacement list arrives; Retry moves to
 stable orientation before removing its own control.
@@ -850,8 +850,8 @@ captured before children can take focus. Restoration requires a usable surviving
 caller-supplied section or record fallback when the opener is gone. A noninteractive fallback
 receives programmatic focus without joining the Tab sequence, even on direct entry before Shell
 has oriented the screen. Native focusable record controls keep their existing Tab position.
-Income-source refresh retains
-its own asynchronous fallback rather than competing with generic restoration.
+Income-source refresh retains its own asynchronous fallback rather than competing with generic
+restoration.
 
 Long editors and builders ignore the backdrop; a pristine short editor or confirmation may request
 close only from a press that began on the backdrop. Escape and the named close control request the
