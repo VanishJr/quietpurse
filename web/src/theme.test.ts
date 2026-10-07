@@ -69,6 +69,21 @@ it('uses income for income plots without repurposing legacy financial ink', () =
   expect(darkInk.good).toBe('#c7e89a');
 });
 
+it('gives native and focus-retaining disabled actions a readable neutral pair and visible boundary', () => {
+  const css = source('styles.css');
+  const disabled = css.match(/\.action-button\.action-button:disabled,\s*\.action-button\.action-button\[aria-disabled='true'\]\s*\{([^}]*)\}/)?.[1];
+  expect(disabled).toBeDefined();
+  expect(disabled).toContain('background: var(--ink-page)');
+  expect(disabled).toContain('color: var(--ink-secondary)');
+  expect(disabled).toContain('border-color: var(--ink-controlBorder)');
+  expect(disabled).toContain('border-style: dashed');
+  expect(disabled).toContain('opacity: 1');
+  for (const [, ink] of palettes) {
+    expect(contrast(ink.secondary, ink.page)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(ink.controlBorder, ink.page)).toBeGreaterThanOrEqual(3);
+  }
+});
+
 it('gives each added palette role a live stylesheet reader', () => {
   const css = source('styles.css');
   const roles = [

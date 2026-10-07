@@ -711,8 +711,10 @@ separate radius from ordinary cards. Focus is visible on the actual ground; redu
 does not depend on transitions to establish the final state.
 
 `Button` owns native action presentation with explicit type, variant and size. Foreground and ground
-are a pair; legacy action classes do not choose either for a migrated button. Pending and
-focus-retaining locked actions refuse activation without substituting a different label.
+are a pair; legacy action classes do not choose either for a migrated button. Native disabled and
+focus-retaining locked actions use a readable neutral pair and a visible dashed boundary rather
+than relying on the cursor or faded text. Pending keeps that locked treatment and adds its own
+indicator without changing the action's label or dimensions. Locked actions refuse activation.
 The legacy filled `btn btn-danger` combination shares `btn-destroy`'s complete danger pair and
 interaction states until consumer migration retires those classes; a standalone `btn-danger`
 remains a lower-emphasis text action rather than acquiring the filled confirmation treatment.

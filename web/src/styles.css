@@ -3401,6 +3401,9 @@ details > summary::marker {
 
 .action-button.action-button:disabled,
 .action-button.action-button[aria-disabled='true'] {
+  background: var(--ink-page);
+  color: var(--ink-secondary);
+  border-color: var(--ink-controlBorder);
   opacity: 1;
   cursor: default;
   border-style: dashed;
