@@ -100,6 +100,47 @@ const ruleAnswer = (pattern: string, matches: number, overridden: number) => ({
 });
 
 describe('the transactions list', () => {
+  it('announces initial and filtered loads without showing old rows or claiming empty data', async () => {
+    let resolve!: (response: Response) => void;
+    mockFetch({ ...TX_ROUTES, 'GET /api/transactions': () => new Promise<Response>((done) => { resolve = done; }) });
+    mount();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading transactions…');
+    expect(screen.queryByText(EMPTY)).toBeNull();
+    await act(async () => resolve(ok(ROWS)));
+    await screen.findByText('REWE Berlin');
+    expect(screen.queryByText('Loading transactions…')).toBeNull();
+    chooseFilter('Category', 'food');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading transactions…');
+    expect(titles()).toEqual([]);
+    expect(screen.queryByText(EMPTY)).toBeNull();
+    await act(async () => resolve(fail(503, { error: 'Filtered read refused' })));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Filtered read refused');
+    expect(screen.queryByText('Loading transactions…')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry transactions' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Loading transactions…');
+    await act(async () => resolve(ok([])));
+    expect(await screen.findByText(EMPTY)).toBeInTheDocument();
+  });
+
+  it('keeps signed refunds and transfers neutral while identifying ordinary income independently', async () => {
+    mockFetch({ ...TX_ROUTES, 'GET /api/transactions': () => ok([
+      row({ id: 'income', description: 'Pay', amount: 1250 }),
+      row({ id: 'refund', description: 'Returned purchase', amount: 42.5, refund: true }),
+      row({ id: 'transfer', description: 'Own transfer', amount: 200, transfer: true }),
+    ]) });
+    mount();
+    const income = await screen.findByRole('button', { name: /Pay/ });
+    const refund = screen.getByRole('button', { name: /Returned purchase/ });
+    const transfer = screen.getByRole('button', { name: /Own transfer/ });
+    expect(income.querySelector('.row-value')).toHaveClass('transaction-value--income');
+    expect(refund.querySelector('.row-value')).not.toHaveClass('transaction-value--income');
+    expect(transfer.querySelector('.row-value')).not.toHaveClass('transaction-value--income');
+    expect(refund).toHaveTextContent('refund');
+    expect(refund).toHaveTextContent('+42.50 EUR');
+    expect(transfer).toHaveTextContent('transfer');
+    expect(transfer).toHaveTextContent('+200 EUR');
+  });
+
   it('renders the rows it was given', async () => {
     // the mirror: without it the two below would both pass against a screen that
     // renders nothing at all
@@ -1009,7 +1050,7 @@ describe('the income source', () => {
     renderThemed(<div className="screen"><TransactionsScreen /></div>);
     const heading = screen.getByRole('heading', { name: 'Transactions' });
     const opener = (await screen.findByText('ZZ Income')).closest<HTMLButtonElement>('button')!;
-    expect(heading).not.toHaveAttribute('tabindex');
+    expect(heading).toHaveAttribute('tabindex', '-1');
     opener.focus();
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
@@ -1272,7 +1313,7 @@ describe('the transfer rule', () => {
     // the copy the sheet carried went with it; the one that outlives it is the list's,
     // in the live region above the rows
     const caption = screen.getByText('2 transactions marked as transfers.');
-    expect(caption.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(caption.closest('[role="status"]')).not.toBeNull();
   });
 
   it('deletes the server-identified rule and preserves independent transfer detection', async () => {

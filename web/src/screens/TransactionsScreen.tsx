@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useEditorSession } from '../editor';
 import { CATEGORIES, Category, categoryLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
+import { Button } from '../components/Button';
+import { Field } from '../components/Field';
+import { Notice } from '../components/Notice';
+import { PageHeader } from '../components/PageHeader';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
 import { CategoryRuleEditor } from '../components/CategoryRuleEditor';
 import { fmtDate, fmtMoney, isoDay } from '../format';
@@ -45,17 +49,13 @@ function TransactionFilter({
   selected: string;
   onSelect: (key: string) => void;
 }) {
+  const id = useId();
   return (
-    <label className="transaction-filter">
-      <span>{label}</span>
-      <select value={selected} onChange={(event) => onSelect(event.target.value)}>
-        {options.map((option) => (
-          <option key={option.key} value={option.key}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <Field id={id} label={label} control="select" className="transaction-filter" controlProps={{
+      value: selected,
+      onChange: (event) => onSelect(event.target.value),
+      children: options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>),
+    }} />
   );
 }
 
@@ -313,8 +313,8 @@ export function TransactionsScreen({
   };
 
   return (
-    <div className="screen-inner">
-      <h1 className="title">Transactions</h1>
+    <div className="screen-inner page-wide transactions-screen">
+      <PageHeader title="Transactions" />
       <div className="transaction-filters">
         <TransactionFilter
           label="Period"
@@ -326,8 +326,10 @@ export function TransactionsScreen({
         <TransactionFilter label="Category" options={categoryOptions} selected={category} onSelect={setCategory} />
       </div>
 
-      <div aria-live="polite">
-        {!selected && error && <p className="error">Error: {error}</p>}
+      <div>
+        {!selected && error && <Notice tone="error" role="alert" remedy={
+          <Button type="button" variant="secondary" size="compact" onClick={load}>Retry transactions</Button>
+        }>Error: {error}</Notice>}
         {!selected && sourceError && (
           <p className="error" role="alert">
             Couldn’t load income sources: {sourceError}{' '}
@@ -340,8 +342,9 @@ export function TransactionsScreen({
             </button>
           </p>
         )}
-        {!selected && notice && <p className="hint">{notice}</p>}
+        {!selected && notice && <Notice role="status">{notice}</Notice>}
       </div>
+      {txs === null && !error && <Notice placement="content" role="status">Loading transactions…</Notice>}
 
       {txs?.map((item) => {
         // hidden while the Account filter already states the answer; undefined while the
@@ -352,8 +355,8 @@ export function TransactionsScreen({
         return (
           <button
             key={item.id}
-            className="row"
-            style={{ gap: 10 }}
+            type="button"
+            className="row transaction-record"
             onClick={() => {
               setRuleEditor(null);
               setNotice(null);
@@ -366,10 +369,7 @@ export function TransactionsScreen({
               <span className={`row-title${item.transfer ? ' muted-strike' : ''}`}>
                 {item.displayDescription ?? (item.description || '(no description)')}
               </span>
-              <span
-                className="row-sub"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
-              >
+              <span className="row-sub transaction-record__context">
                 <span>
                   {fmtDate(item.date)} · {categoryLabel(item.category)}
                   {account ? ` · ${account}` : ''}
@@ -383,8 +383,7 @@ export function TransactionsScreen({
               </span>
             </span>
             <span
-              className={`row-value${item.transfer ? ' muted-strike' : ''}`}
-              style={{ fontSize: 14, color: item.amount > 0 ? 'var(--ink-good)' : undefined }}
+              className={`row-value${item.transfer ? ' muted-strike' : ''}${item.amount > 0 && !item.refund && !item.transfer ? ' transaction-value--income' : ''}`}
             >
               {item.amount > 0 ? '+' : ''}
               {fmtMoney(item.amount, item.currency)}
@@ -394,7 +393,7 @@ export function TransactionsScreen({
       })}
 
       {txs !== null && txs.length === 0 && (
-        <p className="empty">No transactions in the selected period.</p>
+        <Notice placement="content">No transactions in the selected period.</Notice>
       )}
 
       <Sheet

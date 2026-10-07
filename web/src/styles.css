@@ -719,46 +719,61 @@ textarea {
 
 .transaction-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
-  gap: 8px;
-  max-width: 680px;
-  margin: 8px 0 12px;
-}
-
-.transaction-filter {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  color: var(--ink-muted);
-  font-size: 11px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3);
+  max-width: var(--page-normal);
+  margin-block: var(--space-6);
 }
 
 .transaction-filter select {
-  width: 100%;
-  min-width: 0;
-  padding: 9px 10px;
-  overflow: hidden;
-  border: 1px solid var(--ink-grid);
-  border-radius: var(--r-sm);
-  background: var(--ink-surface);
-  color: var(--ink-primary);
-  font: inherit;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   cursor: pointer;
 }
 
-@media (max-width: 599px) {
-  .transaction-filters {
-    gap: 6px;
-  }
+.transaction-record {
+  flex-wrap: wrap;
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
+  padding-block: var(--space-3);
+  border-radius: var(--r-xs);
+}
 
-  .transaction-filter select {
-    padding: 8px 4px;
-    font-size: 12px;
-  }
+.transaction-record:hover {
+  background: var(--ink-surface);
+}
+
+.transaction-record > .dot {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+}
+
+.transaction-record .row-main {
+  flex: 1 1 12rem;
+}
+
+.transaction-record .row-title {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--text-financial-row);
+}
+
+.transaction-record__context {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  flex-wrap: wrap;
+  color: var(--ink-secondary);
+  overflow-wrap: anywhere;
+}
+
+.transaction-record .row-value {
+  margin-inline-start: auto;
+  font-size: var(--text-financial-row);
+  color: var(--ink-primary);
+}
+
+.transaction-record .transaction-value--income {
+  color: var(--ink-income);
 }
 
 /* chip with a category dot inside */
