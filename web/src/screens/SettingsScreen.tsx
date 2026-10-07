@@ -230,7 +230,7 @@ export function SettingsScreen({
   if (historyOpen) {
     return (
       <div className="screen-inner">
-        <ImportHistory onBack={() => setHistoryOpen(false)} onChanged={loadRecurring} />
+        <ImportHistory backLabel="Back to Settings" onBack={() => setHistoryOpen(false)} onChanged={loadRecurring} />
       </div>
     );
   }

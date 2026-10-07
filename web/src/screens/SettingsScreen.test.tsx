@@ -796,7 +796,7 @@ describe('the import history across every account', () => {
 
     expect(await screen.findByRole('heading', { name: 'Import history' })).toBeInTheDocument();
     expect(window.location.search).toBe('?screen=settings&panel=history');
-    fireEvent.click(screen.getByRole('button', { name: '← Back to accounts' }));
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Settings' }));
 
     expect(await screen.findByRole('heading', { name: 'Data & backup' })).toBeInTheDocument();
   });

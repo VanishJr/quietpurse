@@ -3697,3 +3697,111 @@ textarea.native-field__control {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.history-page {
+  min-width: 0;
+}
+
+.history-intro {
+  max-width: 70ch;
+  color: var(--ink-secondary);
+  margin-bottom: var(--space-6);
+}
+
+.history-page p {
+  margin: 0 0 var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.history-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-4) var(--space-6);
+  padding-block: var(--space-6);
+  border-bottom: 1px solid var(--ink-border);
+}
+
+.history-record__identity {
+  min-width: 0;
+}
+
+.history-record h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-component);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+  overflow-wrap: anywhere;
+}
+
+.history-record__context {
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+}
+
+.history-record__counts {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-record__diagnostic {
+  white-space: pre-wrap;
+}
+
+.history-record__actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  max-width: 18rem;
+}
+
+.history-record__actions svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+
+.history-record__popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: var(--z-raised);
+  display: grid;
+  gap: var(--space-1);
+  min-width: 12rem;
+  max-width: 100%;
+  padding: var(--space-2);
+  border: 1px solid var(--ink-controlBorder);
+  border-radius: var(--r-md);
+  background: var(--ink-raised);
+}
+
+.history-record__popover > .action-button {
+  justify-content: flex-start;
+}
+
+.history-confirm-file {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.history-confirm-context {
+  color: var(--ink-secondary);
+}
+
+@media (max-width: 899px) {
+  .history-record {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .history-record__actions {
+    max-width: 100%;
+    justify-self: start;
+  }
+
+  .history-record__popover {
+    left: 0;
+    right: auto;
+    max-width: calc(100vw - var(--page-gutter) * 2);
+  }
+}

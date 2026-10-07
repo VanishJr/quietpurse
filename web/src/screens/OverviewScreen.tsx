@@ -319,6 +319,7 @@ export function OverviewScreen({
     return (
       <div className="screen-inner">
         <ImportHistory
+          backLabel="Back to accounts"
           account={selected}
           onBack={() => setUrl({ panel: null })}
           onChanged={() => {

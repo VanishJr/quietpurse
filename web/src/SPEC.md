@@ -832,7 +832,18 @@ uploaded.
 `ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
 `api.imports` for that one account by its id and never match on `accountName`: the server filters
 imports on the account id, and the name an import row carries is the account's name when the
-statement was staged, which a later rename leaves behind.
+statement was staged, which a later rename leaves behind. The caller supplies the history's return
+destination label; workspace-wide history does not pretend to be an account's panel.
+
+`ImportHistory` gives source identity the record's full reading width before allocating actions on
+narrow screens. Counts describe accepted, rejected and owned rows, never an inferred file total.
+Download requires a readable document claim; file deletion remains reachable without it because
+unclaimed bytes may still need removal. A named ordinary-button group exposes removal, then closes
+before the shared confirmation names the source, operation and ownership consequences. File deletion
+preserves data and does not invalidate financial readers; import deletion does. A failed list reload
+retains the previous records with a visible refusal and retry, rather than reporting empty history.
+Removal retains focus-recovery intent through that reload and any retry; file-only removal returns
+to the same record, while removed imports return to a surviving control or history orientation.
 
 `AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
 server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on
