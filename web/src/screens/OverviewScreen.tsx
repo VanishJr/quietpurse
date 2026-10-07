@@ -121,6 +121,18 @@ export function OverviewScreen({
   const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
 
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const postWriteFocus = useRef<{ list: Account[] | null } | null>(null);
+  useEffect(() => {
+    const intent = postWriteFocus.current;
+    if (!intent) return;
+    const replaced = accounts !== null && accounts !== intent.list;
+    if (!replaced && !error) return;
+    if (replaced) postWriteFocus.current = null;
+    if (document.activeElement === document.body && !titleRef.current?.closest('[hidden], [inert]')) {
+      titleRef.current?.focus();
+    }
+  }, [accounts, error]);
 
   const [data, setData] = useState<AccountData | null>(null);
   /** The dashboard's own refusal: the rail above it loaded and is still true. */
@@ -230,16 +242,21 @@ export function OverviewScreen({
   }, [selected, loadAccount, dataRevision]);
 
   const applyAccount = (updated: Account) => {
+    if (updated.hidden && accounts?.some((account) => account.id === updated.id && !account.hidden)) {
+      postWriteFocus.current = { list: accounts };
+    }
     setAccounts((list) => list?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
   };
 
   const afterCreate = (created: Account) => {
+    postWriteFocus.current = { list: accounts };
     setDialog(null);
     setUrl({ account: created.id });
     load();
   };
 
   const afterDelete = (deleted: Account, destroyed: AccountDeleted) => {
+    postWriteFocus.current = { list: accounts };
     setDialog(null);
     // before the reload and outside its failure: the account is gone whether or not the
     // list comes back, and a screen that says nothing sends the reader to press again
@@ -318,7 +335,7 @@ export function OverviewScreen({
       <header className="ov-heading">
         <div>
           <p className="ov-date">{fmtWeekday(today)}</p>
-          <h1 className="overview-title">Overview</h1>
+          <h1 ref={titleRef} tabIndex={-1} className="overview-title">Overview</h1>
           <p className="ov-subtitle">A clear view of your everyday account.</p>
         </div>
         <button className="btn ov-import" onClick={() => setUrl({ panel: 'import' })}>
@@ -492,6 +509,7 @@ export function OverviewScreen({
             origin={dialog.origin}
             account={dialog.account}
             baseCurrency={baseCurrency ?? ''}
+            restoreFocus={() => titleRef.current}
             onStep={(kind) => setDialog({ ...dialog, kind })}
             onClose={() => setDialog(null)}
             // the account as well as the panel: the dialog's account is the one on the
@@ -499,8 +517,7 @@ export function OverviewScreen({
             // account on the rail of whoever opens it, rather than only in a session
             // that got here by opening this menu
             onOpenHistory={(account) => {
-              setDialog(null);
-              setUrl({ account: account.id, panel: 'history' });
+              setUrl({ account: account.id, panel: 'history' }, 'push', () => setDialog(null));
             }}
             onCreated={afterCreate}
             onUpdated={applyAccount}

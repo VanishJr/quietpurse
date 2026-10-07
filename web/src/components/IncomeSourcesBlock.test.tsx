@@ -236,6 +236,68 @@ describe('IncomeSourcesBlock', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add source' })).not.toBeInTheDocument());
   });
 
+  const dirtyDismissals = (['add', 'edit'] as const).flatMap((mode) =>
+    (['name', 'kind', 'patterns'] as const).flatMap((field) =>
+      (['backdrop', 'escape', 'close', 'cancel'] as const).map((dismissal) => ({ mode, field, dismissal }))));
+
+  it.each(dirtyDismissals)('$mode source $field survives $dismissal until explicit discard', async ({ mode, field, dismissal }) => {
+    await mount();
+    const opener = screen.getByRole('button', { name: mode === 'add' ? 'Add source' : 'Edit Stipend' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog');
+    const edited = field === 'kind' ? within(dialog).getByRole('button', { name: 'Earnings' })
+      : within(dialog).getByRole('textbox', { name: field === 'name' ? 'Source name' : 'Statement match patterns' });
+    edited.focus();
+    if (field === 'kind') fireEvent.click(edited);
+    else fireEvent.change(edited, { target: { value: field === 'name' ? 'Edited grant' : 'Example Limited' } });
+    const dismiss = () => {
+      if (dismissal === 'backdrop') {
+        const backdrop = dialog.parentElement!;
+        fireEvent.pointerDown(backdrop);
+        fireEvent.click(backdrop);
+      } else if (dismissal === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else fireEvent.click(within(dialog).getByRole('button', { name: dismissal === 'close' ? 'Close dialog' : 'Cancel' }));
+    };
+    dismiss();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    expect(screen.queryByRole('textbox', { name: 'Source name' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(edited).toHaveFocus();
+    expect(within(dialog).getByRole('textbox', { name: 'Source name' })).toHaveValue(field === 'name' ? 'Edited grant' : mode === 'add' ? '' : 'Stipend');
+    expect(within(dialog).getByRole('textbox', { name: 'Statement match patterns' })).toHaveValue(field === 'patterns' ? 'Example Limited' : '');
+    expect(within(dialog).getByRole('button', { name: field === 'kind' ? 'Earnings' : 'Support' })).toHaveAttribute('aria-pressed', 'true');
+    dismiss();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(requests().filter((request) => /^(POST|PUT|PATCH|DELETE) /.test(request))).toEqual([]);
+  });
+
+  it('guards edited source dismissal and keeps the same draft until explicit discard', async () => {
+    await mount();
+    const edit = screen.getByRole('button', { name: 'Edit Stipend' });
+    edit.focus();
+    fireEvent.click(edit);
+    const input = screen.getByRole('textbox', { name: 'Source name' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Edited grant' } });
+    const backdrop = screen.getByRole('dialog').parentElement!;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('Edited grant');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(edit).toHaveFocus();
+    fireEvent.click(edit);
+    expect(screen.getByRole('textbox', { name: 'Source name' })).toHaveValue('Stipend');
+    expect(requests().some((request) => request.startsWith('PATCH'))).toBe(false);
+  });
+
   it('restores focus to Add and Edit after the Sheet closes', async () => {
     await mount();
     const add = screen.getByRole('button', { name: 'Add source' });

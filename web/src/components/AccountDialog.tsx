@@ -10,6 +10,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { Account, AccountDeleted } from '../types';
+import { useEditorSession } from '../editor';
 import { Sheet } from './Sheet';
 
 /**
@@ -66,6 +67,7 @@ interface Props {
   baseCurrency: string;
   onStep: (kind: DialogKind) => void;
   onClose: () => void;
+  restoreFocus?: () => HTMLElement | null;
   onOpenHistory: (account: Account) => void;
   onCreated: (account: Account) => void;
   /** A rename or a hide came back; the screen has a newer row for this account. */
@@ -87,6 +89,7 @@ export function AccountDialog({
   baseCurrency,
   onStep,
   onClose,
+  restoreFocus = () => document.querySelector<HTMLElement>('.screen:not([hidden]) .rail-add'),
   onOpenHistory,
   onCreated,
   onUpdated,
@@ -100,6 +103,13 @@ export function AccountDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   /** The delete preview could not be read, so nothing may be said about what goes. */
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const editor = useEditorSession({
+    open: true,
+    dirty: (kind === 'add' || kind === 'rename') && name.trim() !== (kind === 'rename' ? account?.name ?? '' : '').trim(),
+    busy,
+    onClose,
+    onNavigationDiscard: onClose,
+  });
 
   // the field starts at the name being changed, and a refusal from the step before
   // is not about the step now on screen. The typed confirmation clears with them:
@@ -148,9 +158,16 @@ export function AccountDialog({
     setBusy(true);
     setError(null);
     try {
-      if (kind === 'add') onCreated(await api.createAccount(value));
-      else if (account) onUpdated(await api.renameAccount(account.id, value));
-      onClose();
+      const saved = kind === 'add'
+        ? await api.createAccount(value)
+        : account ? await api.renameAccount(account.id, value) : null;
+      editor.finish(() => {
+        if (saved) {
+          if (kind === 'add') onCreated(saved);
+          else onUpdated(saved);
+        }
+        onClose();
+      });
     } catch (err) {
       // the server's own sentence: "an account called X already has that name" says
       // more than anything this form could compose from a 409
@@ -165,8 +182,8 @@ export function AccountDialog({
     setBusy(true);
     setError(null);
     try {
-      onUpdated(await api.setAccountHidden(account.id, hidden));
-      onClose();
+      const saved = await api.setAccountHidden(account.id, hidden);
+      editor.finish(() => { onUpdated(saved); onClose(); });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -189,7 +206,8 @@ export function AccountDialog({
       // the account and the server's counts, and nothing of the preview: what was
       // removed is a different fact from what was previewed, and the screen that
       // writes the sentence can only reach the first
-      onDeleted(account, await api.deleteAccount(account.id));
+      const destroyed = await api.deleteAccount(account.id);
+      editor.finish(() => onDeleted(account, destroyed));
     } catch (err) {
       // printed, never classified: the server's sentence names the refusal
       setError((err as Error).message);
@@ -209,13 +227,13 @@ export function AccountDialog({
    */
   const atOrigin = kind === origin;
   const leaveLabel = atOrigin ? 'Cancel' : 'Back';
-  const leave = () => (atOrigin ? onClose() : onStep('menu'));
+  const leave = () => (atOrigin ? editor.requestClose() : editor.request(() => onStep('menu')));
 
   return (
-    <Sheet open onClose={onClose} position="bottom" title={title}
+    <Sheet open onClose={editor.requestClose} guard={editor.guard} position="bottom" title={title}
       pattern={kind === 'add' || kind === 'rename' ? 'short-editor' : 'confirmation'}
       stepKey={kind} busy={busy}
-      restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) .rail-add')}
+      restoreFocus={restoreFocus}
     >
       {kind === 'add' && (
         <form onSubmit={submitName}>
@@ -240,7 +258,7 @@ export function AccountDialog({
           </p>
           {error && <p className="error">Error: {error}</p>}
           <div className="btn-row">
-            <button type="button" className="btn-ghost" onClick={onClose}>
+            <button type="button" className="btn-ghost" aria-disabled={busy} onClick={editor.requestClose}>
               Cancel
             </button>
             <button type="submit" className="btn" disabled={busy || !name.trim()}>
@@ -285,7 +303,7 @@ export function AccountDialog({
             </button>
           </div>
           <div className="btn-row">
-            <button className="btn-ghost" onClick={onClose}>
+            <button className="btn-ghost" onClick={editor.requestClose}>
               Close
             </button>
           </div>
@@ -313,7 +331,7 @@ export function AccountDialog({
           </p>
           {error && <p className="error">Error: {error}</p>}
           <div className="btn-row">
-            <button type="button" className="btn-ghost" onClick={leave}>
+            <button type="button" className="btn-ghost" aria-disabled={busy} onClick={leave}>
               {leaveLabel}
             </button>
             <button type="submit" className="btn" disabled={busy || !name.trim()}>
@@ -434,6 +452,7 @@ export function AccountDialog({
                 id="acct-delete-confirm"
                 className="input"
                 value={confirmName}
+                readOnly={busy}
                 onChange={(e) => setConfirmName(e.target.value)}
               />
             </>

@@ -1,10 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_SETTINGS, SAVINGS_GOAL } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests } from '../test/harness';
 import type { GoalDetail } from '../types';
 import { GoalEditor } from './GoalEditor';
+import { ThemeProvider } from '../theme';
 
 const monthlyDetail: GoalDetail = {
   id: 'goal-income',
@@ -244,11 +245,13 @@ describe('GoalEditor', () => {
   });
 
   it('keeps the editor and entered values open when the server refuses a save', async () => {
+    const close = vi.fn();
+    const saved = vi.fn();
     mockFetch({
       ...baseRoutes,
       'POST /api/goals': () => fail(409, { error: 'a category spending limit already tracks this category' }),
     });
-    renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={vi.fn()} />);
+    renderThemed(<GoalEditor goalId="new" onClose={close} onSaved={saved} />);
     fireEvent.click(await screen.findByRole('button', { name: /Category spending limit/ }));
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Food again' } });
     fireEvent.change(screen.getByLabelText(/Monthly limit/), { target: { value: '500' } });
@@ -258,6 +261,14 @@ describe('GoalEditor', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Food again');
     expect(screen.getByLabelText(/Monthly limit/)).toHaveValue('500');
     expect(screen.getByRole('dialog')).toBeVisible();
+    expect(requests().filter((request) => request === 'POST /api/goals')).toHaveLength(1);
+    expect(saved).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Name')).toHaveValue('Food again');
+    expect(screen.getByRole('alert')).toHaveTextContent('already tracks this category');
   });
 
   it('routes a missing goal during save through the unavailable fallback', async () => {
@@ -277,6 +288,7 @@ describe('GoalEditor', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Edit goal' })).toBeVisible();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Edited savings' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(missing).toHaveBeenCalledOnce());
@@ -389,6 +401,8 @@ describe('GoalEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Savings balance/ }));
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
     expect(screen.getByRole('heading', { name: 'Savings balance' })).toBeVisible();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -438,4 +452,265 @@ describe('GoalEditor', () => {
     expect(screen.getByText('Currency: EUR')).toBeVisible();
     expect(screen.getByLabelText('Target remaining debt (EUR)')).toBeVisible();
   });
+
+  it.each(['Cancel', 'Close dialog', 'Escape'])(
+    'closes a new goal with only default type choices without a guard via %s',
+    async (dismissal) => {
+      const close = vi.fn();
+      mockFetch(baseRoutes);
+      renderThemed(<GoalEditor goalId="new" onClose={close} onSaved={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: /Financial independence/ }));
+      fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+      fireEvent.click(screen.getByRole('button', { name: /Savings rate/ }));
+      if (dismissal === 'Escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else fireEvent.click(screen.getByRole('button', { name: dismissal }));
+      expect(close).toHaveBeenCalledOnce();
+      expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+      expect(requests()).toEqual(['GET /api/accounts', 'GET /api/app-settings']);
+    },
+  );
+
+  it.each(['Cancel', 'Close dialog', 'Escape'])(
+    'guards meaningful new goal edits via %s and resumes on guard Escape',
+    async (dismissal) => {
+      const close = vi.fn();
+      mockFetch(baseRoutes);
+      renderThemed(<GoalEditor goalId="new" onClose={close} onSaved={vi.fn()} />);
+      fireEvent.click(await screen.findByRole('button', { name: /Monthly income/ }));
+      const name = screen.getByLabelText('Name');
+      name.focus();
+      fireEvent.change(name, { target: { value: 'My income' } });
+      if (dismissal === 'Escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else fireEvent.click(screen.getByRole('button', { name: dismissal }));
+      expect(close).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+      expect(name).not.toBeVisible();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(name).toBeVisible();
+      expect(name).toHaveValue('My income');
+      expect(name).toHaveFocus();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+      expect(close).toHaveBeenCalledOnce();
+      expect(requests()).not.toContain('POST /api/goals');
+    },
+  );
+
+  it('makes reverted edits pristine against the successfully loaded opening snapshot', async () => {
+    const close = vi.fn();
+    mockFetch({ ...baseRoutes, 'GET /api/goals/goal-savings': () => ok(SAVINGS_DETAIL) });
+    renderThemed(<GoalEditor goalId="goal-savings" onClose={close} onSaved={vi.fn()} />);
+    const target = await screen.findByLabelText('Target amount (EUR)');
+    fireEvent.change(target, { target: { value: '10000' } });
+    fireEvent.change(target, { target: { value: '9000' } });
+    const account = screen.getByRole('checkbox', { name: 'Cash · EUR' });
+    fireEvent.click(account);
+    fireEvent.click(account);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+    expect(requests()).not.toContain('PUT /api/goals/goal-savings');
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+  });
+
+  it('preserves Back and same-type values, guarding and discarding incompatible fields on a new type', async () => {
+    const close = vi.fn();
+    mockFetch(baseRoutes);
+    renderThemed(<GoalEditor goalId="new" onClose={close} onSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Financial independence/ }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Independent' } });
+    fireEvent.change(screen.getByLabelText('Cost 1 name'), { target: { value: 'Rent' } });
+    fireEvent.change(screen.getByLabelText('Monthly cost for Rent, row 1'), { target: { value: '900' } });
+    fireEvent.change(screen.getByLabelText('Safety buffer, %'), { target: { value: '15' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Financial independence/ }));
+    expect(screen.getByLabelText('Name')).toHaveValue('Independent');
+    expect(screen.getByLabelText('Monthly cost for Rent, row 1')).toHaveValue('900');
+    expect(screen.getByLabelText('Safety buffer, %')).toHaveValue('15');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: /Monthly income/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    fireEvent.click(screen.getByRole('button', { name: /Financial independence/ }));
+    expect(screen.getByLabelText('Cost 1 name')).toHaveValue('Rent');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: /Monthly income/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.getByLabelText('Monthly target (EUR)')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: /Financial independence/ }));
+    expect(screen.getByLabelText('Cost 1 name')).toHaveValue('');
+    expect(screen.getByLabelText('Monthly cost for row 1')).toHaveValue('');
+    expect(screen.getByLabelText('Safety buffer, %')).toHaveValue('10');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(requests()).not.toContain('POST /api/goals');
+  });
+
+  it('ignores empty cost rows and generated keys after deleting and recreating a saved cost', async () => {
+    const close = vi.fn();
+    const detail = { ...FINANCIAL_DETAIL, essentialCosts: [FINANCIAL_DETAIL.essentialCosts[0]] };
+    mockFetch({ ...baseRoutes, 'GET /api/goals/goal-fi': () => ok(detail) });
+    renderThemed(<GoalEditor goalId="goal-fi" onClose={close} onSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Rent, row 1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add cost' }));
+    fireEvent.change(screen.getByLabelText('Cost 1 name'), { target: { value: 'Rent' } });
+    fireEvent.change(screen.getByLabelText('Monthly cost for Rent, row 1'), { target: { value: '900' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add cost' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+  });
+
+  it.each(['label', 'monthly', 'delete'])(
+    'detects meaningful saved cost %s changes',
+    async (change) => {
+      const close = vi.fn();
+      mockFetch({ ...baseRoutes, 'GET /api/goals/goal-fi': () => ok(FINANCIAL_DETAIL) });
+      renderThemed(<GoalEditor goalId="goal-fi" onClose={close} onSaved={vi.fn()} />);
+      await screen.findByLabelText('Cost 1 name');
+      if (change === 'label') fireEvent.change(screen.getByLabelText('Cost 1 name'), { target: { value: 'Housing' } });
+      if (change === 'monthly') fireEvent.change(screen.getByLabelText('Monthly cost for Rent, row 1'), { target: { value: '1000' } });
+      if (change === 'delete') fireEvent.click(screen.getByRole('button', { name: 'Delete Rent, row 1' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(close).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+      expect(requests()).not.toContain('PUT /api/goals/goal-fi');
+    },
+  );
+
+  it.each([false, true])('does not apply an older save result or unlock a newer editor opening (new save pending: %s)', async (newSavePending) => {
+    let resolve!: (response: Response) => void;
+    let resolveNew!: (response: Response) => void;
+    const pending = new Promise<Response>((finish) => { resolve = finish; });
+    const newPending = new Promise<Response>((finish) => { resolveNew = finish; });
+    const saved = vi.fn();
+    const close = vi.fn();
+    const missing = vi.fn();
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/goals/goal-savings': () => ok(SAVINGS_DETAIL),
+      'GET /api/goals/goal-income': () => ok(monthlyDetail),
+      'PUT /api/goals/goal-savings': () => pending,
+      'PUT /api/goals/goal-income': () => newPending,
+    });
+    const { rerender } = renderThemed(<GoalEditor goalId="goal-savings" onClose={close} onMissing={missing} onSaved={saved} />);
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Updated savings' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    rerender(<ThemeProvider><GoalEditor goalId="goal-income" onClose={close} onMissing={missing} onSaved={saved} /></ThemeProvider>);
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Income'));
+    if (newSavePending) fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await act(async () => { resolve(ok(SAVINGS_DETAIL)); });
+    expect(saved).toHaveBeenCalledWith(SAVINGS_DETAIL);
+    expect(saved).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Name')).toHaveValue('Income');
+    expect(screen.queryByRole('heading', { name: 'Goal saved' })).not.toBeInTheDocument();
+    expect(requests().filter((request) => request.startsWith('PUT '))).toHaveLength(newSavePending ? 2 : 1);
+    if (newSavePending) {
+      expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('aria-busy', 'true');
+      expect(screen.getByLabelText('Name')).toHaveAttribute('readonly');
+      await act(async () => { resolveNew(ok(monthlyDetail)); });
+      expect(saved).toHaveBeenCalledWith(monthlyDetail);
+    } else expect(screen.getByRole('button', { name: 'Save' })).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('shows confirmed completion without another submission when the owner cannot close immediately', async () => {
+    const saved = vi.fn();
+    mockFetch({ ...baseRoutes, 'POST /api/goals': () => ok(monthlyDetail) });
+    renderThemed(<GoalEditor goalId="new" onClose={vi.fn()} onSaved={saved} />);
+    fireEvent.click(await screen.findByRole('button', { name: /^Monthly income/ }));
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Income' } });
+    fireEvent.change(screen.getByLabelText('Monthly target (EUR)'), { target: { value: '3000' } });
+    const form = screen.getByLabelText('Name').closest('form')!;
+    fireEvent.submit(form);
+    await screen.findByRole('heading', { name: 'Goal saved' });
+    expect(saved).toHaveBeenCalledWith(monthlyDetail);
+    expect(screen.getByText(/was saved.*no longer an unsaved draft/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Create goal' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    fireEvent.submit(form);
+    const leave = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leave);
+    expect(leave.defaultPrevented).toBe(false);
+    expect(requests().filter((request) => request === 'POST /api/goals')).toHaveLength(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+  });
+
+  it('blocks duplicate pending writes and locks fields and every dismissal without losing focus', async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => { resolve = done; });
+    const close = vi.fn();
+    const saved = vi.fn();
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/goals/goal-savings': () => ok(SAVINGS_DETAIL),
+      'PUT /api/goals/goal-savings': () => pending,
+    });
+    renderThemed(<GoalEditor goalId="goal-savings" onClose={close} onSaved={saved} />);
+    const name = await screen.findByLabelText('Name');
+    name.focus();
+    fireEvent.change(name, { target: { value: 'House deposit' } });
+    const save = screen.getByRole('button', { name: 'Save' });
+    const form = name.closest('form')!;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    fireEvent.click(save);
+    expect(name).toHaveFocus();
+    expect(name).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Target amount (EUR)')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Target date (optional)')).toHaveAttribute('readonly');
+    fireEvent.change(name, { target: { value: 'Not submitted' } });
+    expect(name).toHaveValue('House deposit');
+    const account = screen.getByRole('checkbox', { name: 'Cash · EUR' });
+    expect(account).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(account);
+    expect(account).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+    expect(requests().filter((request) => request === 'PUT /api/goals/goal-savings')).toHaveLength(1);
+    await act(async () => resolve(ok(SAVINGS_DETAIL)));
+    await waitFor(() => expect(saved).toHaveBeenCalledWith(SAVINGS_DETAIL));
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+  });
+
+  it('keeps pending select controls focusable and restores their committed values on refusal', async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => { resolve = done; });
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/goals/goal-income': () => ok(monthlyDetail),
+      'PUT /api/goals/goal-income': () => pending,
+    });
+    renderThemed(<GoalEditor goalId="goal-income" onClose={vi.fn()} onSaved={vi.fn()} />);
+    const income = await screen.findByLabelText('Income');
+    income.focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(income).toHaveFocus();
+    expect(income).not.toBeDisabled();
+    expect(income).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.change(income, { target: { value: 'all' } });
+    expect(income).toHaveValue('own');
+    const window = screen.getByLabelText('Averaging period');
+    fireEvent.change(window, { target: { value: '12' } });
+    expect(window).toHaveValue('6');
+    await act(async () => resolve(fail(409, { error: 'goal cannot be saved' })));
+    expect(await screen.findByRole('alert')).toHaveTextContent('goal cannot be saved');
+    expect(income).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.change(income, { target: { value: 'all' } });
+    expect(income).toHaveValue('all');
+    expect(requests().filter((request) => request === 'PUT /api/goals/goal-income')).toHaveLength(1);
+  });
+
+  it('finishes missing-goal dependency loads without a discard prompt', async () => {
+    const missing = vi.fn();
+    mockFetch({ ...baseRoutes, 'GET /api/goals/gone': () => fail(404, { error: 'goal not found' }) });
+    renderThemed(<GoalEditor goalId="gone" onClose={vi.fn()} onMissing={missing} onSaved={vi.fn()} />);
+    await waitFor(() => expect(missing).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument();
+  });
+
 });

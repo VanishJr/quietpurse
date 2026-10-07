@@ -9,11 +9,13 @@ interface Props {
   accounts: Account[];
   onBack: () => void;
   onBusyChange: (busy: boolean) => void;
+  onDraftChange: (dirty: boolean) => void;
   onApplied: (transaction: Transaction, notice: string) => Promise<void>;
 }
 
-export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange, onApplied }: Props) {
+export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange, onDraftChange, onApplied }: Props) {
   const [pattern, setPattern] = useState(transaction.displayDescription ?? transaction.description);
+  const openingPattern = useRef(pattern.trim());
   const [query, setQuery] = useState(pattern.trim());
   const category = CATEGORIES.find((value) => value === transaction.category);
   const [preview, setPreview] = useState<CategoryRulePreview | null>(null);
@@ -26,6 +28,8 @@ export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange
   const dirty = pattern.trim() !== query;
 
   useEffect(() => { heading.current?.focus(); }, []);
+  useEffect(() => { onDraftChange(pattern.trim() !== openingPattern.current); }, [pattern, onDraftChange]);
+  useEffect(() => () => onDraftChange(false), [onDraftChange]);
 
   useEffect(() => {
     let current = true;
@@ -45,7 +49,7 @@ export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange
   }, [query, refresh]);
 
   const refreshPreview = () => {
-    if (!pattern.trim()) return;
+    if (saving || !pattern.trim()) return;
     setQuery(pattern.trim());
     setRefresh((value) => value + 1);
   };
@@ -66,6 +70,8 @@ export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange
         notice = categoryRuleCaption(result.rule.pattern, result.rule.category, result);
       }
       if (!notice) return;
+      openingPattern.current = pattern.trim();
+      onDraftChange(false);
       const updated = await api.transaction(transaction.id);
       await onApplied(updated, notice);
     } catch (e) {
@@ -85,8 +91,8 @@ export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange
       <p className="hint">The rule also applies to future matching transactions, including on hidden accounts.</p>
       <form className="rule-preview-form" onSubmit={(event) => { event.preventDefault(); refreshPreview(); }}>
         <label className="setting-label" htmlFor="category-rule-pattern">Description contains</label>
-        <input id="category-rule-pattern" className="input" value={pattern} disabled={saving}
-          onChange={(event) => setPattern(event.target.value)} />
+        <input id="category-rule-pattern" className="input" value={pattern} readOnly={saving}
+          onChange={(event) => { if (!saving) setPattern(event.target.value); }} />
         <button className="btn-ghost" type="submit" disabled={saving || loading || !pattern.trim()}>
           {dirty ? 'Preview matches' : 'Refresh preview'}
         </button>

@@ -450,6 +450,13 @@ the primitive for exactly this — the URL is the store and every reader subscri
 also what stopped the readers being wired to each other, since a fact none of them owns is read
 from one place.
 
+Snapshot identity follows the full published address, including path and fragment, even though
+`AppUrl` exposes only the owned query values. Native hash navigation must refresh the real link
+destinations without resetting a draft whose keys are unchanged. The publication seam observes
+both `popstate` and `hashchange`; a trailing hash notification already handled by a traversal,
+or made stale by its accepted write, cannot stage another guard or supersede that write. This
+notification deduplication never substitutes URL equality for history-entry identity.
+
 `urlFor` is exported because the navigation is anchors and an `href` is a promise about where a
 click lands. `Shell.tsx` builds its anchors from it rather than composing a second address, because
 two pieces of code that agree until one is edited fail invisibly from the app's own side — the click
@@ -482,6 +489,55 @@ a panel opens it again.
 `AppUrl` carries where the reader is and not how they have set a screen up: the Overview's chart
 window and its switch for hidden accounts are component state on purpose, because a link that
 carried them would override the setup of whoever opens it.
+
+`useEditorSession` protects meaningful unsaved changes relative to caller-owned opening values.
+Account names, income-source fields, goal inputs and chart configuration choose their own
+comparison; generated cost keys and suggested chart names are not edits. Undoing changes restores
+pristine dismissal. Keep editing and Discard changes share the existing shell, retaining its body
+rather than remounting inputs. Builder Back preserves values; a different goal type requires explicit
+discard before replacing incompatible fields. Immediate transaction writes do not acquire a draft
+or a global Save action. Category-rule text compares with its opening pattern separately from
+preview freshness: reading an edited preview does not commit that text or clear its leave guard.
+A successful rule mutation establishes the new opening pattern immediately; a failed follow-up
+transaction read remains a refresh error, not unsaved work that Discard could undo.
+Discarding a navigation closes or resets the abandoned local editor without rewriting the history
+entry being left; merely hiding a pristine editor retains its established screen lifetime. Pending non-cancellable writes lock dismissal; confirmed and optimistic
+completion retain their existing owners and bypass only their own leave guard.
+
+`registerNavigationGuard` stages app navigation before history writes or accepted side effects.
+The published location is frozen during a blocked traversal, so an unrelated render cannot reset
+an active editor from the address bar's new location. Managed entries carry namespaced
+`__fintoNavigation` position metadata alongside foreign state. Opaque state remains untouched;
+a native browser entry index supplies its traversal offset where available. Cancellation returns
+to the original indexed entry, and acceptance replays the destination without pushing a duplicate
+or deleting Forward destinations. Derived replacements retain their history role.
+
+An entry whose offset neither managed state nor the browser identifies is not compensated by a
+guessed traversal. The draft and published location remain until explicit acceptance, while the
+address bar follows the browser's existing entry. Keep editing leaves a visible explanation of
+that mismatch. An accepted app URL write waits at the source-entry boundary rather than replacing
+the browser's displaced entry; its original push or replace role and callbacks are retained until
+a verified source return. The owned-key intent is composed over that entry's current foreign
+path, query, hash and state rather than replaying a frozen full address. URL equality alone cannot
+prove that return when entries are opaque.
+A newer intent supersedes the older navigation, and explicitly accepting another browser
+destination abandons its queued URL change without undoing any confirmed server mutation.
+
+Saving a goal is not deferred with its address update. A confirmed goal becomes a non-editable
+result when its source entry is still displaced, with no second submission or unsaved-work claim.
+The owning list refreshes immediately; only closing its URL editor waits. A late response belongs
+to its opening: it may refresh committed data, but cannot mark a newer draft saved, release that
+draft's write lock or close another goal selection. Optimistic chart writes
+likewise keep their existing owner and closure, with the pending address update explained on the
+workspace. The visible screen owns the navigation explanation even after its editor closes;
+Sheet repeats it inside the active modal while that screen surface is inert. If the browser
+exposes no usable source identity, automatic return cannot be promised;
+the interface does not guess a traversal or overwrite a foreign entry to fake completion.
+Full-document departure uses the browser's native unsaved-work prompt while an active session is
+dirty or pending, not browser storage or a recovery promise.
+Inactive editors impose neither navigation nor document-departure guards. A committed write's
+follow-up refresh retains focus-recovery intent until a replacement list arrives; Retry moves to
+stable orientation before removing its own control.
 
 ## The sentences a person reads, and what is lifted out of a screen to hold them
 
@@ -774,14 +830,28 @@ case the strip's paging effect follows.
 is visible. Tab recovers even after the focused control disappears. Opening and deliberate step
 changes enter the caller's target or heading; draft renders do not move the caret. The opener is
 captured before children can take focus. Restoration requires a usable surviving target, with a
-caller-supplied section or record fallback when the opener is gone. Income-source refresh retains
+caller-supplied section or record fallback when the opener is gone. A noninteractive fallback
+receives programmatic focus without joining the Tab sequence, even on direct entry before Shell
+has oriented the screen. Native focusable record controls keep their existing Tab position.
+Income-source refresh retains
 its own asynchronous fallback rather than competing with generic restoration.
 
 Long editors and builders ignore the backdrop; a pristine short editor or confirmation may request
 close only from a press that began on the backdrop. Escape and the named close control request the
 same caller dismissal policy. Pending non-cancellable writes block conflicting dismissal. The
-shared frame provides a primary scrolling body and optional header/action regions; subordinate
-fields and preview records do not establish competing scroll areas.
+shared frame provides a primary scrolling body and optional header and action regions; subordinate
+fields and preview records do not establish competing scroll areas. When framing leaves too little
+space for a labeled control, orientation and actions return to the same scrolling flow. This uses
+actual text and control geometry rather than assuming a short viewport has ordinary-sized text;
+mode changes and Keep editing bring the focused control into view without resetting its caret.
+Associated fieldsets and semantic groups remain part of that measurement even when individual
+options fit. The test harness keeps resize observation present as a controlled notification seam;
+cases supply geometry and notifications explicitly, rather than treating the stub as optional or
+as evidence of browser layout.
+
+A screen owns only one active modal decision. In Goals, an accepted URL editor replaces any
+local delete confirmation before either shell acquires modality; Back does not resurrect that
+abandoned confirmation. Pending deletion still blocks navigation through its existing session.
 
 An open sheet on an inactive screen retains its state but releases focus, inertness, scroll locks
 and keyboard ownership. Returning re-enters without replacing the original opener. Shell drives

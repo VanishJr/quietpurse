@@ -3,6 +3,8 @@ import { defs } from '../analytics';
 import { api } from '../api';
 import { Chips } from './Chips';
 import { Sheet } from './Sheet';
+import { Field } from './Field';
+import { useEditorSession } from '../editor';
 import { IncomeSourceDef, IncomeSourceKind } from '../types';
 
 /**
@@ -47,6 +49,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const retryRef = useRef<HTMLButtonElement>(null);
   const editRefs = useRef(new Map<string, HTMLButtonElement>());
   const refocus = useRef<{ edited: string | null } | null>(null);
+  const baseline = useRef({ label: '', kind: 'external' as IncomeSourceKind, patterns: '' });
 
   const read = useCallback(async () => {
     setSources(await api.incomeSources());
@@ -94,7 +97,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       return;
     }
     refocus.current = { edited: open?.form === 'edit' ? open.id : null };
-    setOpen(null);
+    editor.finish(() => setOpen(null));
     setSources(null);
     try {
       await onChanged();
@@ -121,6 +124,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const openAdd = () => {
     if (busy || open !== null) return;
     setActionError(null);
+    baseline.current = { label: '', kind: 'external', patterns: '' };
     setLabel('');
     setKind('external');
     setPatterns('');
@@ -128,6 +132,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   };
 
   const openEdit = (s: IncomeSourceDef) => {
+    baseline.current = { label: s.label, kind: s.kind, patterns: s.patterns.join(', ') };
     setActionError(null);
     setLabel(s.label);
     setKind(s.kind);
@@ -146,20 +151,21 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
     if (!busy) setOpen(null);
   };
 
+  const editor = useEditorSession({
+    open: open?.form === 'add' || open?.form === 'edit',
+    dirty: JSON.stringify([label.trim(), kind, splitPatterns(patterns)]) !==
+      JSON.stringify([baseline.current.label.trim(), baseline.current.kind, splitPatterns(baseline.current.patterns)]),
+    busy,
+    onClose: close,
+    onNavigationDiscard: close,
+  });
+
   const form = (onOk: () => void) => (
     <div className="settings-income-editor">
       <h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>
-      <label className="setting-label" htmlFor="source-label">
-        Source name
-      </label>
-      <input
-        id="source-label"
-        className="input"
-        value={label}
-        readOnly={busy}
-        onChange={(e) => setLabel(e.target.value)}
-        placeholder="Stipend"
-      />
+      <Field id="source-label" label="Source name" control="input" controlProps={{
+        value: label, readOnly: busy, onChange: (e) => setLabel(e.target.value), placeholder: 'Stipend',
+      }} />
       <div className="setting-label">Counts as</div>
       <Chips
         label="Counts as"
@@ -171,28 +177,21 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       <p className="hint">
         Changing this updates every income-based goal; transaction assignments stay the same.
       </p>
-      <label className="setting-label" htmlFor="source-patterns">
-        Statement match patterns
-      </label>
-      <input
-        id="source-patterns"
-        className="input"
-        value={patterns}
-        readOnly={busy}
-        onChange={(e) => setPatterns(e.target.value)}
-        placeholder="Musterstiftung Musterstadt, Leistungsstipendium Beispielstadt"
-      />
+      <Field id="source-patterns" label="Statement match patterns" control="input" controlProps={{
+        value: patterns, readOnly: busy, onChange: (e) => setPatterns(e.target.value),
+        placeholder: 'Musterstiftung Musterstadt, Leistungsstipendium Beispielstadt', 'aria-describedby': 'source-patterns-help',
+      }} />
       {/* the floor is the matcher's, not this form's, and the hint states it because
           "contains one of these" would be a sentence the product does not keep. Every
           pattern in the placeholder above has to clear the same floor, or the example
           teaches the input the hint forbids. */}
-      <p className="hint">
+      <p className="hint" id="source-patterns-help">
         Comma-separate phrases. Each phrase needs at least two words of 3+ letters; leave blank
         for manual tagging.
       </p>
       {actionError && <p className="error" role="alert">Error: {actionError}</p>}
       <div className="btn-row">
-        <button className="btn-ghost" type="button" aria-disabled={busy} onClick={close}>
+        <button className="btn-ghost" type="button" aria-disabled={busy} onClick={editor.requestClose}>
           Cancel
         </button>
         <button className="btn" type="button" aria-disabled={busy} onClick={onOk}>
@@ -312,7 +311,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
       )}
       <Sheet
         open={open?.form === 'add' || open?.form === 'edit'}
-        onClose={close}
+        onClose={editor.requestClose}
+        guard={editor.guard}
         pattern="short-editor"
         stepKey={open?.form}
         busy={busy}

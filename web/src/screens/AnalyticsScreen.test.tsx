@@ -259,6 +259,22 @@ describe('building a chart', () => {
     expect(screen.queryByText('Nothing plotted yet')).not.toBeInTheDocument();
   });
 
+  it('restores direct-entry focus to the section when creating the first chart removes its opener', async () => {
+    mockFetch(ROUTES);
+    renderThemed(<div className="screen"><AnalyticsScreen /></div>);
+    const heading = screen.getByRole('heading', { name: 'Analytics' });
+    const opener = await screen.findByRole('button', { name: 'Build your first chart' });
+    expect(heading).not.toHaveAttribute('tabindex');
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: /^Line/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create chart' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).not.toBeInTheDocument();
+    expect(heading).toHaveFocus();
+    expect(puts).toHaveLength(1);
+  });
+
   it('lets every measure be turned off, and refuses to save what that leaves', async () => {
     mockFetch(ROUTES);
     mount();

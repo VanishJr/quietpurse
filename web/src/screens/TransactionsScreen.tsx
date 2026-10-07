@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { useEditorSession } from '../editor';
 import { CATEGORIES, Category, categoryLabel } from '../categories';
 import { Sheet } from '../components/Sheet';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
@@ -90,6 +91,7 @@ export function TransactionsScreen({
   const [saving, setSaving] = useState(false);
   const [refreshingSelected, setRefreshingSelected] = useState(false);
   const [ruleEditor, setRuleEditor] = useState<'transfer' | 'category' | null>(null);
+  const [ruleDirty, setRuleDirty] = useState(false);
   const transferButton = useRef<HTMLButtonElement>(null);
   const categoryButton = useRef<HTMLButtonElement>(null);
   const selectedRef = useRef<Transaction | null>(null);
@@ -141,6 +143,10 @@ export function TransactionsScreen({
   }, [dataRevision]);
 
   const busy = saving || refreshingSelected;
+  const editor = useEditorSession({
+    open: selected !== null, dirty: ruleEditor === 'category' && ruleDirty, busy,
+    onClose: () => setSelected(null), onNavigationDiscard: () => setRuleEditor(null),
+  });
 
   /**
    * An arrival with a `focus` asks for all of one account's rows, so the category filter
@@ -303,7 +309,7 @@ export function TransactionsScreen({
     await currentLoad.current();
     setSelected(updated);
     setNotice(message);
-    returnToTransaction();
+    editor.finish(returnToTransaction);
   };
 
   return (
@@ -393,7 +399,8 @@ export function TransactionsScreen({
 
       <Sheet
         open={selected !== null}
-        onClose={() => { if (!busy) setSelected(null); }}
+        onClose={editor.requestClose}
+        guard={editor.guard}
         position="bottom"
         pattern={ruleEditor ? 'long-editor' : 'short-editor'}
         stepKey={ruleEditor ?? 'transaction'}
@@ -405,8 +412,9 @@ export function TransactionsScreen({
           <CategoryRuleEditor
             transaction={selected}
             accounts={accounts}
-            onBack={returnToTransaction}
+            onBack={() => editor.request(returnToTransaction)}
             onBusyChange={setSaving}
+            onDraftChange={setRuleDirty}
             onApplied={ruleApplied}
           />
         ) : selected && ruleEditor === 'transfer' ? (
@@ -596,7 +604,7 @@ export function TransactionsScreen({
             <button
               disabled={busy}
               className="btn-ghost transaction-close-button"
-              onClick={() => setSelected(null)}
+              onClick={editor.requestClose}
             >
               Close
             </button>

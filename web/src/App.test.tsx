@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { importsResponse, PRESETS } from './test/fixtures';
-import { FIRST_PAINT_ROUTES, mockFetch, ok } from './test/harness';
+import { ACCOUNTS, importsResponse, PRESETS } from './test/fixtures';
+import { FIRST_PAINT_ROUTES, mockFetch, ok, requests } from './test/harness';
 
 /**
  * The shell: the five always-mounted screens and the navigation.
@@ -41,6 +41,38 @@ vi.setConfig({ testTimeout: 15_000 });
 const appMounted = () => screen.findByRole('heading', { name: 'Overview' }, { timeout: 5_000 });
 
 describe('the shell', () => {
+  it('keeps the navigation explanation visible after unknown Back/Keep/Create closes New account', async () => {
+    window.history.replaceState({ older: 'kept' }, '', '/?screen=settings&foreign=older#old');
+    window.history.pushState({ direct: 'kept' }, '', '/?screen=overview&ref=source#source');
+    const created = { ...ACCOUNTS[0], id: 'created-account', name: 'New account', balance: 0 };
+    let catalog = ACCOUNTS;
+    mockFetch({
+      ...FIRST_PAINT_ROUTES,
+      'GET /api/accounts': () => ok(catalog),
+      'POST /api/accounts': () => { catalog = [...ACCOUNTS, created]; return ok(created); },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'New account' } });
+    act(() => window.history.back());
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Create$/ }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const notice = screen.getByText(/browser address update is waiting/);
+    expect(notice).toBeVisible();
+    expect(notice.closest('.navigation-notice')?.parentElement).toHaveClass('screen');
+    expect(window.location.search).toBe('?screen=settings&foreign=older');
+    expect(window.location.hash).toBe('#old');
+    const returned = new Promise<void>((resolve) => window.addEventListener('popstate', () => resolve(), { once: true }));
+    act(() => window.history.forward());
+    await act(async () => { await returned; });
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('account')).toBe(created.id));
+    expect(new URLSearchParams(window.location.search).get('ref')).toBe('source');
+    expect(window.location.hash).toBe('#source');
+    expect(screen.queryByText(/browser address update is waiting/)).not.toBeInTheDocument();
+    expect(requests().filter((request) => request === 'POST /api/accounts')).toHaveLength(1);
+  });
+
   it('shows Overview and keeps the other four mounted but hidden', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);

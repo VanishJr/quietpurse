@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode, useRef, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { useDismiss } from '../dismiss';
 import { ScreenShown } from '../screen';
 import { Sheet } from './Sheet';
+import { notifyResizeObservers } from '../test/resize';
 
 function Menu() {
   const [open, setOpen] = useState(false);
@@ -144,10 +145,10 @@ function AutofocusEditor({ strict = false }: { strict?: boolean }) {
   const editor = (
     <>
       <button onClick={() => setOpen(true)}>New account</button>
-      <Sheet open={open} onClose={() => setOpen(false)} title="New account" pattern="short-editor">
+      {open && <Sheet open onClose={() => setOpen(false)} title="New account" pattern="short-editor">
         <h2>Account details</h2>
         <input autoFocus aria-label="Account name" />
-      </Sheet>
+      </Sheet>}
     </>
   );
   return strict ? <StrictMode>{editor}</StrictMode> : editor;
@@ -224,6 +225,8 @@ describe('sheet focus lifecycle', () => {
     );
     const { rerender } = render(view(true));
     const close = screen.getByRole('button', { name: 'Close dialog' });
+    screen.getByRole('heading').blur();
+    expect(document.activeElement).toBe(document.body);
     fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true });
     expect(screen.getByRole('textbox')).toHaveFocus();
     screen.getByRole('button', { name: 'Background' }).focus();
@@ -241,15 +244,15 @@ describe('sheet focus lifecycle', () => {
     const view = (extra: boolean) => (
       <Sheet open onClose={() => {}} pattern="long-editor" title="Controls">
         <h2>Editor</h2>
+        <button aria-disabled="true">Locked but focusable</button>
+        {extra && <button>Added later</button>}
         <button disabled>Disabled</button>
         <input type="hidden" aria-label="Hidden input" />
         <div hidden><button>Hidden</button></div>
         <div inert><button>Inert</button></div>
         <div style={{ display: 'none' }}><button>Display hidden</button></div>
         <div style={{ visibility: 'hidden' }}><button>Visibility hidden</button></div>
-        <details><summary>Disclosure</summary><button>Closed detail</button></details>
-        <button aria-disabled="true">Locked but focusable</button>
-        {extra && <button>Added later</button>}
+        <details><summary tabIndex={-1}>Disclosure</summary><button>Closed detail</button></details>
       </Sheet>
     );
     const { rerender } = render(view(false));
@@ -262,8 +265,10 @@ describe('sheet focus lifecycle', () => {
     expect(screen.getByRole('button', { name: 'Added later' })).toHaveFocus();
     screen.getByText('Disclosure').parentElement!.setAttribute('open', '');
     await waitFor(() => expect(screen.getByRole('button', { name: 'Closed detail' })).toBeVisible());
-    screen.getByRole('button', { name: 'Closed detail' }).focus();
-    expect(fireEvent.keyDown(document.activeElement!, { key: 'Tab' })).toBe(true);
+    screen.getByRole('heading').focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    expect(screen.getByRole('button', { name: 'Closed detail' })).toHaveFocus();
+    expect(fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true })).toBe(true);
     screen.getByRole('heading').focus();
     fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
     expect(screen.getByRole('button', { name: 'Close dialog' })).toHaveFocus();
@@ -300,8 +305,28 @@ describe('sheet focus lifecycle', () => {
       rerender(<Fallback unavailable />);
       fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
       expect(screen.getByRole('button', { name: 'Section fallback' })).toHaveFocus();
+      expect(screen.getByRole('button', { name: 'Section fallback' })).not.toHaveAttribute('tabindex');
     },
   );
+
+  it('makes a noninteractive section fallback focusable without adding it to the Tab sequence', () => {
+    function Section() {
+      const [open, setOpen] = useState(true);
+      const heading = useRef<HTMLHeadingElement>(null);
+      return <>
+        <h1 ref={heading}>Section</h1>
+        <Sheet open={open} onClose={() => setOpen(false)} restoreFocus={() => heading.current}>
+          <h2>Editor</h2>
+        </Sheet>
+      </>;
+    }
+    render(<Section />);
+    const heading = screen.getByRole('heading', { name: 'Section' });
+    expect(heading).not.toHaveAttribute('tabindex');
+    fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+  });
 
   it('hides, rather than unmounts, body/footer during a guard and focuses Keep editing once', () => {
     const view = (guarded: boolean, text: string) => (
@@ -330,6 +355,107 @@ describe('sheet focus lifecycle', () => {
     expect(input).toHaveValue('Edited');
     rerender(view(true, 'Guard again'));
     expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+  });
+});
+
+describe('adaptive sheet framing', () => {
+  it.each(['fieldset', 'semantic'] as const)('measures the complete %s group when each individual option fits', (kind) => {
+    const options = <>
+      <label><input type="checkbox" />Cash</label>
+      <label><input type="checkbox" />Savings</label>
+      <label><input type="checkbox" />Emergency fund</label>
+    </>;
+    render(<Sheet open pattern="long-editor" onClose={() => {}}
+      header={<h2>Editor</h2>} footer={<button>Save</button>}>
+      {kind === 'fieldset' ? <fieldset data-testid="accounts"><legend>Funding accounts</legend>{options}</fieldset>
+        : <div role="group" aria-labelledby="funding-title" data-testid="accounts"><h3 id="funding-title">Funding accounts</h3>{options}</div>}
+    </Sheet>);
+    const card = screen.getByRole('dialog');
+    card.style.padding = '20px';
+    card.style.rowGap = '16px';
+    Object.defineProperty(card, 'clientHeight', { get: () => 415 });
+    card.querySelector<HTMLElement>('.sheet-header')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 100);
+    card.querySelector<HTMLElement>('.sheet-footer')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 70);
+    const group = screen.getByTestId('accounts');
+    group.getBoundingClientRect = () => new DOMRect(0, 0, 300, 260);
+    const controls = screen.getAllByRole('checkbox');
+    controls.forEach((control, index) => {
+      control.getBoundingClientRect = () => new DOMRect(0, 80 * index + 18, 24, 24);
+      control.closest('label')!.getBoundingClientRect = () => new DOMRect(0, 80 * index, 300, 60);
+    });
+    controls[1].focus();
+    act(() => notifyResizeObservers());
+    expect(card).toHaveClass('sheet-flow');
+    expect(controls[1]).toHaveFocus();
+  });
+
+  it('measures a later wrapped field even when the first labeled input fits', () => {
+    const { unmount } = render(<Sheet open pattern="long-editor" onClose={() => {}}
+      header={<h2>Editor</h2>} footer={<button>Save</button>}>
+      <label>Name<input defaultValue="Draft" /></label>
+      <label>Net hourly rate (EUR, optional)<input /></label>
+    </Sheet>);
+    try {
+      const card = screen.getByRole('dialog');
+      const body = card.querySelector<HTMLElement>('.sheet-body')!;
+      card.style.padding = '20px';
+      card.style.rowGap = '16px';
+      body.style.fontSize = '16px';
+      body.style.lineHeight = '24px';
+      Object.defineProperty(card, 'clientHeight', { get: () => 415 });
+      card.querySelector<HTMLElement>('.sheet-header')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 100);
+      card.querySelector<HTMLElement>('.sheet-footer')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 70);
+      const inputs = screen.getAllByRole('textbox');
+      inputs[0].getBoundingClientRect = () => new DOMRect(0, 36, 300, 44);
+      inputs[0].closest('label')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 80);
+      inputs[1].getBoundingClientRect = () => new DOMRect(0, 290, 300, 88);
+      inputs[1].closest('label')!.getBoundingClientRect = () => new DOMRect(0, 200, 300, 178);
+      inputs[1].focus();
+      act(() => notifyResizeObservers());
+      expect(card).toHaveClass('sheet-flow');
+      expect(inputs[1]).toHaveFocus();
+      expect(inputs[0]).toHaveValue('Draft');
+    } finally {
+      unmount();
+    }
+  });
+
+  it('returns framing to one scrolling flow when a labeled control cannot fit, without replacing focus', () => {
+    const { unmount } = render(<Sheet open pattern="long-editor" onClose={() => {}}
+      header={<h2>Editor</h2>} footer={<button>Save</button>}>
+      <label>Name<input defaultValue="Draft" /></label>
+    </Sheet>);
+    try {
+      const card = screen.getByRole('dialog');
+      const body = card.querySelector<HTMLElement>('.sheet-body')!;
+      const header = card.querySelector<HTMLElement>('.sheet-header')!;
+      const footer = card.querySelector<HTMLElement>('.sheet-footer')!;
+      const input = screen.getByRole('textbox') as HTMLInputElement;
+      let height = 300;
+      Object.defineProperty(card, 'clientHeight', { get: () => height });
+      card.style.padding = '20px';
+      card.style.rowGap = '16px';
+      body.style.fontSize = '16px';
+      body.style.lineHeight = '24px';
+      header.getBoundingClientRect = () => new DOMRect(0, 0, 300, 100);
+      footer.getBoundingClientRect = () => new DOMRect(0, 0, 300, 70);
+      input.getBoundingClientRect = () => new DOMRect(0, 56, 300, 44);
+      input.closest('label')!.getBoundingClientRect = () => new DOMRect(0, 0, 300, 100);
+      input.scrollIntoView = vi.fn();
+      input.focus();
+      act(() => notifyResizeObservers());
+      expect(card).toHaveClass('sheet-flow');
+      expect(input).toHaveFocus();
+      expect(input).toHaveValue('Draft');
+      height = 700;
+      act(() => notifyResizeObservers());
+      expect(card).not.toHaveClass('sheet-flow');
+      expect(screen.getByRole('textbox')).toBe(input);
+      expect(input).toHaveFocus();
+      expect(input.scrollIntoView).toHaveBeenCalled();
+    } finally {
+      unmount();
+    }
   });
 });
 

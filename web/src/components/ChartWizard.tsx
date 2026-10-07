@@ -17,10 +17,13 @@ import {
   suggestedTitle,
 } from '../analytics';
 import { useChartData } from '../chartData';
+import { useEditorSession } from '../editor';
 import { Account, Chart, ChartBreakdown, ChartKind, ChartMetric, ChartRange } from '../types';
 import { ChartGlyph } from './ChartGlyphs';
 import { ChartPlot } from './ChartPlot';
 import { Sheet } from './Sheet';
+import { Button } from './Button';
+import { FormActions } from './FormActions';
 
 const PREVIEW_HEIGHT = 190;
 
@@ -48,6 +51,9 @@ interface Props {
   onSave: (spec: Chart) => void;
 }
 
+const meaningOf = ({ kind, accountId, metrics, breakdown, range }: Chart) =>
+  JSON.stringify({ kind, accountId, metrics: [...metrics].sort(), breakdown, range });
+
 export function ChartWizard({
   open,
   editing,
@@ -58,6 +64,7 @@ export function ChartWizard({
   onSave,
 }: Props) {
   const [draft, setDraft] = useState<Chart | null>(null);
+  const [baseline, setBaseline] = useState<Chart | null>(null);
   const [step, setStep] = useState<'kind' | 'detail'>('kind');
   /**
    * Whether the reader has typed a name of their own. Until they have, the box
@@ -78,18 +85,33 @@ export function ChartWizard({
   useEffect(() => {
     if (key === '') return;
     setDraft(editing);
+    setBaseline(editing);
     setStep(editing ? 'detail' : 'kind');
     setNamed(editing !== null);
     // `editing` deliberately absent: `key` stands in for it
   }, [key]);
-
-  if (!open) return null;
 
   /* The suggested title names the account a chart is about — see `suggestedTitle`. */
   const nameOf = (id: string | null): string | null =>
     id ? (accounts?.find((a) => a.id === id)?.name ?? null) : null;
 
   const suggest = (spec: Chart): string => suggestedTitle(spec, nameOf(spec.accountId));
+
+  const dirty = draft !== null && baseline !== null && (
+    meaningOf(draft) !== meaningOf(baseline) ||
+    ((editing !== null || named) && draft.title !== (editing ? baseline.title : suggest(baseline)))
+  );
+  const { requestClose, finish, guard } = useEditorSession({
+    open, dirty, onClose,
+    onNavigationDiscard: () => {
+      setDraft(editing ? baseline : null);
+      setBaseline(editing ? baseline : null);
+      setStep(editing ? 'detail' : 'kind');
+      setNamed(editing !== null);
+    },
+  });
+
+  if (!open) return null;
 
   /*
    * An existing chart opens straight at step two with its own values in it, and "Change
@@ -99,6 +121,7 @@ export function ChartWizard({
    */
   const pickKind = (kind: ChartKind) => {
     const next = draft ? { ...draft, kind } : blankChart(kind);
+    if (!baseline) setBaseline(next);
     setDraft(named ? next : { ...next, title: suggest(next) });
     setStep('detail');
   };
@@ -120,19 +143,30 @@ export function ChartWizard({
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
+      guard={guard}
       position="center"
       wide
       title={editing ? 'Edit chart' : 'New chart'}
       pattern="builder"
       stepKey={step}
       restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
+      footer={
+        <FormActions
+          back={step === 'detail' && draft ? <Button type="button" variant="tertiary" size="standard" onClick={() => setStep('kind')}>Change shape</Button> : undefined}
+          cancel={<Button type="button" variant="secondary" size="standard" onClick={requestClose}>Cancel</Button>}
+          completion={step === 'detail' && draft ? (
+            <Button type="button" variant="primary" size="standard" onClick={() => finish(() => onSave(draft))} disabled={draft.title.trim() === '' || incomplete(draft)}>
+              {editing ? 'Save' : 'Create chart'}
+            </Button>
+          ) : null}
+        />
+      }
     >
       {step === 'kind' || !draft ? (
         <KindStep
           chosen={draft?.kind ?? null}
           onPick={pickKind}
-          onCancel={onClose}
           editing={editing !== null}
         />
       ) : (
@@ -146,10 +180,6 @@ export function ChartWizard({
             setNamed(true);
             setDraft((d) => (d ? { ...d, title } : d));
           }}
-          onBack={() => setStep('kind')}
-          onCancel={onClose}
-          onSave={() => onSave(draft)}
-          editing={editing !== null}
         />
       )}
     </Sheet>
@@ -159,12 +189,10 @@ export function ChartWizard({
 function KindStep({
   chosen,
   onPick,
-  onCancel,
   editing,
 }: {
   chosen: ChartKind | null;
   onPick: (k: ChartKind) => void;
-  onCancel: () => void;
   editing: boolean;
 }) {
   return (
@@ -190,12 +218,6 @@ function KindStep({
           </button>
         ))}
       </div>
-
-      <div className="btn-row">
-        <button className="btn-ghost btn-sm" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
     </>
   );
 }
@@ -207,10 +229,6 @@ function DetailStep({
   dataRevision,
   patch,
   onName,
-  onBack,
-  onCancel,
-  onSave,
-  editing,
 }: {
   draft: Chart;
   accounts: Account[] | null;
@@ -218,10 +236,6 @@ function DetailStep({
   dataRevision: number;
   patch: (change: Partial<Chart>) => void;
   onName: (title: string) => void;
-  onBack: () => void;
-  onCancel: () => void;
-  onSave: () => void;
-  editing: boolean;
 }) {
   const isSeries = chartKind(draft.kind).shape === 'series';
   const missing = incomplete(draft);
@@ -362,22 +376,6 @@ function DetailStep({
             dataRevision={dataRevision}
           />
         </div>
-      </div>
-
-      <div className="btn-row">
-        <button className="btn-ghost btn-sm" onClick={onBack}>
-          Change shape
-        </button>
-        <button className="btn-ghost btn-sm" onClick={onCancel}>
-          Cancel
-        </button>
-        <button
-          className="btn btn-sm"
-          onClick={onSave}
-          disabled={draft.title.trim() === '' || missing}
-        >
-          {editing ? 'Save' : 'Create chart'}
-        </button>
       </div>
     </>
   );

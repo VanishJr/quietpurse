@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useId, useState } from 'react';
+import { FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { ApiError, api } from '../api';
 import { CATEGORIES, categoryLabel } from '../categories';
+import { useEditorSession } from '../editor';
 import {
   GOAL_BASIS_DEFS,
   GOAL_INCOME_SCOPE_DEFS,
@@ -11,6 +12,7 @@ import type { Account, GoalCreate, GoalDetail, GoalType } from '../types';
 import { Sheet } from './Sheet';
 import { Button } from './Button';
 import { FormActions } from './FormActions';
+import { Notice } from './Notice';
 
 interface Props {
   goalId: string | null;
@@ -133,6 +135,13 @@ const draftOf = (goal: GoalDetail): Draft => {
   }
 };
 
+const meaningOf = ({ type: _type, savedCurrency: _currency, savedAccountIds: _saved, costs, accountIds, ...values }: Draft) =>
+  JSON.stringify({
+    ...values,
+    accountIds: [...accountIds].sort(),
+    costs: costs.filter((item) => item.label || item.monthly).map(({ label, monthly }) => ({ label, monthly })),
+  });
+
 const positive = (raw: string, label: string): { value?: number; error?: string } => {
   const value = Number(raw);
   return Number.isFinite(value) && value > 0
@@ -252,10 +261,10 @@ const writeOf = (draft: Draft): { goal?: GoalCreate; error?: string } => {
   }
 };
 
-const WindowField = ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+const WindowField = ({ value, onChange, locked }: { value: string; onChange: (value: string) => void; locked: boolean }) => (
   <label className="field">
     <span>Averaging period</span>
-    <select className="input" value={value} onChange={(event) => onChange(event.target.value)}>
+    <select className="input" value={value} aria-disabled={locked} onChange={(event) => { if (locked) event.currentTarget.value = value; else onChange(event.target.value); }}>
       {!['3', '6', '12'].includes(value) && <option value={value}>{value} months</option>}
       <option value="3">3 months</option>
       <option value="6">6 months</option>
@@ -269,19 +278,39 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
   const open = goalId !== null;
   const editing = goalId !== null && goalId !== 'new';
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [baseline, setBaseline] = useState<Draft | null>(null);
+  const [choosingType, setChoosingType] = useState(true);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [baseCurrency, setBaseCurrency] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [completed, setCompleted] = useState<GoalDetail | null>(null);
+  const completedRef = useRef<GoalDetail | null>(null);
+  const opening = useRef(0);
   const [error, setError] = useState<string | null>(null);
+  const { requestClose, request, finish, guard } = useEditorSession({
+    open, dirty: completed === null && baseline !== null && meaningOf(draft) !== meaningOf(baseline), busy: saving, onClose,
+    onNavigationDiscard: () => {
+      if (baseline) setDraft(baseline);
+      setChoosingType(!editing);
+      setError(null);
+    },
+  });
 
   useEffect(() => {
+    opening.current++;
     if (!open) return;
     let cancelled = false;
     setLoading(true);
     setSaving(false);
+    savingRef.current = false;
+    completedRef.current = null;
+    setCompleted(null);
+    setBaseline(null);
+    setChoosingType(!editing);
     setError(null);
     setLoadError(null);
     setAccounts([]);
@@ -296,12 +325,14 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
         if (cancelled) return;
         setAccounts(loadedAccounts);
         setBaseCurrency(settings.baseCurrency);
-        setDraft(goal ? draftOf(goal) : emptyDraft());
+        const opening = goal ? draftOf(goal) : emptyDraft();
+        setDraft(opening);
+        setBaseline(opening);
       })
       .catch((caught) => {
         if (cancelled) return;
         if (editing && caught instanceof ApiError && caught.status === 404) {
-          onMissing();
+          finish(onMissing);
           return;
         }
         setLoadError(`Couldn’t load goal: ${(caught as Error).message}`);
@@ -314,22 +345,30 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
     };
   }, [editing, goalId, loadAttempt, onMissing, open]);
 
-  const update = <K extends keyof Draft>(key: K, value: Draft[K]) =>
-    setDraft((current) => ({ ...current, [key]: value }));
+  const update = <K extends keyof Draft>(key: K, value: Draft[K]) => {
+    if (!savingRef.current) setDraft((current) => ({ ...current, [key]: value }));
+  };
 
   const selectType = (type: GoalType) => {
-    setError(null);
-    update('type', type);
+    const select = () => {
+      setError(null);
+      if (draft.type !== null && draft.type !== type) setDraft({ ...emptyDraft(), type });
+      else update('type', type);
+      setChoosingType(false);
+    };
+    if (draft.type !== null && draft.type !== type) request(select);
+    else select();
   };
 
   const returnToTypes = () => {
+    if (savingRef.current) return;
     setError(null);
-    update('type', null);
+    setChoosingType(true);
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (savingRef.current) return;
     const parsed = writeOf(draft);
     if (!parsed.goal) {
       setError(parsed.error ?? 'Check the goal fields.');
@@ -339,21 +378,32 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
       setError(`Remove accounts that no longer use this goal’s ${draft.savedCurrency} currency.`);
       return;
     }
+    const owner = opening.current;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
       const saved = editing
         ? await api.updateGoal(goalId, parsed.goal)
         : await api.createGoal(parsed.goal);
-      onSaved(saved);
+      if (owner === opening.current) {
+        completedRef.current = saved;
+        setCompleted(saved);
+        setBaseline(draft);
+        finish(() => onSaved(saved));
+      } else onSaved(saved);
     } catch (caught) {
+      if (owner !== opening.current) return;
       if (editing && caught instanceof ApiError && caught.status === 404) {
-        onMissing();
+        finish(onMissing);
         return;
       }
       setError((caught as Error).message);
     } finally {
-      setSaving(false);
+      if (owner === opening.current) {
+        savingRef.current = completedRef.current !== null;
+        setSaving(false);
+      }
     }
   };
 
@@ -394,6 +444,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
         : baseCurrency ?? '';
 
   const toggleAccount = (id: string) => {
+    if (savingRef.current) return;
     const selected = draft.accountIds.includes(id);
     const account = accounts.find((candidate) => candidate.id === id);
     if (
@@ -418,7 +469,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
   const money = (label: string, key: 'monthlyEssentials' | 'target' | 'targetDebt' | 'monthlyLimit') => (
     <label className="field">
       <span>{label} ({selectedCurrency})</span>
-      <input className="input" inputMode="decimal" value={draft[key]} onChange={(event) => update(key, event.target.value)} />
+      <input readOnly={saving} className="input" inputMode="decimal" value={draft[key]} onChange={(event) => update(key, event.target.value)} />
     </label>
   );
 
@@ -431,7 +482,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
           const account = accounts.find((candidate) => candidate.id === id);
           return (
             <label key={id}>
-              <input type="checkbox" checked onChange={() => toggleAccount(id)} />{' '}
+              <input type="checkbox" checked aria-disabled={saving} onChange={() => toggleAccount(id)} />{' '}
               {account ? `${account.name} · ${account.currency} (not eligible)` : 'Unavailable account'}
             </label>
           );
@@ -443,6 +494,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
             <input
               type="checkbox"
               checked={selected}
+              aria-disabled={saving}
               disabled={!selected && currencyLock !== null && account.currency !== currencyLock}
               onChange={() => toggleAccount(account.id)}
             />{' '}
@@ -461,7 +513,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
           <>
             <label className="field">
               <span>Target basis</span>
-              <select className="input" value={draft.basis} onChange={(event) => update('basis', event.target.value as Draft['basis'])}>
+              <select className="input" value={draft.basis} aria-disabled={saving} onChange={(event) => { if (savingRef.current) { event.currentTarget.value = draft.basis; return; } update('basis', event.target.value as Draft['basis']); }}>
                 {Object.entries(GOAL_BASIS_DEFS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
@@ -474,6 +526,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                   return (
                     <div className="goal-cost-row" key={item.key}>
                       <input
+                        readOnly={saving}
                         className="input"
                         aria-label={`Cost ${index + 1} name`}
                         placeholder="Cost name"
@@ -481,6 +534,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                         onChange={(event) => update('costs', draft.costs.map((costItem) => costItem.key === item.key ? { ...costItem, label: event.target.value } : costItem))}
                       />
                       <input
+                        readOnly={saving}
                         className="input"
                         aria-label={`Monthly cost for ${rowContext}`}
                         inputMode="decimal"
@@ -492,6 +546,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                         type="button"
                         className="btn btn-small btn-ghost"
                         aria-label={`Delete ${rowContext}`}
+                        aria-disabled={saving}
                         onClick={() => update('costs', draft.costs.filter((costItem) => costItem.key !== item.key))}
                       >
                         Delete
@@ -499,28 +554,28 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                     </div>
                   );
                 })}
-                <button type="button" className="btn btn-small" onClick={() => update('costs', [...draft.costs, cost()])}>
+                <button type="button" className="btn btn-small" aria-disabled={saving} onClick={() => update('costs', [...draft.costs, cost()])}>
                   Add cost
                 </button>
               </fieldset>
             )}
-            <label className="field"><span>Safety buffer, %</span><input className="input" inputMode="decimal" value={draft.bufferPct} onChange={(event) => update('bufferPct', event.target.value)} /></label>
-            <WindowField value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} />
-            <label className="field"><span>Net hourly rate ({baseCurrency}, optional)</span><input className="input" inputMode="decimal" value={draft.hourlyRate} onChange={(event) => update('hourlyRate', event.target.value)} /></label>
-            <label className="field"><span>Hours available per week (optional)</span><input className="input" inputMode="decimal" value={draft.hoursPerWeek} onChange={(event) => update('hoursPerWeek', event.target.value)} /></label>
+            <label className="field"><span>Safety buffer, %</span><input readOnly={saving} className="input" inputMode="decimal" value={draft.bufferPct} onChange={(event) => update('bufferPct', event.target.value)} /></label>
+            <WindowField locked={saving} value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} />
+            <label className="field"><span>Net hourly rate ({baseCurrency}, optional)</span><input readOnly={saving} className="input" inputMode="decimal" value={draft.hourlyRate} onChange={(event) => update('hourlyRate', event.target.value)} /></label>
+            <label className="field"><span>Hours available per week (optional)</span><input readOnly={saving} className="input" inputMode="decimal" value={draft.hoursPerWeek} onChange={(event) => update('hoursPerWeek', event.target.value)} /></label>
           </>
         );
       case 'emergency-fund':
         return (
           <>
-            <label className="field"><span>Coverage months</span><input className="input" inputMode="numeric" value={draft.coverageMonths} onChange={(event) => update('coverageMonths', event.target.value)} /></label>
+            <label className="field"><span>Coverage months</span><input readOnly={saving} className="input" inputMode="numeric" value={draft.coverageMonths} onChange={(event) => update('coverageMonths', event.target.value)} /></label>
             {money('Essential monthly amount', 'monthlyEssentials')}
             {accountChecks(accounts.filter((account) => account.currency === baseCurrency))}
-            <DateField value={draft.targetDate} onChange={(value) => update('targetDate', value)} />
+            <DateField locked={saving} value={draft.targetDate} onChange={(value) => update('targetDate', value)} />
           </>
         );
       case 'savings-balance':
-        return <>{money('Target amount', 'target')}{accountChecks(selectableSavingsAccounts, savingsCurrencyLock)}<DateField value={draft.targetDate} onChange={(value) => update('targetDate', value)} /></>;
+        return <>{money('Target amount', 'target')}{accountChecks(selectableSavingsAccounts, savingsCurrencyLock)}<DateField locked={saving} value={draft.targetDate} onChange={(value) => update('targetDate', value)} /></>;
       case 'debt-payoff': {
         const unavailable = draft.accountId && !accounts.some((account) => account.id === draft.accountId);
         const debtAccounts = accounts.filter(
@@ -530,39 +585,39 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
           <>
             <label className="field">
               <span>Debt account</span>
-              <select className="input" value={draft.accountId} disabled={editing} onChange={(event) => update('accountId', event.target.value)}>
+              <select className="input" value={draft.accountId} disabled={editing} aria-disabled={saving} onChange={(event) => { if (savingRef.current) event.currentTarget.value = draft.accountId; else update('accountId', event.target.value); }}>
                 <option value="">Choose an account</option>
                 {unavailable && <option value={draft.accountId}>Unavailable account</option>}
                 {debtAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.currency}</option>)}
               </select>
             </label>
             {money('Target remaining debt', 'targetDebt')}
-            <DateField value={draft.targetDate} onChange={(value) => update('targetDate', value)} />
+            <DateField locked={saving} value={draft.targetDate} onChange={(value) => update('targetDate', value)} />
           </>
         );
       }
       case 'monthly-income':
-        return <>{money('Monthly target', 'target')}<ScopeField value={draft.incomeScope} onChange={(value) => update('incomeScope', value)} /><WindowField value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} /></>;
+        return <>{money('Monthly target', 'target')}<ScopeField locked={saving} value={draft.incomeScope} onChange={(value) => update('incomeScope', value)} /><WindowField locked={saving} value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} /></>;
       case 'savings-rate':
-        return <><label className="field"><span>Target percentage</span><input className="input" inputMode="decimal" value={draft.targetPercent} onChange={(event) => update('targetPercent', event.target.value)} /></label><ScopeField value={draft.incomeScope} onChange={(value) => update('incomeScope', value)} /><WindowField value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} /></>;
+        return <><label className="field"><span>Target percentage</span><input readOnly={saving} className="input" inputMode="decimal" value={draft.targetPercent} onChange={(event) => update('targetPercent', event.target.value)} /></label><ScopeField locked={saving} value={draft.incomeScope} onChange={(value) => update('incomeScope', value)} /><WindowField locked={saving} value={draft.windowMonths} onChange={(value) => update('windowMonths', value)} /></>;
       case 'category-spending-limit':
-        return <><label className="field"><span>Category</span><select className="input" value={draft.category} onChange={(event) => update('category', event.target.value)}>{CATEGORIES.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>{money('Monthly limit', 'monthlyLimit')}</>;
+        return <><label className="field"><span>Category</span><select className="input" value={draft.category} aria-disabled={saving} onChange={(event) => { if (savingRef.current) event.currentTarget.value = draft.category; else update('category', event.target.value); }}>{CATEGORIES.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>{money('Monthly limit', 'monthlyLimit')}</>;
       case null:
         return null;
     }
   };
 
   return (
-    <Sheet open={open} onClose={() => { if (!saving) onClose(); }} position="center" wide
+    <Sheet open={open} onClose={requestClose} guard={guard} position="center" wide
       title={editing ? 'Edit goal' : 'New goal'} pattern="builder"
-      stepKey={loading ? 'loading' : loadError ? 'load-error' : draft.type ?? 'types'} busy={saving}
-      header={<h2>{editing ? 'Edit goal' : draft.type ? GOAL_TYPE_DEFS[draft.type].label : 'Choose a goal type'}</h2>}
+      stepKey={completed ? 'saved' : loading ? 'loading' : loadError ? 'load-error' : choosingType ? 'types' : draft.type ?? 'types'} busy={saving}
+      header={<h2>{completed ? 'Goal saved' : editing ? 'Edit goal' : !choosingType && draft.type ? GOAL_TYPE_DEFS[draft.type].label : 'Choose a goal type'}</h2>}
       restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
-      footer={!loading && !loadError && baseCurrency !== null && draft.type ? (
+      footer={!loading && !loadError && baseCurrency !== null && !choosingType && draft.type ? (
         <FormActions
-          back={!editing ? <Button type="button" variant="tertiary" size="standard" aria-disabled={saving} onClick={returnToTypes}>Back</Button> : undefined}
-          cancel={<Button type="button" variant="secondary" size="standard" aria-disabled={saving} onClick={onClose}>Cancel</Button>}
-          completion={<Button type="submit" form={formId} variant="primary" size="standard" pending={saving}>{editing ? 'Save' : 'Create goal'}</Button>}
+          back={!editing && !completed ? <Button type="button" variant="tertiary" size="standard" aria-disabled={saving} onClick={returnToTypes}>Back</Button> : undefined}
+          cancel={<Button type="button" variant="secondary" size="standard" aria-disabled={saving} onClick={requestClose}>{completed ? 'Close' : 'Cancel'}</Button>}
+          completion={!completed ? <Button type="submit" form={formId} variant="primary" size="standard" pending={saving}>{editing ? 'Save' : 'Create goal'}</Button> : null}
         />
       ) : undefined}
     >
@@ -574,12 +629,12 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
             <button className="btn btn-small" onClick={() => setLoadAttempt((value) => value + 1)}>
               Retry
             </button>
-            <button className="btn btn-small" onClick={onClose}>
+            <button className="btn btn-small" onClick={requestClose}>
               Cancel
             </button>
           </div>
         )}
-        {!loading && !loadError && baseCurrency !== null && !draft.type && (
+        {!loading && !loadError && baseCurrency !== null && choosingType && (
           <>
             <div className="goal-type-grid">
               {GOAL_TYPE_ORDER.map((type) => (
@@ -590,29 +645,30 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
               ))}
             </div>
             <div className="sheet-actions">
-              <button type="button" className="btn" onClick={onClose}>Cancel</button>
+              <button type="button" className="btn" onClick={requestClose}>Cancel</button>
             </div>
           </>
         )}
-        {!loading && !loadError && baseCurrency !== null && draft.type && (
+        {completed && <Notice tone="success" role="status">“{completed.name}” was saved. This goal is no longer an unsaved draft.</Notice>}
+        {!completed && !loading && !loadError && baseCurrency !== null && !choosingType && draft.type && (
           <form id={formId} onSubmit={(event) => void submit(event)}>
             <p className="goal-currency">Currency: {draft.type === 'savings-rate' ? 'percentage' : selectedCurrency}</p>
-            <label className="field"><span>Name</span><input className="input" value={draft.name} onChange={(event) => update('name', event.target.value)} /></label>
+            <label className="field"><span>Name</span><input readOnly={saving} className="input" value={draft.name} onChange={(event) => update('name', event.target.value)} /></label>
             {fields()}
             {error && <p className="error-text" role="alert">{error}</p>}
             {saving && <p className="state-note" role="status">Saving goal…</p>}
           </form>
         )}
-        {!loading && !loadError && error && !draft.type && <p className="error-text" role="alert">{error}</p>}
+        {!loading && !loadError && error && choosingType && <p className="error-text" role="alert">{error}</p>}
       </div>
     </Sheet>
   );
 }
 
-const DateField = ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-  <label className="field"><span>Target date (optional)</span><input className="input" type="date" value={value} onChange={(event) => onChange(event.target.value)} /></label>
+const DateField = ({ value, onChange, locked }: { value: string; onChange: (value: string) => void; locked: boolean }) => (
+  <label className="field"><span>Target date (optional)</span><input readOnly={locked} className="input" type="date" value={value} onChange={(event) => onChange(event.target.value)} /></label>
 );
 
-const ScopeField = ({ value, onChange }: { value: 'own' | 'all'; onChange: (value: 'own' | 'all') => void }) => (
-  <label className="field"><span>Income</span><select className="input" value={value} onChange={(event) => onChange(event.target.value as 'own' | 'all')}>{Object.entries(GOAL_INCOME_SCOPE_DEFS).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}</select></label>
+const ScopeField = ({ value, onChange, locked }: { value: 'own' | 'all'; onChange: (value: 'own' | 'all') => void; locked: boolean }) => (
+  <label className="field"><span>Income</span><select className="input" value={value} aria-disabled={locked} onChange={(event) => { if (locked) event.currentTarget.value = value; else onChange(event.target.value as 'own' | 'all'); }}>{Object.entries(GOAL_INCOME_SCOPE_DEFS).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}</select></label>
 );

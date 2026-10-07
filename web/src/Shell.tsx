@@ -15,6 +15,7 @@ import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ScreenShown } from './screen';
 import { ThemeMode, useTheme } from './theme';
 import { TxFocus } from './types';
+import { NavigationNotice } from './components/NavigationNotice';
 import { setUrl, urlFor, useUrl } from './url';
 
 const TABS = [
@@ -44,7 +45,10 @@ const THEME_MODES: readonly { mode: ThemeMode; label: string }[] = [
 /** One `shown` for both, so the `hidden` a screen sits under and what its sheets are told cannot differ. */
 const Screen = ({ shown, children }: { shown: boolean; children: React.ReactNode }) => (
   <div className="screen" hidden={!shown}>
-    <ScreenShown value={shown}>{children}</ScreenShown>
+    <ScreenShown value={shown}>
+      {shown && <NavigationNotice className="navigation-notice" />}
+      {children}
+    </ScreenShown>
   </div>
 );
 
@@ -88,8 +92,9 @@ export function Shell() {
   };
 
   const openTransactions = (accountId: string) => {
-    setFocus((prev) => ({ accountId, nonce: (prev?.nonce ?? 0) + 1 }));
-    setUrl({ screen: 'transactions', panel: null });
+    setUrl({ screen: 'transactions', panel: null }, 'push', () => {
+      setFocus((prev) => ({ accountId, nonce: (prev?.nonce ?? 0) + 1 }));
+    });
   };
 
   const openImport = () => setUrl(IMPORT_PATCH);

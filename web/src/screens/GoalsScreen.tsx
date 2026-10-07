@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { useEditorSession } from '../editor';
 import { Button } from '../components/Button';
 import { FormActions } from '../components/FormActions';
 import { Notice } from '../components/Notice';
@@ -15,13 +16,32 @@ interface Props {
 
 export function GoalsScreen({ reloadToken = 0 }: Props) {
   const url = useUrl();
+  const selection = useRef({ goal: url.goal, token: 0 });
+  if (selection.current.goal !== url.goal) {
+    selection.current = { goal: url.goal, token: selection.current.token + 1 };
+  }
+  const selectionToken = selection.current.token;
   const [goals, setGoals] = useState<GoalSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GoalSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  if (url.goal !== null && deleteTarget !== null) setDeleteTarget(null);
+  const deleteEditor = useEditorSession({ open: deleteTarget !== null, dirty: false, busy: deleting, onClose: () => setDeleteTarget(null) });
   const loadGeneration = useRef(0);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const postWriteFocus = useRef<{ list: GoalSummary[] | null } | null>(null);
+  useEffect(() => {
+    const intent = postWriteFocus.current;
+    if (!intent) return;
+    const replaced = goals !== null && goals !== intent.list;
+    if (!replaced && !error) return;
+    if (replaced) postWriteFocus.current = null;
+    if (document.activeElement === document.body && !titleRef.current?.closest('[hidden], [inert]')) {
+      titleRef.current?.focus();
+    }
+  }, [goals, error]);
 
   const load = useCallback(async (initial = false) => {
     const generation = ++loadGeneration.current;
@@ -50,8 +70,11 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
     setDeleteError(null);
     try {
       await api.deleteGoal(deleteTarget.id);
-      if (url.goal === deleteTarget.id) setUrl({ goal: null }, 'replace');
-      setDeleteTarget(null);
+      deleteEditor.finish(() => {
+        if (url.goal === deleteTarget.id) setUrl({ goal: null }, 'replace');
+        postWriteFocus.current = { list: goals };
+        setDeleteTarget(null);
+      });
       await load();
     } catch (caught) {
       setDeleteError((caught as Error).message);
@@ -64,7 +87,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
     <section className="screen-inner">
       <header className="header goals-header">
         <div>
-          <h1 tabIndex={-1}>Goals</h1>
+          <h1 ref={titleRef} tabIndex={-1}>Goals</h1>
         </div>
         <button
           className="btn btn-primary"
@@ -83,7 +106,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
       {error && (
         <div className="error-row" role="alert">
           <span>Couldn’t load goals: {error}</span>
-          <button className="btn btn-small" onClick={() => void load(true)}>
+          <button className="btn btn-small" onClick={() => { titleRef.current?.focus(); void load(true); }}>
             Retry
           </button>
         </div>
@@ -128,17 +151,16 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
         onClose={() => setUrl({ goal: null }, 'replace')}
         onMissing={handleMissingGoal}
         onSaved={() => {
+          postWriteFocus.current = { list: goals };
           setNotice(null);
-          setUrl({ goal: null }, 'replace');
+          if (selection.current.token === selectionToken) setUrl({ goal: null }, 'replace');
           void load();
         }}
       />
 
       <Sheet
         open={deleteTarget !== null}
-        onClose={() => {
-          if (!deleting) setDeleteTarget(null);
-        }}
+        onClose={deleteEditor.requestClose}
         position="center"
         pattern="confirmation"
         busy={deleting}

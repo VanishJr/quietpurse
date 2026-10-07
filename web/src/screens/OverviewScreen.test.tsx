@@ -1221,12 +1221,17 @@ describe('the account menu', () => {
       ...OVERVIEW_ROUTES,
       'PATCH /api/accounts/acc-1': () => ok({ ...ACCOUNTS[0], hidden: true }),
     });
+    const opener = await screen.findByRole('button', { name: 'Account menu: Sparkasse Giro' });
+    opener.focus();
     const menu = await openMenu();
 
     fireEvent.click(within(menu).getByText('Hide'));
     fireEvent.click(await screen.findByRole('button', { name: 'Hide' }));
 
     expect(await screen.findByText(/Every account you have is hidden/)).toBeInTheDocument();
+    expect(opener).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add account' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toHaveFocus();
   });
 
   it('names what deleting would destroy before offering anything', async () => {
@@ -1320,6 +1325,54 @@ describe('deleting an account', () => {
     fireEvent.change(await screen.findByLabelText(/to confirm/), { target: { value: name } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
   };
+
+  it.each([false, true])('handles delayed first-account focus without stealing a surviving user choice (chosen=%s)', async (chosen) => {
+    let created = false;
+    let finish!: (response: Response) => void;
+    const cash = account({ id: 'cash-new', name: 'Cash' });
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => created ? new Promise<Response>((resolve) => { finish = resolve; }) : ok([]),
+      'POST /api/accounts': () => { created = true; return ok(cash); },
+    });
+    const opener = await screen.findByRole('button', { name: 'Create an empty account' });
+    await waitFor(() => expect(opener).toBeEnabled());
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Cash' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+    const heading = screen.getByRole('heading', { name: 'Overview' });
+    const survivor = within(heading.closest('header')!).getByRole('button', { name: 'Import statement' });
+    if (chosen) survivor.focus();
+    await act(async () => finish(ok([cash])));
+    await screen.findByRole('button', { name: 'Cash' });
+    expect(opener).not.toBeInTheDocument();
+    expect(chosen ? survivor : heading).toHaveFocus();
+  });
+
+  it('recovers focus after a delayed post-delete refresh removes the restored account opener', async () => {
+    let deleted = false;
+    let finish!: (response: Response) => void;
+    const remaining = account({ id: 'acc-3', name: 'Cash' });
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => deleted ? new Promise<Response>((resolve) => { finish = resolve; }) : ok([ACCOUNTS[0], remaining]),
+      'GET /api/imports': () => ok(PREVIEW),
+      'DELETE /api/accounts/acc-1': () => { deleted = true; return ok(DESTROYED); },
+    });
+    await panel('Sparkasse Giro');
+    const opener = await screen.findByRole('button', { name: 'Account menu: Sparkasse Giro' });
+    opener.focus();
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+    await act(async () => finish(ok([remaining])));
+    await screen.findByRole('button', { name: 'Cash' });
+    expect(screen.getByRole('heading', { name: 'Overview' })).toHaveFocus();
+  });
 
   it('drops the account from the rail and names what the server destroyed', async () => {
     const other = account({ id: 'acc-3', name: 'Cash' });

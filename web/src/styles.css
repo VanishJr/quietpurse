@@ -882,6 +882,7 @@ textarea {
 
 .sheet-heading :is(h2, h3) {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sheet-close {
@@ -895,6 +896,16 @@ textarea {
   overscroll-behavior: contain;
   scroll-padding-block: var(--space-4);
   padding: var(--space-1);
+}
+
+.sheet.sheet-flow {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.sheet.sheet-flow .sheet-body {
+  flex-shrink: 0;
+  overflow: visible;
 }
 
 .sheet-footer,
@@ -3511,6 +3522,11 @@ textarea.native-field__control {
   overflow-wrap: anywhere;
 }
 
+.screen > .navigation-notice {
+  margin: var(--space-6) var(--page-gutter) 0;
+  max-width: var(--page-wide);
+}
+
 .notice--content {
   padding-block: var(--space-6);
 }
@@ -3578,6 +3594,18 @@ textarea.native-field__control {
 
 .page-header__action {
   max-width: 100%;
+}
+
+.editor-guard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.editor-guard h3 {
+  font-size: var(--text-component);
+  line-height: var(--leading-heading);
 }
 
 .choice-chips {

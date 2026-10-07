@@ -5,6 +5,7 @@ import { ACCOUNTS, INCOME_SOURCES } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
 import { IncomeSourceDef, Transaction, CategoryRulePreview, TransferRulePreview, TransferRuleWithMatches } from '../types';
 import { TransactionsScreen } from './TransactionsScreen';
+import { setUrl } from '../url';
 
 /**
  * The first of the empty-versus-failed states: "No transactions in the selected period."
@@ -501,6 +502,119 @@ const openCategoryPreview = async () => {
 const applyCategoryRule = () => screen.getByRole('button', { name: 'Apply Food' });
 
 describe('category rules with a preview', () => {
+  it('guards unapplied pattern changes even after preview, and an undone edit dismisses directly', async () => {
+    mockFetch({ ...CATEGORY_ROUTES, 'POST /api/category-rules/preview': (init) => ok({
+      ...CATEGORY_PREVIEW, pattern: JSON.parse(String(init?.body)).pattern,
+    }) });
+    mount();
+    await openCategoryPreview();
+    const input = screen.getByRole('textbox', { name: 'Description contains' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'REWE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
+    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('REWE');
+    fireEvent.change(input, { target: { value: 'REWE Berlin' } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests()).not.toContain('POST /api/category-rules');
+  });
+
+  const partialRuleCases = [false, true].flatMap((remove) => [false, true].flatMap((writeSucceeds) =>
+    (['escape', 'navigation'] as const).map((leave) => ({ remove, writeSucceeds, leave }))));
+
+  it.each(partialRuleCases)('keeps rule draft truth after remove=$remove, committed=$writeSucceeds, leave=$leave', async ({ remove, writeSucceeds, leave }) => {
+    const mutation = remove ? 'DELETE /api/category-rules/7' : 'POST /api/category-rules';
+    mockFetch({ ...CATEGORY_ROUTES,
+      'POST /api/category-rules/preview': (init) => ok({
+        ...CATEGORY_PREVIEW,
+        pattern: JSON.parse(String(init?.body)).pattern,
+        activeRule: remove ? ruleAnswer('REWE', 2, 1).rule : null,
+      }),
+      [mutation]: () => writeSucceeds ? ok(remove ? { deleted: true } : ruleAnswer('REWE', 2, 1)) : fail(409, { error: 'rule write refused' }),
+      'GET /api/transactions/tx-1': () => fail(500, { error: 'transaction refresh failed' }),
+    });
+    mount();
+    await openCategoryPreview();
+    const pattern = screen.getByRole('textbox', { name: 'Description contains' });
+    fireEvent.change(pattern, { target: { value: 'REWE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
+    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(remove ? screen.getByRole('button', { name: 'Remove category rule' }) : applyCategoryRule());
+    const error = await screen.findByRole('alert');
+    expect(error).toHaveTextContent(writeSucceeds ? 'Could not refresh the transaction: transaction refresh failed' : 'rule write refused');
+    expect(pattern).toHaveValue('REWE');
+    expect(requests().filter((request) => request === mutation)).toHaveLength(1);
+    expect(requests().includes('GET /api/transactions/tx-1')).toBe(writeSucceeds);
+    const before = window.location.href;
+    const requestLeave = () => {
+      if (leave === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else act(() => setUrl({ screen: 'settings' }));
+    };
+    requestLeave();
+    if (writeSucceeds) {
+      expect(screen.queryByRole('button', { name: 'Discard changes' })).not.toBeInTheDocument();
+      if (leave === 'escape') expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      else expect(window.location.search).toContain('screen=settings');
+    } else {
+      expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+      expect(window.location.href).toBe(before);
+      fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+      expect(pattern).toHaveValue('REWE');
+      expect(screen.getByRole('alert')).toHaveTextContent('rule write refused');
+      requestLeave();
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    }
+    expect(requests().filter((request) => request === mutation)).toHaveLength(1);
+  });
+
+  it('marks an edited rule committed before a failed transaction refresh, without offering to discard the saved rule', async () => {
+    mockFetch({ ...CATEGORY_ROUTES,
+      'POST /api/category-rules/preview': (init) => ok({ ...CATEGORY_PREVIEW, pattern: JSON.parse(String(init?.body)).pattern }),
+      'POST /api/category-rules': () => ok(ruleAnswer('REWE', 2, 1)),
+      'GET /api/transactions/tx-1': () => fail(500, { error: 'transaction refresh failed' }),
+    });
+    mount();
+    await openCategoryPreview();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description contains' }), { target: { value: 'REWE' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Preview matches' }));
+    await waitFor(() => expect(applyCategoryRule()).toBeEnabled());
+    fireEvent.click(applyCategoryRule());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not refresh the transaction: transaction refresh failed');
+    expect(screen.getByRole('alert')).toHaveTextContent('The rule sets Food');
+    expect(requests().filter((request) => request === 'POST /api/category-rules')).toHaveLength(1);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
+    expect(requests().some((request) => request.startsWith('DELETE'))).toBe(false);
+  });
+
+  it('protects edited pattern navigation and Back without changing immediate transaction controls', async () => {
+    mockFetch(CATEGORY_ROUTES);
+    mount();
+    await openCategoryPreview();
+    const input = screen.getByRole('textbox', { name: 'Description contains' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'REWE broad' } });
+    const before = window.location.href;
+    act(() => setUrl({ screen: 'settings' }));
+    expect(window.location.href).toBe(before);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(input).toHaveValue('REWE broad');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to transaction' }));
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply to similar transactions' })).toHaveFocus());
+    expect(screen.queryByRole('textbox', { name: 'Description contains' })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests()).not.toContain('POST /api/category-rules');
+  });
+
   it('carries the category just selected in the card through viewing an existing rule and refreshing', async () => {
     const sent: unknown[] = [];
     const oldRule = ruleAnswer('REWE', 2, 1).rule;
@@ -631,7 +745,10 @@ describe('category rules with a preview', () => {
     await openCategoryPreview();
     fireEvent.click(applyCategoryRule());
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
-    expect(screen.getByLabelText('Description contains')).toBeDisabled();
+    expect(screen.getByLabelText('Description contains')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Description contains')).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Description contains'), { target: { value: 'Must not change' } });
+    expect(screen.getByLabelText('Description contains')).toHaveValue('REWE Berlin');
     expect(screen.getByRole('button', { name: 'Back to transaction' })).toBeDisabled();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('dialog', { name: 'Apply category' })).toBeInTheDocument();
@@ -877,6 +994,32 @@ describe('the income source', () => {
     // and the detail stays open on the updated row
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Support, this transaction only' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('restores direct-entry focus to the section after a Support refresh replaces the opener', async () => {
+    const updated = { ...INCOME, category: 'support', categoryManual: true, incomeSource: 'category:support' };
+    let reads = 0;
+    let releaseRead!: (response: Response) => void;
+    const reload = new Promise<Response>((resolve) => { releaseRead = resolve; });
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/transactions': () => ++reads === 1 ? ok([INCOME]) : reload,
+      'PATCH /api/transactions/tx-in/category': () => ok(updated),
+    });
+    renderThemed(<div className="screen"><TransactionsScreen /></div>);
+    const heading = screen.getByRole('heading', { name: 'Transactions' });
+    const opener = (await screen.findByText('ZZ Income')).closest<HTMLButtonElement>('button')!;
+    expect(heading).not.toHaveAttribute('tabindex');
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: 'Support, this transaction only' }));
+    await waitFor(() => expect(reads).toBe(2));
+    expect(opener).not.toBeInTheDocument();
+    await act(async () => { releaseRead(ok([updated])); });
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Close$/ })).toBeEnabled());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(heading).toHaveFocus();
   });
 
   it('re-reads the list when a row leaves Support, which can pair it with a transfer again', async () => {
