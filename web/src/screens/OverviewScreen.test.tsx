@@ -197,7 +197,7 @@ describe('the page heading', () => {
     const heading = await screen.findByRole('heading', { name: 'Import a statement' });
     expect(heading).toBeInTheDocument();
     expect(heading.closest('.import-page')).toBeInTheDocument();
-    expect(heading.closest('.screen-inner')).toBeNull();
+    expect(heading.closest('.screen-inner')).toBeInTheDocument();
   });
 
   it('drops the panel from the URL on the way out, which is what the bar reads', async () => {

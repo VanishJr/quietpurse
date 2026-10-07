@@ -1,7 +1,7 @@
 ---
 id: module-web
 type: module-design
-status: active
+status: draft
 title: web — the client's requests, month arithmetic, sentences and entry point
 parent: architecture
 ---
@@ -606,8 +606,13 @@ of the rows that were unreadable, filtered by a status or moved no money — the
 before Confirm, and a cause repeated afterwards would be a claim about rows none of the three can
 see.
 
-`CsvImport` stages a read for review rather than treating it as an import. Its reader sentence
-precedes every figure because it qualifies what those figures mean; the balance pair, when present,
+`CsvImport` stages a read for review rather than treating it as an import. Preparation is the working
+surface only until the read begins; a review or outcome replaces it, retaining the source identity
+and destination beside the server's answer. A staged source changes through explicit discard, not
+through editable setup beside Confirm. Optional presets belong to preparation and retry. Parser
+refusals remain whole, accompanied by web-supported next steps rather than a promised mapping editor.
+Every available staged problem remains visible before confirmation. Its reader sentence precedes
+every figure because it qualifies what those figures mean; the balance pair, when present,
 is opening to closing, while its claim stays in the details because a continuous run cannot prove
 the statement is complete. Without a pair the metric is absent, and a reason is shown only when the
 server supplies one. Parser problems on a staged read are warnings, not fatal request errors; the
