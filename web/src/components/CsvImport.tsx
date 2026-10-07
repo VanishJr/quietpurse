@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney, rowCount } from '../format';
 import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
@@ -314,17 +314,19 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     }
   };
 
-  useEffect(() => {
+  // Layout, not passive: the heading must hold focus in the same commit that shows it, or a reader
+  // (or anything waiting on the heading) acts in the frame where focus is still on the body.
+  useLayoutEffect(() => {
     if (result) {
       (result.outcome === 'awaiting_confirmation' ? reviewHeading : resultHeading).current?.focus();
     }
   }, [result]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (confirmed) resultHeading.current?.focus();
   }, [confirmed]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (discarded) resultHeading.current?.focus();
   }, [discarded]);
 
