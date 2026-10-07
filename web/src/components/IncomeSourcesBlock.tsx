@@ -255,7 +255,7 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                           Cancel
                         </button>
                         <button
-                          className="btn-danger"
+                          className="btn btn-sm btn-destroy"
                           aria-disabled={busy || !destination}
                           onClick={() => {
                             if (destination) remove(s.id);

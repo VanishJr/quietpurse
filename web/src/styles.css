@@ -1340,13 +1340,21 @@ textarea {
   background: var(--ink-page);
   gap: 2px;
 }
-.flows-head .chip {
+/* Scoped through .choice-chips so this screen's segmented control keeps its own look over the
+   shared chip treatment until the screen migrates; the touch-size floor below still reaches it. */
+.flows-head .choice-chips .chip {
+  min-width: 0;
+  min-height: 0;
+  max-width: 220px;
   padding: 5px 10px;
   border: 0;
   border-radius: 5px;
+  background: var(--ink-surface);
+  color: var(--ink-secondary);
   font-size: 11px;
+  white-space: nowrap;
 }
-.flows-head .chip[aria-pressed='true'] {
+.flows-head .choice-chips .chip[aria-pressed='true'] {
   background: var(--ink-raised);
   color: var(--ink-primary);
 }
@@ -3654,7 +3662,8 @@ textarea.native-field__control {
 
 @media (max-width: 899px), (pointer: coarse) {
   .action-button.action-button--compact,
-  .choice-chips .chip {
+  .choice-chips .chip,
+  .flows-head .choice-chips .chip {
     min-width: var(--control-touch);
     min-height: var(--control-touch);
   }

@@ -279,7 +279,7 @@ export function ImportHistory({ onBack, onChanged, account }: Props) {
                       Cancel
                     </button>
                     <button
-                      className="btn-danger"
+                      className="btn btn-sm btn-destroy"
                       disabled={busy}
                       onClick={() =>
                         open.kind === 'import' ? runDeleteImport(r.id) : runDeleteDocument(r.id)

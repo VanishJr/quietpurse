@@ -392,6 +392,7 @@ describe('IncomeSourcesBlock', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
     const confirm = screen.getByRole('button', { name: 'Delete' });
+    expect(confirm).toHaveClass('btn-destroy');
     confirm.focus();
     fireEvent.click(confirm);
     expect(confirm).not.toBeDisabled();

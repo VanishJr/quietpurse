@@ -320,6 +320,7 @@ describe('deleting an import', () => {
     ).toBeInTheDocument();
     expect(deletes()).toEqual([]);
 
+    expect(screen.getByRole('button', { name: 'Delete import' })).toHaveClass('btn-destroy');
     fireEvent.click(screen.getByRole('button', { name: 'Delete import' }));
 
     expect(
