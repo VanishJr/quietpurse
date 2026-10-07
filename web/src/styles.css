@@ -444,16 +444,19 @@ textarea {
   opacity: 0.5;
 }
 
-.btn-destroy {
+.btn-destroy,
+.btn.btn-danger {
   background: var(--ink-danger);
   color: var(--ink-onDanger);
 }
 
-.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):hover {
+.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):hover,
+.btn.btn-danger:where(:not(:disabled, [aria-disabled='true'])):hover {
   background: var(--ink-dangerHover);
 }
 
-.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):active {
+.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):active,
+.btn.btn-danger:where(:not(:disabled, [aria-disabled='true'])):active {
   background: var(--ink-dangerPressed);
 }
 

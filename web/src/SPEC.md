@@ -713,6 +713,9 @@ does not depend on transitions to establish the final state.
 `Button` owns native action presentation with explicit type, variant and size. Foreground and ground
 are a pair; legacy action classes do not choose either for a migrated button. Pending and
 focus-retaining locked actions refuse activation without substituting a different label.
+The legacy filled `btn btn-danger` combination shares `btn-destroy`'s complete danger pair and
+interaction states until consumer migration retires those classes; a standalone `btn-danger`
+remains a lower-emphasis text action rather than acquiring the filled confirmation treatment.
 `FormActions` keeps supporting navigation before dismissal and completion in reading order;
 narrow layouts put completion on its own row rather than reshuffling keyboard order.
 
