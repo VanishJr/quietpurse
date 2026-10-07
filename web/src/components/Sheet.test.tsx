@@ -420,6 +420,52 @@ describe('adaptive sheet framing', () => {
     }
   });
 
+  it('keeps the focused action visible after a resize that does not change scroll framing', async () => {
+    const { unmount } = render(<Sheet open pattern="confirmation" onClose={() => {}}
+      header={<h2>Delete import?</h2>} footer={<button>Cancel</button>}>
+      <label>Name<input defaultValue="Draft" /></label>
+    </Sheet>);
+    try {
+      const card = screen.getByRole('dialog');
+      const body = card.querySelector<HTMLElement>('.sheet-body')!;
+      const cancel = screen.getByRole('button', { name: 'Cancel' });
+      const input = screen.getByRole('textbox') as HTMLInputElement;
+      Object.defineProperty(card, 'clientHeight', { get: () => 300 });
+      card.style.padding = '20px';
+      card.style.rowGap = '16px';
+      card.style.overflowY = 'auto';
+      card.getBoundingClientRect = () => new DOMRect(0, 100, 300, 300);
+      card.querySelector<HTMLElement>('.sheet-header')!.getBoundingClientRect = () => new DOMRect(0, 100, 300, 100);
+      card.querySelector<HTMLElement>('.sheet-footer')!.getBoundingClientRect = () => new DOMRect(0, 600, 300, 70);
+      input.getBoundingClientRect = () => new DOMRect(0, 200, 300, 44);
+      input.closest('label')!.getBoundingClientRect = () => new DOMRect(0, 180, 300, 100);
+      body.getBoundingClientRect = () => new DOMRect(0, 200, 300, 100);
+      cancel.getBoundingClientRect = () => new DOMRect(0, 600, 100, 44);
+      cancel.scrollIntoView = vi.fn();
+      cancel.focus();
+      act(() => notifyResizeObservers());
+      expect(card).toHaveClass('sheet-flow');
+      await waitFor(() => expect(cancel.scrollIntoView).toHaveBeenCalled());
+      vi.mocked(cancel.scrollIntoView).mockClear();
+      act(() => notifyResizeObservers());
+      await waitFor(() => expect(cancel.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+      expect(cancel).toHaveFocus();
+
+      vi.mocked(cancel.scrollIntoView).mockClear();
+      input.scrollIntoView = vi.fn();
+      act(() => notifyResizeObservers());
+      input.focus();
+      input.setSelectionRange(1, 3);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      expect(cancel.scrollIntoView).not.toHaveBeenCalled();
+      expect(input.scrollIntoView).not.toHaveBeenCalled();
+      expect(input).toHaveFocus();
+      expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
+    } finally {
+      unmount();
+    }
+  });
+
   it('returns framing to one scrolling flow when a labeled control cannot fit, without replacing focus', () => {
     const { unmount } = render(<Sheet open pattern="long-editor" onClose={() => {}}
       header={<h2>Editor</h2>} footer={<button>Save</button>}>

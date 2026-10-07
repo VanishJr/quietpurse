@@ -869,6 +869,7 @@ textarea {
   max-height: 88vh;
   max-height: 88dvh;
   overflow: hidden;
+  scroll-padding-block: var(--space-4);
 }
 
 .sheet-header {
@@ -3802,6 +3803,7 @@ textarea.native-field__control {
   .history-record__popover {
     left: 0;
     right: auto;
+    min-width: min(12rem, calc(100vw - var(--page-gutter) * 2));
     max-width: calc(100vw - var(--page-gutter) * 2);
   }
 }

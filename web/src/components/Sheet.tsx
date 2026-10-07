@@ -221,6 +221,24 @@ export function Sheet({
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (!live || !card || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const keepFocusVisible = () => {
+      frame = 0;
+      const target = document.activeElement;
+      if (!active.current || !isAvailable(card) || !(target instanceof HTMLElement) ||
+          !card.contains(target) || !isAvailable(target)) return;
+      const viewport = /auto|scroll/.test(getComputedStyle(card).overflowY)
+        ? card : card.querySelector<HTMLElement>('.sheet-body');
+      if (!viewport?.contains(target)) return;
+      const bounds = viewport.getBoundingClientRect();
+      const style = getComputedStyle(viewport);
+      const control = target.getBoundingClientRect();
+      const top = bounds.top + (Number.parseFloat(style.scrollPaddingTop) || 0);
+      const bottom = bounds.bottom - (Number.parseFloat(style.scrollPaddingBottom) || 0);
+      if (control.top < top || control.bottom > bottom) {
+        target.scrollIntoView?.({ block: 'nearest' });
+      }
+    };
     const measure = () => {
       if (!isAvailable(card)) return;
       const body = card.querySelector<HTMLElement>('.sheet-body');
@@ -255,6 +273,11 @@ export function Sheet({
       const required = Math.max(0, ...heights, controls.length ? 0 : content?.getBoundingClientRect().height ?? 0) +
         (Number.parseFloat(bodyStyle.paddingTop) || 0) + (Number.parseFloat(bodyStyle.paddingBottom) || 0);
       setFlow((current) => available < required + (current ? gap : 0));
+      cancelAnimationFrame(frame);
+      // Changing overflow can reset the body's old scroll offset after layout.
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(keepFocusVisible);
+      });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -262,7 +285,10 @@ export function Sheet({
     for (const region of card.querySelectorAll<HTMLElement>('.sheet-header, .sheet-footer, .sheet-content, .sheet-guard, .sheet-status')) {
       observer.observe(region);
     }
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [live, header, footer, busy, guarded]);
 
   useLayoutEffect(() => {

@@ -883,6 +883,8 @@ fields and preview records do not establish competing scroll areas. When framing
 space for a labeled control, orientation and actions return to the same scrolling flow. This uses
 actual text and control geometry rather than assuming a short viewport has ordinary-sized text;
 mode changes and Keep editing bring the focused control into view without resetting its caret.
+Later content reflow keeps that control visible even when the scrolling mode is unchanged; recovery
+waits for overflow layout to settle and acts on the current focus, not a previously captured target.
 Associated fieldsets and semantic groups remain part of that measurement even when individual
 options fit. The test harness keeps resize observation present as a controlled notification seam;
 cases supply geometry and notifications explicitly, rather than treating the stub as optional or
