@@ -842,8 +842,11 @@ unclaimed bytes may still need removal. A named ordinary-button group exposes re
 before the shared confirmation names the source, operation and ownership consequences. File deletion
 preserves data and does not invalidate financial readers; import deletion does. A failed list reload
 retains the previous records with a visible refusal and retry, rather than reporting empty history.
-Removal retains focus-recovery intent through that reload and any retry; file-only removal returns
-to the same record, while removed imports return to a surviving control or history orientation.
+Removal retains recovery intent through that reload and any retry; file-only removal returns to
+the same record, while removed imports return to a surviving control or history orientation.
+Recovery owns only lost focus or its own restored target, not a later user choice or another
+confirmation's opener. Explicit Retry reclaims stable heading orientation before replacing its
+control and can then apply the retained removal intent.
 
 `AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
 server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on

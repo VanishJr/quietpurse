@@ -579,6 +579,46 @@ describe('record actions and confirmations', () => {
 });
 
 describe('mutation recovery', () => {
+  it('does not override another record confirmation after a failed removal reload, but Retry can recover', async () => {
+    const survivor = importRecord({ id: 'imp-2', originalFilename: 'second.csv' });
+    let reads = 0;
+    mockFetch({
+      'GET /api/imports': () => ++reads === 1 ? ok(importsResponse([importRecord(), survivor]))
+        : reads === 2 ? fail(500, { error: 'refresh refused' }) : ok(importsResponse([survivor])),
+      'DELETE /api/imports/imp-1': () => ok({ deleted: true, transactions: 12 }),
+    });
+    mount();
+    const first = await openConfirmation('import');
+    fireEvent.click(within(first.dialog).getByRole('button', { name: 'Delete import' }));
+    await screen.findByText('Import deleted — 12 transactions removed.');
+    expect(screen.getByRole('heading', { name: 'Import history' })).toHaveFocus();
+    const second = await openConfirmation('import', 'second.csv');
+    fireEvent.click(within(second.dialog).getByRole('button', { name: 'Cancel' }));
+    expect(second.trigger).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(screen.queryByRole('article', { name: 'statement.csv' })).not.toBeInTheDocument());
+    expect(second.trigger).toHaveFocus();
+    expect(deletes()).toEqual(['DELETE /api/imports/imp-1']);
+  });
+
+  it('does not steal focus from a surviving record while a removal reload is delayed', async () => {
+    const refresh = deferredResponse();
+    const survivor = importRecord({ id: 'imp-2', originalFilename: 'second.csv' });
+    let reads = 0;
+    mockFetch({
+      'GET /api/imports': () => ++reads === 1 ? ok(importsResponse([importRecord(), survivor])) : refresh.promise,
+      'DELETE /api/imports/imp-1': () => ok({ deleted: true, transactions: 12 }),
+    });
+    mount();
+    const { dialog } = await openConfirmation('import');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete import' }));
+    await screen.findByText('Updating import history…');
+    const chosen = screen.getByRole('button', { name: 'Download the file for second.csv' });
+    chosen.focus();
+    await act(async () => refresh.resolve(ok(importsResponse([survivor]))));
+    expect(chosen).toHaveFocus();
+    expect(deletes()).toEqual(['DELETE /api/imports/imp-1']);
+  });
   it.each(['survivor', 'heading'] as const)(
     'waits for the deletion reload before focusing the %s and uses the server removal count', async (target) => {
       const refresh = deferredResponse();

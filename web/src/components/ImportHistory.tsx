@@ -68,8 +68,12 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
   const pending = useRef<'download' | 'document' | 'import' | null>(null);
   const pendingRecord = useRef<string | null>(null);
   const lastConfirmRecord = useRef<string | undefined>(undefined);
-  const focusAfter = useRef<{ id: string; removed: boolean } | null>(null);
+  const focusAfter = useRef<{ id: string; removed: boolean; owner: HTMLElement | null } | null>(null);
   const sequence = useRef(0);
+
+  const recordNode = (recordId: string): HTMLElement | null =>
+    Array.from(records.current?.querySelectorAll<HTMLElement>('[data-record-actions]') ?? [])
+      .find((control) => control.dataset.recordActions === recordId) ?? null;
 
   const recordControl = (recordId?: string, exclude?: string): HTMLElement | null => {
     const controls = Array.from(records.current?.querySelectorAll<HTMLElement>('[data-record-actions]') ?? [])
@@ -116,8 +120,16 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
   useLayoutEffect(() => {
     const recovery = focusAfter.current;
     if (!recovery || confirm || loading || !shown) return;
+    const focused = document.activeElement;
+    const ownsFocus = recovery.owner !== null && (focused === document.body || focused === recovery.owner);
+    if (!ownsFocus) {
+      if (error) recovery.owner = null;
+      else focusAfter.current = null;
+      return;
+    }
     if (error) {
       heading.current?.focus({ preventScroll: true });
+      recovery.owner = heading.current;
       return;
     }
     focusAfter.current = null;
@@ -161,7 +173,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
     setRowError(null);
     try {
       const { bytesRemoved } = await api.deleteImportDocument(recordId);
-      focusAfter.current = { id: recordId, removed: false };
+      focusAfter.current = { id: recordId, removed: false, owner: recordNode(recordId) ?? heading.current };
       await load();
       setNotice(bytesRemoved ? 'The stored statement was deleted.'
         : 'This import no longer claims a stored file, and there were no bytes to remove.');
@@ -180,7 +192,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
     setRowError(null);
     try {
       const { transactions } = await api.deleteImport(recordId);
-      focusAfter.current = { id: recordId, removed: true };
+      focusAfter.current = { id: recordId, removed: true, owner: recordNode(recordId) ?? heading.current };
       await load();
       const removed = transactions === 1 ? '1 transaction' : `${transactions} transactions`;
       setNotice(transactions === 0 ? 'Import deleted — no transactions were removed.'
@@ -210,6 +222,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
       {loading && <Notice role="status">{list ? 'Updating import history…' : 'Loading import history…'}</Notice>}
       {error && <Notice title="History could not be loaded" tone="error" role="alert" remedy={
         <Button type="button" variant="secondary" size="standard" aria-disabled={busy || loading} onClick={() => {
+          if (focusAfter.current) focusAfter.current.owner = heading.current;
           heading.current?.focus();
           void load();
         }}>Retry</Button>
