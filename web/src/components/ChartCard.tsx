@@ -1,19 +1,8 @@
-/**
- * `ChartCard` carries no control, for the reason `web/src/SPEC.md` gives under *What a
- * chart is, and where its numbers come from*.
- *
- * **A refusal is printed, and no numbers are.** `useChartData` nulls the data before
- * every load, so there is never a figure on screen from the range the card is no
- * longer about.
- *
- * No footnote says how amounts are converted or what is counted, deliberately: the
- * screen is a strip of charts that do not share a unit — a per-account chart answers
- * in its own account's currency — so a rule stated once at the foot would be a rule
- * about whichever chart happened to be showing.
- */
-import { drawnShares, METRICS, suggestedTitle } from '../analytics';
+import type { ReactNode } from 'react';
+import { boundsOf, chartKind, drawnShares, METRICS, priorBoundsOf, rangeDef, rankingSeriesName, suggestedTitle } from '../analytics';
 import { ChartData, useChartData } from '../chartData';
-import { fmtMoney } from '../format';
+import { fmtDay, fmtMoney } from '../format';
+import { Notice } from './Notice';
 import { Account, Chart } from '../types';
 import { ChartPlot } from './ChartPlot';
 
@@ -26,9 +15,10 @@ interface Props {
   /** ...and why, when it is null because the read failed rather than not finished. */
   accountsError: string | null;
   dataRevision?: number;
+  actions?: ReactNode;
 }
 
-export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: Props) {
+export function ChartCard({ spec, accounts, accountsError, dataRevision = 0, actions }: Props) {
   const { data, error, loading } = useChartData(
     spec,
     accounts,
@@ -43,13 +33,29 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0 }: P
    */
   const account = spec.accountId ? accounts?.find((a) => a.id === spec.accountId) : undefined;
   const title = spec.title || suggestedTitle(spec, account?.name ?? null);
+  const range = rangeDef(spec.range);
+  const today = new Date();
+  const period = boundsOf(range, today);
+  const prior = chartKind(spec.kind).comparative ? priorBoundsOf(range, today) : null;
+  const dates = ({ from, to }: { from: string; to: string }) => `${fmtDay(from)} – ${fmtDay(to)}`;
 
   return (
     <section className="chart-card" aria-label={title}>
-      <h2 className="block-title chart-title">{title}</h2>
+      <header className="chart-header">
+        <div className="chart-identity">
+          <h2 className="block-title chart-title">{title}</h2>
+          <div className="chart-context">
+            <p>Scope: {spec.accountId === null ? 'All accounts' : account ? `${account.name}${account.hidden ? ' (hidden)' : ''}` : `Account ${spec.accountId}`}</p>
+            <p>Period: {range.label} · {dates(period)}{chartKind(spec.kind).shape === 'series' ? ` · ${range.grain === 'month' ? 'Monthly' : 'Yearly'} totals` : ` · ${rankingSeriesName(spec.breakdown)}`}</p>
+            {prior && <p>Compared with: {dates(prior)}</p>}
+            <p>Units: {data ? `${data.currency} · ${spec.accountId === null ? 'Converted workspace amounts' : 'Native account amounts'}` : loading ? 'Reading currency…' : 'Unavailable'}</p>
+          </div>
+        </div>
+        {actions && <div className="chart-context-actions">{actions}</div>}
+      </header>
 
-      {error && <p className="error">Error: {error}</p>}
-      {loading && <p className="hint chart-loading">Reading the numbers…</p>}
+      {error && <Notice tone="error" role="alert">Error: {error}</Notice>}
+      {loading && <Notice role="status" className="chart-loading">Reading the numbers…</Notice>}
 
       {data && (
         <>

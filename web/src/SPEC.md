@@ -441,10 +441,18 @@ own data, rather than a mock that could disagree with it: a range is easier to j
 it produces than from its name. A fetch or a piece of state added to `ChartPlot` is one the preview
 and the card would each run for themselves.
 
-`ChartCard` is the chart as a picture and carries no control: editing, duplicating and deleting a
-chart are done to it as an object, from its tab in `ChartDock`, because actions on the card put the
-loudest row on the screen above the plot a reader came to look at. `ChartDock` sits under the chart
-it chooses, as an index under its subject rather than a filter over it.
+`ChartCard` keeps title, account scope, selected period and response currency beside its plot,
+including the comparison window where applicable. A custom title never replaces that financial
+context, and unreadable units remain unavailable rather than borrowed from the account catalog.
+Selected-chart controls belong to this context, but `AnalyticsScreen` still owns every mutation.
+`ChartControls` shares action and safe confirmation behavior with the desktop strip, retaining
+non-selected chart actions without changing the chart being read. Narrow layouts use a labeled
+selector above the plot instead of a second bottom dock; primary navigation remains separate.
+A deleted action owner restores focus to the stable workspace creation control.
+
+`AnalyticsScreen` exposes the save pump's unresolved lifecycle as Saving charts, including
+serialized later intents. Optimistic editor closure is not confirmation. A normal refusal retains
+the visible work and retry, while a stale refusal replaces the list without reapplying the edit.
 
 `ChartCard`, `AccountFlows` and `SpendingByCategory` each draw their plot hidden from a screen reader
 and carry its numbers in a visually hidden table beside it — as measured — because the SVG is not

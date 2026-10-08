@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { render } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { ThemeProvider } from '../theme';
@@ -230,6 +230,72 @@ describe('the empty workspace', () => {
   });
 });
 
+describe('contextual workspace controls', () => {
+  it('switches through the labeled selector while retaining foreign URL context', async () => {
+    seed([chart('c-a', 'Groceries'), chart('c-b', 'Salary')]);
+    window.history.replaceState({ foreign: true }, '', '/?screen=analytics&chart=c-a&foreign=keep#context');
+    mockFetch(ROUTES);
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+    const selector = screen.getByRole('combobox', { name: 'Selected chart' });
+    expect(selector).toHaveValue('c-a');
+    fireEvent.change(selector, { target: { value: 'c-b' } });
+    expect(await screen.findByRole('heading', { name: 'Salary' })).toBeInTheDocument();
+    expect(selector).toHaveValue('c-b');
+    expect(window.location.search).toContain('foreign=keep');
+    expect(window.location.hash).toBe('#context');
+    expect(puts).toHaveLength(0);
+  });
+
+  it('keeps account, period and response units beside a custom title', async () => {
+    seed([{ ...COLUMN_CHART, accountId: 'acc-1', title: 'Custom question' }]);
+    mockFetch({ ...ROUTES, 'GET /api/summary/months': (_init, url) => ok(accountMonths(askedFor(url), { currency: 'UAH' })) });
+    mount();
+    const card = await screen.findByRole('region', { name: 'Custom question' });
+    expect(within(card).getByText('Scope: Sparkasse Giro')).toBeInTheDocument();
+    expect(within(card).getByText(/^Period: 12 months/)).toHaveTextContent('Monthly totals');
+    expect(await within(card).findByText('Units: UAH · Native account amounts')).toBeInTheDocument();
+    expect(within(card).queryByText('Units: EUR')).not.toBeInTheDocument();
+  });
+
+  it('keeps optimistic editor closure visibly pending, then exposes recoverable refusal', async () => {
+    seed([COLUMN_CHART]);
+    let release!: (response: Response) => void;
+    let refusing = true;
+    const held = new Promise<Response>((resolve) => { release = resolve; });
+    mockFetch({ ...ROUTES, 'PUT /api/analytics/charts': (init) => refusing ? held : acceptPut(init) });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit chart' }));
+    fireEvent.change(screen.getByLabelText('Chart name'), { target: { value: 'My changed chart' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByText('Saving charts…')).toBeVisible();
+    expect(screen.queryByText(/^Saved/)).not.toBeInTheDocument();
+    await act(async () => release(fail(503, { error: 'temporary refusal' })));
+    expect(await screen.findByText('Not saved: temporary refusal')).toBeVisible();
+    expect(screen.queryByText('Saving charts…')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'My changed chart' })).toBeInTheDocument();
+    refusing = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.queryByText(/Not saved/)).not.toBeInTheDocument());
+    expect(puts[0]).toMatchObject({ version: 3, charts: [expect.objectContaining({ title: 'My changed chart' })] });
+  });
+
+  it('confirms contextual deletion safely and restores a surviving action', async () => {
+    seed([COLUMN_CHART]);
+    mockFetch(ROUTES);
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for Spending, monthly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus();
+    expect(screen.getByText(/Accounts and transactions stay/)).toBeVisible();
+    expect(puts).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByText('Nothing plotted yet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New chart' })).toHaveFocus();
+  });
+});
+
 describe('building a chart', () => {
   it('asks for the shape first and the subject second, and leaves a card behind', async () => {
     mockFetch(ROUTES);
@@ -264,7 +330,7 @@ describe('building a chart', () => {
     renderThemed(<div className="screen"><AnalyticsScreen /></div>);
     const heading = screen.getByRole('heading', { name: 'Analytics' });
     const opener = await screen.findByRole('button', { name: 'Build your first chart' });
-    expect(heading).not.toHaveAttribute('tabindex');
+    expect(heading).toHaveAttribute('tabindex', '-1');
     opener.focus();
     fireEvent.click(opener);
     fireEvent.click(screen.getByRole('button', { name: /^Line/ }));
@@ -372,18 +438,15 @@ describe('a chart that was already there', () => {
     expect(screen.queryByText('1,200 EUR')).not.toBeInTheDocument();
   });
 
-  it('carries no controls of its own: they are on the tab, and there is one way in', async () => {
+  it('attaches selected-chart controls to its context without duplicating New chart', async () => {
     seed([COLUMN_CHART]);
     mockFetch(ROUTES);
     mount();
-    await screen.findByRole('heading', { name: 'Spending, monthly' });
-
-    // the three pills that used to sit over the plot are behind the tab's ⋮
-    for (const name of ['Edit', 'Duplicate', 'Delete']) {
-      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
-    }
-    // ...and "New chart" is the dock's alone, not a second one beside the heading
+    const card = await screen.findByRole('region', { name: 'Spending, monthly' });
+    expect(within(card).getByRole('button', { name: 'Edit chart' })).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'More actions for Spending, monthly' })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'New chart' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
   it('edits the chart its own ⋮ belongs to', async () => {
@@ -980,10 +1043,9 @@ describe('a popover under a tab at the edge of the screen', () => {
     window.innerWidth = 360;
     fireEvent.click(screen.getByRole('button', { name: 'Actions for A' }));
 
-    // hung from the button's own edge it would be 360px in from the right, which puts
-    // the left edge of a 176px menu at −176 with no way to scroll to it
     const menu = container.querySelector('.dock-menu') as HTMLElement;
-    expect(menu.style.right).toBe('176px');
+    expect(menu.style.left).toBe('8px');
+    expect(menu.style.top).toBe('8px');
   });
 });
 
@@ -1288,6 +1350,8 @@ describe('what is sent, and when', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(callsTo('PUT /api/analytics/charts')).toBe(1);
+    expect(screen.getByText('Saving charts…')).toBeVisible();
+    expect(screen.queryByText(/^Saved/)).not.toBeInTheDocument();
 
     release();
 
@@ -1295,6 +1359,7 @@ describe('what is sent, and when', () => {
     // ascending and distinct: the second carries the version the FIRST one's answer
     // gave it, and not the one the screen was holding when the reader clicked
     expect(puts.map((p) => p.version)).toEqual([3, 4]);
+    await waitFor(() => expect(screen.queryByText('Saving charts…')).not.toBeInTheDocument());
     expect(screen.queryByText(/changed somewhere else/)).not.toBeInTheDocument();
     // and the reader's second action survived, rather than being undone by a message
     // blaming another device

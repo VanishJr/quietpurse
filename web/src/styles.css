@@ -2401,29 +2401,69 @@ textarea {
   }
 }
 
-/* ---------- analytics: the chart workspace ---------- */
-
-/*
- * The screen is a column with a strip pinned to the foot of it, so it has to be at
- * least as tall as the scroll container whatever is in it: without `min-height`, a
- * workspace holding one short chart puts the dock halfway up the page, and the whole
- * point of the dock is that it is where you look for it.
- *
- * The bottom gutter `.screen-inner` gives every other screen is taken off here and
- * paid by the dock itself. 32px of page underneath a strip that is supposed to sit
- * against the bottom edge is 32px of it not sitting there.
- */
 .analytics-screen {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  padding-bottom: 0;
+  gap: var(--space-6);
+}
+
+.analytics-screen .page-header {
+  margin-bottom: 0;
+}
+
+.analytics-notices:empty {
+  display: none;
+}
+
+.chart-mobile-selector {
+  display: none;
 }
 
 .chart-stage {
   flex: 1;
   min-width: 0;
-  padding-bottom: 20px;
+}
+
+.chart-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.chart-identity {
+  flex: 1 1 24rem;
+  min-width: 0;
+}
+
+.chart-context {
+  margin-top: var(--space-2);
+  font-size: var(--text-helper);
+  color: var(--ink-secondary);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.chart-context p {
+  margin: var(--space-1) 0 0;
+}
+
+.chart-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (max-width: 899px) {
+  .chart-mobile-selector {
+    display: block;
+  }
+
+  .analytics-screen .chart-dock {
+    display: none;
+  }
 }
 
 /* the same card the Overview draws, at this screen's measure */
@@ -2434,8 +2474,6 @@ textarea {
   padding: 20px 22px 22px;
 }
 
-/* the heading and then the chart, with nothing between them: no controls (they are on
-   the tab — see ChartDock.tsx) and no line restating the spec in words */
 .chart-title {
   margin: 0;
   overflow-wrap: anywhere;
@@ -2557,44 +2595,16 @@ textarea {
   margin: 0;
 }
 
-/* ---------- the dock ---------- */
-
-/*
- * Sticky rather than fixed: it belongs to this screen and not to the window, and the
- * app already has something fixed to the bottom edge on a phone — the navigation. A
- * fixed strip here would be laid over that one.
- *
- * The negative margins run the strip's ground out to the gutters `.screen-inner`
- * holds, so the line above it reads as the foot of the page rather than as the foot of
- * the column of cards.
- */
 .chart-dock {
   position: sticky;
   bottom: 0;
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 -16px;
-  padding: 10px 16px 14px;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
   background: var(--ink-page);
   border-top: 1px solid var(--ink-grid);
-}
-
-/*
- * ...but staying off the navigation takes this as well. A sticky offset is resolved
- * against the scrollport, which is `.screen`'s PADDING box — so the foot that screen
- * gives itself on a phone (60px, so the last row of every other screen clears the tab
- * bar) is inside the box and does not lift this strip out of the way. At `bottom: 0`
- * the dock parks flush against the bottom of the window, where the tab bar is fixed and
- * wins on z-index: the tabs, both arrows and New chart are all under it until the reader
- * scrolls to the very end of the page. The offset is that same foot, which is also where
- * the dock comes to rest once the page is scrolled out — so it does not move.
- */
-@media (max-width: 899px) {
-  .chart-dock {
-    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
-  }
 }
 
 .dock-tabs {
@@ -2724,7 +2734,7 @@ textarea {
 
 .dock-more {
   flex: none;
-  width: 26px;
+  width: 36px;
   color: inherit;
   opacity: 0.55;
   font-size: 15px;
@@ -2749,8 +2759,10 @@ textarea {
 .dock-menu {
   position: fixed;
   z-index: var(--z-raised);
-  min-width: 176px;
-  padding: 6px;
+  width: min(18rem, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  padding: var(--space-2);
   border: 1px solid var(--ink-grid);
   border-radius: var(--r-md);
   background: var(--ink-surface);
@@ -2758,29 +2770,17 @@ textarea {
 }
 
 .dock-menu-item {
-  display: block;
+  display: flex;
+  justify-content: flex-start;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--r-xs);
-  text-align: left;
-  font-size: 14px;
-  color: var(--ink-primary);
-}
-
-.dock-menu-item:hover {
-  background: var(--ink-page);
-}
-
-.dock-menu-item.is-danger {
-  color: var(--ink-bad);
 }
 
 .dock-menu-ask {
   margin: 0;
   padding: 6px 8px 2px;
-  font-size: 13px;
+  font-size: var(--text-body);
   color: var(--ink-secondary);
-  line-height: 1.35;
+  line-height: var(--leading-body);
   overflow-wrap: anywhere;
 }
 
@@ -2789,25 +2789,6 @@ textarea {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
-}
-
-.dock-new {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-  padding: 8px 15px;
-  border: 1px solid var(--ink-accent);
-  border-radius: var(--r-sm);
-  background: var(--ink-surface);
-  color: var(--ink-accent);
-  font-size: 13px;
-  font-weight: 600;
-  transition: background var(--dur-1) var(--ease-out);
-}
-
-.dock-new:hover {
-  background: var(--ink-grid);
 }
 
 /* ---------- the wizard ---------- */
@@ -3374,15 +3355,6 @@ details > summary::marker {
 @media (min-width: 900px) {
   .screen-inner {
     padding: var(--space-8) var(--page-gutter) 40px;
-  }
-
-  .analytics-screen {
-    padding-bottom: 0;
-  }
-
-  .chart-dock {
-    margin: 0 -40px;
-    padding: 12px 40px 18px;
   }
 
   .chart-card {

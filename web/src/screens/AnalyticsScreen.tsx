@@ -13,6 +13,11 @@ import {
   suggestedTitle,
 } from '../analytics';
 import { ChartCard } from '../components/ChartCard';
+import { ChartControls } from '../components/ChartControls';
+import { Button } from '../components/Button';
+import { Field } from '../components/Field';
+import { Notice } from '../components/Notice';
+import { PageHeader } from '../components/PageHeader';
 import { ChartDock, DockTab } from '../components/ChartDock';
 import { BlankPlotGlyph } from '../components/ChartGlyphs';
 import { ChartWizard } from '../components/ChartWizard';
@@ -75,6 +80,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
   const [edits, setEdits] = useState<string | null>(null);
   const [capReached, setCapReached] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const { chart: urlChart } = useUrl();
 
@@ -111,6 +117,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   const pump = useCallback(async (): Promise<void> => {
     if (inFlight.current) return;
     inFlight.current = true;
+    setSaving(true);
+    setSaveFailure(null);
     try {
       while (pending.current !== null && list.current !== null) {
         const at = list.current;
@@ -168,6 +176,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
       }
     } finally {
       inFlight.current = false;
+      setSaving(false);
     }
   }, [commit]);
 
@@ -373,58 +382,41 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   }));
 
   return (
-    <div className="screen-inner analytics-screen">
-      <h1 className="title">Analytics</h1>
+    <div className="screen-inner page-region--wide analytics-screen">
+      <PageHeader title="Analytics" action={<Button type="button" variant="primary" size="standard" className="analytics-new" disabled={!ready} onClick={() => setWizard({ editing: null })}>New chart</Button>} />
+      {ready && specs.length > 0 && <div className="chart-mobile-selector">
+        <Field id="analytics-chart-selection" label="Selected chart" control="select" controlProps={{ value: activeId ?? '', onChange: (event) => show(event.target.value), children: tabs.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>) }} />
+      </div>}
 
       {accountsError && (
-        <p className="error">
-          Error: {accountsError}{' '}
-          <button className="btn-ghost btn-sm" onClick={loadAccounts}>
-            Try again
-          </button>
-        </p>
+        <Notice tone="error" role="alert" remedy={<Button type="button" variant="secondary" size="compact" onClick={loadAccounts}>Try again</Button>}>Error: {accountsError}</Notice>
       )}
 
-      {/* everything the screen has to say about the LIST rather than about a chart:
-          announced, because none of it is where the reader was looking */}
-      <div aria-live="polite">
+      <div className="analytics-notices" aria-live="polite">
+        {saving && <Notice>Saving charts…</Notice>}
         {saveFailure && (
-          <p className="error">
-            {saveFailure.stale ? saveFailure.message : `Not saved: ${saveFailure.message}`}{' '}
-            {!saveFailure.stale && (
-              <button className="btn-ghost btn-sm" onClick={() => void pump()}>
-                Try again
-              </button>
-            )}
-          </p>
+          <Notice tone="error" remedy={!saveFailure.stale && <Button type="button" variant="secondary" size="compact" onClick={() => void pump()}>Try again</Button>}>
+            {saveFailure.stale ? saveFailure.message : `Not saved: ${saveFailure.message}`}
+          </Notice>
         )}
-        {capReached && (
-          <p className="error">
-            This workspace holds at most {CHARTS_MAX} charts. Delete one to make room.
-          </p>
-        )}
-        {edits && <p className="hint">{edits}</p>}
+        {capReached && <Notice tone="error">This workspace holds at most {CHARTS_MAX} charts. Delete one to make room.</Notice>}
+        {edits && <Notice tone="warning">{edits}</Notice>}
         {unreadable > 0 && (
-          <p className="hint">
+          <Notice>
             {unreadable === 1
               ? '1 chart on this list was made by a newer version of Finto'
               : `${unreadable} charts on this list were made by a newer version of Finto`}
             . {unreadable === 1 ? 'It is kept' : 'They are kept'} and saved with the rest, and
             cannot be shown here.
-          </p>
+          </Notice>
         )}
       </div>
 
       <div className="chart-stage">
         {charts.phase === 'loading' ? (
-          <p className="empty">Reading your charts…</p>
+          <Notice placement="content" role="status">Reading your charts…</Notice>
         ) : charts.phase === 'failed' ? (
-          <p className="error">
-            Error: {charts.message}{' '}
-            <button className="btn-ghost btn-sm" onClick={loadCharts}>
-              Try again
-            </button>
-          </p>
+          <Notice placement="content" tone="error" role="alert" remedy={<Button type="button" variant="secondary" size="compact" onClick={loadCharts}>Try again</Button>}>Error: {charts.message}</Notice>
         ) : active ? (
           <ChartCard
             // the id, so switching tabs remounts rather than reusing the last chart's
@@ -434,6 +426,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
             accounts={accounts}
             accountsError={accountsError}
             dataRevision={dataRevision}
+            actions={<ChartControls contextual id={active.id} label={active.title || suggestedTitle(active)} onEdit={edit} onDuplicate={duplicate} onDelete={remove} fallbackFocus={() => document.querySelector<HTMLElement>('.analytics-new')} />}
           />
         ) : (
           <Blank onNew={() => setWizard({ editing: null })} />
@@ -444,7 +437,6 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
         tabs={tabs}
         activeId={activeId}
         onSelect={show}
-        onNew={() => setWizard({ editing: null })}
         onEdit={edit}
         onDuplicate={duplicate}
         onDelete={remove}
@@ -481,8 +473,6 @@ const Blank = ({ onNew }: { onNew: () => void }) => (
     <h2 className="block-title chart-blank-title">Nothing plotted yet</h2>
     {/* not "Create chart", which is what the wizard's own submit says: two controls a
         step apart with one name is what makes a screenshot of a bug unreadable */}
-    <button className="btn" onClick={onNew}>
-      Build your first chart
-    </button>
+    <Button type="button" variant="secondary" size="standard" onClick={onNew}>Build your first chart</Button>
   </div>
 );
