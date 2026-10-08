@@ -1806,49 +1806,48 @@ textarea {
   }
 }
 
+.acct-dialog-name {
+  margin: var(--space-2) 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
+}
+.acct-name-form {
+  display: grid;
+  gap: var(--space-4);
+}
 .acct-menu {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 12px;
+  gap: var(--space-2);
 }
-
-.acct-menu-item {
+.acct-menu .acct-menu-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: stretch;
+  gap: var(--space-1);
   width: 100%;
-  padding: 10px 12px;
-  border-radius: var(--r-sm);
+  padding: var(--space-3);
   text-align: left;
 }
-
-.acct-menu-item:hover {
-  background: var(--ink-page);
-}
-
 .acct-menu-label {
-  font-size: 15px;
+  font-size: var(--text-component);
   font-weight: 600;
 }
-
-.acct-menu-item.is-danger .acct-menu-label {
-  color: var(--ink-bad);
-}
-
 .acct-menu-sub {
-  font-size: 12px;
-  color: var(--ink-muted);
-  line-height: 1.35;
+  color: var(--ink-secondary);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
 }
-
-/* what deleting would destroy, listed before the control rather than beside it */
 .acct-destroy {
-  margin: 12px 0;
-  padding-left: 20px;
-  font-size: 14px;
+  margin: var(--space-4) 0;
+  padding-left: var(--space-6);
+  font-size: var(--text-body);
   color: var(--ink-primary);
-  line-height: 1.6;
+  line-height: var(--leading-body);
+}
+.acct-history-remedy {
+  margin-top: var(--space-4);
 }
 
 .settings-page {

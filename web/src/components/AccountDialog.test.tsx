@@ -97,6 +97,10 @@ describe('account name drafts', () => {
       }
       renderThemed(<Flow />);
       const input = screen.getByRole('textbox', { name: 'Name' });
+      expect(input).toHaveAttribute('aria-describedby', `${input.id}-help`);
+      expect(document.getElementById(`${input.id}-help`)).toHaveTextContent(
+        kind === 'add' ? 'your base currency' : 'transactions, the imports and the files stay',
+      );
       fireEvent.change(input, { target: { value: 'Draft account' } });
       fireEvent.click(screen.getByRole('button', { name: commit }));
       const leaving = screen.getByRole('button', { name: leave });
@@ -268,6 +272,52 @@ describe('the delete preview', () => {
     await screen.findByText('137 imports');
 
     expect(screen.queryByText(/an import older than that is not in these numbers/)).toBeNull();
+  });
+});
+
+describe('pending account consequences', () => {
+  it.each(['hide', 'delete'] as const)('%s retains focus and locks conflicting actions until refusal', async (kind) => {
+    let finish!: (response: Response) => void;
+    const route = kind === 'delete' ? 'DELETE /api/accounts/acc-1' : 'PATCH /api/accounts/acc-1';
+    mockFetch({
+      'GET /api/imports': () => ok(TRUNCATED),
+      'GET /api/transactions': () => ok([]),
+      [route]: () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    const close = vi.fn();
+    const step = vi.fn();
+    const history = vi.fn();
+    renderThemed(<AccountDialog kind={kind} origin="menu" account={ACCOUNT} baseCurrency="EUR"
+      onStep={step} onClose={close} onOpenHistory={history} onCreated={vi.fn()}
+      onUpdated={vi.fn()} onDeleted={vi.fn()} />);
+    if (kind === 'delete') fireEvent.change(await confirmField(), { target: { value: ACCOUNT.name } });
+    const action = screen.getByRole('button', { name: kind === 'delete' ? 'Delete permanently' : 'Hide' });
+    action.focus();
+    fireEvent.click(action);
+    expect(action).toHaveFocus();
+    expect(action).toHaveAttribute('aria-busy', 'true');
+    expect(action).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(action);
+    for (const label of ['Back', 'Cancel', 'Close dialog']) {
+      const control = screen.getByRole('button', { name: label });
+      expect(control).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(control);
+    }
+    if (kind === 'delete') {
+      expect(await confirmField()).toHaveAttribute('readonly');
+      fireEvent.click(screen.getByRole('button', { name: 'Open import history' }));
+    }
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    expect(step).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+    expect(requests().filter((request) => request === route)).toHaveLength(1);
+    await act(async () => finish(fail(409, { error: 'Account write refused' })));
+    expect(screen.getByRole('alert')).toHaveTextContent('Error: Account write refused');
+    expect(action).toHaveFocus();
+    expect(action).not.toHaveAttribute('aria-disabled', 'true');
+    expect(action).toBeEnabled();
+    if (kind === 'delete') expect(await confirmField()).toHaveValue(ACCOUNT.name);
   });
 });
 

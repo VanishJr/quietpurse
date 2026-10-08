@@ -877,6 +877,15 @@ Recovery owns only lost focus or its own restored target, not a later user choic
 confirmation's opener. Explicit Retry reclaims stable heading orientation before replacing its
 control and can then apply the retained removal intent.
 
+`AccountDialog` uses the shared Sheet header, primary body and action frame for every account step.
+The full account name qualifies the decision even when the rail shortens it. Back returns only to an
+existing menu origin; Cancel dismisses through the same draft policy. Native name and confirmation
+fields carry visible labels and associated guidance. Pending actions retain their identity and focus,
+lock conflicting exits, and announce the owning write without implying it was saved. An unread or
+refused deletion preview offers no final delete. Its counts precede the typed gate; a truncated count
+is a visible lower bound, not a new refusal rule. History remains a reachable remedy for server
+refusals, without interpreting the refusal's text or changing deletion scope.
+
 `AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
 server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on
 the lower-cased name: a gate demanding the capitals back would refuse a name the server calls
