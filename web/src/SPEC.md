@@ -791,7 +791,9 @@ The chart tables live inside clipped wrappers: clipping the table itself leaves 
 width able to widen a narrow page. Recent transactions retain a caption and native table cells while
 reflowing into records on narrow layouts. Refund and transfer flags qualify neutral signed values,
 not income emphasis; full identity and distinct value-date context remain readable. Unusually long
-amounts take their own mobile line without changing account-focused See all navigation. The account
+amounts take their own mobile line without changing account-focused See all navigation. A
+start-aligned scroll container surrounds a max-content value that aligns right only within its own
+width, so a wide signed amount never begins outside the reachable scroll range. The account
 rail retains ordinary current-account buttons, selected scrolling and paging; overflow has visible
 guidance, and locked paging arrows remain focusable but refuse repeated activation.
 

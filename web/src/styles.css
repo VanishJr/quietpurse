@@ -1495,7 +1495,7 @@ textarea {
 .ov-spend-amount {
   grid-column: 2;
   font-weight: 500;
-  text-align: right;
+  text-align: start;
   min-width: 0;
   white-space: nowrap;
   overflow-x: auto;
@@ -1652,6 +1652,13 @@ textarea {
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
+  text-align: start;
+}
+.financial-value-text {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  text-align: right;
 }
 .tx-amount {
   font-weight: 500;

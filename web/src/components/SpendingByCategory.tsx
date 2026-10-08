@@ -90,14 +90,14 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
           <li key={c.category} className="ov-spend-row">
             <span className="dot" style={{ background: categoryColor(c.category) }} aria-hidden="true" />
             <span className="ov-spend-name">{categoryLabel(c.category)}</span>
-            <span className="ov-spend-amount">{fmtMoney(c.total, currency)}</span>
+            <span className="ov-spend-amount"><span className="financial-value-text">{fmtMoney(c.total, currency)}</span></span>
           </li>
         ))}
         {rest.length > 0 && (
           <li className="ov-spend-row is-rest">
             <span className="swatch" style={{ background: ink.categoryRemainder }} aria-hidden="true" />
             <span className="ov-spend-name">{restLabel(rest.length)}</span>
-            <span className="ov-spend-amount">{fmtMoney(restTotal, currency)}</span>
+            <span className="ov-spend-amount"><span className="financial-value-text">{fmtMoney(restTotal, currency)}</span></span>
           </li>
         )}
       </ul>

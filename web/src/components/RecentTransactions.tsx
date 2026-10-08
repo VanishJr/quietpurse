@@ -90,8 +90,10 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                   </td>
                   <td className={`tx-num tx-amount${t.amount > 0 && !t.refund && !t.transfer ? ' is-income' : ''}`}>
                     <span className="tx-cell">
-                      {t.amount > 0 ? '+' : ''}
-                      {fmtMoney(t.amount, t.currency)}
+                      <span className="financial-value-text">
+                        {t.amount > 0 ? '+' : ''}
+                        {fmtMoney(t.amount, t.currency)}
+                      </span>
                     </span>
                   </td>
                 </tr>
