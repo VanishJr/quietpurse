@@ -1073,6 +1073,42 @@ describe('the recent transactions', () => {
     }
   });
 
+  it('keeps positive refunds and transfers neutral while ordinary income uses income emphasis', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04', 900, { description: 'Earned income' }),
+        txn('2026-08-03', 60, { description: 'Returned purchase', refund: true }),
+        txn('2026-08-02', 300, { description: 'Own-account incoming', transfer: true }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const amount = (title: string) => within(list).getByText(title).closest('tr')!.querySelector('.tx-amount');
+    expect(amount('Earned income')).toHaveClass('is-income');
+    expect(amount('Returned purchase')).not.toHaveClass('is-income');
+    expect(amount('Own-account incoming')).not.toHaveClass('is-income');
+    expect(within(list).getByText('Refund')).toBeVisible();
+    expect(within(list).getByText('Transfer')).toBeVisible();
+  });
+
+  it('keeps long identities, signed native amounts and distinct value dates in a named table', async () => {
+    const title = 'Regional merchant identity '.repeat(8);
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04', -9876543210.45, { description: title, currency: 'USD', valueDate: '2026-08-03', refund: true }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const table = within(list).getByRole('table', { name: 'Recent transactions in Sparkasse Giro' });
+    const row = within(table).getByText(title.trim()).closest('tr')!;
+    expect(row).toHaveClass('tx-row-long');
+    expect(row.querySelectorAll('td')).toHaveLength(4);
+    expect(within(row).getByText('−9,876,543,210.45 USD')).toBeInTheDocument();
+    expect(within(row).getByText('Value date 03.08.2026')).toBeInTheDocument();
+    expect(within(row).getByText('Refund')).toBeVisible();
+  });
+
   it('keeps every cell in its own column', async () => {
     // `display: flex` on a <td> takes it out of the table, and CSS fixup then wraps it
     // together with its adjacent non-cell siblings into ONE anonymous cell — which put

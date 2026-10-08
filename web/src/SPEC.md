@@ -787,8 +787,13 @@ context use spacing instead of additional surfaces. Balance and ordinary expense
 income and caller-interpreted comparisons use their independent roles. Signs and currency stay
 attached to values, with local scrolling for a value that cannot fit rather than smaller type or
 split units. Tablet spending pairs the plot with its legend without reordering the reading sequence.
-The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
-width able to widen a narrow page.
+The chart tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
+width able to widen a narrow page. Recent transactions retain a caption and native table cells while
+reflowing into records on narrow layouts. Refund and transfer flags qualify neutral signed values,
+not income emphasis; full identity and distinct value-date context remain readable. Unusually long
+amounts take their own mobile line without changing account-focused See all navigation. The account
+rail retains ordinary current-account buttons, selected scrolling and paging; overflow has visible
+guidance, and locked paging arrows remain focusable but refuse repeated activation.
 
 Navigation uses the same links for the desktop sidebar and mobile bar. Import remains a desktop
 navigation link and a panel of Overview, while Settings takes its place in the mobile bar; Import

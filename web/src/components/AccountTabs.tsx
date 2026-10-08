@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { truncateMiddle } from '../format';
 import { Account } from '../types';
 import { AccountsIcon } from './NavIcons';
+import { Button } from './Button';
+import { ChevronIcon } from './SettingsActionIcons';
 
 export const TABS_PER_PAGE = 3;
 
@@ -38,6 +40,8 @@ export function AccountTabs({
   onToggleHidden,
 }: Props) {
   const currentTab = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState(false);
   const pages = Math.max(1, Math.ceil(accounts.length / TABS_PER_PAGE));
   const [page, setPage] = useState(0);
 
@@ -90,6 +94,16 @@ export function AccountTabs({
     return () => observer.disconnect();
   }, [selectedId, current, accounts]);
 
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail) return;
+    const measure = () => setOverflow(rail.scrollWidth > rail.clientWidth + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    return () => observer.disconnect();
+  }, [accounts, current]);
+
   const plural = hiddenCount === 1 ? 'account' : 'accounts';
   const hiddenLabel = showHidden
     ? `Hide ${hiddenCount} hidden ${plural} again`
@@ -99,19 +113,20 @@ export function AccountTabs({
     <div className="acct-strip">
       <div className="rail-nav">
         {pages > 1 && (
-          <button
-            className="rail-arrow"
+          <Button type="button" variant="secondary" size="compact" iconOnly
+            className="rail-arrow rail-arrow-prev"
             onClick={() => setPage(current - 1)}
-            disabled={current === 0}
+            aria-disabled={current === 0}
             aria-label="Previous accounts"
           >
-            ‹
-          </button>
+            <ChevronIcon />
+          </Button>
         )}
 
-        <div className="rail-tabs" role="group" aria-label="Accounts">
+        <div ref={railRef} className="rail-tabs" role="group" aria-label="Accounts">
           {shown.map((a) => (
             <button
+              type="button"
               key={a.id}
               ref={a.id === selectedId ? currentTab : null}
               className="rail-tab"
@@ -139,14 +154,14 @@ export function AccountTabs({
         </div>
 
         {pages > 1 && (
-          <button
+          <Button type="button" variant="secondary" size="compact" iconOnly
             className="rail-arrow"
             onClick={() => setPage(current + 1)}
-            disabled={current === pages - 1}
+            aria-disabled={current === pages - 1}
             aria-label="Next accounts"
           >
-            ›
-          </button>
+            <ChevronIcon />
+          </Button>
         )}
       </div>
 
@@ -166,7 +181,7 @@ export function AccountTabs({
 
       <div className="rail-actions">
         {hiddenCount > 0 && (
-          <button
+          <Button type="button" variant="tertiary" size="compact"
             className="rail-toggle"
             onClick={onToggleHidden}
             aria-pressed={showHidden}
@@ -175,13 +190,14 @@ export function AccountTabs({
           >
             <AccountsIcon off={showHidden} />
             <span>{showHidden ? 'Hide hidden' : 'Show hidden'}</span>
-          </button>
+          </Button>
         )}
 
-        <button className="rail-add" onClick={onAdd}>
+        <Button type="button" variant="tertiary" size="compact" className="rail-add" onClick={onAdd}>
           <span aria-hidden="true">+</span> Add account
-        </button>
+        </Button>
       </div>
+      {overflow && <p className="rail-overflow-hint">Scroll to see all accounts on this page.</p>}
     </div>
   );
 }
