@@ -46,7 +46,7 @@ beforeEach(() => {
 describe('IncomeSourcesBlock', () => {
   it('uses concise Settings copy and names automatic versus manual matching', async () => {
     await mount();
-    const rowOf = (label: string): HTMLElement => screen.getByText(label, { selector: '.row-title' }).closest('.row') as HTMLElement;
+    const rowOf = (label: string): HTMLElement => screen.getByRole('article', { name: `Income source ${label}` });
 
     expect(screen.getByText('Support is tracked separately and does not count toward earnings goals.')).toBeVisible();
     expect(within(rowOf('Salary')).getByText('Earnings')).toBeVisible();
@@ -64,12 +64,43 @@ describe('IncomeSourcesBlock', () => {
         source({ patterns: ['Acme Limited', 'Example GmbH'] }),
       ]),
     });
-    const stipend = screen.getByText('Stipend', { selector: '.row-title' }).closest('.row') as HTMLElement;
+    const stipend = screen.getByRole('article', { name: 'Income source Stipend' });
     expect(within(stipend).getByText('2 automatic match patterns')).toBeVisible();
     expect(within(stipend).queryByText(/Acme Limited|Example GmbH/)).not.toBeInTheDocument();
     fireEvent.click(within(stipend).getByRole('button', { name: 'Edit Stipend' }));
     expect(screen.getByRole('dialog', { name: 'Edit source' })).toBeVisible();
     expect(screen.getByLabelText('Statement match patterns')).toHaveValue('Acme Limited, Example GmbH');
+  });
+
+  it('uses one editor body and action frame with described interpretation choices', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Stipend' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit source' });
+    expect(within(dialog).getByRole('heading', { name: 'Edit source' }).closest('.sheet-header')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save' }).closest('.sheet-footer')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Source name').closest('.sheet-body')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Statement match patterns')).toHaveAccessibleDescription(/Comma-separate phrases/);
+    expect(dialog.querySelector('fieldset')).toHaveAccessibleDescription(/Changing this updates every income-based goal/);
+  });
+
+  it('submits from the native source form while pending duplicate submits are refused', async () => {
+    let finish: (response: Response) => void = () => {};
+    await mount({
+      'POST /api/income-sources': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    const input = screen.getByLabelText('Source name');
+    fireEvent.change(input, { target: { value: 'Grant' } });
+    const form = input.closest('form')!;
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toHaveAttribute('form', form.id);
+    expect(save).toHaveAttribute('type', 'submit');
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(requests().filter((request) => request === 'POST /api/income-sources')).toHaveLength(1);
+    await act(async () => finish(fail(400, { error: 'refused source' })));
+    expect(screen.getByRole('alert')).toHaveTextContent('refused source');
+    expect(input).toHaveValue('Grant');
   });
 
   it('keeps builtins editable but not deletable', async () => {
@@ -226,7 +257,9 @@ describe('IncomeSourcesBlock', () => {
     // held without `disabled`: a browser takes focus off a control disabled under it, and
     // in a modal that leaves the Tab trap nothing to hold - jsdom never does, so the
     // attribute is what is asserted
-    const saving = screen.getByRole('button', { name: 'Saving…' });
+    const saving = screen.getByRole('button', { name: 'Save' });
+    expect(saving).toHaveAttribute('data-pending', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Saving source…');
     expect(saving).not.toBeDisabled();
     expect(saving).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute('aria-disabled', 'true');
@@ -392,7 +425,7 @@ describe('IncomeSourcesBlock', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
     const confirm = screen.getByRole('button', { name: 'Delete' });
-    expect(confirm).toHaveClass('btn-destroy');
+    expect(confirm).toHaveClass('action-button--destructive-primary');
     confirm.focus();
     fireEvent.click(confirm);
     expect(confirm).not.toBeDisabled();
@@ -400,7 +433,7 @@ describe('IncomeSourcesBlock', () => {
     expect(confirm).toHaveFocus();
 
     await act(async () => { finish(fail(400, { error: 'cannot delete this source' })); });
-    const confirmation = screen.getByText(/Delete “Stipend”/).closest('.row') as HTMLElement;
+    const confirmation = screen.getByRole('article', { name: 'Income source Stipend' });
     expect(within(confirmation).getByRole('alert')).toHaveTextContent('cannot delete this source');
     expect(confirm).toHaveAttribute('aria-disabled', 'false');
     expect(confirm).toHaveFocus();

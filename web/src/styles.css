@@ -1964,60 +1964,78 @@ textarea {
   margin: 0;
 }
 
-.settings-page .settings-income-row {
+.settings-income-row {
+  display: flex;
   align-items: flex-start;
-  gap: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--ink-grid);
 }
 
-.settings-page .settings-income-heading {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 10px;
+.settings-income-info {
+  flex: 1 1 240px;
   min-width: 0;
 }
 
-.settings-page .settings-income-heading .row-title {
-  white-space: normal;
+.settings-income-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.settings-income-name {
+  margin: 0;
+  font-size: var(--text-component);
+  line-height: var(--leading-body);
   overflow-wrap: anywhere;
   font-weight: 600;
 }
 
-.settings-page .settings-income-kind {
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-sm);
-  background: var(--ink-raised);
+.settings-income-kind,
+.settings-income-context {
+  font-size: var(--text-meta);
   color: var(--ink-secondary);
-  padding: 3px 8px;
-  font-size: 12px;
-  white-space: nowrap;
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
 }
 
-.settings-page .settings-income-actions {
+.settings-income-context {
+  margin-top: var(--space-1);
+}
+
+.settings-income-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
-.settings-page .settings-income-actions button {
-  min-height: 44px;
+.settings-income-add {
+  margin-top: var(--space-4);
 }
 
-.settings-page .settings-income-add {
-  font-weight: 600;
-  min-height: 44px;
+.settings-income-editor {
+  display: grid;
+  gap: var(--space-4);
 }
 
-.settings-page .settings-income-editor .setting-label {
-  margin: 16px 0 6px;
+.settings-income-counts {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
 }
 
-.settings-page .settings-income-editor .hint {
-  margin: 8px 0;
+.settings-income-counts legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
 }
 
-.settings-page .settings-income-editor .btn-row button {
-  min-height: 44px;
+.settings-income-editor .settings-consequence {
+  margin-bottom: 0;
 }
 
 .settings-page .settings-recurring-header {
@@ -2250,20 +2268,6 @@ textarea {
   margin: 0;
   padding: 0 12px 12px 64px;
   font-size: 13px;
-}
-
-.settings-page .settings-section .row {
-  flex-wrap: wrap;
-}
-
-.settings-page .settings-section .row-main {
-  flex-basis: 180px;
-}
-
-.settings-page .settings-section .row-sub,
-.settings-page .settings-section .hint,
-.settings-page .settings-section .error {
-  overflow-wrap: anywhere;
 }
 
 .settings-page .settings-advanced {
