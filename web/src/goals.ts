@@ -81,7 +81,7 @@ export const formatWorkHours = (value: number): string =>
 
 export const progressLabel = (progress: GoalProgress): string => {
   if (progress.status === 'reached') return 'Reached';
-  if (progress.percentage === null) return GOAL_STATUS_LABELS[progress.status] || 'Progress unavailable';
+  if (progress.percentage === null) return progress.status === 'tracking' ? 'Progress unavailable' : GOAL_STATUS_LABELS[progress.status];
   const percentage = `${Math.round(progress.percentage)}%`;
   switch (progress.semantic) {
     case 'completion':

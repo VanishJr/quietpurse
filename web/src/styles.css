@@ -3133,30 +3133,75 @@ textarea {
   margin-top: 20px;
 }
 
+.backdrop-center .sheet-wide:has(.goal-editor) {
+  max-width: calc(var(--page-editing) + var(--space-12));
+}
+
 .goal-editor {
-  padding: 4px;
+  max-width: var(--page-editing);
+  min-width: 0;
+}
+
+.goal-error-summary {
+  padding: var(--space-4);
+  border-inline-start: 2px solid var(--ink-error);
+  color: var(--ink-error);
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.goal-error-summary h3 {
+  font-size: var(--text-component);
+  font-weight: 600;
+}
+
+.goal-error-summary ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+}
+
+.goal-error-summary a {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-standard);
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.goal-editor-footer {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.goal-editor-footer .state-note {
+  padding: 0;
+  margin: 0;
+  font-size: var(--text-helper);
+  color: var(--ink-secondary);
 }
 
 .goal-type-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 18px;
+  gap: var(--space-3);
 }
 
 .goal-type-tile {
-  min-height: 92px;
-  padding: 14px;
-  border: 1px solid var(--ink-grid);
-  border-radius: var(--r-md);
+  min-height: var(--control-touch);
+  padding: var(--space-4);
+  border: 1px solid var(--ink-controlBorder);
+  border-radius: var(--r-sm);
   background: var(--ink-surface);
   color: var(--ink-primary);
   text-align: left;
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
 }
 
 .goal-type-tile:hover,
 .goal-type-tile:focus-visible {
-  border-color: var(--ink-accent);
+  background: var(--ink-raised);
 }
 
 .goal-type-tile strong,
@@ -3167,41 +3212,75 @@ textarea {
 .goal-type-tile span,
 .goal-currency,
 .goal-account-list p {
-  margin-top: 6px;
-  color: var(--ink-muted);
-  font-size: 12px;
+  margin-top: var(--space-2);
+  color: var(--ink-secondary);
+  font-size: var(--text-helper);
 }
 
 .goal-editor form,
 .goal-costs,
 .goal-account-list {
   display: grid;
-  gap: 12px;
+  gap: var(--space-4);
+  min-width: 0;
 }
 
 .goal-editor form {
-  margin-top: 14px;
+  margin: 0;
 }
 
 .goal-costs,
 .goal-account-list {
-  padding: 14px;
-  border: 1px solid var(--ink-grid);
-  border-radius: var(--r-md);
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-top: 1px solid var(--ink-grid);
+  border-radius: 0;
+}
+
+.goal-costs legend,
+.goal-account-list legend {
+  padding-right: var(--space-2);
+  font-size: var(--text-component);
+  font-weight: 500;
 }
 
 .goal-cost-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(100px, 0.8fr) auto;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--ink-grid);
+  min-width: 0;
+}
+
+.goal-cost-row > .action-button {
+  margin-top: calc(var(--text-label) * var(--leading-body) + var(--space-2));
+}
+
+.goal-costs > .action-button {
+  justify-self: start;
 }
 
 .goal-account-list label {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-2);
+  min-height: var(--control-standard);
+  font-size: var(--text-body);
+  overflow-wrap: anywhere;
+}
+
+.goal-account-list input[type='checkbox'] {
+  flex: none;
+}
+
+.goal-account-list[aria-invalid='true'] {
+  border-color: var(--ink-error);
+}
+
+.goal-account-list .native-field__error {
+  color: var(--ink-error);
 }
 
 @media (max-width: 599px) {
@@ -3211,6 +3290,11 @@ textarea {
 
   .goal-cost-row {
     grid-template-columns: 1fr;
+  }
+
+  .goal-cost-row > .action-button {
+    margin-top: 0;
+    justify-self: start;
   }
 
   .sheet-actions {

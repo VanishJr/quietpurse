@@ -119,7 +119,19 @@ when a saved account is gone or no longer uses that currency. Savings selection 
 until the current selection is cleared; incompatible saved accounts remain removable and cannot
 silently retarget the goal. A debt edit continues naming its saved account after the balance reaches
 zero. Form refusals stay with their draft, but Back or a new type clears them; repeated
-essential-cost controls carry their row ordinal in every accessible name.
+essential-cost controls carry their row ordinal in every accessible name. Their control identity
+follows the draft row key instead of its name or displayed position, so correction links survive
+renaming and neighboring removal. Generated keys never establish meaningful unsaved work.
+
+`GoalEditor` supplies correction targets directly from its existing validation predicates. Short
+forms focus the first invalid control or account group after submission; Financial independence
+focuses a linked error summary in the primary body. Links reveal and focus their control without
+changing the navigation address. Failed fields update correction while edited, without moving the
+caret; raw invalid strings stay intact. Retained costs under Current spending still participate in
+validation and replacement, so a hidden cost refusal points to Target basis until its fields are
+revealed rather than linking to absent content. API diagnostics without field identity remain whole
+and form-level in the action region. Repeatable costs and account choices use headings and separators,
+not nested scroll surfaces; adding and removing a cost preserves a usable correction focus.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key opens the editor, for a new goal or a saved one. A

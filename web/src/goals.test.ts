@@ -41,6 +41,7 @@ describe('Goals presentation', () => {
     expect(progressLabel(progress({ percentage: 76 }))).toBe('76% of target');
     expect(progressLabel(progress({ semantic: 'used', percentage: 76 }))).toBe('76% used');
     expect(progressLabel(progress({ status: 'reached', percentage: 120 }))).toBe('Reached');
+    expect(progressLabel(progress({ percentage: null }))).toBe('Progress unavailable');
   });
 
   it('distinguishes favorable surplus from limit consumption using server semantics', () => {
