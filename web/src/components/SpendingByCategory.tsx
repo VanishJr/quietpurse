@@ -1,9 +1,10 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { RING_SLOT_INK, categoryLabel, restLabel, spendRing } from '../categories';
+import { REST_SECTOR, categoryLabel, restLabel, spendRing } from '../categories';
 import { tooltipMoney, tooltipProps } from '../chartTooltip';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { useTheme } from '../theme';
 import { CategorySummary } from '../types';
+import { Button } from './Button';
 
 interface Props {
   spend: CategorySummary[];
@@ -14,9 +15,8 @@ interface Props {
 }
 
 export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: Props) {
-  const { ink } = useTheme();
+  const { ink, categoryColor } = useTheme();
   const { top, rest, restTotal, sectors } = spendRing(spend, total);
-  const palette = RING_SLOT_INK.map((k) => ink[k]);
   const hasRefunds = spend.some((c) => c.total < 0);
 
   return (
@@ -46,7 +46,10 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
                 isAnimationActive={false}
               >
                 {sectors.map((c) => (
-                  <Cell key={c.category} fill={c.slot === null ? ink.muted : palette[c.slot]} />
+                  <Cell
+                    key={c.category}
+                    fill={c.category === REST_SECTOR ? ink.categoryRemainder : categoryColor(c.category)}
+                  />
                 ))}
               </Pie>
               <Tooltip {...tooltipProps(ink, 'surface', tooltipMoney(currency))} />
@@ -83,16 +86,16 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
         className="ov-spend-legend"
         aria-label={`Biggest categories, ${fmtMonthKey(month)}`}
       >
-        {top.map((c, i) => (
+        {top.map((c) => (
           <li key={c.category} className="ov-spend-row">
-            <span className="dot" style={{ background: palette[i] }} aria-hidden="true" />
+            <span className="dot" style={{ background: categoryColor(c.category) }} aria-hidden="true" />
             <span className="ov-spend-name">{categoryLabel(c.category)}</span>
             <span className="ov-spend-amount">{fmtMoney(c.total, currency)}</span>
           </li>
         ))}
         {rest.length > 0 && (
           <li className="ov-spend-row is-rest">
-            <span className="dot" style={{ background: ink.muted }} aria-hidden="true" />
+            <span className="swatch" style={{ background: ink.categoryRemainder }} aria-hidden="true" />
             <span className="ov-spend-name">{restLabel(rest.length)}</span>
             <span className="ov-spend-amount">{fmtMoney(restTotal, currency)}</span>
           </li>
@@ -124,9 +127,9 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
           </tfoot>
         </table>
       </div>
-      <button className="btn-link ov-spend-more" onClick={onSeeAll}>
+      <Button type="button" variant="tertiary" size="compact" className="ov-spend-more" onClick={onSeeAll}>
         All analytics <span aria-hidden="true">↗</span>
-      </button>
+      </Button>
     </section>
   );
 }

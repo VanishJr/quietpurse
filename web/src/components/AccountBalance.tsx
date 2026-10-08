@@ -2,6 +2,8 @@ import { balanceChange, shiftMonth } from '../accounts';
 import { fmtMoney, fmtMonthKey } from '../format';
 import { Account, AccountMonthTotals } from '../types';
 import { Delta } from './Delta';
+import { Button } from './Button';
+import { MoreIcon } from './SettingsActionIcons';
 
 interface Props {
   account: Account;
@@ -17,18 +19,17 @@ export function AccountBalance({ account, comparable, onOpenMenu }: Props) {
     <section className="ov-card ov-balance" aria-label={`Balance of ${account.name}`}>
       <div className="fig-head">
         <h2 className="fig-title">Account balance</h2>
-        <button
-          className="fig-menu"
+        <Button type="button" variant="tertiary" size="compact" iconOnly
           onClick={onOpenMenu}
           aria-haspopup="dialog"
           aria-label={`Account menu: ${account.name}`}
         >
-          <span aria-hidden="true">⋮</span>
-        </button>
+          <MoreIcon />
+        </Button>
       </div>
       <p className="acct-full-name">{account.name}</p>
-      <p className={`bal-value${value.length > 11 ? ' bal-value-long' : ''}`}>
-        {value} <span className="bal-currency">{account.currency}</span>
+      <p className="bal-value financial-value">
+        {value} {account.currency}
       </p>
       {change === null ? (
         <p className="balance-no-comparison">No previous balance to compare</p>

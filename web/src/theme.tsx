@@ -41,6 +41,7 @@ export interface Ink {
   income: string;
   favorable: string;
   unfavorable: string;
+  categoryRemainder: string;
 }
 
 export const lightInk: Ink = {
@@ -82,6 +83,7 @@ export const lightInk: Ink = {
   income: '#08766c',
   favorable: '#28713b',
   unfavorable: '#a03b32',
+  categoryRemainder: '#636363',
 };
 
 export const darkInk: Ink = {
@@ -123,6 +125,7 @@ export const darkInk: Ink = {
   income: '#67c8b8',
   favorable: '#92cf9c',
   unfavorable: '#eda49c',
+  categoryRemainder: '#737373',
 };
 
 // keyed by the backend's slugs; the dark palette is the same hue per category, lightened

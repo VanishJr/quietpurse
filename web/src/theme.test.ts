@@ -49,7 +49,7 @@ describe.each(palettes)('%s semantic foundations', (_scheme, ink) => {
   });
 
   it.each(grounds)('identifies controls and focus against %s', (ground) => {
-    for (const role of ['controlBorder', 'focus'] as const) {
+    for (const role of ['controlBorder', 'focus', 'categoryRemainder'] as const) {
       expect(contrast(ink[role], ink[ground]), `${role} on ${ground}`).toBeGreaterThanOrEqual(3);
     }
   });
@@ -89,7 +89,7 @@ it('gives each added palette role a live stylesheet reader', () => {
   const roles = [
     'action', 'actionHover', 'actionPressed', 'onAction', 'selected', 'onSelected',
     'danger', 'dangerHover', 'dangerPressed', 'onDanger', 'controlBorder', 'focus',
-    'success', 'error', 'warning', 'income', 'favorable', 'unfavorable',
+    'success', 'error', 'warning', 'income', 'favorable', 'unfavorable', 'categoryRemainder',
   ] as const satisfies readonly (keyof Ink)[];
   for (const role of roles) expect(css, role).toContain(`var(--ink-${role})`);
 });

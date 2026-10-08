@@ -724,9 +724,9 @@ schemes keep answering for themselves. An income source whose id is also a categ
 coloured as that category.
 
 `ChartPlot`'s donut key marks each part with the round `.dot` and its series legend with the square
-`.swatch`. As measured, and enforced by nothing, every `.dot` in the product's markup marks a
-category or a sector of a ring — the donut's key, the Overview ring's legend, and the Transactions
-list and its category picker — and every `.swatch` marks a series or a period.
+`.swatch`. Category dots preserve slug identity rather than rank. Overview's aggregate remainder
+uses a square swatch so it is not read as another named category; series and period legends also
+use square markers with their own explicit labels.
 
 ## Presentation foundations
 
@@ -776,10 +776,17 @@ remainder includes positive categories even when a refund elsewhere in that grou
 the explanation must remain visible whenever those net figures differ from what can be drawn.
 `spendRing` in `categories.ts` is where the drawn sectors and the legend's remainder part ways, so
 the two figures are one function's answer and `categories.test.ts` can hold them apart on a fixture
-whose tail nets to nothing. The ring's named sectors and their legend dots are coloured by rank, not
-by category — the slot's ink keys and how many categories the legend names are one literal,
-`RING_SLOT_INK` in `categories.ts` — so the Overview ring is the one chart where a category's colour
-is its position and not the colour `categoryColor` gives it everywhere else.
+whose tail nets to nothing. Named sectors and legend dots use `categoryColor` by slug, independent
+of order and refund filtering. The grouping limit is independent of that encoding. The aggregate
+remainder has its own neutral palette role, square marker and Remaining label, not the actual Other
+category's identity. Unknown categories retain the neutral category fallback.
+
+Overview shares the outer wide page anchor and header. Independent financial groups size to their
+content rather than stretching the balance to the neighboring chart; subordinate figures and period
+context use spacing instead of additional surfaces. Balance and ordinary expenses are neutral;
+income and caller-interpreted comparisons use their independent roles. Signs and currency stay
+attached to values, with local scrolling for a value that cannot fit rather than smaller type or
+split units. Tablet spending pairs the plot with its legend without reordering the reading sequence.
 The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
 width able to widen a narrow page.
 

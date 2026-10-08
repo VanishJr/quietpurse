@@ -92,7 +92,28 @@ describe('the ring against its legend', () => {
       ['shopping', 30],
       [REST_SECTOR, 20],
     ]);
-    expect(ring.sectors[3].label).toBe('Other · 2 categories');
+    expect(ring.sectors[3].label).toBe('Remaining · 2 categories');
+  });
+
+  it('keeps the server’s order and names actual Other separately from the remainder', () => {
+    const ring = spendRing(
+      [
+        { category: 'other', total: 10 },
+        { category: 'food', total: 60 },
+        { category: 'housing', total: 100 },
+        { category: 'cash', total: 40 },
+      ],
+      210,
+    );
+    expect(ring.top.map((c) => c.category)).toEqual(['other', 'food', 'housing']);
+    expect(ring.rest).toEqual([{ category: 'cash', total: 40 }]);
+    expect(ring.restTotal).toBe(40);
+    expect(ring.sectors.map((s) => [s.category, s.label, s.total])).toEqual([
+      ['other', 'Other', 10],
+      ['food', 'Food', 60],
+      ['housing', 'Housing', 100],
+      [REST_SECTOR, 'Remaining · 1 category', 40],
+    ]);
   });
 
   it('subtracts in cents, so a remainder that is zero on paper is zero on screen', () => {
@@ -127,13 +148,11 @@ describe('the ring against its legend', () => {
       top: [{ category: 'food', total: 100 }],
       rest: [],
       restTotal: 0,
-      sectors: [{ category: 'food', total: 100, label: 'Food', slot: 0 }],
+      sectors: [{ category: 'food', total: 100, label: 'Food' }],
     });
   });
 
-  it('carries each named category’s legend row onto its sector, so a refund shifts no colour', () => {
-    // health has a legend row and no sector: shopping keeps the third slot, and the
-    // tail has none — the ring and the legend paint from the same number
+  it('keeps slug identity when a named category has no positive sector', () => {
     const ring = spendRing(
       [
         { category: 'food', total: 100 },
@@ -143,11 +162,13 @@ describe('the ring against its legend', () => {
       ],
       100,
     );
-    expect(ring.sectors.map((s) => [s.category, s.slot])).toEqual([
-      ['food', 0],
-      ['shopping', 2],
-      [REST_SECTOR, null],
+    expect(ring.top.map((c) => c.category)).toEqual(['food', 'health', 'shopping']);
+    expect(ring.sectors.map((s) => [s.category, s.label, s.total])).toEqual([
+      ['food', 'Food', 100],
+      ['shopping', 'Shopping', 30],
+      [REST_SECTOR, 'Remaining · 1 category', 20],
     ]);
+    expect(ring.restTotal).toBe(20);
   });
 });
 

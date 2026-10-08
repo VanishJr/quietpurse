@@ -14,6 +14,7 @@ import { useTheme } from '../theme';
 import { Account, AccountMonthTotals } from '../types';
 import { Chips } from './Chips';
 import { Delta } from './Delta';
+import { Notice } from './Notice';
 
 const CHART_HEIGHT = 180;
 
@@ -90,7 +91,7 @@ export function AccountFlows({
             Income
           </h3>
           <p className="fig-label">{label}</p>
-          <p className="fig-value">+{fmtMoney(month.income, account.currency)}</p>
+          <p className="fig-value financial-value is-income">+{fmtMoney(month.income, account.currency)}</p>
           <Delta
             pct={deltas.income}
             favourable={(deltas.income ?? 0) >= 0}
@@ -105,7 +106,7 @@ export function AccountFlows({
           </h3>
           <p className="fig-label">{label}</p>
 
-          <p className="fig-value">
+          <p className="fig-value financial-value">
             {/* Net refunds reverse the sign; a fixed minus would print it twice. */}
             {month.expense < 0 ? '+' : '−'}
             {fmtMoney(Math.abs(month.expense), account.currency)}
@@ -179,13 +180,13 @@ export function AccountFlows({
         // nothing here was told. The claim is screen-wide: the donut's total sums the
         // same unconverted rows, and one sentence said once is worth more than the same
         // paragraph on every card.
-        <p className="error">
+        <Notice tone="warning">
           This account holds transactions in {otherCurrencies.join(', ')}, not{' '}
           {account.currency}. The account's balance adds them in as though they were{' '}
           {account.currency}, so it is wrong. So is any other figure on this screen
           covering a month one of them falls in — and nothing here knows which months
           those are.
-        </p>
+        </Notice>
       )}
 
       <div className="visually-hidden">

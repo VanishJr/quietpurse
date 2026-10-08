@@ -1188,57 +1188,12 @@ textarea {
   clip-path: inset(50%);
 }
 
-.ov {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 30px 32px 24px;
-}
-.ov-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 28px;
-}
 .ov-date {
-  margin: 0 0 8px;
-  font-size: 12px;
-  color: var(--ink-secondary);
-}
-.overview-title {
-  margin: 0;
-  font-size: 30px;
-  line-height: 1.3;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-}
-.ov-subtitle {
-  margin: 8px 0 0;
-  color: var(--ink-secondary);
-  font-size: 13px;
-}
-.ov-import {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  flex: none;
-  font-size: 13px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-meta);
 }
 .ov-body {
-  padding-top: 24px;
-}
-.ov-notice {
-  margin: 0 0 16px;
-  padding: 16px 20px;
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-md);
-  background: var(--ink-surface);
-  overflow-wrap: anywhere;
-}
-.ov-loading {
-  color: var(--ink-secondary);
-  padding: 32px 0;
+  padding-top: var(--space-6);
 }
 .acct-strip {
   display: flex;
@@ -1335,12 +1290,12 @@ textarea {
 .ov-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.94fr);
-  gap: 22px;
-  align-items: stretch;
+  gap: var(--space-6);
+  align-items: start;
 }
 .ov-card {
   min-width: 0;
-  padding: 22px;
+  padding: var(--space-6);
   border: 1px solid var(--ink-border);
   border-radius: var(--r-md);
   background: var(--ink-surface);
@@ -1348,7 +1303,6 @@ textarea {
 .ov-balance {
   display: flex;
   flex-direction: column;
-  container-type: inline-size;
 }
 .fig-head {
   display: flex;
@@ -1360,71 +1314,54 @@ textarea {
 .ov-spend-title,
 .ov .block-title {
   margin: 0;
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-}
-.fig-menu {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  margin: -5px -8px 0 0;
-  border-radius: var(--r-sm);
-  color: var(--ink-secondary);
-  font-size: 22px;
-}
-.fig-menu:hover {
-  background: var(--ink-raised);
-  color: var(--ink-primary);
+  font-size: var(--text-section);
+  font-weight: 600;
+  line-height: var(--leading-heading);
 }
 .acct-full-name {
-  margin: 30px 0 8px;
+  margin: var(--space-4) 0 var(--space-2);
   color: var(--ink-secondary);
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: var(--text-body);
+}
+.financial-value {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-variant-numeric: tabular-nums;
 }
 .bal-value {
   margin: 0;
-  font-size: clamp(2rem, 14cqi, var(--text-financial-primary));
+  font-size: var(--text-financial-primary);
   font-weight: 600;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-.bal-value-long {
-  font-size: clamp(var(--text-financial-secondary), 8.5cqi, var(--text-financial-primary));
-}
-.bal-currency {
-  display: inline-block;
-  font-size: 0.4em;
-  letter-spacing: 0;
-  color: var(--ink-secondary);
+  line-height: var(--leading-heading);
 }
 .balance-period {
-  margin: auto 0 0;
-  padding-top: 40px;
-  font-size: 12px;
-  color: var(--ink-muted);
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-meta);
+  color: var(--ink-secondary);
 }
 .balance-no-comparison {
-  margin: 18px 0 0;
-  font-size: 12px;
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-helper);
   color: var(--ink-secondary);
 }
 .fig-delta {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 5px;
-  margin: 16px 0 0;
-  font-size: 12px;
+  gap: var(--space-1) var(--space-2);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-meta);
 }
 .fig-delta strong {
   font-weight: 500;
 }
-.fig-delta.is-good {
+.fig-delta.is-favorable {
   color: var(--ink-favorable);
 }
-.fig-delta.is-bad {
+.fig-delta.is-unfavorable {
   color: var(--ink-unfavorable);
 }
 .fig-delta-note {
@@ -1432,9 +1369,6 @@ textarea {
 }
 .ov-balance .fig-delta {
   align-self: flex-start;
-  border-radius: var(--r-sm);
-  background: var(--ink-raised);
-  padding: 7px 10px;
 }
 .ov-flows {
   container-type: inline-size;
@@ -1445,38 +1379,14 @@ textarea {
   }
 }
 .flows-head {
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-}
-.flows-head .chips {
-  padding: 3px;
-  border-radius: var(--r-sm);
-  background: var(--ink-page);
-  gap: 2px;
-}
-/* Scoped through .choice-chips so this screen's segmented control keeps its own look over the
-   shared chip treatment until the screen migrates; the touch-size floor below still reaches it. */
-.flows-head .choice-chips .chip {
-  min-width: 0;
-  min-height: 0;
-  max-width: 220px;
-  padding: 5px 10px;
-  border: 0;
-  border-radius: 5px;
-  background: var(--ink-surface);
-  color: var(--ink-secondary);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.flows-head .choice-chips .chip[aria-pressed='true'] {
-  background: var(--ink-raised);
-  color: var(--ink-primary);
 }
 .flows-figures {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
-  margin: 18px 0 16px;
+  gap: var(--space-6);
+  margin: var(--space-4) 0;
 }
 .flow {
   min-width: 0;
@@ -1485,8 +1395,11 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--ink-secondary);
+}
+.flow .is-income {
+  color: var(--ink-income);
 }
 .swatch {
   width: 9px;
@@ -1503,38 +1416,36 @@ textarea {
   border-top-style: dashed;
 }
 .fig-label {
-  margin: 5px 0 0;
-  font-size: 11px;
-  color: var(--ink-muted);
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-meta);
+  color: var(--ink-secondary);
 }
 .fig-value {
-  margin: 7px 0 0;
+  margin: var(--space-2) 0 0;
   font-size: var(--text-financial-secondary);
   font-weight: 500;
-  overflow-wrap: anywhere;
 }
 .flow .fig-delta {
-  margin-top: 7px;
-  font-size: 11px;
+  margin-top: var(--space-2);
 }
 .acct-chart {
   margin-left: -8px;
 }
 .acct-range {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   text-align: right;
-  font-size: 11px;
-  color: var(--ink-muted);
+  font-size: var(--text-meta);
+  color: var(--ink-secondary);
 }
 .ov-spend {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-4);
 }
 .spend-period {
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   color: var(--ink-secondary);
-  font-size: 12px;
+  font-size: var(--text-meta);
 }
 .ov-donut {
   position: relative;
@@ -1554,16 +1465,15 @@ textarea {
   z-index: 1;
 }
 .ov-donut .donut-value {
-  font-size: 26px;
+  font-size: var(--text-financial-secondary);
   font-weight: 500;
-  letter-spacing: -0.035em;
   overflow-wrap: anywhere;
 }
 .ov-donut .donut-value-long {
-  font-size: 17px;
+  font-size: var(--text-financial-row);
 }
 .ov-donut .donut-currency {
-  font-size: 11px;
+  font-size: var(--text-meta);
   color: var(--ink-secondary);
 }
 .donut-empty-ring {
@@ -1581,33 +1491,32 @@ textarea {
 }
 .ov-spend-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 10px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
-  padding: 11px 0;
-  font-size: 12px;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) 0;
+  font-size: var(--text-body);
 }
-.ov-spend-row .dot {
-  width: 8px;
-  height: 8px;
+.ov-spend-row .swatch {
+  background: var(--ink-categoryRemainder);
 }
 .ov-spend-name {
   color: var(--ink-secondary);
   overflow-wrap: anywhere;
 }
 .ov-spend-amount {
+  grid-column: 2;
   font-weight: 500;
   text-align: right;
-  overflow-wrap: anywhere;
   min-width: 0;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 .ov-spend-more {
   align-self: flex-start;
-  margin-top: auto;
-  font-size: 12px;
 }
 .ov-spend-empty {
-  font-size: 12px;
+  font-size: var(--text-helper);
   color: var(--ink-secondary);
   margin: 0;
 }
@@ -1639,10 +1548,10 @@ textarea {
   margin: 24px 0 12px;
 }
 .ov-footnote {
-  margin: 22px 0 0;
-  color: var(--ink-muted);
-  font-size: 11px;
-  text-align: center;
+  margin: var(--space-4) 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-helper);
+  line-height: var(--leading-body);
 }
 .tx-recent .header {
   gap: 12px;
@@ -1769,12 +1678,9 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 1199px) {
-  .ov {
-    padding: 24px;
-  }
   .ov-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
-    gap: 18px;
+    gap: var(--space-4);
   }
   .acct-strip {
     flex-wrap: wrap;
@@ -1787,18 +1693,15 @@ textarea {
     margin-left: auto;
   }
   .ov-card {
-    padding: 20px;
+    padding: var(--space-4);
   }
 }
 @media (max-width: 999px) {
   .ov-grid {
     grid-template-columns: minmax(0, 1fr);
   }
-  .balance-period {
-    padding-top: 28px;
-  }
   .ov-spend {
-    gap: 16px;
+    gap: var(--space-4);
   }
   .ov-spend-legend {
     width: 100%;
@@ -1849,19 +1752,8 @@ textarea {
   }
 }
 @media (max-width: 599px) {
-  .ov {
-    padding: 22px 16px;
-  }
-  .ov-heading {
-    flex-wrap: wrap;
-    gap: 20px;
-    margin-bottom: 16px;
-  }
-  .ov-import {
+  .ov .page-header__action .action-button {
     width: 100%;
-  }
-  .overview-title {
-    font-size: 28px;
   }
   .rail-tabs {
     gap: 20px;
@@ -1872,27 +1764,31 @@ textarea {
     gap: 24px;
   }
   .ov-body {
-    padding-top: 18px;
+    padding-top: var(--space-4);
   }
   .ov-grid {
-    gap: 16px;
+    gap: var(--space-4);
   }
   .flows-figures {
-    gap: 16px;
-  }
-  .fig-value {
-    font-size: 23px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
   }
   .ov-footnote {
     line-height: 1.7;
   }
 }
 
-/* ---------- the account panel's four items ---------- */
-
-/* wraps, unlike the tab: this is the one place the whole name is shown as a name */
-.acct-full-name {
-  overflow-wrap: anywhere;
+@media (min-width: 600px) and (max-width: 999px) {
+  .ov-spend {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+  }
+  .ov-spend > :first-child,
+  .ov-spend-empty,
+  .ov-spend-more {
+    grid-column: 1 / -1;
+  }
 }
 
 .acct-menu {
@@ -2812,8 +2708,6 @@ textarea {
   white-space: nowrap;
 }
 
-/* the app's ⋮, at the app's opacity — the same control `.fig-menu` draws on the
-   balance card, sized for a tab rather than for a card heading */
 .dock-more {
   flex: none;
   width: 26px;

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
 import { RECENT_LIMIT } from '../components/RecentTransactions';
+import { categoryLabel } from '../categories';
 import {
   ACCOUNTS,
   accountMonths,
@@ -25,6 +26,8 @@ import {
   Routes,
 } from '../test/harness';
 import { fmtWeekday } from '../format';
+import { notifyResizeObservers } from '../test/resize';
+import { darkInk, lightInk } from '../theme';
 import {
   Account,
   AccountDeleted,
@@ -557,13 +560,142 @@ describe('spending by category', () => {
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
     // the legend is the top three, and then the tail named as a tail — 100 of 1000
-    expect(rows.getByText('Other · 1 category')).toBeInTheDocument();
+    expect(rows.getByText('Remaining · 1 category')).toBeInTheDocument();
     expect(rows.getByText('100 EUR')).toBeInTheDocument();
     expect(rows.queryByText('Health')).not.toBeInTheDocument();
     // the fourth one is not lost: the table beside the ring has all of them, which is
     // what a screen reader gets and what jsdom can see of a donut
     const table = within(card).getByRole('table', { name: /Spending by category/ });
     expect(within(table).getByRole('rowheader', { name: 'Health' })).toBeInTheDocument();
+  });
+
+  describe.each([
+    {
+      scheme: 'light', ink: lightInk,
+      colors: { housing: '#8c5a2b', food: '#2a78d6', transport: '#1baf7a', health: '#4a3aa7', other: '#898781' },
+    },
+    {
+      scheme: 'dark', ink: darkInk,
+      colors: { housing: '#c99367', food: '#6aa6ef', transport: '#3ecf9a', health: '#9d8df1', other: '#9a9891' },
+    },
+  ] as const)('$scheme category encoding', ({ scheme, ink, colors }) => {
+    const drawRing = (card: HTMLElement) => {
+      const container = card.querySelector<HTMLElement>('.recharts-responsive-container')!;
+      container.getBoundingClientRect = () => new DOMRect(0, 0, 240, 240);
+      act(() => notifyResizeObservers());
+    };
+    const sectorFills = (card: HTMLElement) =>
+      Array.from(card.querySelectorAll('.recharts-pie-sector path'), (path) => path.getAttribute('fill'));
+
+    it('keeps sector and legend colors tied to slugs when the ranks swap', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const first = [
+        { category: 'housing', total: 400 },
+        { category: 'food', total: 300 },
+        { category: 'transport', total: 200 },
+        { category: 'health', total: 100 },
+      ];
+      const swapped = [
+        { category: 'food', total: 400 },
+        { category: 'transport', total: 300 },
+        { category: 'housing', total: 200 },
+        { category: 'health', total: 100 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/accounts': () => ok([ACCOUNTS[0], account({ id: 'acc-3', name: 'Savings' })]),
+        'GET /api/summary': (_init, url) => ok(summaryBody(url, {
+          totals: { income: 0, expense: 1000 },
+          byCategory: askedFor(url) === 'acc-1' ? first : swapped,
+        })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 1000, net: -1000 }])),
+      });
+
+      for (const [index, spend] of [first, swapped].entries()) {
+        if (index > 0) {
+          fireEvent.click(await tab('Savings'));
+          await panel('Balance of Savings');
+        }
+        const card = await panel('Spending by category, Aug 2026');
+        const rows = within(await legend());
+        expect(rows.getAllByRole('listitem').map((row) => row.querySelector('.ov-spend-name')?.textContent))
+          .toEqual([...spend.slice(0, 3).map((c) => categoryLabel(c.category)), 'Remaining · 1 category']);
+        for (const slug of ['housing', 'food', 'transport'] as const) {
+          const dot = rows.getByText(categoryLabel(slug)).closest('li')!.querySelector('.dot');
+          expect(dot).toHaveStyle({ background: colors[slug] });
+          expect(dot).toHaveAttribute('aria-hidden', 'true');
+        }
+        drawRing(card);
+        await waitFor(() => expect(sectorFills(card)).toEqual([
+          ...spend.slice(0, 3).map((c) => colors[c.category as keyof typeof colors]),
+          ink.categoryRemainder,
+        ]));
+      }
+    });
+
+    it('distinguishes actual Other from the grouped remainder in label, color and marker shape', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const spend = [
+        { category: 'other', total: 100 },
+        { category: 'food', total: 80 },
+        { category: 'health', total: 60 },
+        { category: 'cash', total: 40 },
+        { category: 'transport', total: 20 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/summary': (_init, url) =>
+          ok(summaryBody(url, { totals: { income: 0, expense: 300 }, byCategory: spend })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 300, net: -300 }])),
+      });
+
+      const card = await panel('Spending by category, Aug 2026');
+      const rows = within(await legend());
+      const other = rows.getByText('Other').closest('li')!;
+      const remainder = rows.getByText('Remaining · 2 categories').closest('li')!;
+      expect(other.querySelector('.dot')).toHaveStyle({ background: colors.other });
+      expect(other.querySelector('.swatch')).toBeNull();
+      expect(other).toHaveTextContent('100 EUR');
+      expect(remainder.querySelector('.swatch')).toHaveStyle({ background: ink.categoryRemainder });
+      expect(remainder.querySelector('.swatch')).toHaveAttribute('aria-hidden', 'true');
+      expect(remainder.querySelector('.dot')).toBeNull();
+      expect(remainder).toHaveTextContent('60 EUR');
+      expect(ink.categoryRemainder).toMatch(/^#[\da-f]{6}$/i);
+      expect(ink.categoryRemainder).not.toBe(colors.other);
+      expect(lightInk.categoryRemainder).not.toBe(darkInk.categoryRemainder);
+      drawRing(card);
+      await waitFor(() => expect(sectorFills(card)).toEqual([
+        colors.other, colors.food, colors.health, ink.categoryRemainder,
+      ]));
+    });
+
+    it('uses the existing neutral fallback for unknown slugs in sectors and legend dots', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const spend = [
+        { category: 'groceries-2', total: 100 },
+        { category: '__proto__', total: 80 },
+        { category: 'other', total: 60 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/summary': (_init, url) =>
+          ok(summaryBody(url, { totals: { income: 0, expense: 240 }, byCategory: spend })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 240, net: -240 }])),
+      });
+
+      const card = await panel('Spending by category, Aug 2026');
+      const rows = within(await legend());
+      for (const label of ['groceries-2', '__proto__', 'Other']) {
+        expect(rows.getByText(label).closest('li')!.querySelector('.dot'))
+          .toHaveStyle({ background: colors.other });
+      }
+      expect(rows.queryByText(/Remaining/)).not.toBeInTheDocument();
+      drawRing(card);
+      await waitFor(() => expect(sectorFills(card)).toEqual([colors.other, colors.other, colors.other]));
+    });
   });
 
   it('says so rather than drawing an empty ring when the month spent nothing', async () => {
@@ -608,7 +740,7 @@ describe('spending by category', () => {
     expect(
       within(card).getByText('Total includes net refunds; the ring shows positive spending.'),
     ).toBeInTheDocument();
-    const tail = within(await legend()).getByText('Other · 2 categories').closest('li');
+    const tail = within(await legend()).getByText('Remaining · 2 categories').closest('li');
     expect(tail).toHaveTextContent('0 EUR');
     expect(within(card).getByText('180')).toBeInTheDocument();
   });
@@ -633,9 +765,13 @@ describe('spending by category', () => {
     mount();
     const card = await panel('Spending by category, Aug 2026');
 
-    fireEvent.click(within(card).getByRole('button', { name: 'All analytics' }));
+    const more = within(card).getByRole('button', { name: 'All analytics' });
+    expect(more).toHaveAttribute('type', 'button');
+    expect(more).toHaveClass('action-button--tertiary', 'action-button--compact');
+    expect(more).not.toHaveClass('btn-link');
+    fireEvent.click(more);
 
-    expect(onOpenAnalytics).toHaveBeenCalled();
+    expect(onOpenAnalytics).toHaveBeenCalledOnce();
   });
 });
 

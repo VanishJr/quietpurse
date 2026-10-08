@@ -73,21 +73,13 @@ export const spendSectors = <T extends CategorySummary>(spend: T[]): (T & SpendS
     .filter((c) => c.total > 0)
     .map((c) => ({ ...c, label: categoryLabel(c.category) }));
 
-export const RING_SLOT_INK = ['good', 'lavender', 'sand'] as const;
-
-/** How many categories the Overview ring names before it groups the tail. */
-const RING_TOP = RING_SLOT_INK.length;
+const RING_TOP = 3;
 
 /** The tail's own key, which no slug can be. */
 export const REST_SECTOR = '__rest';
 
 export const restLabel = (count: number): string =>
-  `Other · ${count} ${count === 1 ? 'category' : 'categories'}`;
-
-export interface RingSector extends SpendSector {
-  /** The sector's row in the legend: its index in `top`, and none for the tail. */
-  slot: number | null;
-}
+  `Remaining · ${count} ${count === 1 ? 'category' : 'categories'}`;
 
 export interface SpendRing {
   /** The categories the legend names, in the server's order. */
@@ -97,7 +89,7 @@ export interface SpendRing {
   /** The tail as the legend prints it: the month's net total less the named categories. */
   restTotal: number;
   /** What the ring draws: the named categories and the tail, positive parts only. */
-  sectors: RingSector[];
+  sectors: SpendSector[];
 }
 
 /**
@@ -113,12 +105,10 @@ export function spendRing(spend: CategorySummary[], total: number): SpendRing {
     (toCents(total) - top.reduce((sum, c) => sum + toCents(c.total), 0)) / 100;
   const positiveRest =
     spendSectors(rest).reduce((sum, c) => sum + toCents(c.total), 0) / 100;
-  const sectors: RingSector[] = [
-    // the slot is stamped before the positive filter, so a named category a refund
-    // pushed below zero takes its slot with it and the ones after keep theirs
-    ...spendSectors(top.map((c, slot) => ({ ...c, slot }))),
+  const sectors: SpendSector[] = [
+    ...spendSectors(top),
     ...(positiveRest > 0
-      ? [{ category: REST_SECTOR, label: restLabel(rest.length), total: positiveRest, slot: null }]
+      ? [{ category: REST_SECTOR, label: restLabel(rest.length), total: positiveRest }]
       : []),
   ];
   return { top, rest, restTotal, sectors };
