@@ -2479,46 +2479,39 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/*
- * The figures above the plot.
- *
- * `1 1 150px` rather than a fixed count: a series chart shows one box per measure and
- * a share chart shows two, and the row is the same shape at one, two or three.
- */
 .chart-figs {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin: 16px 0 4px;
+  gap: var(--space-4) var(--space-6);
+  margin: var(--space-6) 0 var(--space-2);
 }
 
 .chart-fig {
-  flex: 1 1 150px;
+  flex: 1 1 15rem;
   min-width: 0;
-  border: 1px solid var(--ink-grid);
-  border-radius: var(--r-md);
-  padding: 10px 12px;
 }
 
 .chart-fig-label {
-  font-size: 11px;
-  color: var(--ink-muted);
-  margin-bottom: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--text-label);
+  color: var(--ink-secondary);
+  margin-bottom: var(--space-1);
+  overflow-wrap: anywhere;
 }
 
 .chart-fig-value {
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: var(--text-financial-secondary);
+  font-weight: 600;
+  line-height: var(--leading-heading);
+}
+
+.chart-fig-value--income {
+  color: var(--ink-income);
 }
 
 .chart-fig-pct {
-  font-size: 12px;
+  font-size: var(--text-helper);
   font-weight: 400;
-  color: var(--ink-muted);
+  color: var(--ink-secondary);
 }
 
 /* Every plot's key. The shape of the swatch is the chart's to choose and follows the
@@ -2527,10 +2520,21 @@ textarea {
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
-  margin: 14px 0 0;
-  font-size: 12px;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-helper);
   color: var(--ink-secondary);
+}
+
+.chart-legend .acct-legend-item {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.chart-legend .dot,
+.chart-legend .swatch {
+  flex-shrink: 0;
 }
 
 .acct-legend-item {
@@ -2934,10 +2938,14 @@ textarea {
   pointer-events: none;
 }
 
-/* The middle of a donut, on both screens that draw one. It was 18/13 here and 19/12 on
-   the Overview's card — two sizes for one job, which is the drift tokens.css exists to
-   stop; one set, and the Overview overrides only the colour, because only its ground
-   differs. */
+.chart-plot .donut-value {
+  max-width: 60%;
+  white-space: nowrap;
+  overflow-x: auto;
+  pointer-events: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .donut-value {
   font-size: 19px;
   font-weight: 700;

@@ -758,12 +758,14 @@ The client's cleaning is not the server's `cleanName` for a reason: nothing here
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.
 
-`ChartPlot` colours a series by the `Ink` key its entry in `METRICS` names, so what income or
-expenses look like is not decided in the plot, and colours a share part by `sliceColor`: a key that
-is a category slug takes that category's `categoryColor`, and any other key takes a colour off
-`RAMP` by its position. `RAMP` is a list of category slugs rather than of colours, so the two
-schemes keep answering for themselves. An income source whose id is also a category slug is
-coloured as that category.
+`ChartPlot` colours a series by the `Ink` key its entry in `METRICS` names. Analytics expense
+series use neutral ink; income retains its independent financial role and Net is not automatically
+favorable. Category breakdowns always use `categoryColor` by slug, with the neutral unknown fallback
+rather than a rank-dependent hue. Income-source breakdowns use a labeled chart-local palette,
+including when a source id collides with a category slug: breakdown context, not string membership,
+establishes meaning. Metric groups use spacing rather than nested surfaces, keeping full labels
+and currency attached to financial values. Oversized figures scroll only within their own value.
+Clipped wrappers contain intrinsic table width without changing the plot's accessible rows.
 
 `ChartPlot`'s donut key marks each part with the round `.dot` and its series legend with the square
 `.swatch`. Category dots preserve slug identity rather than rank. Overview's aggregate remainder
@@ -888,7 +890,8 @@ Light and Dark as explicit choices, with System following the OS preference. Its
 moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
 indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
 together. Income series and their legend marks use the income role, independent of action and
-success colors; expense series retain `lavender`. Chart tooltips use
+success colors; Overview expense series retain their existing encoding while Analytics uses
+neutral expense ink. Chart tooltips use
 a raised surface with its own text colours rather than inheriting colours from the plotted series.
 
 ## Accounts and statements, as the client handles them

@@ -86,7 +86,7 @@ function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
           return (
             <div key={m.key} className="chart-fig">
               <div className="chart-fig-label">{m.label}, total</div>
-              <div className="chart-fig-value">{fmtMoney(total, data.currency)}</div>
+              <div className={`chart-fig-value financial-value${m.key === 'income' ? ' chart-fig-value--income' : ''}`}><span className="financial-value-text">{fmtMoney(total, data.currency)}</span></div>
             </div>
           );
         })}
@@ -116,17 +116,17 @@ function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
     <div className="chart-figs">
       <div className="chart-fig">
         <div className="chart-fig-label">Total</div>
-        <div className="chart-fig-value">{fmtMoney(total, data.currency)}</div>
+        <div className={`chart-fig-value financial-value${spec.breakdown !== 'expense-categories' ? ' chart-fig-value--income' : ''}`}><span className="financial-value-text">{fmtMoney(total, data.currency)}</span></div>
       </div>
       {biggest && (
         <div className="chart-fig">
           <div className="chart-fig-label">Largest, {biggest.label}</div>
-          <div className="chart-fig-value">
+          <div className="chart-fig-value financial-value"><span className="financial-value-text">
             {fmtMoney(biggest.value, data.currency)}
             {isWhole && (
               <span className="chart-fig-pct"> · {Math.round((biggest.value / total) * 100)}%</span>
             )}
-          </div>
+          </span></div>
         </div>
       )}
     </div>
@@ -146,7 +146,7 @@ function DataTable({
   if (data.shape === 'series') {
     const drawn = METRICS.filter((m) => spec.metrics.includes(m.key));
     return (
-      <table className="visually-hidden">
+      <div className="visually-hidden"><table>
         <caption>{title}</caption>
         <thead>
           <tr>
@@ -168,7 +168,7 @@ function DataTable({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     );
   }
 
@@ -176,7 +176,7 @@ function DataTable({
   const rows = data.compared;
   if (rows) {
     return (
-      <table className="visually-hidden">
+      <div className="visually-hidden"><table>
         <caption>{title}</caption>
         <thead>
           <tr>
@@ -194,7 +194,7 @@ function DataTable({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     );
   }
 
@@ -202,7 +202,7 @@ function DataTable({
   // plot, so a donut that dropped a refunded category has to drop it here too or the
   // two readers of this card are given different rows and a total that fits neither
   return (
-    <table className="visually-hidden">
+    <div className="visually-hidden"><table>
       <caption>{title}</caption>
       <thead>
         <tr>
@@ -218,6 +218,6 @@ function DataTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
