@@ -23,6 +23,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   }
   const selectionToken = selection.current.token;
   const [goals, setGoals] = useState<GoalSummary[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GoalSummary | null>(null);
@@ -47,12 +48,15 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   const load = useCallback(async (initial = false) => {
     const generation = ++loadGeneration.current;
     if (initial) setGoals(null);
+    setRefreshing(!initial);
     setError(null);
     try {
       const next = await api.goals();
       if (generation === loadGeneration.current) setGoals(next.goals);
     } catch (caught) {
       if (generation === loadGeneration.current) setError((caught as Error).message);
+    } finally {
+      if (generation === loadGeneration.current) setRefreshing(false);
     }
   }, []);
 
@@ -94,6 +98,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
       )} />
 
       {goals === null && !error && <Notice placement="content" role="status">Loading goals…</Notice>}
+      {refreshing && goals !== null && <Notice role="status">Updating goals…</Notice>}
       {notice && <Notice role="status">{notice}</Notice>}
       {error && (
         <Notice tone="error" placement="content" role="alert" remedy={

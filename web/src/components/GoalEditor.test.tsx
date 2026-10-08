@@ -1003,6 +1003,7 @@ describe('GoalEditor', () => {
     const firstId = first.id;
     const add = screen.getByRole('button', { name: 'Add cost' });
     expect(add).toHaveClass('action-button--secondary');
+    expect(screen.getByRole('button', { name: 'Delete row 1' })).toHaveClass('action-button--destructive-secondary');
     fireEvent.click(add);
     const second = screen.getByLabelText('Cost 2 name');
     const secondId = second.id;

@@ -129,15 +129,17 @@ focuses a linked error summary in the primary body. Links reveal and focus their
 changing the navigation address. Failed fields update correction while edited, without moving the
 caret; raw invalid strings stay intact. Retained costs under Current spending still participate in
 validation and replacement, so a hidden cost refusal points to Target basis until its fields are
-revealed rather than linking to absent content. API diagnostics without field identity remain whole
-and form-level in the action region. Repeatable costs and account choices use headings and separators,
+revealed rather than linking to absent content. API diagnostics without field identity retain the transport's diagnostic budget and remain
+form-level in the action region. Repeatable costs and account choices use headings and separators,
 not nested scroll surfaces; adding and removing a cost preserves a usable correction focus.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key opens the editor, for a new goal or a saved one. A
 missing id, including one that disappears before an edit is saved, falls back to the list with an
 explicit unavailable message rather than choosing another goal. A new installation's empty list is
-a real empty state and is never shown while the request is unresolved or failed.
+a real empty state and is never shown while the request is unresolved or failed. A post-write list
+retained during its refresh is explicitly Updating; an obsolete response cannot clear that state
+for a newer request. A refused refresh leaves the list beside its own refusal, not an empty claim.
 
 **The wire types are the server's declaration, reached by type only and through one door.**
 `web/src/types.ts` declares nothing of its own but `TxFocus`: every wire shape in it is an `export

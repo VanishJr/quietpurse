@@ -3032,12 +3032,14 @@ textarea {
 }
 
 .goal-card-header h2 {
+  margin: 0;
   font-size: var(--text-component);
   line-height: var(--leading-heading);
   overflow-wrap: anywhere;
 }
 
 .goal-status-label {
+  margin: 0;
   color: var(--ink-secondary);
   font-size: var(--text-label);
   font-weight: 500;
@@ -3306,11 +3308,7 @@ textarea {
   }
 
   .goal-figures {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .goal-figures > div:first-child {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

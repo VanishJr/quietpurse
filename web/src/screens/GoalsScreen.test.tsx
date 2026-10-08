@@ -411,6 +411,28 @@ describe('GoalsScreen', () => {
     expect(requests().filter((request) => request === 'DELETE /api/goals/goal-savings')).toHaveLength(1);
   });
 
+  it('announces a retained post-write list refresh and keeps a failed read distinct from empty', async () => {
+    let reads = 0;
+    let finish!: (response: Response) => void;
+    mockFetch({
+      'GET /api/goals': () => ++reads === 1 ? ok({ goals: [SAVINGS_GOAL] }) : new Promise<Response>((resolve) => { finish = resolve; }),
+      'DELETE /api/goals/goal-savings': () => ok({ deleted: true, id: 'goal-savings' }),
+    });
+    renderThemed(<GoalsScreen />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Emergency savings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete goal' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('status')).toHaveTextContent('Updating goals…');
+    expect(screen.getByRole('heading', { name: 'Emergency savings' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Edit Emergency savings' })).toBeDisabled();
+    await act(async () => finish(fail(500, { error: 'refresh unavailable' })));
+    expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t load goals: refresh unavailable');
+    expect(screen.getByRole('heading', { name: 'Emergency savings' })).toBeVisible();
+    expect(screen.queryByText('No goals yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Updating goals…')).not.toBeInTheDocument();
+    expect(requests()).toEqual(['GET /api/goals', 'DELETE /api/goals/goal-savings', 'GET /api/goals']);
+  });
+
   it('reloads after a successful delete', async () => {
     let reads = 0;
     mockFetch({

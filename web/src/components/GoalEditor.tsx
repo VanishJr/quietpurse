@@ -606,7 +606,7 @@ export function GoalEditor({ goalId, onClose, onMissing = onClose, onSaved }: Pr
                           readOnly: saving, inputMode: 'decimal', value: item.monthly,
                           onChange: (event) => update('costs', draft.costs.map((costItem) => costItem.key === item.key ? { ...costItem, monthly: event.target.value } : costItem)),
                         }} />
-                      <Button type="button" variant="tertiary" size="standard" aria-label={`Delete ${rowContext}`}
+                      <Button type="button" variant="destructive-secondary" size="standard" aria-label={`Delete ${rowContext}`}
                         aria-disabled={saving} onClick={() => removeCost(index)}>Delete</Button>
                     </div>
                   );
