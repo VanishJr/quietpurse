@@ -877,8 +877,11 @@ the entry separates spellings. Removing a spelling hands focus to the next one, 
 or the entry field. Only an exact echo of the requested currency and ordered names resets the form
 to saved; a refusal or different answer leaves the edits available to correct or retry, and a
 different answer names what the server kept, since the fields still show the edits. Validation and recalculation
-remain with the server. Settings' recurring list uses the server's monthly estimate and detected groups without recomputing them; category markers come from the
-category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
+remain with the server. Settings' recurring records put identity before the monthly value and unit,
+then category, detection and exclusion context before actions. Oversized signed values scroll only
+within their own value region instead of splitting currency or widening the page. The list uses the
+server's monthly estimate and detected groups without recomputing them; category markers come from
+the category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
 rather than disappearing, and a mutation replaces the whole recurring answer instead of patching
 one row. A group is followed across answers by the server's `key`, not its description: the
 description is the group's newest spelling and moves between reads. Revision-triggered reads and
@@ -889,7 +892,8 @@ irrelevant when that payment is gone or already in the requested state; an in-fl
 that still leaves the action available does not erase the refusal. A refusal belongs to its
 payment: an action on another payment neither clears nor replaces it. Refusals are shown apart
 from a failed read, which keeps its own Retry for the read; neither hides the other, nor the
-loading status. A control on Settings that would turn disabled while it holds focus — a save
+loading status. A retained refusal names its affected payment and describes that record even after
+its displayed spelling changes; excluded-row refusals remain visible outside the disclosure. A control on Settings that would turn disabled while it holds focus — a save
 pressed or entered, a name just added, a save answered with nothing left to save, an exclude,
 restore or delete in flight, Add source once its form is open — is `aria-disabled` instead and
 ignores a press, and a field being sent is read-only: a browser drops focus from a control
@@ -900,7 +904,8 @@ meanwhile. After a write,
 focus goes to the section's heading only when it was lost or is still inside the card. The summary
 total shows only beside detected groups. Import and history navigate to
 their respective flows; backup uses the checked fetch path and produces a file only after a successful response. A
-refusal stays beside Export, not elsewhere on Settings. The account strip marks the current
+refusal stays beside Export, not elsewhere on Settings. Export retains its action name and focus
+while a separate pending status explains preparation; pending activation cannot start another file. The account strip marks the current
 account with `aria-current` like the navigation does and is deliberately not a tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
@@ -1009,8 +1014,9 @@ abandoned confirmation. Pending deletion still blocks navigation through its exi
 An open sheet on an inactive screen retains its state but releases focus, inertness, scroll locks
 and keyboard ownership. Returning re-enters without replacing the original opener. Shell drives
 `hidden` and `ScreenShown` from the same value. Modal layering stays above raised popovers.
-Accepted screen or panel navigation orients the reader at the visible heading, not on background
-refresh or filter changes and not over an editor's own focus policy.
+Accepted screen or panel navigation orients the reader at an available heading, not on background
+refresh or filter changes and not over an available editor's own focus policy. A retained hidden
+dialog is neither a modal focus owner nor a reason to suppress the visible panel's orientation.
 
 `useDismiss` is the Escape-and-outside-press seam for lightweight popovers. A live child receives
 Escape before its sheet; a background popover beneath the modal cannot consume that dismissal.

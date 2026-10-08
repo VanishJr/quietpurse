@@ -364,6 +364,29 @@ describe('the shell', () => {
     expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
   });
 
+  it('orients History on Back past a retained pristine income editor and re-enters it on Forward', async () => {
+    mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports': () => ok(importsResponse([])) });
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('link', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import history' }));
+    await screen.findByRole('heading', { name: 'Import history' });
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add source' }));
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toBeVisible();
+
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Import history' })).toHaveFocus());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe('');
+    expect(screen.getByRole('heading', { name: 'Settings', hidden: true })).not.toBeVisible();
+
+    act(() => window.history.forward());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Add source' })).toHaveFocus());
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toBeVisible();
+    expect(document.body.style.overflow).toBe('hidden');
+  });
+
   it('lets a sheet left open on a screen hold the page only while that screen shows', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);

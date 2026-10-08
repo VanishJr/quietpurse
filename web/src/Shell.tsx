@@ -17,6 +17,7 @@ import { ThemeMode, useTheme } from './theme';
 import { TxFocus } from './types';
 import { NavigationNotice } from './components/NavigationNotice';
 import { setUrl, urlFor, useUrl } from './url';
+import { isAvailable } from './dismiss';
 
 const TABS = [
   { key: 'overview', title: 'Overview', Icon: OverviewIcon },
@@ -68,8 +69,8 @@ export function Shell() {
     if (previousPlace.current === place) return;
     previousPlace.current = place;
     const screen = document.querySelector<HTMLElement>('.screen:not([hidden])');
-    if (screen?.querySelector('[role="dialog"]')) return;
-    const heading = screen?.querySelector<HTMLElement>('h1, h2');
+    if (Array.from(screen?.querySelectorAll<HTMLElement>('[role="dialog"]') ?? []).some(isAvailable)) return;
+    const heading = Array.from(screen?.querySelectorAll<HTMLElement>('h1, h2') ?? []).find(isAvailable);
     if (heading) {
       heading.tabIndex = -1;
       heading.focus();

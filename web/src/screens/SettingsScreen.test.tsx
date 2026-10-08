@@ -780,9 +780,11 @@ describe('the data export', () => {
     await screen.findByRole('heading', { name: 'Data & backup' });
 
     fireEvent.click(exportControl());
-    const preparing = screen.getByRole('button', { name: /^Preparing backup…/ });
-    expect(preparing).toBeDisabled();
-    expect(preparing).toHaveAccessibleName('Preparing backup…');
+    const preparing = screen.getByRole('button', { name: 'Export backup' });
+    expect(preparing).not.toBeDisabled();
+    expect(preparing).toHaveAttribute('aria-disabled', 'true');
+    expect(preparing).toHaveAccessibleName('Export backup');
+    expect(within(cardFor('Data & backup')).getByRole('status')).toHaveTextContent('Preparing backup…');
     expect(preparing).toHaveAccessibleDescription(
       'Download readable, unencrypted JSON. Original statement files are not included.',
     );
@@ -793,6 +795,7 @@ describe('the data export', () => {
     await vi.waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1));
     expect(requests().filter((r) => r === 'GET /api/backup')).toHaveLength(1);
     expect(exportControl()).toBeEnabled();
+    expect(exportControl()).not.toHaveAttribute('aria-disabled', 'true');
     expect(exportControl()).toHaveAttribute('aria-busy', 'false');
   });
 });
@@ -817,6 +820,44 @@ describe('the import history across every account', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
     expect(requests().filter((request) => request === 'GET /api/app-settings')).toHaveLength(1);
     expect(requests()).not.toContain('PATCH /api/app-settings');
+  });
+
+  it('guards a dirty income editor before history can hide it, without abandoning inline financial edits', async () => {
+    mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
+    mount();
+    const currency = await screen.findByLabelText('Base currency');
+    fireEvent.change(currency, { target: { value: 'USD' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add source' }));
+    fireEvent.change(screen.getByLabelText('Source name'), { target: { value: 'Edited salary' } });
+    act(() => setUrl({ screen: 'settings', panel: 'history' }));
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    expect(requests()).not.toContain('GET /api/imports');
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Source name')).toHaveValue('Edited salary');
+    act(() => setUrl({ screen: 'settings', panel: 'history' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    await screen.findByRole('heading', { name: 'Import history' });
+    expect(document.body.style.overflow).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Settings' }));
+    expect(currency).toHaveValue('USD');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(requests().filter((request) => /^(POST|PUT|PATCH|DELETE) /.test(request))).toEqual([]);
+  });
+
+  it('suspends a retained pristine editor behind history without page or keyboard ownership', async () => {
+    mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add source' }));
+    expect(document.body.style.overflow).toBe('hidden');
+    act(() => setUrl({ screen: 'settings', panel: 'history' }));
+    await screen.findByRole('heading', { name: 'Import history' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe('');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Settings' }));
+    expect(screen.getByRole('dialog', { name: 'Add source' })).toBeVisible();
+    expect(screen.getByLabelText('Source name')).toHaveValue('');
+    expect(document.body.style.overflow).toBe('hidden');
   });
 
   it('does not treat another screen’s account history as a Settings takeover', async () => {
@@ -897,7 +938,14 @@ describe('recurring payments', () => {
     expect(within(card).getByText(/last twelve months/)).toBeInTheDocument();
     expect(within(card).getByText('Estimated per month')).toBeInTheDocument();
     expect(within(card).getByText(/Subscriptions · 6 months detected/)).toBeInTheDocument();
-    expect(within(card).getByText('−10 EUR/mo')).toBeInTheDocument();
+    const row = within(card).getByRole('article', { name: 'Recurring payment Long gym payment' });
+    const value = within(row).getByText('−10 EUR');
+    expect(value.closest('.settings-recurring-amount')).toHaveTextContent('−10 EUR/mo');
+    expect(value.parentElement).toHaveClass('financial-value');
+    expect(Array.from(row.children, (element) => element.className)).toEqual([
+      'settings-recurring-marker', 'settings-recurring-name', 'settings-recurring-amount',
+      'settings-recurring-meta', 'settings-recurring-actions',
+    ]);
     expect(container.querySelector('.settings-recurring-marker')).toHaveAttribute('aria-hidden', 'true');
     const trigger = within(card).getByRole('button', { name: 'Actions for Long gym payment' });
     expect(trigger.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
@@ -1077,6 +1125,8 @@ describe('recurring payments', () => {
     expect(requests().filter((request) => request === 'POST /api/recurring/ignore')).toHaveLength(1);
     await act(async () => { finish(fail(500, { error: 'cannot exclude' })); });
     expect(within(card).getByRole('alert')).toHaveTextContent('cannot exclude');
+    expect(within(card).getByRole('article', { name: 'Recurring payment Gym' })).toHaveAccessibleDescription(/Gym: cannot exclude/);
+    expect(within(card).getByRole('article', { name: 'Recurring payment Spotify' })).not.toHaveAttribute('aria-describedby');
     expect(within(card).getByRole('button', { name: 'Actions for Gym' })).toHaveAttribute('aria-disabled', 'false');
     expect(within(card).queryByText(/Excluded payments/)).not.toBeInTheDocument();
   });

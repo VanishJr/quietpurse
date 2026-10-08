@@ -5,6 +5,8 @@ import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
 import { PageHeader } from '../components/PageHeader';
+import { Button } from '../components/Button';
+import { Notice } from '../components/Notice';
 import { ImportIcon } from '../components/NavIcons';
 import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
 import { useDismiss } from '../dismiss';
@@ -147,35 +149,33 @@ export function SettingsScreen({
   };
 
   const recurringRow = (g: RecurringSummary['groups'][number], excluded: boolean) => (
-    <div key={g.key} className="settings-recurring-row">
+    <article key={g.key} className="settings-recurring-row" aria-label={`Recurring payment ${g.description}`}
+      aria-describedby={recurringActionErrors.some((failed) => failed.key === g.key)
+        ? `settings-recurring-error-${encodeURIComponent(g.key)}` : undefined}>
       <span className="settings-recurring-marker" style={{ backgroundColor: categoryColor(g.category) }} aria-hidden="true" />
-      <div className="settings-recurring-info">
-        <div className="settings-recurring-name">{g.description}</div>
-        <div className="settings-recurring-meta">
-          {categoryLabel(g.category)} · {g.months} months detected · last {fmtDate(g.lastDate)}
-        </div>
-      </div>
+      <h3 className="settings-recurring-name">{g.description}</h3>
       <strong className="settings-recurring-amount">
-        {fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}/mo
+        <span className="financial-value"><span className="financial-value-text">{fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}</span></span><span className="financial-qualifier">/mo</span>
       </strong>
+      <div className="settings-recurring-meta">
+        {excluded && 'Excluded · '}{categoryLabel(g.category)} · {g.months} months detected · last {fmtDate(g.lastDate)}
+      </div>
       {excluded ? (
-        <button
+        <Button type="button" variant="secondary" size="compact"
           className="settings-recurring-restore"
-          type="button"
           aria-label={`Restore payment ${g.description}`}
           aria-disabled={recurringBusy}
           onClick={() => toggleRecurring(g, false)}
         >
           Restore
-        </button>
+        </Button>
       ) : (
         <div
           className="settings-recurring-actions"
           ref={openRecurringMenu === g.key ? recurringMenuRef : undefined}
         >
-          <button
+          <Button type="button" variant="tertiary" size="touch" iconOnly
             className="settings-recurring-trigger"
-            type="button"
             aria-label={`Actions for ${g.description}`}
             aria-expanded={openRecurringMenu === g.key}
             aria-controls={openRecurringMenu === g.key ? 'settings-recurring-menu' : undefined}
@@ -189,22 +189,21 @@ export function SettingsScreen({
             }}
           >
             <MoreIcon />
-          </button>
+          </Button>
           {openRecurringMenu === g.key && (
             <div className="settings-recurring-menu" id="settings-recurring-menu">
-              <button
+              <Button type="button" variant="secondary" size="standard"
                 ref={recurringActionRef}
-                type="button"
                 aria-label={`Exclude from recurring: ${g.description}`}
                 onClick={() => toggleRecurring(g, true)}
               >
                 Exclude from recurring
-              </button>
+              </Button>
             </div>
           )}
         </div>
       )}
-    </div>
+    </article>
   );
 
   /**
@@ -261,30 +260,29 @@ export function SettingsScreen({
           </div>
           {recurring && recurring.groups.length > 0 && (
             <p className="settings-recurring-summary">
-              <strong>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</strong>
+              <strong><span>{fmtMoney(recurring.monthlyTotal, recurring.baseCurrency)}</span></strong>
               <span>Estimated per month</span>
             </p>
           )}
         </div>
         {!recurring && !recurringReadError && (
-          <p role="status" className="hint">Loading recurring payments…</p>
+          <Notice role="status">Loading recurring payments…</Notice>
         )}
         {recurringReadError && (
-          <div className="settings-recurring-error">
-            <p className="error" role="alert">Error: {recurringReadError}</p>
-            <button className="btn-link" type="button" onClick={loadRecurring}>Retry</button>
-          </div>
+          <Notice tone="error" role="alert" remedy={
+            <Button type="button" variant="tertiary" size="standard" onClick={loadRecurring}>Retry</Button>
+          }>Error: {recurringReadError}</Notice>
         )}
         {recurringActionErrors.map((failed) => (
-          <div key={failed.key} className="settings-recurring-error">
-            <p className="error" role="alert">Error: {failed.description}: {failed.message}</p>
-          </div>
+          <Notice key={failed.key} tone="error" role="alert" id={`settings-recurring-error-${encodeURIComponent(failed.key)}`}>
+            Error: {failed.description}: {failed.message}
+          </Notice>
         ))}
-        {recurringBusy && <p role="status" className="hint">Updating recurring payments…</p>}
+        {recurringBusy && <Notice role="status">Updating recurring payments…</Notice>}
         {recurring && recurring.groups.length === 0 && (
-          <p className="hint">
+          <Notice>
             Nothing yet. A payment has to appear in several months before Finto calls it recurring.
-          </p>
+          </Notice>
         )}
         {recurring && active.length > 0 && (
           <div className="settings-recurring-list">
@@ -292,9 +290,9 @@ export function SettingsScreen({
           </div>
         )}
         {!showAllRecurring && active.length > RECURRING_LIMIT && (
-          <button className="settings-recurring-more" type="button" onClick={() => setShowAllRecurring(true)}>
+          <Button className="settings-recurring-more" type="button" variant="tertiary" size="standard" onClick={() => setShowAllRecurring(true)}>
             Show {active.length - RECURRING_LIMIT} more
-          </button>
+          </Button>
         )}
         {ignored.length > 0 && (
           <details className="settings-recurring-excluded">
@@ -317,7 +315,7 @@ export function SettingsScreen({
 
         <div className="settings-data-actions">
           <div className="settings-data-item">
-            <button className="settings-data-action" type="button" onClick={onOpenImport}
+            <Button className="settings-data-action" type="button" variant="tertiary" size="standard" onClick={onOpenImport}
               aria-labelledby="settings-import-label" aria-describedby="settings-import-description">
               <span className="settings-data-icon"><ImportIcon /></span>
               <span className="settings-data-copy">
@@ -325,10 +323,10 @@ export function SettingsScreen({
                 <span className="settings-data-description" id="settings-import-description">Upload a CSV, XLSX, or PDF statement.</span>
               </span>
               <span className="settings-data-trailing"><ChevronIcon /></span>
-            </button>
+            </Button>
           </div>
           <div className="settings-data-item">
-            <button className="settings-data-action" type="button" onClick={() => setHistoryOpen(true)}
+            <Button className="settings-data-action" type="button" variant="tertiary" size="standard" onClick={() => setHistoryOpen(true)}
               aria-labelledby="settings-history-label" aria-describedby="settings-history-description">
               <span className="settings-data-icon"><HistoryIcon /></span>
               <span className="settings-data-copy">
@@ -338,14 +336,11 @@ export function SettingsScreen({
                 </span>
               </span>
               <span className="settings-data-trailing"><ChevronIcon /></span>
-            </button>
+            </Button>
           </div>
           <div className="settings-data-item">
-            <button
-              className="settings-data-action"
-              type="button"
-              disabled={exporting}
-              aria-busy={exporting}
+            <Button className="settings-data-action" type="button" variant="tertiary" size="standard"
+              pending={exporting} aria-busy={exporting}
               aria-labelledby="settings-export-label"
               aria-describedby="settings-export-description"
               onClick={runExport}
@@ -353,15 +348,16 @@ export function SettingsScreen({
               <span className="settings-data-icon"><BackupIcon /></span>
               <span className="settings-data-copy">
                 <span className="settings-data-label" id="settings-export-label">
-                  {exporting ? 'Preparing backup…' : 'Export backup'}
+                  Export backup
                 </span>
                 <span className="settings-data-description" id="settings-export-description">
                   Download readable, unencrypted JSON. Original statement files are not included.
                 </span>
               </span>
               <span className="settings-data-trailing"><ImportIcon /></span>
-            </button>
-            {exportError && <p className="settings-data-error error" role="alert">Error: {exportError}</p>}
+            </Button>
+            {exporting && <Notice role="status">Preparing backup…</Notice>}
+            {exportError && <Notice className="settings-data-error" tone="error" role="alert">Error: {exportError}</Notice>}
           </div>
         </div>
       </section>
@@ -370,16 +366,14 @@ export function SettingsScreen({
           contents are presentational, which takes the heading out of heading navigation */}
       <section className="settings-section settings-advanced" aria-labelledby="settings-advanced-title">
         <h2 className="settings-title" id="settings-advanced-title">
-          <button
-            className="settings-advanced-toggle"
-            type="button"
+          <Button className="settings-advanced-toggle" type="button" variant="tertiary" size="standard"
             aria-expanded={advancedOpen}
             aria-controls="settings-advanced-content"
             onClick={() => setAdvancedOpen((open) => !open)}
           >
             <span className="settings-advanced-label">Advanced · API connection</span>
             <span className="settings-advanced-chevron" aria-hidden="true"><ChevronIcon /></span>
-          </button>
+          </Button>
         </h2>
         <div className="settings-advanced-content" id="settings-advanced-content" hidden={!advancedOpen}>
           <p className="settings-lead">This is the address of Finto’s local REST API.</p>
