@@ -104,6 +104,21 @@ const parse = (href: string): AppUrl => {
   };
 };
 
+function keyedNativeHistory() {
+  const keys = new WeakMap<HistoryEntry, string>();
+  let nextKey = 0;
+  const keyOf = (entry: HistoryEntry) => {
+    if (!keys.has(entry)) keys.set(entry, `entry-${nextKey++}`);
+    return keys.get(entry)!;
+  };
+  const navigation = {
+    get currentEntry() { return { index, key: keyOf(entries[index]) }; },
+    entries: () => entries.map((entry, i) => ({ index: i, key: keyOf(entry) })),
+  };
+  Object.assign(window, { navigation });
+  return navigation;
+}
+
 const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null, goal: null };
 const FULL: AppUrl = {
   screen: 'overview',
@@ -263,6 +278,259 @@ describe('setUrl', () => {
     expect(index).toBe(0);
     expect(entries).toHaveLength(4);
     release();
+  });
+
+  it('resolves entry identities against live positions after the browser prunes a captured index', () => {
+    at('/app/?screen=overview&foreign=kept#origin');
+    entries[0].state = { foreign: 'state-kept' };
+    let base = 0;
+    Object.assign(window, { navigation: {
+      get currentEntry() { return { index, key: `entry-${base + index}` }; },
+      entries: () => entries.map((_entry, i) => ({ index: i, key: `entry-${base + i}` })),
+    } });
+    let blocked = false;
+    let accept!: () => void;
+    const release = registerNavigationGuard((proceed) => { accept = proceed; return blocked; });
+    setUrl({ screen: 'transactions' });
+    setUrl({ screen: 'overview' });
+    // Pruning changes positions without changing either surviving entry's identity.
+    entries.shift();
+    base++;
+    index--;
+    const before = entries.map((entry) => ({ url: entry.url.href, state: structuredClone(entry.state) }));
+    blocked = true;
+    go(-1);
+    flush();
+    expect(index).toBe(1);
+    expect(go).toHaveBeenLastCalledWith(1);
+    expect(current().pathname + current().search + current().hash).toBe('/app/?screen=overview&foreign=kept#origin');
+    expect(useUrl().screen).toBe('overview');
+    blocked = false;
+    accept();
+    flush();
+    expect(index).toBe(0);
+    expect(go).toHaveBeenLastCalledWith(-1);
+    expect(useUrl().screen).toBe('transactions');
+    go(1);
+    flush();
+    expect(useUrl().screen).toBe('overview');
+    expect(entries.map((entry) => ({ url: entry.url.href, state: entry.state }))).toEqual(before);
+    release();
+  });
+
+  it('restores the actual source before replaying a surviving Back destination after a foreign push', () => {
+    entries = [
+      { url: new URL('/app/?screen=transactions&foreign=target#old', ORIGIN), state: 'opaque target' },
+      { url: new URL('/app/?screen=goal&goal=new&foreign=source#draft', ORIGIN), state: 'opaque source' },
+    ];
+    index = 1;
+    keyedNativeHistory();
+    let blocked = true;
+    let accept!: () => void;
+    const accepted = vi.fn();
+    const release = registerNavigationGuard((proceed) => { accept = () => proceed(accepted); return blocked; });
+    go(-1);
+    flush();
+    expect(index).toBe(1);
+    pushState('foreign new entry', '', '/app/?screen=settings&foreign=external#new');
+    const before = entries.map((entry) => ({ url: entry.url.href, state: entry.state }));
+    go.mockClear();
+    accept();
+    flushOne();
+    expect(index).toBe(1);
+    expect(accepted).not.toHaveBeenCalled();
+    expect(useUrl().screen).toBe('goal');
+    flush();
+    expect(index).toBe(0);
+    expect(go.mock.calls).toEqual([[-1], [-1]]);
+    expect(accepted).toHaveBeenCalledOnce();
+    expect(useUrl().screen).toBe('transactions');
+    expect(entries.map((entry) => ({ url: entry.url.href, state: entry.state }))).toEqual(before);
+    blocked = false;
+    go(2);
+    flush();
+    expect(current().hash).toBe('#new');
+    expect(entries[2].state).toBe('foreign new entry');
+    release();
+  });
+
+  it('keeps the source barrier when distinct native keys have the same cached index without a live list', () => {
+    entries = [
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 'opaque target' },
+      { url: new URL('/?screen=goal#source', ORIGIN), state: 'opaque source' },
+    ];
+    index = 1;
+    const navigation = keyedNativeHistory();
+    Reflect.deleteProperty(navigation, 'entries');
+    const nativeCurrent = Object.getOwnPropertyDescriptor(navigation, 'currentEntry')!.get!;
+    let stale = false;
+    Object.defineProperty(navigation, 'currentEntry', { get: () => {
+      const entry = nativeCurrent.call(navigation) as { key: string; index: number };
+      return stale ? { ...entry, index: 1 } : entry;
+    } });
+    let accept!: () => void;
+    const accepted = vi.fn();
+    const release = registerNavigationGuard((proceed) => { accept = () => proceed(accepted); return true; });
+    const status = observeStatus();
+    go(-1);
+    flush();
+    pushState('foreign new entry', '', '/?screen=settings#foreign');
+    stale = true;
+    go.mockClear();
+    accept();
+    flush();
+    expect(go).not.toHaveBeenCalled();
+    expect(accepted).not.toHaveBeenCalled();
+    expect(index).toBe(2);
+    expect(useUrl().screen).toBe('goal');
+    expect(status.getSnapshot()).toBe('displaced');
+    release();
+    status.release();
+  });
+
+  it('compensates and replays Forward after opaque native entries are rebased', () => {
+    entries = [
+      { url: new URL('/?screen=settings#old', ORIGIN), state: ['old foreign'] },
+      { url: new URL('/?screen=goal&goal=new#source', ORIGIN), state: 'opaque source' },
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 42 },
+    ];
+    index = 1;
+    keyedNativeHistory();
+    let blocked = true;
+    let accept!: () => void;
+    const release = registerNavigationGuard((proceed) => { accept = proceed; return blocked; });
+    entries.shift();
+    index--;
+    const before = entries.map((entry) => ({ url: entry.url.href, state: entry.state }));
+    go(1);
+    flush();
+    expect(index).toBe(0);
+    expect(go).toHaveBeenLastCalledWith(-1);
+    expect(useUrl().screen).toBe('goal');
+    blocked = false;
+    accept();
+    flush();
+    expect(index).toBe(1);
+    expect(useUrl().screen).toBe('transactions');
+    expect(entries.map((entry) => ({ url: entry.url.href, state: entry.state }))).toEqual(before);
+    release();
+  });
+
+  it('never substitutes a cached index for a known missing key when the other endpoint exposes only an index', () => {
+    entries = [
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 'opaque target' },
+      { url: new URL('/?screen=goal&goal=new#source', ORIGIN), state: 'opaque source' },
+    ];
+    index = 1;
+    const navigation = keyedNativeHistory();
+    const sourceKey = navigation.currentEntry.key;
+    const nativeCurrent = Object.getOwnPropertyDescriptor(navigation, 'currentEntry')!.get!;
+    const nativeEntries = navigation.entries;
+    Object.defineProperty(navigation, 'currentEntry', { get: () => {
+      const entry = nativeCurrent.call(navigation) as { key: string; index: number };
+      return index === 0 ? { index: entry.index } : entry;
+    } });
+    const release = registerNavigationGuard(() => true);
+    const status = observeStatus();
+    navigation.entries = () => nativeEntries().filter((entry) => entry.key !== sourceKey);
+    go(-1);
+    flush();
+    expect(go.mock.calls).toEqual([[-1]]);
+    expect(index).toBe(0);
+    expect(useUrl().screen).toBe('goal');
+    expect(status.getSnapshot()).toBe('displaced');
+    release();
+    status.release();
+  });
+
+  it.each([-1, Number.NaN, undefined])('refuses a live source index that is not available (%s)', (invalid) => {
+    entries = [
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 'opaque target' },
+      { url: new URL('/?screen=goal&goal=new#source', ORIGIN), state: 'opaque source' },
+    ];
+    index = 1;
+    const navigation = keyedNativeHistory();
+    const sourceKey = navigation.currentEntry.key;
+    const nativeEntries = navigation.entries;
+    const release = registerNavigationGuard(() => true);
+    const status = observeStatus();
+    const unavailable = () => nativeEntries().map((entry) => entry.key === sourceKey ? { ...entry, index: invalid } : entry);
+    Object.assign(navigation, { entries: unavailable });
+    go(-1);
+    flush();
+    expect(go.mock.calls).toEqual([[-1]]);
+    expect(index).toBe(0);
+    expect(useUrl().screen).toBe('goal');
+    expect(status.getSnapshot()).toBe('displaced');
+    release();
+    status.release();
+  });
+
+  it('does not reload or publish a foreign push when a staged Forward destination disappears', () => {
+    entries = [
+      { url: new URL('/?screen=overview#source', ORIGIN), state: 'opaque source' },
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 'opaque target' },
+    ];
+    keyedNativeHistory();
+    let accept!: () => void;
+    const accepted = vi.fn();
+    const release = registerNavigationGuard((proceed) => { accept = () => proceed(accepted); return true; });
+    const status = observeStatus();
+    go(1);
+    flush();
+    expect(index).toBe(0);
+    pushState('foreign new entry', '', '/?screen=settings#foreign');
+    const before = entries.map((entry) => ({ url: entry.url.href, state: entry.state }));
+    go.mockClear();
+    accept();
+    flush();
+    expect(go).not.toHaveBeenCalled();
+    expect(accepted).not.toHaveBeenCalled();
+    expect(useUrl().screen).toBe('overview');
+    expect(status.getSnapshot()).toBe('displaced');
+    expect(entries.map((entry) => ({ url: entry.url.href, state: entry.state }))).toEqual(before);
+    go(-1);
+    flush();
+    expect(status.getSnapshot()).toBe('ready');
+    expect(useUrl().screen).toBe('overview');
+    expect(accepted).not.toHaveBeenCalled();
+    release();
+    status.release();
+  });
+
+  it('does not issue a stale restoration when the source disappears before an overtaken replay lands', () => {
+    entries = [
+      { url: new URL('/?screen=overview#source', ORIGIN), state: 'opaque source' },
+      { url: new URL('/?screen=transactions#target', ORIGIN), state: 'opaque target' },
+    ];
+    keyedNativeHistory();
+    let prune = false;
+    popListeners.add(() => {
+      if (!prune) return;
+      entries.shift();
+      index--;
+      prune = false;
+    });
+    let accept!: () => void;
+    const accepted = vi.fn();
+    const release = registerNavigationGuard((proceed) => { accept = () => proceed(accepted); return true; });
+    const status = observeStatus();
+    go(1);
+    flush();
+    accept();
+    setUrl({ screen: 'settings' });
+    prune = true;
+    go.mockClear();
+    flush();
+    expect(go).not.toHaveBeenCalled();
+    expect(accepted).not.toHaveBeenCalled();
+    expect(useUrl().screen).toBe('overview');
+    expect(status.getSnapshot()).toBe('displaced');
+    expect(entries).toHaveLength(1);
+    expect(current().search).toBe('?screen=transactions');
+    expect(entries[0].state).toBe('opaque target');
+    release();
+    status.release();
   });
 
   it('uses native entry indices to cancel and replay untracked multi-step traversal without changing foreign state', () => {

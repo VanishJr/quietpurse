@@ -181,11 +181,19 @@ export function AccountDialog({
         {account && kind !== 'menu' && <p className="acct-dialog-name">{account.name}</p>}
         {kind === 'menu' && <p className="sheet-meta">{account?.hidden ? 'Hidden from the app' : 'Visible'}</p>}
       </>}
-      footer={<FormActions
+      footer={<>
+        {error && <Notice tone="error" role="alert">Error: {error}</Notice>}
+        {kind === 'delete' && account && <div className="acct-history-remedy">
+          <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={() => onOpenHistory(account)}>
+            Open import history
+          </Button>
+        </div>}
+        <FormActions
         back={!atOrigin && <Button type="button" variant="tertiary" size="standard" aria-disabled={busy} onClick={leave}>Back</Button>}
         cancel={kind !== 'menu' && <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={editor.requestClose}>Cancel</Button>}
         completion={completion}
-      />}
+        />
+      </>}
     >
       {(kind === 'add' || kind === 'rename') && (
         <form id={formId} onSubmit={submitName} className="acct-name-form">
@@ -273,17 +281,11 @@ export function AccountDialog({
           label={<>Type <strong>{account.name}</strong> to confirm</>}
           controlProps={{ value: confirmName, readOnly: busy, onChange: (e) => setConfirmName(e.target.value) }}
         />}
-        <div className="acct-history-remedy">
-          <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={() => onOpenHistory(account)}>
-            Open import history
-          </Button>
-        </div>
       </>}
       {busy && <Notice role="status">{kind === 'add' ? 'Creating account…'
         : kind === 'rename' ? 'Saving account name…'
         : kind === 'hide' ? account?.hidden ? 'Unhiding account…' : 'Hiding account…'
         : 'Deleting account…'}</Notice>}
-      {error && <Notice tone="error" role="alert">Error: {error}</Notice>}
     </Sheet>
   );
 }

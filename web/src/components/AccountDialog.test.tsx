@@ -314,6 +314,7 @@ describe('pending account consequences', () => {
     expect(requests().filter((request) => request === route)).toHaveLength(1);
     await act(async () => finish(fail(409, { error: 'Account write refused' })));
     expect(screen.getByRole('alert')).toHaveTextContent('Error: Account write refused');
+    expect(screen.getByRole('alert').closest('.sheet-footer')).not.toBeNull();
     expect(action).toHaveFocus();
     expect(action).not.toHaveAttribute('aria-disabled', 'true');
     expect(action).toBeEnabled();
@@ -439,5 +440,6 @@ describe('the delete itself', () => {
       await screen.findByText(/confirm it or discard it, then delete the account/),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open import history' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open import history' }).closest('.sheet-footer')).not.toBeNull();
   });
 });

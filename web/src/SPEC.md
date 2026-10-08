@@ -527,7 +527,15 @@ screen instead. Confirmed and optimistic completion retain their existing owners
 The published location is frozen during a blocked traversal, so an unrelated render cannot reset
 an active editor from the address bar's new location. Managed entries carry namespaced
 `__fintoNavigation` position metadata alongside foreign state. Opaque state remains untouched;
-a native browser entry index supplies its traversal offset where available. Cancellation returns
+native entry identities resolve against the browser's live entry list before deriving a traversal
+offset, because pruning can rebase positions after a snapshot was captured. A known missing identity
+is unavailable, not permission to reuse its cached index. Partial identity information on that seam
+also preserves the barrier instead of mixing a cached scalar into keyed lookup. Browsers without that live-list seam retain
+the established native-index or managed-segment fallback. Replay requires the browser to be at the
+verified source identity. A foreign push after staging restores that source first when a live offset
+is available; otherwise the source barrier remains unverified rather than applying the source's
+delta from another entry. A destination or source lost between staging and acceptance likewise
+retains the barrier, never a reload or acceptance of an unrelated address. Cancellation returns
 to the original indexed entry, and acceptance replays the destination without pushing a duplicate
 or deleting Forward destinations. Derived replacements retain their history role: `replace` is for
 a value the app derived rather than one the reader chose, and it leaves no entry, or Back would land
@@ -881,7 +889,10 @@ control and can then apply the retained removal intent.
 The full account name qualifies the decision even when the rail shortens it. Back returns only to an
 existing menu origin; Cancel dismisses through the same draft policy. Native name and confirmation
 fields carry visible labels and associated guidance. Pending actions retain their identity and focus,
-lock conflicting exits, and announce the owning write without implying it was saved. An unread or
+lock conflicting exits, and announce the owning write without implying it was saved. Write refusals
+remain in the action region rather than below scrollable consequences, so a focused completion
+control does not hide its failed outcome. The history remedy stays in that same action region,
+reachable before and after a refusal without moving its control when the response arrives. An unread or
 refused deletion preview offers no final delete. Its counts precede the typed gate; a truncated count
 is a visible lower bound, not a new refusal rule. History remains a reachable remedy for server
 refusals, without interpreting the refusal's text or changing deletion scope.
@@ -904,7 +915,10 @@ case the strip's paging effect follows.
 ## What the shared controls promise
 
 `Sheet` owns modal containment, reversible background inertness and scrolling while its screen
-is visible. Tab recovers even after the focused control disappears. A browser-native scroll region
+is visible. Tab recovers even after the focused control disappears. Intercepted boundary wraps and
+lost-focus recovery reveal their new control as well as focusing it: in single-flow mode even a
+header or footer control can lie outside the viewport. Ordinary native progression remains the
+browser's responsibility. A browser-native scroll region
 without an explicit tabindex keeps its ordinary keyboard progression; it is not a programmatic
 orientation target merely because the control query does not list it. Opening and deliberate step
 changes enter the caller's target or heading; draft renders do not move the caret. The opener is

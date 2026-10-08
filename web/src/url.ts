@@ -23,6 +23,8 @@ type Entry = {
   browserIndex: number | null;
   browserKey: string | null;
 };
+type NativeEntry = { index?: number; key?: string };
+type NativeNavigation = { currentEntry?: NativeEntry; entries?: () => NativeEntry[] };
 type NavigationStatus = 'ready' | 'displaced' | 'waiting';
 type Traversal = {
   origin: Entry;
@@ -64,11 +66,13 @@ function positionOf(state: unknown): Position | null {
   return position?.session === session ? position : null;
 }
 
+function nativeNavigation(): NativeNavigation | undefined {
+  return (window as Window & { navigation?: NativeNavigation }).navigation;
+}
+
 function currentEntry(): Entry {
   const state: unknown = window.history.state;
-  const nativeEntry = (window as Window & {
-    navigation?: { currentEntry?: { index?: number; key?: string } };
-  }).navigation?.currentEntry;
+  const nativeEntry = nativeNavigation()?.currentEntry;
   const nativeIndex = nativeEntry?.index;
   return {
     url: href(), state, position: positionOf(state),
@@ -93,7 +97,24 @@ function managed(entry: Entry): Entry {
 }
 
 function distance(from: Entry, to: Entry): number | null {
-  if (from.browserIndex !== null && to.browserIndex !== null) return to.browserIndex - from.browserIndex;
+  const navigation = nativeNavigation();
+  if (navigation?.entries && (from.browserKey !== null || to.browserKey !== null)) {
+    const entries = navigation.entries();
+    const indexOf = (key: string | null): number | null => {
+      if (key === null) return null;
+      const index = entries.find((entry) => entry.key === key)?.index;
+      return Number.isInteger(index) && index! >= 0 ? index! : null;
+    };
+    const origin = indexOf(from.browserKey);
+    const destination = indexOf(to.browserKey);
+    // Pruning rebases positions; a known missing identity cannot use a cached offset.
+    return origin !== null && destination !== null ? destination - origin : null;
+  }
+  if (from.browserIndex !== null && to.browserIndex !== null) {
+    const delta = to.browserIndex - from.browserIndex;
+    return delta === 0 && from.browserKey !== null && to.browserKey !== null &&
+      from.browserKey !== to.browserKey ? null : delta;
+  }
   return from.position && to.position && from.position.segment === to.position.segment
     ? to.position.index - from.position.index : null;
 }
@@ -235,8 +256,22 @@ function replay(pending: Traversal): void {
     stop();
     return;
   }
+  const delta = distance(pending.origin, pending.destination);
+  if (delta === null) {
+    pending.phase = 'unknown';
+    updateNavigationStatus();
+    return;
+  }
+  const current = currentEntry();
+  if (!sameEntry(current, pending.origin)) {
+    const restore = distance(current, pending.origin);
+    pending.phase = restore === null ? 'unknown' : 'restoring';
+    if (restore !== null) window.history.go(restore);
+    updateNavigationStatus();
+    return;
+  }
   pending.phase = 'replaying';
-  window.history.go(distance(pending.origin, pending.destination)!);
+  window.history.go(delta);
 }
 
 function onPopState(): void {
@@ -271,10 +306,11 @@ function handlePopState(): void {
   if (traversal?.phase === 'replaying' && sameEntry(destination, traversal.destination)) {
     const pending = traversal;
     if (pending.isCurrent && !pending.isCurrent()) {
-      pending.phase = 'restoring';
+      const delta = distance(destination, pending.origin);
+      pending.phase = delta === null ? 'unknown' : 'restoring';
       pending.accepted = false;
       pending.onAccepted = undefined;
-      window.history.go(distance(destination, pending.origin)!);
+      if (delta !== null) window.history.go(delta);
       return;
     }
     traversal = null;

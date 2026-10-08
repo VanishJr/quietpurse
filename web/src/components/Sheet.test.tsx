@@ -86,6 +86,30 @@ describe('account menu keyboard navigation', () => {
     }
   });
 
+  it('reveals header and footer controls when keyboard wrapping or recovery moves focus', () => {
+    render(<Sheet open onClose={() => {}} title="Consequences" pattern="confirmation"
+      header={<h2>Account consequences</h2>} footer={<button>Last action</button>}>
+      <p>Account data and deletion consequences</p>
+      <input aria-label="Confirmation" />
+    </Sheet>);
+    const first = screen.getByRole('button', { name: 'Close dialog' });
+    const last = screen.getByRole('button', { name: 'Last action' });
+    first.scrollIntoView = vi.fn();
+    last.scrollIntoView = vi.fn();
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(first).toHaveFocus();
+    expect(first.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+    expect(last.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    vi.mocked(first.scrollIntoView).mockClear();
+    last.blur();
+    fireEvent.focusIn(document.body);
+    expect(first).toHaveFocus();
+    expect(first.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+  });
+
   it('includes description disclosures and keeps focus inside after a preview heading is focused', () => {
     render(
       <Sheet open onClose={() => {}} title="Transaction">

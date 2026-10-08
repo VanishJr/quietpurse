@@ -34,6 +34,10 @@ function focus(element: HTMLElement): boolean {
   return document.activeElement === element;
 }
 
+function focusAndReveal(element: HTMLElement): void {
+  if (focus(element)) element.scrollIntoView?.({ block: 'nearest' });
+}
+
 function lockScroll(element: HTMLElement): () => void {
   const properties = ['overflow', 'overflow-x', 'overflow-y'];
   const previous = properties.map((property) => [
@@ -141,7 +145,7 @@ export function Sheet({
     const recover = () => {
       const focused = document.activeElement;
       if (focused instanceof HTMLElement && card.contains(focused) && isAvailable(focused)) return;
-      focus(controlsIn(card)[0] ?? card);
+      focusAndReveal(controlsIn(card)[0] ?? card);
     };
     const onFocus = () => {
       if (active.current && isAvailable(card)) recover();
@@ -166,7 +170,7 @@ export function Sheet({
         focus(card);
       } else if (fromPanel || (event.shiftKey ? focused === first : focused === last)) {
         event.preventDefault();
-        focus(event.shiftKey ? last : first);
+        focusAndReveal(event.shiftKey ? last : first);
       }
     };
     const suspend = () => {
