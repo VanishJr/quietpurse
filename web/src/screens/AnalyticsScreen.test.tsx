@@ -258,6 +258,31 @@ describe('contextual workspace controls', () => {
     expect(within(card).queryByText('Units: EUR')).not.toBeInTheDocument();
   });
 
+  it.each(['column', 'radar'])('retains loaded request windows across rollover and a title-only %s edit', async (kind) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 0, 31, 12));
+      seed([{ ...COLUMN_CHART, kind, range: '3m' }]);
+      mockFetch(ROUTES);
+      const { container } = mount();
+      await screen.findByText(/^Units: EUR/);
+      const oldPeriod = screen.getByText(/^Period:/).textContent;
+      const oldComparison = screen.queryByText(/^Compared with:/)?.textContent;
+      const oldTable = container.querySelector('.chart-card table')?.textContent;
+      vi.setSystemTime(new Date(2026, 1, 1, 12));
+      fireEvent.click(screen.getByRole('button', { name: 'Edit chart' }));
+      fireEvent.change(screen.getByLabelText('Chart name'), { target: { value: 'Renamed after rollover' } });
+      await waitFor(() => expect(within(screen.getByRole('dialog')).queryByText('Reading the numbers…')).not.toBeInTheDocument());
+      const reads = requestUrls().length;
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await screen.findByRole('heading', { name: 'Renamed after rollover' });
+      expect(screen.getByText(/^Period:/).textContent).toBe(oldPeriod);
+      expect(screen.queryByText(/^Compared with:/)?.textContent).toBe(oldComparison);
+      expect(container.querySelector('.chart-card table')?.textContent).toBe(oldTable?.replace('Spending, monthly', 'Renamed after rollover'));
+      expect(requestUrls().length).toBe(reads + 1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('keeps optimistic editor closure visibly pending, then exposes recoverable refusal', async () => {
     seed([COLUMN_CHART]);
     let release!: (response: Response) => void;

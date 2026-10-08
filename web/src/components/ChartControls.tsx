@@ -49,11 +49,17 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       if (event.target instanceof Node && menu.current?.contains(event.target)) return;
       close();
     };
+    const departed = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !anchor.current?.contains(target) && !menu.current?.contains(target)) close(false);
+    };
     window.addEventListener('resize', moved);
     document.addEventListener('scroll', moved, true);
+    document.addEventListener('focusin', departed);
     return () => {
       window.removeEventListener('resize', moved);
       document.removeEventListener('scroll', moved, true);
+      document.removeEventListener('focusin', departed);
     };
   }, [open]);
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { boundsOf, chartKind, drawnShares, METRICS, priorBoundsOf, rangeDef, rankingSeriesName, suggestedTitle } from '../analytics';
+import { chartKind, drawnShares, METRICS, rangeDef, rankingSeriesName, suggestedTitle } from '../analytics';
 import { ChartData, useChartData } from '../chartData';
 import { fmtDay, fmtMoney } from '../format';
 import { Notice } from './Notice';
@@ -34,9 +34,8 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0, act
   const account = spec.accountId ? accounts?.find((a) => a.id === spec.accountId) : undefined;
   const title = spec.title || suggestedTitle(spec, account?.name ?? null);
   const range = rangeDef(spec.range);
-  const today = new Date();
-  const period = boundsOf(range, today);
-  const prior = chartKind(spec.kind).comparative ? priorBoundsOf(range, today) : null;
+  const period = data?.period;
+  const prior = data?.priorPeriod;
   const dates = ({ from, to }: { from: string; to: string }) => `${fmtDay(from)} – ${fmtDay(to)}`;
 
   return (
@@ -46,7 +45,7 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0, act
           <h2 className="block-title chart-title">{title}</h2>
           <div className="chart-context">
             <p>Scope: {spec.accountId === null ? 'All accounts' : account ? `${account.name}${account.hidden ? ' (hidden)' : ''}` : `Account ${spec.accountId}`}</p>
-            <p>Period: {range.label} · {dates(period)}{chartKind(spec.kind).shape === 'series' ? ` · ${range.grain === 'month' ? 'Monthly' : 'Yearly'} totals` : ` · ${rankingSeriesName(spec.breakdown)}`}</p>
+            <p>Period: {range.label}{period ? ` · ${dates(period)}` : ''}{chartKind(spec.kind).shape === 'series' ? ` · ${range.grain === 'month' ? 'Monthly' : 'Yearly'} totals` : ` · ${rankingSeriesName(spec.breakdown)}`}</p>
             {prior && <p>Compared with: {dates(prior)}</p>}
             <p>Units: {data ? `${data.currency} · ${spec.accountId === null ? 'Converted workspace amounts' : 'Native account amounts'}` : loading ? 'Reading currency…' : 'Unavailable'}</p>
           </div>

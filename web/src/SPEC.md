@@ -444,11 +444,15 @@ and the card would each run for themselves.
 `ChartCard` keeps title, account scope, selected period and response currency beside its plot,
 including the comparison window where applicable. A custom title never replaces that financial
 context, and unreadable units remain unavailable rather than borrowed from the account catalog.
+Displayed calendar bounds travel with the loaded numbers; renaming a chart after a calendar
+rollover cannot relabel retained figures as a newly loaded window.
 Selected-chart controls belong to this context, but `AnalyticsScreen` still owns every mutation.
 `ChartControls` shares action and safe confirmation behavior with the desktop strip, retaining
 non-selected chart actions without changing the chart being read. Narrow layouts use a labeled
 selector above the plot instead of a second bottom dock; primary navigation remains separate.
-A deleted action owner restores focus to the stable workspace creation control.
+Focus departure dismisses a lightweight action group without stealing the new focus, so
+keyboard traversal to another chart never leaves competing Escape owners. A deleted action owner
+restores focus to the stable workspace creation control.
 
 `AnalyticsScreen` exposes the save pump's unresolved lifecycle as Saving charts, including
 serialized later intents. Optimistic editor closure is not confirmation. A normal refusal retains

@@ -1,4 +1,4 @@
-import { fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderThemed } from '../test/harness';
 import { ChartControls } from './ChartControls';
@@ -27,6 +27,23 @@ describe('ChartControls', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(trigger).toHaveFocus();
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
+  });
+
+  it('releases the previous owner when the keyboard reaches another chart trigger', () => {
+    renderThemed(<><ChartControls {...props()} /><ChartControls {...props()} id="c-b" label="B" /></>);
+    const a = screen.getByRole('button', { name: 'Actions for A' });
+    const b = screen.getByRole('button', { name: 'Actions for B' });
+    fireEvent.click(a);
+    expect(screen.getByRole('group', { name: 'Actions for A' })).toBeInTheDocument();
+    act(() => b.focus());
+    expect(a).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('group', { name: 'Actions for A' })).not.toBeInTheDocument();
+    fireEvent.click(b);
+    expect(screen.getAllByRole('group')).toHaveLength(1);
+    expect(screen.getByRole('group', { name: 'Actions for B' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(b).toHaveFocus();
   });
 
   it('does not delete on entry, cancellation or Escape and recovers focus on confirmation', () => {
