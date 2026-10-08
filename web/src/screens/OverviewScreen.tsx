@@ -335,7 +335,7 @@ export function OverviewScreen({
   }
 
   return (
-    <div className="screen-inner page-wide ov">
+    <div className="screen-inner ov">
       <PageHeader
         title="Overview"
         titleRef={titleRef}

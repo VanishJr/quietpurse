@@ -24,7 +24,7 @@ function contrast(foreground: string, background: string): number {
 const textPairs: [keyof Ink, keyof Ink][] = [
   ['onAction', 'action'], ['onAction', 'actionHover'], ['onAction', 'actionPressed'],
   ['onDanger', 'danger'], ['onDanger', 'dangerHover'], ['onDanger', 'dangerPressed'],
-  ['onSelected', 'selected'], ['onBrand', 'brand'], ['onAccent', 'accent'], ['onBad', 'bad'],
+  ['onSelected', 'selected'], ['onBrand', 'brand'],
 ];
 const texts: (keyof Ink)[] = [
   'primary', 'secondary', 'muted', 'success', 'error', 'warning', 'income', 'favorable', 'unfavorable',
@@ -59,14 +59,12 @@ describe.each(palettes)('%s semantic foundations', (_scheme, ink) => {
   });
 });
 
-it('uses income for income plots without repurposing legacy financial ink', () => {
+it('uses the independent income role for income plots', () => {
   expect(METRIC_DEFS.income.ink).toBe('income');
   const flows = source('components/AccountFlows.tsx');
   expect(flows).toContain('stroke={ink.income}');
   expect(flows).toContain('fill: ink.income');
-  expect(flows).not.toContain('ink.good');
-  expect(lightInk.good).toBe('#007e04');
-  expect(darkInk.good).toBe('#c7e89a');
+  expect(flows).not.toContain('ink.action');
 });
 
 it('gives native and focus-retaining disabled actions a readable neutral pair and visible boundary', () => {

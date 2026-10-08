@@ -742,9 +742,9 @@ Where the theme is kept is *Boundary*'s ruling and is not restated here. Action 
 foregrounds belong to their grounds, not to whichever text role a consumer happened to inherit.
 Brand identifies the product; success confirms an outcome; income identifies a financial series;
 favorable and unfavorable interpret a comparison whose direction the caller supplies. Those roles
-are independent even where hues are related. Legacy `good` and `bad` retain their existing readers'
-meaning and are not aliases that reclassify every signed amount. Control boundaries and focus
-have their own contrasting roles; a field's focus feedback is not merely a changed border.
+are independent even where hues are related. A palette role must reach product styling or a chart
+reader rather than survive only through publication as a custom property. Control boundaries and
+focus have their own contrasting roles; a field's focus feedback is not merely a changed border.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value. A ground is named for the `Ink` key of its own fill, so nothing states twice what colour a
@@ -809,9 +809,8 @@ are a pair; legacy action classes do not choose either for a migrated button. Na
 focus-retaining locked actions use a readable neutral pair and a visible dashed boundary rather
 than relying on the cursor or faded text. Pending keeps that locked treatment and adds its own
 indicator without changing the action's label or dimensions. Locked actions refuse activation.
-The legacy filled `btn btn-danger` combination shares `btn-destroy`'s complete danger pair and
-interaction states until consumer migration retires those classes; a standalone `btn-danger`
-remains a lower-emphasis text action rather than acquiring the filled confirmation treatment.
+Action consumers use these semantic variants rather than combinable legacy action classes.
+Choice controls likewise have one selected-state treatment instead of a competing accent pair.
 `FormActions` keeps supporting navigation before dismissal and completion in reading order;
 narrow layouts put completion on its own row rather than reshuffling keyboard order.
 

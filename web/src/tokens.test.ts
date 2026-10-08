@@ -3,6 +3,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { darkInk, lightInk } from './theme';
+import { METRIC_DEFS } from './analytics';
+import { TOOLTIP_CHIP } from './chartTooltip';
 
 const SRC = dirname(fileURLToPath(import.meta.url));
 const TOKENS = 'styles/tokens.css';
@@ -66,6 +68,18 @@ describe('live design tokens', () => {
       }
     }
     expect(declared.filter((token) => !reachable.has(token))).toEqual([]);
+  });
+
+  it('keeps every palette role connected to styling or a named chart reader', () => {
+    const readers = new Set([
+      ...product.filter(({ file }) => file.endsWith('.css')).flatMap(({ text }) =>
+        references(text.replace(/\/\*[\s\S]*?\*\//g, '')).filter((token) => token.startsWith('--ink-')).map((token) => token.slice('--ink-'.length))),
+      ...product.filter(({ file }) => !file.endsWith('.css') && file !== 'theme.tsx').flatMap(({ text }) =>
+        [...text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '').matchAll(/\bink\.([\w]+)\b/g)].map((match) => match[1])),
+      ...Object.values(METRIC_DEFS).map((metric) => metric.ink),
+      ...Object.values(TOOLTIP_CHIP).flatMap((chip) => [chip.fill, chip.label, chip.item]),
+    ]);
+    expect(Object.keys(lightInk).filter((role) => !readers.has(role))).toEqual([]);
   });
 
   it('resolves every literal variable through styles or either published palette', () => {

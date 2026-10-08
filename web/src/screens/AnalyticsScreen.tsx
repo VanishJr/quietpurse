@@ -382,7 +382,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
   }));
 
   return (
-    <div className="screen-inner page-region--wide analytics-screen">
+    <div className="screen-inner analytics-screen">
       <PageHeader title="Analytics" action={<Button type="button" variant="primary" size="standard" className="analytics-new" disabled={!ready} onClick={() => setWizard({ editing: null })}>New chart</Button>} />
       {ready && specs.length > 0 && <div className="chart-mobile-selector">
         <Field id="analytics-chart-selection" label="Selected chart" control="select" controlProps={{ value: activeId ?? '', onChange: (event) => show(event.target.value), children: tabs.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>) }} />

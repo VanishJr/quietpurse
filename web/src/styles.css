@@ -105,10 +105,6 @@ textarea {
   }
 }
 
-:root {
-  --ov-card-shadow: none;
-}
-
 .skip {
   position: absolute;
   left: -9999px;
@@ -336,13 +332,6 @@ textarea {
   }
 }
 
-.title {
-  font-size: var(--text-page);
-  font-weight: 600;
-  line-height: var(--leading-heading);
-  margin: var(--space-3) 0;
-}
-
 .block-title {
   font-size: var(--text-section);
   font-weight: 600;
@@ -350,30 +339,12 @@ textarea {
   margin: var(--space-4) 0 var(--space-2);
 }
 
-/*
- * Every heading in the app that is allowed to wrap, in one place.
- *
- * `balance` spreads a wrapped heading evenly over its lines instead of filling each
- * one and leaving the remainder on the last — which is how "Nothing here yet — start
- * with a statement" and "Nothing has been loaded into <account>" each came to hang a
- * single word under a full line, in the middle of a card whose text is centred. It
- * costs nothing to be wrong about: a browser without it wraps as it does today, and
- * one with it caps the work at a few lines and gives up on anything longer, so this
- * cannot be paid for by a heading somebody makes long later.
- *
- * Headings only, and not the prose under them. `balance` on a paragraph is the wrong
- * shape: a body of text wants full lines and an even last one, which is `pretty`.
- *
- * `.row-title` retains its legacy single-line treatment. The flows heading inherits
- * its wrapping from `.block-title`.
- */
-.title,
+/* Balanced wrapping belongs to headings, not continuous prose or record identities. */
 .block-title,
 .sheet-title,
 .fig-title,
 .settings-title,
 .ov-spend-title,
-.welcome-title,
 .acct-blank-title {
   text-wrap: balance;
 }
@@ -383,11 +354,6 @@ textarea {
   color: var(--ink-secondary);
   line-height: var(--leading-body);
   margin: 0 0 var(--space-2);
-}
-
-.error {
-  color: var(--ink-error);
-  margin: 4px 0;
 }
 
 .empty {
@@ -415,72 +381,6 @@ textarea {
   border-radius: 4px;
   padding: 1px 5px;
   white-space: nowrap;
-}
-
-.btn {
-  background: var(--ink-action);
-  color: var(--ink-onAction);
-  border-radius: var(--r-sm);
-  min-height: var(--control-standard);
-  padding: var(--space-3) 20px;
-  font-size: var(--text-label);
-  font-weight: 600;
-  text-align: center;
-  transition: background var(--dur-1) var(--ease-out);
-}
-
-.btn:where(:not(.btn-ghost, .btn-danger, :disabled, [aria-disabled='true'])):hover {
-  background: var(--ink-actionHover);
-}
-
-.btn:where(:not(.btn-ghost, .btn-danger, :disabled, [aria-disabled='true'])):active {
-  background: var(--ink-actionPressed);
-}
-
-.btn:disabled,
-.btn[aria-disabled='true'] {
-  opacity: 0.5;
-}
-
-.btn-destroy,
-.btn.btn-danger {
-  background: var(--ink-danger);
-  color: var(--ink-onDanger);
-}
-
-.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):hover,
-.btn.btn-danger:where(:not(:disabled, [aria-disabled='true'])):hover {
-  background: var(--ink-dangerHover);
-}
-
-.btn-destroy:where(:not(:disabled, [aria-disabled='true'])):active,
-.btn.btn-danger:where(:not(:disabled, [aria-disabled='true'])):active {
-  background: var(--ink-dangerPressed);
-}
-
-.btn-sm {
-  padding: 9px 16px;
-  font-size: 13px;
-}
-
-.btn-ghost {
-  border: 1px solid var(--ink-border);
-  color: var(--ink-primary);
-  background: var(--ink-surface);
-  border-radius: var(--r-sm);
-  padding: 10px 18px;
-  font-size: 14px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.btn-ghost:hover {
-  border-color: var(--ink-muted);
-}
-
-.btn-ghost:disabled,
-.btn-ghost[aria-disabled='true'] {
-  opacity: 0.5;
 }
 
 .transaction-original {
@@ -579,6 +479,12 @@ textarea {
 }
 
 .transactions-screen .switch {
+  appearance: none;
+  flex: none;
+  width: 44px;
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s;
   height: var(--control-touch);
   border-radius: var(--r-sm);
   border: 1px solid var(--ink-controlBorder);
@@ -586,6 +492,13 @@ textarea {
 }
 
 .transactions-screen .switch::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  transition: transform 0.15s;
   top: 50%;
   transform: translateY(-50%);
   background: var(--ink-secondary);
@@ -706,51 +619,6 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-.btn-link {
-  color: var(--ink-accent);
-  font-size: 14px;
-  padding: 6px 0;
-  text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.btn-danger {
-  color: var(--ink-bad);
-  font-size: 13px;
-  padding: 6px 10px;
-}
-
-.pill {
-  padding: 6px 10px;
-  border-radius: 16px;
-  border: 1px solid var(--ink-grid);
-  background: var(--ink-surface);
-  font-size: 12px;
-  color: var(--ink-secondary);
-}
-
-.input {
-  border: 1px solid var(--ink-controlBorder);
-  border-radius: var(--r-sm);
-  min-height: var(--control-standard);
-  padding: 10px var(--space-3);
-  font-size: var(--text-body);
-  color: var(--ink-primary);
-  background: var(--ink-surface);
-  width: 100%;
-}
-
-.input::placeholder {
-  color: var(--ink-muted);
-}
-
-.input:focus-visible {
-  outline: 2px solid var(--ink-focus);
-  outline-offset: 2px;
-  border-color: var(--ink-focus);
-}
-
 .card {
   border: 1px solid var(--ink-grid);
   border-radius: var(--r-md);
@@ -797,35 +665,12 @@ textarea {
 
 .chips {
   display: flex;
-  gap: 6px;
-  padding: 6px 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
 .chips::-webkit-scrollbar {
   display: none;
-}
-
-.chip {
-  padding: 6px 12px;
-  border-radius: 16px;
-  border: 1px solid var(--ink-grid);
-  background: var(--ink-surface);
-  font-size: 13px;
-  color: var(--ink-secondary);
-  white-space: nowrap;
-  flex: none;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chip[aria-pressed='true'] {
-  background: var(--ink-accent);
-  border-color: var(--ink-accent);
-  color: var(--ink-onAccent);
-  font-weight: 600;
 }
 
 .transaction-filters {
@@ -895,58 +740,6 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
-}
-
-/* ---------- legend (category breakdown) ---------- */
-
-.legend {
-  margin-bottom: 24px;
-}
-
-.legend-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--ink-grid);
-  width: 100%;
-  text-align: left;
-}
-
-.legend-name {
-  flex: 1;
-  font-size: 14px;
-  min-width: 0;
-}
-
-.legend-pct {
-  width: 48px;
-  font-size: 13px;
-  color: var(--ink-muted);
-  text-align: right;
-}
-
-.legend-value {
-  width: 100px;
-  font-size: 14px;
-  font-weight: 600;
-  text-align: right;
-}
-
-.total-row {
-  display: flex;
-  align-items: center;
-  padding: 10px 0;
-}
-
-.total-row .legend-name {
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.total-row .legend-value {
-  font-size: 15px;
-  font-weight: 800;
 }
 
 /* ---------- modal / sheet ---------- */
@@ -1091,67 +884,6 @@ textarea {
   border-top: 1px solid var(--ink-grid);
 }
 
-.switch-label {
-  font-size: 15px;
-}
-
-.switch-hint {
-  font-size: 12px;
-  color: var(--ink-muted);
-  margin-top: 2px;
-  line-height: 1.35;
-}
-
-/* a real checkbox styled as an iOS-ish switch */
-.switch {
-  appearance: none;
-  flex: none;
-  width: 44px;
-  height: 26px;
-  border-radius: 13px;
-  background: var(--ink-grid);
-  position: relative;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s;
-}
-
-.switch:checked {
-  background: var(--ink-accent);
-}
-
-.switch:checked::after {
-  transform: translateX(18px);
-}
-
-.switch:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-/* wrapping rather than shrinking: the delete step puts three buttons in this row, and
-   on a 390px phone they need 434px — without this the labels wrap inside the pills and
-   the destructive one becomes a squat two-line box among two others */
-.btn-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 16px;
-}
-
 /* ---------- overview ---------- */
 
 .header {
@@ -1159,18 +891,6 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-}
-
-.header-btns {
-  display: flex;
-  gap: 8px;
-}
-
-.edit-hint {
-  font-size: 12px;
-  color: var(--ink-muted);
-  line-height: 1.35;
-  margin-bottom: 8px;
 }
 
 /* Text for a screen reader and nobody else. */
@@ -1679,7 +1399,6 @@ textarea {
     gap: var(--space-4);
   }
   .acct-strip {
-    flex-wrap: wrap;
     gap: 0;
   }
   .rail-nav {
@@ -1691,19 +1410,6 @@ textarea {
   .ov-card {
     padding: var(--space-4);
   }
-}
-@media (max-width: 999px) {
-  .ov-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ov-spend {
-    gap: var(--space-4);
-  }
-  .ov-spend-legend {
-    width: 100%;
-  }
-}
-@media (max-width: 1199px) {
   .tx-table thead {
     display: none;
   }
@@ -1747,9 +1453,13 @@ textarea {
     grid-area: amount;
     align-self: center;
   }
-  .tx-title {
-    white-space: normal;
-    overflow-wrap: anywhere;
+}
+@media (max-width: 999px) {
+  .ov-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ov-spend-legend {
+    width: 100%;
   }
 }
 @media (max-width: 599px) {
@@ -1762,13 +1472,9 @@ textarea {
   .rail-actions {
     width: 100%;
     justify-content: flex-end;
-    gap: var(--space-2);
   }
   .ov-body {
     padding-top: var(--space-4);
-  }
-  .ov-grid {
-    gap: var(--space-4);
   }
   .flows-figures {
     grid-template-columns: minmax(0, 1fr);
@@ -1864,8 +1570,7 @@ textarea {
   border-top: 1px solid var(--ink-border);
 }
 
-.settings-title,
-.settings-section > .block-title {
+.settings-title {
   margin: 0;
   font-size: var(--text-section);
   font-weight: 600;
@@ -1880,11 +1585,6 @@ textarea {
   color: var(--ink-secondary);
   line-height: var(--leading-body);
   overflow-wrap: anywhere;
-}
-
-.settings-section > .hint {
-  margin-top: var(--space-2);
-  font-size: var(--text-body);
 }
 
 .settings-financial-form form {
@@ -2164,12 +1864,15 @@ textarea {
 }
 
 .settings-page .settings-recurring-excluded summary {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-height: 44px;
   padding: 12px 0;
   color: var(--ink-primary);
   font-size: var(--text-body);
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .settings-recurring-more {
@@ -2179,13 +1882,6 @@ textarea {
 .settings-page .settings-recurring-excluded {
   margin-top: 8px;
   border-top: 1px solid var(--ink-grid);
-}
-
-.settings-page .settings-recurring-excluded summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow-wrap: anywhere;
 }
 
 .settings-page .settings-recurring-excluded-chevron {
@@ -2314,7 +2010,6 @@ textarea {
   }
 
   .settings-page .settings-recurring-name {
-    grid-column: 2;
     grid-row: 1;
   }
 
@@ -2326,10 +2021,6 @@ textarea {
   .settings-page .settings-recurring-amount {
     grid-column: 2;
     grid-row: 2;
-    min-width: 0;
-  }
-
-  .settings-page .settings-recurring-amount {
     justify-content: flex-start;
   }
 
@@ -2413,7 +2104,6 @@ textarea {
 .chart-card {
   border-radius: var(--r-xl);
   background: var(--ink-surface);
-  box-shadow: var(--ov-card-shadow);
   padding: 20px 22px 22px;
 }
 
@@ -2724,7 +2414,6 @@ textarea {
   border: 1px solid var(--ink-grid);
   border-radius: var(--r-md);
   background: var(--ink-surface);
-  box-shadow: var(--ov-card-shadow);
 }
 
 .dock-menu-item {
@@ -2831,10 +2520,6 @@ textarea {
   border: none;
 }
 
-.wiz-field:last-child {
-  margin-bottom: 0;
-}
-
 .wiz-legend,
 .wiz-preview-label {
   padding: 0;
@@ -2900,18 +2585,11 @@ textarea {
   color: var(--ink-muted);
 }
 
-.average {
-  font-size: 13px;
-  color: var(--ink-secondary);
-  margin-bottom: 6px;
-}
-
 .goals-screen {
   max-width: var(--page-normal);
 }
 
-.state-note,
-.error-row {
+.state-note {
   max-width: 920px;
   margin-left: auto;
   margin-right: auto;
@@ -2940,17 +2618,6 @@ textarea {
 .state-note {
   color: var(--ink-muted);
   padding: 28px 0;
-}
-
-.error-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--ink-bad);
-  padding: 14px 16px;
-  border: 1px solid var(--ink-bad);
-  border-radius: var(--r-md);
 }
 
 .goal-card {
@@ -3058,13 +2725,6 @@ textarea {
 .goal-support,
 .goal-status {
   margin-top: var(--space-2);
-}
-
-.sheet-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
 }
 
 .backdrop-center .sheet-wide:has(.goal-editor) {
@@ -3231,10 +2891,6 @@ textarea {
     justify-self: start;
   }
 
-  .sheet-actions {
-    flex-wrap: wrap;
-  }
-
   .goal-card {
     padding: var(--space-4);
   }
@@ -3242,15 +2898,6 @@ textarea {
   .goal-figures {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-/* on a <label> too, which would otherwise stay inline and run into the control before it */
-.setting-label {
-  display: block;
-  font-size: var(--text-label);
-  font-weight: 500;
-  color: var(--ink-primary);
-  margin-top: var(--space-2);
 }
 
 .body-text {
@@ -3274,31 +2921,12 @@ details > summary::marker {
   content: '';
 }
 
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-
 .row-value,
 .sheet-amount,
 .chart-fig-value,
 .import-review-metric-value {
   font-variant-numeric: tabular-nums;
   letter-spacing: normal;
-}
-
-@media (max-width: 599px) {
-  .input {
-    font-size: 1rem;
-  }
-}
-
-/* a pill stretched across the column reads as a banner rather than as a control */
-.stack > .btn,
-.stack > .btn-ghost {
-  align-self: flex-start;
 }
 
 /* ---------- wide screens ---------- */
@@ -3659,11 +3287,12 @@ textarea.native-field__control {
 }
 
 .choice-chips .chip {
+  flex: none;
   min-width: var(--control-compact);
   min-height: var(--control-compact);
   max-width: min(20rem, 100%);
   padding: var(--space-2) var(--space-3);
-  border-color: var(--ink-controlBorder);
+  border: 1px solid var(--ink-controlBorder);
   border-radius: var(--r-sm);
   background: var(--ink-surface);
   color: var(--ink-secondary);
@@ -3684,14 +3313,17 @@ textarea.native-field__control {
   color: var(--ink-onSelected);
 }
 
+.choice-chips .chip[aria-pressed='true'] {
+  font-weight: 600;
+}
+
 .choice-chips .chip[aria-disabled='true'] {
   border-style: dashed;
 }
 
 @media (max-width: 899px), (pointer: coarse) {
   .action-button.action-button--compact,
-  .choice-chips .chip,
-  .flows-head .choice-chips .chip {
+  .choice-chips .chip {
     min-width: var(--control-touch);
     min-height: var(--control-touch);
   }

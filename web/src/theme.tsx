@@ -9,19 +9,13 @@ export interface Ink {
   surface: string;
   page: string;
   accent: string;
-  good: string;
-  bad: string;
-  onAccent: string;
-  onBad: string;
   backdrop: string;
 
   brand: string;
   onBrand: string;
-  panel: string;
   net: string;
   raised: string;
   lavender: string;
-  sand: string;
 
   action: string;
   actionHover: string;
@@ -53,18 +47,12 @@ export const lightInk: Ink = {
   surface: '#ffffff',
   page: '#f4f4f4',
   accent: '#0a213f',
-  good: '#007e04',
-  bad: '#a70000',
-  onAccent: '#ffffff',
-  onBad: '#ffffff',
   backdrop: 'rgba(1,7,16,0.40)',
   brand: '#365323',
   onBrand: '#ffffff',
-  panel: '#ffffff',
   net: '#936921',
   raised: '#e8eee2',
   lavender: '#7955ab',
-  sand: '#936921',
   action: '#365323',
   actionHover: '#2e471e',
   actionPressed: '#263b19',
@@ -95,18 +83,12 @@ export const darkInk: Ink = {
   surface: '#191c19',
   page: '#101211',
   accent: '#c7e89a',
-  good: '#c7e89a',
-  bad: '#eea49b',
-  onAccent: '#182111',
-  onBad: '#101211',
   backdrop: 'rgba(0,0,0,0.65)',
   brand: '#c7e89a',
   onBrand: '#182111',
-  panel: '#191c19',
   net: '#d9c6a0',
   raised: '#20251f',
   lavender: '#b69ae3',
-  sand: '#d9c6a0',
   action: '#b8d88a',
   actionHover: '#c7e89a',
   actionPressed: '#a5c675',

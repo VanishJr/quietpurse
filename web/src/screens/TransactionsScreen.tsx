@@ -341,7 +341,7 @@ export function TransactionsScreen({
   const previewActions = (actions: ReactNode) => actionHost ? createPortal(actions, actionHost) : null;
 
   return (
-    <div className="screen-inner page-wide transactions-screen">
+    <div className="screen-inner transactions-screen">
       <PageHeader title="Transactions" />
       <div className="transaction-filters">
         <TransactionFilter
