@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { useDismiss } from '../dismiss';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { isAvailable, useDismiss } from '../dismiss';
+import { ScreenShown } from '../screen';
 import { Button } from './Button';
 
 interface Props {
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function ChartControls({ id, label, contextual = false, onEdit, onDuplicate, onDelete, fallbackFocus }: Props) {
+  const shown = useContext(ScreenShown);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
@@ -24,15 +26,16 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   const close = (restore = true) => {
     setOpen(false);
     setConfirming(false);
-    if (restore) anchor.current?.focus();
+    if (restore && shown && anchor.current && isAvailable(anchor.current)) anchor.current.focus();
   };
 
   useDismiss(open,
     (target) => !!(anchor.current?.contains(target) || menu.current?.contains(target)),
-    () => close(), () => close(false));
+    () => close(), () => close(false), () => close(false));
 
   useLayoutEffect(() => {
-    if (!open || !anchor.current || !menu.current) return;
+    if (!open || !shown || !anchor.current || !menu.current
+      || !isAvailable(anchor.current) || !isAvailable(menu.current)) return;
     const box = anchor.current.getBoundingClientRect();
     anchorBox.current = box;
     const popup = menu.current.getBoundingClientRect();
@@ -43,7 +46,7 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       top: Math.max(8, Math.min(wantedTop, window.innerHeight - popup.height - 8)),
     });
     const first = menu.current.querySelector<HTMLButtonElement>('button');
-    if (first) {
+    if (first && isAvailable(first)) {
       first.focus({ preventScroll: true });
       const frame = menu.current.getBoundingClientRect();
       const control = first.getBoundingClientRect();
@@ -51,11 +54,12 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       if (control.bottom > frame.bottom - 4) menu.current.scrollTop += control.bottom - frame.bottom + 4;
       else if (control.top < frame.top + 4) menu.current.scrollTop -= frame.top - control.top + 4;
     }
-  }, [open, confirming, contextual]);
+  }, [open, confirming, contextual, shown]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !shown) return;
     const moved = (event: Event) => {
+      if (!anchor.current || !isAvailable(anchor.current)) return;
       if (event.target instanceof Node && menu.current?.contains(event.target)) return;
       if (event.type === 'scroll' && anchor.current && anchorBox.current) {
         const now = anchor.current.getBoundingClientRect();
@@ -65,24 +69,21 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       }
       close();
     };
-    const departed = (event: FocusEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !anchor.current?.contains(target) && !menu.current?.contains(target)) close(false);
-    };
     window.addEventListener('resize', moved);
     document.addEventListener('scroll', moved, true);
-    document.addEventListener('focusin', departed);
     return () => {
       window.removeEventListener('resize', moved);
       document.removeEventListener('scroll', moved, true);
-      document.removeEventListener('focusin', departed);
     };
-  }, [open]);
+  }, [open, shown]);
 
   const act = (action: (id: string) => void, deleting = false) => {
     const losesAnchor = deleting || (contextual && action === onDuplicate);
     close(!losesAnchor);
-    if (losesAnchor) fallbackFocus()?.focus();
+    if (losesAnchor && shown) {
+      const fallback = fallbackFocus();
+      if (fallback && isAvailable(fallback)) fallback.focus();
+    }
     action(id);
   };
 

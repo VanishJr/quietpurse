@@ -2100,9 +2100,8 @@ textarea {
   }
 }
 
-/* the same card the Overview draws, at this screen's measure */
 .chart-card {
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   background: var(--ink-surface);
   padding: 20px 22px 22px;
 }
@@ -2192,15 +2191,7 @@ textarea {
 
 /* ---------- the workspace before anything is on it ---------- */
 
-/*
- * Dashed, and that is the whole of the difference from a card: the border says "this
- * is where a chart would be" without the panel pretending to be one. It is the same
- * device the Import file picker uses, for the same sentence.
- *
- * Three things in it now — a mark, a line and a button — where it used to hold two
- * paragraphs as well, so the gaps are set for a stack that short: the heading close
- * under the mark, and the button clear of it.
- */
+/* Dashed marks a place for a chart without presenting it as an existing one. */
 .chart-blank {
   display: flex;
   flex-direction: column;
@@ -2208,7 +2199,7 @@ textarea {
   gap: 14px;
   padding: clamp(36px, 7vw, 64px) 24px;
   border: 1px dashed var(--ink-border);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   background: var(--ink-surface);
   text-align: center;
 }
@@ -3355,6 +3346,51 @@ textarea.native-field__control {
 
   .page-header {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (forced-colors: active) {
+  .theme-option[aria-pressed='true'],
+  .transactions-screen .transaction-choice[aria-pressed='true'],
+  .kind-tile[aria-pressed='true'],
+  .choice-chips .chip[aria-pressed='true'] {
+    border: 3px double Highlight;
+  }
+
+  .transactions-screen .transaction-choice[aria-pressed='true'][aria-disabled='true'],
+  .choice-chips .chip[aria-pressed='true'][aria-disabled='true'] {
+    border-style: dashed;
+  }
+
+  .transactions-screen .switch {
+    /* The custom thumb must not be forced onto its track's fill. */
+    forced-color-adjust: none;
+    background: Canvas;
+    border-color: ButtonText;
+  }
+
+  .transactions-screen .switch::after {
+    background: ButtonText;
+  }
+
+  .transactions-screen .switch:checked {
+    background: Highlight;
+  }
+
+  .transactions-screen .switch:checked::after {
+    background: HighlightText;
+  }
+
+  .transactions-screen .switch[aria-disabled='true'] {
+    background: Canvas;
+  }
+
+  .transactions-screen .switch[aria-disabled='true']::after {
+    background: GrayText;
+  }
+
+  .transactions-screen .switch:focus-visible {
+    outline-color: Highlight;
   }
 }
 

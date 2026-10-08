@@ -82,6 +82,24 @@ it('gives native and focus-retaining disabled actions a readable neutral pair an
   }
 });
 
+it('keeps selected controls and custom switch contrast independent of forced colors', () => {
+  const css = source('styles.css');
+  const forced = css.slice(css.indexOf('@media (forced-colors: active)'));
+  for (const selector of [
+    ".theme-option[aria-pressed='true']", ".transactions-screen .transaction-choice[aria-pressed='true']",
+    ".kind-tile[aria-pressed='true']", ".choice-chips .chip[aria-pressed='true']",
+  ]) expect(forced).toContain(selector);
+  expect(forced).toContain('border: 3px double Highlight');
+  const track = forced.match(/\.transactions-screen \.switch \{([^}]*)\}/)?.[1];
+  expect(track).toContain('forced-color-adjust: none');
+  expect(track).toContain('background: Canvas');
+  expect(track).toContain('border-color: ButtonText');
+  expect(forced.match(/\.transactions-screen \.switch::after \{([^}]*)\}/)?.[1]).toContain('background: ButtonText');
+  expect(forced.match(/\.transactions-screen \.switch:checked::after \{([^}]*)\}/)?.[1]).toContain('background: HighlightText');
+  expect(forced.match(/\.transactions-screen \.switch\[aria-disabled='true'\]::after \{([^}]*)\}/)?.[1]).toContain('background: GrayText');
+  expect(forced).not.toMatch(/(?:^|})\s*(?:\*|html|body)\s*\{[^}]*forced-color-adjust:\s*none/);
+});
+
 it('gives each added palette role a live stylesheet reader', () => {
   const css = source('styles.css');
   const roles = [

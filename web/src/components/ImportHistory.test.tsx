@@ -452,6 +452,41 @@ describe('deleting the stored statement', () => {
 });
 
 describe('record actions and confirmations', () => {
+  it('closes on Tab departure without letting the next Escape jump back to the old record', async () => {
+    mockFetch(BASE);
+    mount();
+    const { trigger, group } = await openActions();
+    const back = screen.getByRole('button', { name: /Back to accounts/ });
+    fireEvent.keyDown(document, { key: 'Tab' });
+    act(() => back.focus());
+    expect(group).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+    expect(back).toHaveFocus();
+    expect(deletes()).toEqual([]);
+  });
+
+  it.each([false, true])('keeps confirmation entry usable after outside-ancestor focus (pointerup: %s)', async (up) => {
+    mockFetch(BASE);
+    const { container, onChanged } = mount();
+    const { group } = await openActions();
+    const entry = within(group).getByRole('button', { name: 'Delete import statement.csv' });
+    const ancestor = container.querySelector<HTMLElement>('.history-page')!;
+    ancestor.tabIndex = -1;
+    fireEvent.pointerDown(entry);
+    act(() => ancestor.focus());
+    if (up) fireEvent.pointerUp(entry);
+    expect(entry).toBeInTheDocument();
+    fireEvent.click(entry);
+    const dialog = screen.getByRole('dialog', { name: 'Delete import?' });
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(deletes()).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deletes()).toEqual([]);
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
   it('uses the explicit Back to Settings label and callback without writing', async () => {
     mockFetch(BASE);
     const { onBack, onChanged } = mount(vi.fn(), 'Back to Settings');

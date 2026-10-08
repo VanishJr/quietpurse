@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { defs } from '../analytics';
 import { api } from '../api';
+import { isAvailable } from '../dismiss';
+import { ScreenShown } from '../screen';
 import { Chips } from './Chips';
 import { Sheet } from './Sheet';
 import { Field } from './Field';
@@ -39,6 +41,7 @@ interface Props {
 }
 
 export function IncomeSourcesBlock({ onChanged }: Props) {
+  const shown = useContext(ScreenShown);
   /** null until the GET answered: an empty list is a real state and must not be faked */
   const [sources, setSources] = useState<IncomeSourceDef[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,11 +51,34 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<IncomeSourceKind>('external');
   const [patterns, setPatterns] = useState('');
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const deleteRowRef = useRef<HTMLElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const lastDeleteId = useRef<string | null>(null);
+  const cancelledDelete = useRef<{ id: string; owner: Element | null } | null>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const retryRef = useRef<HTMLButtonElement>(null);
   const editRefs = useRef(new Map<string, HTMLButtonElement>());
   const refocus = useRef<{ edited: string | null } | null>(null);
   const baseline = useRef({ label: '', kind: 'external' as IncomeSourceKind, patterns: '' });
+  const deleteId = open?.form === 'delete' ? open.id : null;
+
+  useLayoutEffect(() => {
+    if (deleteId !== lastDeleteId.current) {
+      lastDeleteId.current = deleteId;
+      const cancel = deleteCancelRef.current;
+      if (deleteId !== null && shown && cancel && isAvailable(cancel)) cancel.focus();
+    }
+    const cancelled = cancelledDelete.current;
+    if (!cancelled) return;
+    cancelledDelete.current = null;
+    if (!shown) return;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body && focused !== cancelled.owner) return;
+    const target = [editRefs.current.get(cancelled.id), addRef.current, headingRef.current]
+      .find((control) => control && isAvailable(control));
+    target?.focus();
+  }, [deleteId, shown]);
 
   const read = useCallback(async () => {
     setSources(await api.incomeSources());
@@ -201,14 +227,18 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
 
   return (
     <>
-      <h2 className="settings-title" id="settings-income-title">Income sources</h2>
+      <h2 className="settings-title" id="settings-income-title" ref={headingRef} tabIndex={-1}>Income sources</h2>
       <p className="settings-lead">
         Support is tracked separately and does not count toward earnings goals.
       </p>
 
       {error && (
         <Notice tone="error" role="alert" remedy={!sources && (
-          <Button ref={retryRef} type="button" variant="tertiary" size="standard" onClick={load}>Retry</Button>
+          <Button ref={retryRef} type="button" variant="tertiary" size="standard" onClick={() => {
+            const heading = headingRef.current;
+            if (shown && heading && isAvailable(heading)) heading.focus();
+            load();
+          }}>Retry</Button>
         )}>Error: {error}</Notice>
       )}
 
@@ -220,7 +250,8 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
           {sources.map((s) => {
             const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
             return (
-              <article key={s.id} className="settings-income-row" aria-label={`Income source ${s.label}`}>
+              <article key={s.id} className="settings-income-row" aria-label={`Income source ${s.label}`}
+                ref={mine?.form === 'delete' ? deleteRowRef : undefined}>
                 <div className="settings-income-info">
                   <div className="settings-income-heading">
                     <h3 className="settings-income-name">{s.label}</h3>
@@ -241,7 +272,15 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
                       {actionError && <Notice tone="error" role="alert">Error: {actionError}</Notice>}
                       {busy && <Notice role="status">Deleting source…</Notice>}
                       <FormActions cancel={
-                        <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={close}>Cancel</Button>
+                        <Button type="button" variant="secondary" size="standard" ref={deleteCancelRef}
+                          aria-disabled={busy} onClick={() => {
+                            if (busy) return;
+                            const focused = document.activeElement;
+                            if (!focused || focused === document.body || deleteRowRef.current?.contains(focused)) {
+                              cancelledDelete.current = { id: s.id, owner: focused };
+                            }
+                            close();
+                          }}>Cancel</Button>
                       } completion={
                         <Button type="button" variant="destructive-primary" size="standard" pending={busy}
                           aria-disabled={busy || !destination} onClick={() => { if (destination) remove(s.id); }}>

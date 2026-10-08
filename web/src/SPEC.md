@@ -466,7 +466,11 @@ the visible work and retry, while a stale refusal replaces the list without reap
 and carry its numbers in a visually hidden table beside it — as measured — because the SVG is not
 readable. `ChartWizard`'s preview draws `ChartPlot` with no table beside it, so its figures reach a
 screen reader only once the chart is saved and drawn on a card. A future chart owes the pair
-wherever it is the thing a reader is reading.
+wherever it is the thing a reader is reading. Hidden plots explicitly disable Recharts' keyboard
+accessibility layer, and a pie's root group is likewise outside Tab order. Otherwise the library
+creates focus targets beneath the hidden plot, interrupting editor traversal even though the
+surrounding dialog retains containment. Pointer tooltips and the saved charts' tables remain
+independent of that keyboard layer.
 
 `isAnimationActive` is false on every series `ChartPlot`, `AccountFlows` and `SpendingByCategory`
 draw — as measured, and nothing enforces it. The screens stay mounted, so a chart first renders
@@ -733,6 +737,12 @@ destination label and irreversible manual-assignment consequence beside its conf
 The short editor uses the shared header, primary body and action frame; native form submission
 keeps the same server validation and write owner. Refusals and unresolved saving remain in the
 action region while the draft and its meaningful-change guard retain their existing lifetime.
+Custom-source deletion remains non-modal. Entry focuses available Cancel on a shown screen without
+replaying that handoff on rerender, refusal or a hidden return. Inline Cancel alone recovers lost
+or decision-owned focus to the same source's available Edit, then Add source or the Income sources
+heading, without rereading or overriding another focus choice. Explicit catalog Retry focuses that
+heading before removing its own control; automatic reads and committed-write recovery retain
+their existing owners.
 
 ## The palette, and what leaves the page
 
@@ -801,8 +811,11 @@ scoped screen compositions retain their own treatment rather than acquiring a ne
 scrolling, hidden-screen exclusion and navigation safe-area clearance remain the shell's concern.
 
 Grouped surfaces remain flat, subordinate relationships use spacing, and transient dialogs have a
-separate radius from ordinary cards. Focus is visible on the actual ground; reduced-motion behavior
-does not depend on transitions to establish the final state.
+separate radius from ordinary cards. Analytics surfaces share the grouped-surface radius rather
+than keeping another card-size role. Focus is visible on the actual ground; reduced-motion behavior
+does not depend on transitions to establish the final state. Forced-color selection uses boundary
+geometry independently of fills; custom switches use system-color track and thumb pairs, with
+forced adjustment disabled only for that control so its thumb cannot vanish into the track.
 
 `Button` owns native action presentation with explicit type, variant and size. Foreground and ground
 are a pair; legacy action classes do not choose either for a migrated button. Native disabled and
@@ -1019,7 +1032,14 @@ dialog is neither a modal focus owner nor a reason to suppress the visible panel
 
 `useDismiss` is the Escape-and-outside-press seam for lightweight popovers. A live child receives
 Escape before its sheet; a background popover beneath the modal cannot consume that dismissal.
-Like a sheet, it hears nothing while its screen is hidden.
+Optional focus departure closes a group without restoring its opener or stealing the destination.
+An inside pointer press protects its action through outside-ancestor focus and click; release or
+cancellation settles against current focus in a later task. A new press or Tab invalidates stale
+protection. Current callbacks do not restart press ownership. Closing, hiding or unmounting releases
+listeners and pending settlement. Settings' recurring actions also suspend ownership when history
+takes over their composition. Opening focus requires an available visible target; explicit recurring
+read Retry focuses its stable heading before removing Retry, while automatic reads stay passive.
+Like a sheet, a hidden screen's popover hears nothing.
 `Chips` takes `locked`, which marks every chip `aria-disabled` and ignores a press, for a form
 whose values are already on their way.
 

@@ -32,8 +32,9 @@ export function SpendingByCategory({ spend, month, total, currency, onSeeAll }: 
       <div className="ov-donut" aria-hidden="true">
         {sectors.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+            <PieChart accessibilityLayer={false}>
               <Pie
+                rootTabIndex={-1}
                 data={sectors}
                 dataKey="total"
                 nameKey="label"

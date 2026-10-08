@@ -111,10 +111,12 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
     const target = recordControl(menu ?? undefined);
     setMenu(null);
     target?.focus();
-  }, () => setMenu(null));
+  }, () => setMenu(null), () => setMenu(null));
 
   useLayoutEffect(() => {
-    if (menu && shown) menuGroup.current?.querySelector<HTMLButtonElement>('[data-record-removal]')?.focus();
+    if (!menu || !shown) return;
+    const action = menuGroup.current?.querySelector<HTMLButtonElement>('[data-record-removal]');
+    if (action && isAvailable(action)) action.focus();
   }, [menu, shown]);
 
   useLayoutEffect(() => {

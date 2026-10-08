@@ -1,4 +1,4 @@
-import { useContext, useEffect } from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import { ScreenShown } from './screen';
 
 export function isAvailable(element: HTMLElement): boolean {
@@ -20,28 +20,70 @@ export function useDismiss(
   inside: (target: Element) => boolean,
   onEscape: () => void,
   onOutsidePress: () => void,
+  onFocusDeparture?: () => void,
 ): void {
   const shown = useContext(ScreenShown);
+  const current = useRef({ inside, onEscape, onOutsidePress, onFocusDeparture, live: !!open && shown });
+  current.current = { inside, onEscape, onOutsidePress, onFocusDeparture, live: !!open && shown };
   useEffect(() => {
     if (!open || !shown) return;
-    const available = () => Array.from(document.querySelectorAll<HTMLElement>('*'))
-      .some((element) => inside(element) && isAvailable(element));
+    let insidePress = false;
+    let settlement: ReturnType<typeof setTimeout> | undefined;
+    const release = () => {
+      insidePress = false;
+      clearTimeout(settlement);
+      settlement = undefined;
+    };
+    const available = () => current.current.live && Array.from(document.querySelectorAll<HTMLElement>('*'))
+      .some((element) => current.current.inside(element) && isAvailable(element));
+    const departed = (target: EventTarget | null) => {
+      if (current.current.onFocusDeparture && available()
+        && !(target instanceof Element && current.current.inside(target))) current.current.onFocusDeparture();
+    };
+    const settle = () => {
+      if (!insidePress) return;
+      clearTimeout(settlement);
+      // A microtask can run before click; retain the pressed action until that dispatch finishes.
+      settlement = setTimeout(() => {
+        release();
+        departed(document.activeElement);
+      }, 0);
+    };
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') {
+        release();
+        departed(document.activeElement);
+      }
       if (event.key !== 'Escape' || event.defaultPrevented || !available()) return;
       event.preventDefault();
-      onEscape();
+      current.current.onEscape();
     };
     const onPointer = (event: Event) => {
+      release();
       if (!available()) return;
-      if (!(event.target instanceof Element && inside(event.target))) onOutsidePress();
+      if (event.target instanceof Element && current.current.inside(event.target)) {
+        insidePress = !!current.current.onFocusDeparture;
+      } else current.current.onOutsidePress();
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (!insidePress) departed(event.target);
     };
     // Capture phase, with a press `inside` claims let through: that is what keeps a popover's
     // own toggle a toggle, since otherwise the press closes it and the following click reopens it.
     document.addEventListener('keydown', onKey, true);
     document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('focusin', onFocus, true);
+    document.addEventListener('pointerup', settle, true);
+    document.addEventListener('pointercancel', settle, true);
+    document.addEventListener('click', settle, true);
     return () => {
+      release();
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('focusin', onFocus, true);
+      document.removeEventListener('pointerup', settle, true);
+      document.removeEventListener('pointercancel', settle, true);
+      document.removeEventListener('click', settle, true);
     };
   }, [open, shown]);
 }

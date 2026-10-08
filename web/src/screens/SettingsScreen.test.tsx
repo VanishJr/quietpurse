@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { setUrl } from '../url';
+import { ScreenShown } from '../screen';
+import { ThemeProvider } from '../theme';
 import { REFILL_POLL_MS } from '../components/AppSettingsBlock';
 import { SettingsScreen } from './SettingsScreen';
 
@@ -969,6 +971,97 @@ describe('recurring payments', () => {
     expect(reads).toBe(2);
   });
 
+  it('focuses the stable heading before explicit read Retry removes its control', async () => {
+    let finish: (response: Response) => void = () => {};
+    let reads = 0;
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ++reads === 1
+      ? fail(500, { error: 'unavailable' }) : new Promise<Response>((resolve) => { finish = resolve; }) });
+    mount();
+    const card = cardFor('Recurring payments');
+    const retry = await within(card).findByRole('button', { name: 'Retry' });
+    act(() => retry.focus());
+    fireEvent.click(retry);
+    const heading = screen.getByRole('heading', { name: 'Recurring payments' });
+    expect(retry).not.toBeInTheDocument();
+    expect(heading).toHaveFocus();
+    const elsewhere = screen.getByRole('button', { name: 'Advanced · API connection' });
+    act(() => elsewhere.focus());
+    await act(async () => { finish(ok(answer(payment('Gym')))); });
+    expect(await within(card).findByRole('button', { name: 'Actions for Gym' })).toBeInTheDocument();
+    expect(elsewhere).toHaveFocus();
+    expect(reads).toBe(2);
+  });
+
+  it('keeps initial and revision recurring reads passive, including replacement of a Retry', async () => {
+    let reads = 0;
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ++reads === 1
+      ? fail(500, { error: 'unavailable' }) : ok(answer(payment('Gym'))) });
+    const onOpenImport = vi.fn();
+    const view = (dataRevision: number) => <><button>Elsewhere</button>
+      <SettingsScreen onOpenImport={onOpenImport} dataRevision={dataRevision} /></>;
+    const { rerender } = renderThemed(view(0));
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    act(() => elsewhere.focus());
+    const card = cardFor('Recurring payments');
+    await within(card).findByRole('button', { name: 'Retry' });
+    expect(elsewhere).toHaveFocus();
+    rerender(<ThemeProvider>{view(1)}</ThemeProvider>);
+    expect(await within(card).findByRole('button', { name: 'Actions for Gym' })).toBeInTheDocument();
+    expect(elsewhere).toHaveFocus();
+    expect(reads).toBe(2);
+  });
+
+  it('closes on Tab departure so the next Escape cannot jump back to an old payment', async () => {
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))) });
+    mount();
+    const trigger = await screen.findByRole('button', { name: 'Actions for Gym' });
+    fireEvent.click(trigger);
+    const action = screen.getByRole('button', { name: 'Exclude from recurring: Gym' });
+    const elsewhere = screen.getByRole('button', { name: 'Advanced · API connection' });
+    fireEvent.keyDown(action, { key: 'Tab' });
+    act(() => elsewhere.focus());
+    expect(action).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+    expect(elsewhere).toHaveFocus();
+    expect(requests().filter((request) => request.startsWith('POST'))).toEqual([]);
+  });
+
+  it('releases recurring ownership during history takeover even though its hook is above the nested provider', async () => {
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))),
+      'GET /api/imports': () => ok(importsResponse([])) });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    const action = screen.getByRole('button', { name: 'Exclude from recurring: Gym' });
+    act(() => setUrl({ screen: 'settings', panel: 'history' }));
+    const back = await screen.findByRole('button', { name: '← Back to Settings' });
+    act(() => back.focus());
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+    fireEvent.pointerDown(back);
+    expect(back).toHaveFocus();
+    expect(action).toBeInTheDocument();
+    fireEvent.click(back);
+    expect(action).toBeVisible();
+    expect(action).toHaveFocus();
+  });
+
+  it('does not focus an unavailable action on opening but enters when its screen returns', async () => {
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))) });
+    const onOpenImport = vi.fn();
+    const view = (shown: boolean) => <><button>Elsewhere</button><ScreenShown value={shown}>
+      <SettingsScreen onOpenImport={onOpenImport} />
+    </ScreenShown></>;
+    const { rerender } = renderThemed(view(false));
+    const trigger = await screen.findByRole('button', { name: 'Actions for Gym' });
+    const elsewhere = screen.getByRole('button', { name: 'Elsewhere' });
+    act(() => elsewhere.focus());
+    fireEvent.click(trigger);
+    expect(elsewhere).toHaveFocus();
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+    rerender(<ThemeProvider>{view(true)}</ThemeProvider>);
+    expect(screen.getByRole('button', { name: 'Exclude from recurring: Gym' })).toHaveFocus();
+  });
+
   it('opens a named action, closes on Escape or outside press, and returns focus on Escape', async () => {
     mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))) });
     mount();
@@ -1024,6 +1117,28 @@ describe('recurring payments', () => {
     expect(await screen.findByText('Excluded payments (1)')).toBeInTheDocument();
     expect(writes).toEqual([{ description: 'Gym', ignored: true }]);
     outside.remove();
+  });
+
+  it('keeps the Safari-style action usable when pointerup precedes click', async () => {
+    const writes: unknown[] = [];
+    mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))),
+      'POST /api/recurring/ignore': (init) => {
+        writes.push(JSON.parse(String(init?.body)));
+        return ok(answer(payment('Gym', true)));
+      } });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    const action = screen.getByRole('button', { name: 'Exclude from recurring: Gym' });
+    const outside = cardFor('Recurring payments');
+    outside.tabIndex = -1;
+    fireEvent.pointerDown(action);
+    act(() => outside.focus());
+    fireEvent.pointerUp(action);
+    await act(async () => { await Promise.resolve(); });
+    expect(action).toBeInTheDocument();
+    fireEvent.click(action);
+    expect(await screen.findByText('Excluded payments (1)')).toBeInTheDocument();
+    expect(writes).toEqual([{ description: 'Gym', ignored: true }]);
   });
 
   it('keeps excluded groups collapsed and restores them from the complete server answer', async () => {

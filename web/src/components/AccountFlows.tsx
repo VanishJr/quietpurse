@@ -122,7 +122,7 @@ export function AccountFlows({
 
       <div className="acct-chart" style={{ height: CHART_HEIGHT }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          <LineChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
             <CartesianGrid stroke={ink.grid} strokeDasharray="3 4" vertical={false} />
             <XAxis
               dataKey="label"

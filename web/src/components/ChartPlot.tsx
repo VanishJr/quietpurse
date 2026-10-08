@@ -127,7 +127,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
         <div className="chart-plot" style={{ height }} aria-hidden="true">
           <ResponsiveContainer width="100%" height="100%">
             {spec.kind === 'column' ? (
-              <BarChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <BarChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Bar
@@ -142,7 +142,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
                 ))}
               </BarChart>
             ) : spec.kind === 'area' ? (
-              <AreaChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <AreaChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Area
@@ -163,7 +163,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
                 ))}
               </AreaChart>
             ) : (
-              <LineChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <LineChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Line
@@ -210,7 +210,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
         </div>
         <div className="chart-plot" style={{ height }} aria-hidden="true">
           <ResponsiveContainer width="100%" height="100%">
-            <RadarChart data={rows} outerRadius="72%">
+            <RadarChart accessibilityLayer={false} data={rows} outerRadius="72%">
               <PolarGrid stroke={ink.grid} />
               <PolarAngleAxis dataKey="label" tick={{ fill: ink.muted, fontSize: 10 }} />
               <Tooltip {...tooltip} />
@@ -246,6 +246,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
       <div className="chart-plot" style={{ height }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
+            accessibilityLayer={false}
             data={rows}
             layout="vertical"
             margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
@@ -321,8 +322,9 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
       </div>
       <div className="chart-wrap chart-plot" style={{ height }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+          <PieChart accessibilityLayer={false}>
             <Pie
+              rootTabIndex={-1}
               data={sectors}
               dataKey="value"
               nameKey="label"

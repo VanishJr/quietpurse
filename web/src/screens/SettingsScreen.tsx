@@ -9,7 +9,7 @@ import { Button } from '../components/Button';
 import { Notice } from '../components/Notice';
 import { ImportIcon } from '../components/NavIcons';
 import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
-import { useDismiss } from '../dismiss';
+import { isAvailable, useDismiss } from '../dismiss';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { useTheme } from '../theme';
@@ -54,20 +54,6 @@ export function SettingsScreen({
   const recurringTitleRef = useRef<HTMLHeadingElement>(null);
   const { categoryColor } = useTheme();
 
-  useDismiss(
-    openRecurringMenu,
-    (target) => !!recurringMenuRef.current?.contains(target),
-    () => {
-      setOpenRecurringMenu(null);
-      recurringTriggerRef.current?.focus();
-    },
-    () => setOpenRecurringMenu(null),
-  );
-
-  useEffect(() => {
-    if (openRecurringMenu) recurringActionRef.current?.focus();
-  }, [openRecurringMenu]);
-
   /**
    * The import history takes the screen over, so it is a place the reader can BE, and
    * it lives in the URL rather than in a `useState`: the Shell keeps every screen
@@ -81,6 +67,24 @@ export function SettingsScreen({
   const historyOpen = url.screen === 'settings' && url.panel === 'history';
   const setHistoryOpen = (open: boolean): void =>
     setUrl({ screen: 'settings', panel: open ? 'history' : null });
+
+  useDismiss(
+    historyOpen ? null : openRecurringMenu,
+    (target) => !!recurringMenuRef.current?.contains(target),
+    () => {
+      setOpenRecurringMenu(null);
+      const trigger = recurringTriggerRef.current;
+      if (trigger && isAvailable(trigger)) trigger.focus();
+    },
+    () => setOpenRecurringMenu(null),
+    () => setOpenRecurringMenu(null),
+  );
+
+  useEffect(() => {
+    if (!openRecurringMenu || !shown || historyOpen) return;
+    const action = recurringActionRef.current;
+    if (action && isAvailable(action)) action.focus();
+  }, [openRecurringMenu, shown, historyOpen]);
 
   /**
    * The export's own refusal. It sits at the bottom of a long screen, and the error
@@ -270,7 +274,11 @@ export function SettingsScreen({
         )}
         {recurringReadError && (
           <Notice tone="error" role="alert" remedy={
-            <Button type="button" variant="tertiary" size="standard" onClick={loadRecurring}>Retry</Button>
+            <Button type="button" variant="tertiary" size="standard" onClick={() => {
+              const title = recurringTitleRef.current;
+              if (shown && !historyOpen && title && isAvailable(title)) title.focus();
+              void loadRecurring();
+            }}>Retry</Button>
           }>Error: {recurringReadError}</Notice>
         )}
         {recurringActionErrors.map((failed) => (

@@ -2,6 +2,8 @@ import { act, fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderThemed } from '../test/harness';
 import { ChartControls } from './ChartControls';
+import { ScreenShown } from '../screen';
+import { ThemeProvider } from '../theme';
 
 const props = () => ({ id: 'c-a', label: 'A', onEdit: vi.fn(), onDuplicate: vi.fn(), onDelete: vi.fn(), fallbackFocus: () => document.querySelector<HTMLElement>('#survivor') });
 
@@ -77,15 +79,74 @@ describe('ChartControls', () => {
     const b = screen.getByRole('button', { name: 'Actions for B' });
     fireEvent.click(a);
     expect(screen.getByRole('group', { name: 'Actions for A' })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Tab' });
     act(() => b.focus());
     expect(a).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('group', { name: 'Actions for A' })).not.toBeInTheDocument();
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+    expect(b).toHaveFocus();
     fireEvent.click(b);
     expect(screen.getAllByRole('group')).toHaveLength(1);
     expect(screen.getByRole('group', { name: 'Actions for B' })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
     expect(b).toHaveFocus();
+  });
+
+  it.each([false, true])('keeps pointer actions usable after outside-ancestor focus (pointerup: %s)', (up) => {
+    const callbacks = props();
+    renderThemed(<><main tabIndex={-1}>Outside ancestor</main><ChartControls {...callbacks} /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for A' }));
+    const duplicate = screen.getByRole('button', { name: 'Duplicate' });
+    fireEvent.pointerDown(duplicate);
+    act(() => screen.getByRole('main').focus());
+    if (up) fireEvent.pointerUp(duplicate);
+    expect(duplicate).toBeInTheDocument();
+    fireEvent.click(duplicate);
+    expect(callbacks.onDuplicate).toHaveBeenCalledExactlyOnceWith('c-a');
+    expect(callbacks.onDelete).not.toHaveBeenCalled();
+  });
+
+  it.each(['screen', 'hidden', 'inert'] as const)('suspends open-menu effects and restoration in a %s branch', (kind) => {
+    const callbacks = props();
+    const view = (shown: boolean) => <>
+      <button id="survivor">Survivor</button>
+      <ScreenShown value={kind === 'screen' ? shown : true}>
+        <div hidden={kind === 'hidden' && !shown} inert={kind === 'inert' && !shown}>
+          <ChartControls {...callbacks} contextual />
+        </div>
+      </ScreenShown>
+    </>;
+    const { rerender } = renderThemed(view(true));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for A' }));
+    const menu = screen.getByRole('group', { name: 'Actions for A' });
+    rerender(<ThemeProvider>{view(false)}</ThemeProvider>);
+    const outside = screen.getByRole('button', { name: 'Survivor' });
+    act(() => outside.focus());
+    fireEvent(window, new Event('resize'));
+    fireEvent.scroll(document);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(menu).toBeInTheDocument();
+    expect(outside).toHaveFocus();
+    rerender(<ThemeProvider>{view(true)}</ThemeProvider>);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+  });
+
+  it('does not focus unavailable controls while opening or confirming a hidden menu', () => {
+    const view = (shown: boolean) => <>
+      <button>Outside</button>
+      <ScreenShown value={shown}><ChartControls {...props()} contextual /></ScreenShown>
+    </>;
+    const { rerender } = renderThemed(view(true));
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for A' }));
+    rerender(<ThemeProvider>{view(false)}</ThemeProvider>);
+    const outside = screen.getByRole('button', { name: 'Outside' });
+    act(() => outside.focus());
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(outside).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
+    expect(outside).toHaveFocus();
   });
 
   it('does not delete on entry, cancellation or Escape and recovers focus on confirmation', () => {
