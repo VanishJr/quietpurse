@@ -855,7 +855,13 @@ navigation link and a panel of Overview, while Settings takes its place in the m
 is still reachable from Overview and Settings. Screens stay mounted so filters survive navigation,
 with inactive screens excluded through `hidden`. Settings separates financial setup from income
 classification, then presents recurring payments, data and backup actions, and API connection
-information in that order. The API address stays in a closed-by-default Advanced disclosure: it
+information in that order. These independent sections share the page anchor and use headings and
+separators rather than nested cards; financial interpretation has a narrower reading measure.
+The history panel hides the Settings composition without unmounting its forms, so raw inline
+financial drafts and owner-tag identity survive a return. Harmless navigation does not turn these
+retained inline drafts into modal decisions. Hidden income editors release interaction ownership
+through the same screen-visibility contract as other mounted editors.
+The API address stays in a closed-by-default Advanced disclosure: it
 identifies this page's local REST API, not a preference the reader can change. Pending reads and
 failures belong to their respective regions, never to a page-wide empty result. Financial setup
 shows the server's currency with a readable name when one is available; suggestions never

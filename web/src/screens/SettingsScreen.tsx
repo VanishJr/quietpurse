@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, apiLabel } from '../api';
 import { categoryLabel } from '../categories';
 import { AppSettingsBlock } from '../components/AppSettingsBlock';
 import { ImportHistory } from '../components/ImportHistory';
 import { IncomeSourcesBlock } from '../components/IncomeSourcesBlock';
+import { PageHeader } from '../components/PageHeader';
 import { ImportIcon } from '../components/NavIcons';
 import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
 import { useDismiss } from '../dismiss';
 import { saveBlob } from '../download';
 import { fmtDate, fmtMoney } from '../format';
 import { useTheme } from '../theme';
+import { ScreenShown } from '../screen';
 import { RecurringSummary } from '../types';
 import { setUrl, useUrl } from '../url';
 
@@ -73,7 +75,8 @@ export function SettingsScreen({
    * *Where the reader is*.
    */
   const url = useUrl();
-  const historyOpen = url.panel === 'history';
+  const shown = useContext(ScreenShown);
+  const historyOpen = url.screen === 'settings' && url.panel === 'history';
   const setHistoryOpen = (open: boolean): void =>
     setUrl({ screen: 'settings', panel: open ? 'history' : null });
 
@@ -227,25 +230,18 @@ export function SettingsScreen({
   const active = recurring?.groups.filter((g) => !g.ignored) ?? [];
   const ignored = recurring?.groups.filter((g) => g.ignored) ?? [];
 
-  if (historyOpen) {
-    return (
-      <div className="screen-inner">
-        <ImportHistory backLabel="Back to Settings" onBack={() => setHistoryOpen(false)} onChanged={loadRecurring} />
-      </div>
-    );
-  }
-
   return (
-    <div className="screen-inner settings-page">
-      <header className="settings-header">
-        <h1 className="title">Settings</h1>
-        <p className="settings-intro">
-          Set how Finto counts your money, review recurring payments, and manage your local data.
-        </p>
-      </header>
+    <>
+      {historyOpen && (
+        <div className="screen-inner">
+          <ImportHistory backLabel="Back to Settings" onBack={() => setHistoryOpen(false)} onChanged={loadRecurring} />
+        </div>
+      )}
+      <ScreenShown.Provider value={shown && !historyOpen}>
+      <div className="screen-inner settings-page" hidden={historyOpen}>
+      <PageHeader title="Settings" context="Set how Finto counts your money, review recurring payments, and manage your local data." />
 
-      <div className="settings-top">
-        <section className="settings-card" aria-labelledby="settings-financial-title">
+        <section className="settings-section" aria-labelledby="settings-financial-title">
           <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
           <p className="settings-lead">
             These settings decide what totals and income-based goals mean across all accounts.
@@ -253,12 +249,11 @@ export function SettingsScreen({
           <AppSettingsBlock onChanged={onDataChanged} />
         </section>
 
-        <section className="settings-card" aria-labelledby="settings-income-title">
+        <section className="settings-section" aria-labelledby="settings-income-title">
           <IncomeSourcesBlock onChanged={onDataChanged} />
         </section>
-      </div>
 
-      <section className="settings-card settings-recurring" aria-labelledby="settings-recurring-title">
+      <section className="settings-section settings-recurring" aria-labelledby="settings-recurring-title">
         <div className="settings-recurring-header">
           <div>
             <h2 className="settings-title" id="settings-recurring-title" ref={recurringTitleRef} tabIndex={-1}>Recurring payments</h2>
@@ -314,8 +309,8 @@ export function SettingsScreen({
         )}
       </section>
 
-      <section className="settings-card">
-        <h2 className="settings-title">Data &amp; backup</h2>
+      <section className="settings-section" aria-labelledby="settings-data-title">
+        <h2 className="settings-title" id="settings-data-title">Data &amp; backup</h2>
         <p className="settings-lead">
           What you have uploaded, and how to take all of it away with you.
         </p>
@@ -373,7 +368,7 @@ export function SettingsScreen({
 
       {/* a button inside the heading rather than a heading inside <summary>: a summary's
           contents are presentational, which takes the heading out of heading navigation */}
-      <section className="settings-card settings-advanced" aria-labelledby="settings-advanced-title">
+      <section className="settings-section settings-advanced" aria-labelledby="settings-advanced-title">
         <h2 className="settings-title" id="settings-advanced-title">
           <button
             className="settings-advanced-toggle"
@@ -391,6 +386,8 @@ export function SettingsScreen({
           <code className="settings-api-origin">{apiLabel()}</code>
         </div>
       </section>
-    </div>
+      </div>
+      </ScreenShown.Provider>
+    </>
   );
 }

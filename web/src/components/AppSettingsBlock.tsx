@@ -3,6 +3,10 @@ import type { FormEvent } from 'react';
 import { api } from '../api';
 import { CURRENCY_SUGGESTIONS, currencyName } from '../currencies';
 import type { AppSettings } from '../types';
+import { Button } from './Button';
+import { Field } from './Field';
+import { Notice } from './Notice';
+import { CloseIcon } from './SettingsActionIcons';
 
 const sameNames = (left: string[], right: string[]) =>
   JSON.stringify(left) === JSON.stringify(right);
@@ -170,77 +174,80 @@ export function AppSettingsBlock({ onChanged = () => {} }: Props) {
     }
   };
 
-  // No heading of its own: its caller heads the section it sits in, and two headings
-  // over one form read as two forms.
   return (
-    <section>
+    <div className="settings-financial-form">
       {!stored && error && (
-        <p className="error">
-          Error: {error}{' · '}
-          <button className="btn-link" type="button" onClick={load}>Retry</button>
-        </p>
+        <Notice tone="error" role="alert" remedy={
+          <Button type="button" variant="tertiary" size="standard" onClick={load}>Retry</Button>
+        }>Error: {error}</Notice>
       )}
-      {!stored && !error && <p role="status" className="hint">Loading financial setup…</p>}
+      {!stored && !error && <Notice role="status">Loading financial setup…</Notice>}
 
       {stored && (
-        <form className="settings-financial-form" onSubmit={save}>
-          <label className="setting-label" htmlFor="app-currency">Base currency</label>
-          <input
-            id="app-currency"
-            className="input settings-currency-input"
-            list="settings-currencies"
-            value={currency}
-            readOnly={busy}
-            onChange={(event) => {
-              edit();
-              setCurrency(event.target.value);
+        <form onSubmit={save}>
+          <Field id="app-currency" label="Base currency" control="input" className="settings-currency-field"
+            help={<>
+              {currencyName(currency) && <span className="settings-currency-name">
+                {currency.trim().toUpperCase()} · {currencyName(currency)}
+              </span>}
+              Every total is converted into this one. Changing it recomputes them in the
+              background, so the amounts on screen stay the old ones until that finishes.
+            </>}
+            controlProps={{
+              className: 'settings-currency-input', list: 'settings-currencies', value: currency,
+              readOnly: busy, onChange: (event) => { edit(); setCurrency(event.target.value); }, placeholder: 'EUR',
             }}
-            placeholder="EUR"
           />
           <datalist id="settings-currencies">
             {CURRENCY_SUGGESTIONS.map((code) => (
               <option key={code} value={code} label={currencyName(code) ?? code} />
             ))}
           </datalist>
-          {currencyName(currency) && (
-            <p className="settings-currency-name">
-              {currency.trim().toUpperCase()} · {currencyName(currency)}
-            </p>
-          )}
-          <p className="hint">
-            Every total is converted into this one. Changing it recomputes them in the
-            background, so the amounts on screen stay the old ones until that finishes.
-          </p>
           {refill?.state === 'running' && (
-            <p role="status" className="hint">
+            <Notice role="status">
               Converting every amount into {refill.currency}. The other screens update when that finishes.
-            </p>
+            </Notice>
           )}
           {refill?.state === 'incomplete' && (
-            <p className="error" role="alert">
+            <Notice tone="warning" role="alert">
               {refill.unconverted === 1
                 ? `1 transaction has no amount in ${refill.currency} yet: no exchange rate could be fetched for it.`
                 : `${refill.unconverted} transactions have no amount in ${refill.currency} yet: no exchange rate could be fetched for them.`}
               {' '}Finto tries again later.
-            </p>
+            </Notice>
           )}
           {refill?.state === 'unreadable' && (
-            <p className="error" role="alert">
-              Error: could not tell whether the amounts are in {refill.currency} yet: {refill.error}{' · '}
-              <button className="btn-link" type="button" onClick={() => watchRefill(refill.currency)}>Retry</button>
-            </p>
+            <Notice tone="error" role="alert" remedy={
+              <Button type="button" variant="tertiary" size="standard" onClick={() => watchRefill(refill.currency)}>Retry</Button>
+            }>
+              Error: could not tell whether the amounts are in {refill.currency} yet: {refill.error}
+            </Notice>
           )}
 
-          <label className="setting-label" htmlFor="app-owners">Owner names</label>
+          <div className="settings-owner-group">
+          <div className="settings-owner-entry">
+            <Field id="app-owners" label="Owner names" control="input" controlProps={{
+              ref: ownerInput, value: ownerDraft, readOnly: busy,
+              'aria-describedby': 'app-owners-help',
+              onChange: (event) => { edit(); setOwnerDraft(event.target.value); },
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') { event.preventDefault(); addName(); }
+              },
+              placeholder: 'Add a name from a statement',
+            }} />
+            <Button type="button" variant="secondary" size="standard" aria-disabled={namesToAdd.length === 0 || busy} onClick={addName}>
+              Add name
+            </Button>
+          </div>
           {owners.length > 0 && (
             <ul className="settings-owner-tags" aria-label="Owner names on this form">
               {owners.map((tag) => (
                 <li className="settings-owner-tag" key={tag.id}>
                   <span>{tag.name}</span>
-                  <button
-                    type="button"
+                  <Button
+                    type="button" variant="tertiary" size="touch" iconOnly
                     aria-label={`Remove owner name ${tag.name}`}
-                    disabled={busy}
+                    aria-disabled={busy}
                     onClick={(event) => {
                       const item = event.currentTarget.closest('li');
                       const neighbour = (item?.nextElementSibling ?? item?.previousElementSibling)?.querySelector('button');
@@ -248,52 +255,30 @@ export function AppSettingsBlock({ onChanged = () => {} }: Props) {
                       edit();
                       setOwners((tags) => tags.filter((other) => other.id !== tag.id));
                     }}
-                  >×</button>
+                  ><CloseIcon /></Button>
                 </li>
               ))}
             </ul>
           )}
-          <div className="settings-owner-entry">
-            <input
-              ref={ownerInput}
-              id="app-owners"
-              className="input"
-              value={ownerDraft}
-              readOnly={busy}
-              onChange={(event) => {
-                edit();
-                setOwnerDraft(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  addName();
-                }
-              }}
-              placeholder="Add a name from a statement"
-            />
-            <button className="btn-ghost" type="button" aria-disabled={namesToAdd.length === 0 || busy} onClick={addName}>
-              Add name
-            </button>
-          </div>
-          <p className="hint">
+          <p className="settings-consequence" id="app-owners-help">
             Your name as your bank writes it in a statement. Without it a transfer between
             your own accounts is counted as income. Each spelling is its own name; a comma separates two.
           </p>
+          </div>
 
           <div className="settings-save-row">
-            <button className="btn" type="submit" aria-disabled={!dirty || busy}>
-              {busy ? 'Saving…' : 'Save changes'}
-            </button>
+            <Button type="submit" variant="primary" size="standard" pending={busy} aria-disabled={!dirty || busy}>
+              Save changes
+            </Button>
             {!error && (
-              <p role="status" className="settings-save-status">
+              <Notice role="status" tone={justSaved ? 'success' : 'neutral'} className="settings-save-status">
                 {busy ? 'Saving…' : justSaved ? 'All changes saved' : dirty ? 'Unsaved changes' : 'No changes to save'}
-              </p>
+              </Notice>
             )}
           </div>
-          {error && <p className="error" role="alert">Error: {error}</p>}
+          {error && <Notice tone="error" role="alert">Error: {error}</Notice>}
         </form>
       )}
-    </section>
+    </div>
   );
 }

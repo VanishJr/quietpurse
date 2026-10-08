@@ -27,7 +27,7 @@ const BASE: Routes = {
 
 const mount = () => renderThemed(<SettingsScreen onOpenImport={vi.fn()} />);
 const cardFor = (name: string) =>
-  screen.getByRole('heading', { name }).closest('section.settings-card') as HTMLElement;
+  screen.getByRole('heading', { name }).closest('section.settings-section') as HTMLElement;
 
 describe('the screen itself', () => {
   it('asks for the global settings reads and nothing else', async () => {
@@ -48,13 +48,13 @@ describe('the screen itself', () => {
     expect(screen.getByRole('heading', { name: 'Income sources' })).toBeInTheDocument();
   });
 
-  it('heads the page and keeps each block in its own ordered card', async () => {
+  it('uses the shared page header and keeps independent sections in reading order', async () => {
     mockFetch(BASE);
     const { container } = mount();
 
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
     expect(screen.getByText(/Set how Finto counts your money/)).toBeInTheDocument();
-    expect(Array.from(container.querySelectorAll('.settings-card h2'), (heading) => heading.textContent))
+    expect(Array.from(container.querySelectorAll('.settings-section h2'), (heading) => heading.textContent))
       .toEqual([
         'Financial setup',
         'Income sources',
@@ -62,10 +62,9 @@ describe('the screen itself', () => {
         'Data & backup',
         'Advanced · API connection',
       ]);
-    const top = container.querySelector('.settings-top');
-    expect(top?.children).toHaveLength(2);
-    expect(top).toContainElement(cardFor('Financial setup'));
-    expect(top).toContainElement(cardFor('Income sources'));
+    expect(screen.getByRole('heading', { name: 'Settings' }).closest('header')).toHaveClass('page-header');
+    expect(container.querySelector('.settings-top')).not.toBeInTheDocument();
+    expect(container.querySelector('.settings-card')).not.toBeInTheDocument();
     expect(within(cardFor('Financial setup')).getByText(/totals and income-based goals/))
       .toBeInTheDocument();
     expect(within(cardFor('Data & backup')).getByRole('button', { name: /^Export backup/ }))
@@ -141,6 +140,17 @@ describe('financial setup', () => {
 
   /** The anchor: no field exists until GET /api/app-settings came back. */
   const settled = () => screen.findByLabelText('Base currency');
+
+  it('associates interpretation guidance with both native financial controls', async () => {
+    mockFetch(BASE);
+    mount();
+    await settled();
+
+    expect(currency()).toHaveAccessibleDescription(/EUR · Euro.*Every total is converted/);
+    expect(owners()).toHaveAccessibleDescription(/Without it a transfer between your own accounts is counted as income/);
+    expect(currency().closest('.native-field')).toBeInTheDocument();
+    expect(owners().closest('.native-field')).toBeInTheDocument();
+  });
 
   it('shows the stored values', async () => {
     mockFetch(BASE);
@@ -609,7 +619,8 @@ describe('financial setup', () => {
 
     // a browser takes focus off a control disabled under it and jsdom does not, so what
     // is held here is that nothing the reader can be on turns disabled
-    expect(save).toHaveAccessibleName('Saving…');
+    expect(save).toHaveAccessibleName('Save changes');
+    expect(save).toHaveAttribute('data-pending', 'true');
     expect(save).not.toBeDisabled();
     expect(currency()).not.toBeDisabled();
     expect(owners()).not.toBeDisabled();
@@ -650,7 +661,7 @@ describe('financial setup', () => {
     const save = screen.getByRole('button', { name: 'Save changes' });
     const form = save.closest('form')!;
     fireEvent.submit(form);
-    expect(screen.getByRole('button', { name: 'Saving…' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toHaveAttribute('aria-disabled', 'true');
     expect(currency()).toHaveAttribute('readonly');
     expect(screen.getByRole('status')).toHaveTextContent('Saving…');
     fireEvent.submit(form);
@@ -787,6 +798,36 @@ describe('the data export', () => {
 });
 
 describe('the import history across every account', () => {
+  it('retains raw financial edits, pending owner text and tag identity behind history', async () => {
+    mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
+    mount();
+    const currency = await screen.findByLabelText('Base currency');
+    const entry = screen.getByLabelText('Owner names');
+    const tag = screen.getByRole('button', { name: 'Remove owner name Yurii Kalvenko' });
+    fireEvent.change(currency, { target: { value: ' usd ' } });
+    fireEvent.change(entry, { target: { value: ' Ana Lee, Lee Ana ,' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Import history' }));
+    await screen.findByRole('heading', { name: 'Import history' });
+    expect(currency).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Settings' }));
+    expect(currency).toBeVisible();
+    expect(currency).toHaveValue(' usd ');
+    expect(entry).toHaveValue(' Ana Lee, Lee Ana ,');
+    expect(screen.getByRole('button', { name: 'Remove owner name Yurii Kalvenko' })).toBe(tag);
+    expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+    expect(requests().filter((request) => request === 'GET /api/app-settings')).toHaveLength(1);
+    expect(requests()).not.toContain('PATCH /api/app-settings');
+  });
+
+  it('does not treat another screen’s account history as a Settings takeover', async () => {
+    mockFetch(BASE);
+    mount();
+    await screen.findByLabelText('Base currency');
+    act(() => setUrl({ screen: 'overview', panel: 'history' }));
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    expect(requests()).not.toContain('GET /api/imports');
+  });
+
   it('opens every account, and comes back', async () => {
     mockFetch({ ...BASE, 'GET /api/imports': () => ok(importsResponse([])) });
     mount();
