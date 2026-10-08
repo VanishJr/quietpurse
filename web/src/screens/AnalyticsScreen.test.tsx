@@ -17,6 +17,7 @@ import {
 } from '../test/harness';
 import { MonthlySummary, Summary } from '../types';
 import { AnalyticsScreen } from './AnalyticsScreen';
+import { ScreenShown } from '../screen';
 
 /**
  * The workspace: it starts with nothing on it, the wizard is what puts something there,
@@ -256,6 +257,15 @@ describe('contextual workspace controls', () => {
     expect(within(card).getByText(/^Period: 12 months/)).toHaveTextContent('Monthly totals');
     expect(await within(card).findByText('Units: UAH · Native account amounts')).toBeInTheDocument();
     expect(within(card).queryByText('Units: EUR')).not.toBeInTheDocument();
+  });
+
+  it('names a share breakdown even when the custom title hides the question', async () => {
+    seed([{ ...COLUMN_CHART, kind: 'donut', breakdown: 'income-sources', title: 'My question' }]);
+    mockFetch(ROUTES);
+    mount();
+    const card = await screen.findByRole('region', { name: 'My question' });
+    expect(within(card).getByText(/^Period:/)).toHaveTextContent('Income by source');
+    expect(await within(card).findByText('Units: EUR · Converted workspace amounts')).toBeVisible();
   });
 
   it.each(['column', 'radar'])('retains loaded request windows across rollover and a title-only %s edit', async (kind) => {
@@ -1390,6 +1400,46 @@ describe('what is sent, and when', () => {
     // blaming another device
     expect(screen.queryByRole('button', { name: 'Groceries' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Salary (copy)' })).toBeInTheDocument();
+  });
+
+  it('settles optimistic writes while the owning screen is hidden', async () => {
+    seed([COLUMN_CHART]);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    mockFetch({ ...ROUTES, 'PUT /api/analytics/charts': async (init) => { await held; return acceptPut(init); } });
+    const content = (shown: boolean) => <ScreenShown.Provider value={shown}><div className="screen" hidden={!shown}><AnalyticsScreen /></div></ScreenShown.Provider>;
+    const view = renderThemed(content(true));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions for Spending, monthly' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    expect(screen.getByText('Saving charts…')).toBeVisible();
+    view.rerender(<ThemeProvider>{content(false)}</ThemeProvider>);
+    await act(async () => release());
+    await waitFor(() => expect(puts).toHaveLength(1));
+    view.rerender(<ThemeProvider>{content(true)}</ThemeProvider>);
+    expect(screen.getByRole('heading', { name: 'Spending, monthly (copy)' })).toBeVisible();
+    expect(screen.queryByText('Saving charts…')).not.toBeInTheDocument();
+    expect(workspace.version).toBe(4);
+  });
+
+  it('drops queued intents on a stale refusal and never replays them as a retry', async () => {
+    seed([chart('c-a', 'Groceries'), chart('c-b', 'Salary')], 3);
+    let release!: (response: Response) => void;
+    const held = new Promise<Response>((resolve) => { release = resolve; });
+    mockFetch({ ...ROUTES, 'PUT /api/analytics/charts': () => held });
+    mount();
+    await screen.findByRole('heading', { name: 'Groceries' });
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Salary' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    workspace = { version: 4, charts: [chart('c-server', 'Current server chart')] };
+    await act(async () => release(fail(409, { error: 'changed elsewhere', ...workspace })));
+    expect(await screen.findByText(/changed somewhere else/)).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Current server chart' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Saving charts…')).not.toBeInTheDocument();
+    expect(callsTo('PUT /api/analytics/charts')).toBe(1);
   });
 
   it('goes on saving after a write failed in a way nothing planned for', async () => {

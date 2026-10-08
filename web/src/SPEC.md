@@ -413,7 +413,7 @@ totals on the same card. A refund can push a category negative, the purchase in 
 and the refund in this one, and that is the honest figure: a ranking has a baseline and prints it,
 and a donut or a radar has no such thing as a negative sector and drops it. `SharePoint.key` is the
 backend's slug or the income source's id, and `ChartPlot` takes the React key from it, and the
-colour too when the key is a category slug.
+colour too for a category breakdown, not for a coincidentally matching source id.
 
 `parseChart` reads a stored row field by field and answers null for a shape this version does not
 recognise, because a throw would take the whole screen down on first paint, and a row can have been
@@ -441,7 +441,7 @@ own data, rather than a mock that could disagree with it: a range is easier to j
 it produces than from its name. A fetch or a piece of state added to `ChartPlot` is one the preview
 and the card would each run for themselves.
 
-`ChartCard` keeps title, account scope, selected period and response currency beside its plot,
+`ChartCard` keeps title, account scope, selected period, breakdown and response currency beside its plot,
 including the comparison window where applicable. A custom title never replaces that financial
 context, and unreadable units remain unavailable rather than borrowed from the account catalog.
 Displayed calendar bounds travel with the loaded numbers; renaming a chart after a calendar
@@ -452,7 +452,11 @@ non-selected chart actions without changing the chart being read. Narrow layouts
 selector above the plot instead of a second bottom dock; primary navigation remains separate.
 Focus departure dismisses a lightweight action group without stealing the new focus, so
 keyboard traversal to another chart never leaves competing Escape owners. A deleted action owner
-restores focus to the stable workspace creation control.
+restores focus to the stable workspace creation control, as does contextual duplication when
+selection replaces its owner. Scroll dismissal follows actual anchor movement, not a delayed
+notification from the press that opened the group. A capped group reveals its safe focused
+action within its own scroll area rather than moving the chart behind it; coarse-pointer strip
+controls use the shared touch size.
 
 `AnalyticsScreen` exposes the save pump's unresolved lifecycle as Saving charts, including
 serialized later intents. Optimistic editor closure is not confirmation. A normal refusal retains
@@ -475,7 +479,12 @@ nothing holds the two literals equal; the rule is written beside `ChartPlot`'s c
 `ChartWizard` keeps `metrics` and `breakdown` in the draft across a change of shape, so switching a
 donut to a line and back does not quietly discard the half that was not being read, and the charts
 route takes both whatever the kind: `chartSchema` in `backend/src/app.ts` couples neither `metrics`
-nor `breakdown` to `kind` and sets no minimum on `metrics`.
+nor `breakdown` to `kind` and sets no minimum on `metrics`. Period is reader-facing vocabulary,
+not a renamed range field. Named native input and labeled choice groups associate guidance and
+incomplete choices without changing completion predicates. Unresolved, failed and missing account
+choices remain distinct; no choice silently retargets saved scope. Preview waiting and refusal live
+inside the inset, with retry only for a resolvable scope and stable orientation before replacing
+its control. The shared builder frame retains the primary scroll and action ownership.
 
 `AnalyticsScreen` holds no analysis of its own: it draws the charts the reader made, none of the
 app's choosing. It draws one of them at a time rather than a grid, because the reader who made a

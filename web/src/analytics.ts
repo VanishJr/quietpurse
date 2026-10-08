@@ -56,7 +56,7 @@ export const KIND_DEFS = {
   column: {
     name: 'Column',
     shape: 'series',
-    blurb: 'One bar per tick. For reading single months off against each other.',
+    blurb: 'One bar per period. For reading single months off against each other.',
   },
   area: {
     name: 'Area',

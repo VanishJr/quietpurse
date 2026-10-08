@@ -29,6 +29,48 @@ describe('ChartControls', () => {
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
   });
 
+  it('reveals safe confirmation focus inside a capped menu without scrolling its owner', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const isMenu = this.classList.contains('dock-menu');
+      const y = this.closest('.dock-menu-row') ? 210 : 20;
+      const top = isMenu ? 0 : y;
+      const height = isMenu ? 100 : 44;
+      return { x: 0, y: top, left: 0, right: 288, top, bottom: top + height, width: 288, height, toJSON: () => ({}) };
+    });
+    const { container } = renderThemed(<div className="screen"><ChartControls {...props()} contextual /></div>);
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for A' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus();
+    expect(screen.getByRole('group', { name: 'Actions for A' }).scrollTop).toBe(158);
+    expect(container.querySelector('.screen')?.scrollTop).toBe(0);
+  });
+
+  it('ignores late opening scroll events but dismisses when the anchor actually moves', () => {
+    let top = 20;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const y = this.tagName === 'BUTTON' ? top : 0;
+      return { x: 0, y, left: 0, right: 40, top: y, bottom: y + 40, width: 40, height: 40, toJSON: () => ({}) };
+    });
+    renderThemed(<ChartControls {...props()} contextual />);
+    const trigger = screen.getByRole('button', { name: 'More actions for A' });
+    fireEvent.click(trigger);
+    fireEvent.scroll(document);
+    expect(screen.getByRole('group', { name: 'Actions for A' })).toBeInTheDocument();
+    top = 40;
+    fireEvent.scroll(document);
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('uses a stable fallback when contextual duplication replaces its action owner', () => {
+    const callbacks = props();
+    renderThemed(<><button id="survivor">Survivor</button><ChartControls {...callbacks} contextual /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'More actions for A' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    expect(callbacks.onDuplicate).toHaveBeenCalledExactlyOnceWith('c-a');
+    expect(screen.getByRole('button', { name: 'Survivor' })).toHaveFocus();
+  });
+
   it('releases the previous owner when the keyboard reaches another chart trigger', () => {
     renderThemed(<><ChartControls {...props()} /><ChartControls {...props()} id="c-b" label="B" /></>);
     const a = screen.getByRole('button', { name: 'Actions for A' });

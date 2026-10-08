@@ -37,6 +37,59 @@ const chooseLine = () => fireEvent.click(screen.getByRole('button', { name: 'Lin
 const back = () => fireEvent.click(screen.getByRole('button', { name: 'Change shape' }));
 const cancel = () => fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
+describe('ChartWizard field and preview context', () => {
+  it('names Period without changing range serialization and associates incomplete fields', () => {
+    const save = vi.fn();
+    mockFetch(previewRoutes);
+    renderThemed(wizard(null, vi.fn(), save));
+    chooseLine();
+    expect(screen.getByRole('group', { name: 'Period' })).toHaveAccessibleDescription('The window includes the current calendar period.');
+    expect(screen.queryByText('Ticks')).not.toBeInTheDocument();
+    const name = screen.getByRole('textbox', { name: 'Chart name' });
+    expect(name).toHaveAccessibleDescription('Suggested until you type your own name.');
+    fireEvent.change(name, { target: { value: '' } });
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    expect(name).toHaveAccessibleDescription('Suggested until you type your own name. Enter a chart name.');
+    fireEvent.click(screen.getByRole('button', { name: 'Expenses' }));
+    const measures = screen.getByRole('group', { name: 'Measures' });
+    expect(measures).toHaveAttribute('aria-invalid', 'true');
+    expect(measures).toHaveAccessibleDescription('Pick at least one.');
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: 'Named chart' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Income' }));
+    fireEvent.click(screen.getByRole('button', { name: '3 years' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create chart' }));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ title: 'Named chart', range: '3y', metrics: ['income'] }));
+  });
+
+  it('distinguishes delayed account choices from a missing saved account without retargeting it', async () => {
+    mockFetch(previewRoutes);
+    const view = renderThemed(<ChartWizard open editing={{ ...CHART, accountId: 'gone' }} accounts={null} accountsError={null} onClose={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByText('Reading account choices…')).toBeVisible();
+    expect(screen.queryByText(/Saved account gone is unavailable/)).not.toBeInTheDocument();
+    view.rerender(<ThemeProvider>{wizard({ ...CHART, accountId: 'gone' })}</ThemeProvider>);
+    expect(await screen.findByText(/Saved account gone is unavailable/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'All accounts' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: 'Retry preview' })).not.toBeInTheDocument();
+    expect(requests()).toHaveLength(0);
+  });
+
+  it('retries a refused preview without resetting draft values or losing orientation', async () => {
+    let down = true;
+    mockFetch({ ...previewRoutes, 'GET /api/summary/months': () => down ? fail(503, { error: 'preview unavailable' }) : ok(MONTHS) });
+    renderThemed(wizard(CHART));
+    fireEvent.change(screen.getByLabelText('Chart name'), { target: { value: 'My draft remains' } });
+    const retry = await screen.findByRole('button', { name: 'Retry preview' });
+    down = false;
+    fireEvent.click(retry);
+    expect(screen.getByRole('heading', { name: 'Preview' })).toHaveFocus();
+    await waitFor(() => expect(screen.queryByText('Reading the numbers…')).not.toBeInTheDocument());
+    expect(screen.queryByText('preview unavailable')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Chart name')).toHaveValue('My draft remains');
+    expect(requests()).toEqual(['GET /api/summary/months', 'GET /api/summary/months']);
+  });
+});
+
 describe('ChartWizard drafts', () => {
   it.each(['Cancel', 'Close dialog', 'Escape'])(
     'closes a pristine new draft via %s without guarding generated id or name',

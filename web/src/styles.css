@@ -2621,7 +2621,6 @@ textarea {
   scrollbar-width: none;
   /* the focus ring on the first and last tab has somewhere to be drawn */
   padding: 3px;
-  margin: -3px;
   /* the arrows either side of this move it, and a jump of most of a row with no travel
      is hard to follow; the reduced-motion block at the top of this file turns it off */
   scroll-behavior: smooth;
@@ -2750,6 +2749,18 @@ textarea {
 .dock-more:hover,
 .dock-more[aria-expanded='true'] {
   opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .chart-dock .dock-arrow,
+  .chart-dock .dock-more {
+    min-width: var(--control-touch);
+    min-height: var(--control-touch);
+  }
+
+  .chart-dock .dock-open {
+    min-height: var(--control-touch);
+  }
 }
 
 /*
@@ -2884,11 +2895,9 @@ textarea {
 .wiz-legend,
 .wiz-preview-label {
   padding: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--ink-primary);
 }
 
 /* straight under the legend: there is no line of explanation between them any more */
@@ -2896,12 +2905,8 @@ textarea {
   margin-top: 7px;
 }
 
-/* under the chips it is about, not at the foot of the form beside the button it
-   disables: the reader is looking at the thing they just switched off */
-.wiz-error {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.35;
+.wiz-chips .chip {
+  overflow-wrap: anywhere;
 }
 
 .wiz-preview {
@@ -2916,11 +2921,6 @@ textarea {
 .wiz-preview-label {
   display: block;
   margin: 0 0 4px;
-}
-
-.wiz-preview-note {
-  margin: 28px 0;
-  text-align: center;
 }
 
 .chart-wrap {

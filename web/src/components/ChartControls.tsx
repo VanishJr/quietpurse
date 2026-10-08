@@ -18,6 +18,7 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const anchor = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const anchorBox = useRef<DOMRect | null>(null);
   const menuId = useId();
 
   const close = (restore = true) => {
@@ -33,6 +34,7 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   useLayoutEffect(() => {
     if (!open || !anchor.current || !menu.current) return;
     const box = anchor.current.getBoundingClientRect();
+    anchorBox.current = box;
     const popup = menu.current.getBoundingClientRect();
     const above = box.top - popup.height - 6;
     const wantedTop = contextual ? box.bottom + 6 : above;
@@ -40,13 +42,27 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       left: Math.max(8, Math.min(box.right - popup.width, window.innerWidth - popup.width - 8)),
       top: Math.max(8, Math.min(wantedTop, window.innerHeight - popup.height - 8)),
     });
-    menu.current.querySelector<HTMLButtonElement>('button')?.focus();
+    const first = menu.current.querySelector<HTMLButtonElement>('button');
+    if (first) {
+      first.focus({ preventScroll: true });
+      const frame = menu.current.getBoundingClientRect();
+      const control = first.getBoundingClientRect();
+      // Reveal the safe action within its group without scrolling the owning chart.
+      if (control.bottom > frame.bottom - 4) menu.current.scrollTop += control.bottom - frame.bottom + 4;
+      else if (control.top < frame.top + 4) menu.current.scrollTop -= frame.top - control.top + 4;
+    }
   }, [open, confirming, contextual]);
 
   useEffect(() => {
     if (!open) return;
     const moved = (event: Event) => {
       if (event.target instanceof Node && menu.current?.contains(event.target)) return;
+      if (event.type === 'scroll' && anchor.current && anchorBox.current) {
+        const now = anchor.current.getBoundingClientRect();
+        const at = anchorBox.current;
+        // A delayed opening scroll notification is not a moved anchor.
+        if (now.top === at.top && now.right === at.right && now.bottom === at.bottom) return;
+      }
       close();
     };
     const departed = (event: FocusEvent) => {
@@ -64,8 +80,9 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   }, [open]);
 
   const act = (action: (id: string) => void, deleting = false) => {
-    close(!deleting);
-    if (deleting) fallbackFocus()?.focus();
+    const losesAnchor = deleting || (contextual && action === onDuplicate);
+    close(!losesAnchor);
+    if (losesAnchor) fallbackFocus()?.focus();
     action(id);
   };
 

@@ -5,7 +5,7 @@
  * nobody finishes. Split, the first step is one click and the second is a page of chips
  * with every default already filled in.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   BREAKDOWNS,
   CHART_KINDS,
@@ -24,6 +24,8 @@ import { ChartPlot } from './ChartPlot';
 import { Sheet } from './Sheet';
 import { Button } from './Button';
 import { FormActions } from './FormActions';
+import { Field } from './Field';
+import { Notice } from './Notice';
 
 const PREVIEW_HEIGHT = 190;
 
@@ -237,6 +239,7 @@ function DetailStep({
   patch: (change: Partial<Chart>) => void;
   onName: (title: string) => void;
 }) {
+  const nameId = useId();
   const isSeries = chartKind(draft.kind).shape === 'series';
   const missing = incomplete(draft);
   /*
@@ -286,7 +289,7 @@ function DetailStep({
 
       <div className="wiz-split">
         <div className="wiz-form">
-          <Field label="Account">
+          <ChoiceGroup label="Account" help="All accounts use converted workspace amounts. One account uses its native currency.">
             <div className="chip-wrap wiz-chips">
               <Choice
                 label="All accounts"
@@ -304,10 +307,13 @@ function DetailStep({
                 />
               ))}
             </div>
-          </Field>
+          </ChoiceGroup>
+          {accounts === null && !accountsError && <Notice role="status">Reading account choices…</Notice>}
+          {accountsError && <Notice tone="error">Account choices could not be read: {accountsError}. All accounts remains available.</Notice>}
+          {accounts !== null && draft.accountId !== null && accountName === null && <Notice tone="warning">Saved account {draft.accountId} is unavailable. Choose another account or All accounts.</Notice>}
 
           {isSeries ? (
-            <Field label="Measures">
+            <ChoiceGroup label="Measures" error={missing ? 'Pick at least one.' : undefined}>
               <div className="chip-wrap wiz-chips">
                 {METRICS.map((m) => (
                   <Choice
@@ -318,13 +324,9 @@ function DetailStep({
                   />
                 ))}
               </div>
-              {/* the refusal sits under the chips it is about, and the submit is
-                  disabled beside it — a reader who has cleared them all is told so
-                  here rather than by a button that does nothing when pressed */}
-              {missing && <p className="error wiz-error">Pick at least one.</p>}
-            </Field>
+            </ChoiceGroup>
           ) : (
-            <Field label="Split by">
+            <ChoiceGroup label="Split by">
               <div className="chip-wrap wiz-chips">
                 {breakdowns.map((b) => (
                   <Choice
@@ -335,10 +337,10 @@ function DetailStep({
                   />
                 ))}
               </div>
-            </Field>
+            </ChoiceGroup>
           )}
 
-          <Field label="Ticks">
+          <ChoiceGroup label="Period" help="The window includes the current calendar period.">
             <div className="chip-wrap wiz-chips">
               {RANGES.map((r) => (
                 <Choice
@@ -349,26 +351,14 @@ function DetailStep({
                 />
               ))}
             </div>
-          </Field>
+          </ChoiceGroup>
 
-          <Field label="Name">
-            <input
-              className="input"
-              value={draft.title}
-              /* the door's own bound, at the keyboard. `normaliseForSave` would cut
-                 what is past it on the way out instead, which is a word going missing
-                 from a tab later where this is a keystroke not appearing under the
-                 caret */
-              maxLength={CHART_TITLE_MAX}
-              onChange={(e) => onName(e.target.value)}
-              placeholder={suggestedTitle(draft, accountName)}
-              aria-label="Chart name"
-            />
-          </Field>
+          <Field id={nameId} label="Chart name" control="input" help="Suggested until you type your own name." error={draft.title.trim() === '' ? 'Enter a chart name.' : undefined}
+            controlProps={{ value: draft.title, maxLength: CHART_TITLE_MAX, onChange: (event) => onName(event.target.value), placeholder: suggestedTitle(draft, accountName) }} />
         </div>
 
         <div className="wiz-preview">
-          <p className="wiz-preview-label">Preview</p>
+          <h4 className="wiz-preview-label" tabIndex={-1}>Preview</h4>
           <Preview
             draft={draft}
             accounts={accounts}
@@ -392,26 +382,27 @@ function Preview({
   accountsError: string | null;
   dataRevision: number;
 }) {
+  const [retry, setRetry] = useState(0);
   const { data, error, loading } = useChartData(
     draft,
     accounts,
     accountsError,
-    dataRevision,
+    dataRevision + retry,
   );
-  if (error) return <p className="error wiz-preview-note">{error}</p>;
-  if (loading || !data) return <p className="hint wiz-preview-note">Reading the numbers…</p>;
+  const canRetry = draft.accountId === null || (accountsError === null && accounts?.some((account) => account.id === draft.accountId));
+  if (error) return <Notice tone="error" role="alert" remedy={canRetry && <Button type="button" variant="secondary" size="compact" onClick={(event) => { event.currentTarget.closest('.wiz-preview')?.querySelector<HTMLElement>('h4')?.focus(); setRetry((value) => value + 1); }}>Retry preview</Button>}>{error}</Notice>;
+  if (loading || !data) return <Notice role="status">Reading the numbers…</Notice>;
   return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} ground="page" />;
 }
 
-/**
- * A label and its controls, and nothing between them: a caption over a row of chips
- * says what the words on the chips already say.
- */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function ChoiceGroup({ label, help, error, children }: { label: string; help?: string; error?: string; children: React.ReactNode }) {
+  const id = useId();
   return (
-    <fieldset className="wiz-field">
+    <fieldset className="wiz-field choice-chips" aria-invalid={!!error || undefined} aria-describedby={[help && `${id}-help`, error && `${id}-error`].filter(Boolean).join(' ') || undefined}>
       <legend className="wiz-legend">{label}</legend>
       {children}
+      {help && <p id={`${id}-help`} className="native-field__help">{help}</p>}
+      {error && <p id={`${id}-error`} className="native-field__error">{error}</p>}
     </fieldset>
   );
 }
@@ -421,7 +412,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * not, and one control that says "on/off" serves both.
  */
 const Choice = ({ label, on, onPick }: { label: string; on: boolean; onPick: () => void }) => (
-  <button className="chip" aria-pressed={on} onClick={onPick}>
+  <button type="button" className="chip" aria-pressed={on} onClick={onPick}>
     {label}
   </button>
 );
