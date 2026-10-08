@@ -116,7 +116,7 @@ describe('GoalsScreen', () => {
     expect(requests().filter((request) => request === 'PUT /api/goals/goal-savings')).toHaveLength(1);
   });
 
-  it('recovers focus when a delayed first-goal refresh removes the empty-state opener', async () => {
+  it.each([false, true])('recovers first-goal orientation without an empty claim or stealing a chosen action (chosen: %s)', async (chosen) => {
     let reads = 0;
     let finish!: (response: Response) => void;
     const saved = { ...SAVINGS_GOAL, type: 'monthly-income', name: 'Salary target', target: 3000, incomeScope: 'own', windowMonths: 6 };
@@ -135,10 +135,17 @@ describe('GoalsScreen', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Monthly target (EUR)' }), { target: { value: '3000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create goal' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(opener).toHaveFocus();
+    expect(opener).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Updating goals…');
+    expect(screen.queryByText('No goals yet.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create a goal' })).not.toBeInTheDocument();
+    const heading = screen.getByRole('heading', { name: 'Goals' });
+    expect(heading).toHaveFocus();
+    const action = screen.getByRole('button', { name: 'New goal' });
+    if (chosen) action.focus();
     await act(async () => finish(ok({ goals: [saved] })));
     await screen.findByRole('button', { name: 'Edit Salary target' });
-    expect(screen.getByRole('heading', { name: 'Goals' })).toHaveFocus();
+    expect(chosen ? action : heading).toHaveFocus();
   });
 
   it('keeps post-save focus recovery through a failed refresh and a successful Retry', async () => {

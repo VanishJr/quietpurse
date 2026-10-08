@@ -38,12 +38,12 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
     const intent = postWriteFocus.current;
     if (!intent) return;
     const replaced = goals !== null && goals !== intent.list;
-    if (!replaced && !error) return;
+    if (!replaced && !error && !refreshing) return;
     if (replaced) postWriteFocus.current = null;
     if (document.activeElement === document.body && !titleRef.current?.closest('[hidden], [inert]')) {
       titleRef.current?.focus();
     }
-  }, [goals, error]);
+  }, [goals, error, refreshing]);
 
   const load = useCallback(async (initial = false) => {
     const generation = ++loadGeneration.current;
@@ -90,7 +90,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
 
   return (
     <section className="screen-inner goals-screen">
-      <PageHeader title="Goals" titleRef={titleRef} action={goals?.length === 0 && !error ? undefined : (
+      <PageHeader title="Goals" titleRef={titleRef} action={goals?.length === 0 && !error && !refreshing ? undefined : (
         <Button type="button" variant="primary" size="standard" disabled={goals === null}
           onClick={() => { setNotice(null); setUrl({ screen: 'goal', goal: 'new' }); }}>
           New goal
@@ -109,7 +109,7 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
           Couldn’t load goals: {error}
         </Notice>
       )}
-      {goals !== null && goals.length === 0 && !error && (
+      {goals !== null && goals.length === 0 && !error && !refreshing && (
         <div className="empty-state goals-empty">
           <h2>No goals yet.</h2>
           <p>Create one to track progress from your financial data.</p>
