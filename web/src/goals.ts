@@ -43,7 +43,7 @@ export const GOAL_INCOME_SCOPE_DEFS = {
 } satisfies Record<GoalIncomeScope, string>;
 
 export const GOAL_STATUS_LABELS = {
-  tracking: '',
+  tracking: 'Tracking',
   reached: 'Reached',
   'needs-setup': 'Needs setup',
   'not-enough-data': 'Not enough data',
@@ -93,8 +93,17 @@ export const progressLabel = (progress: GoalProgress): string => {
   }
 };
 
-export const remainingLabel = (progress: GoalProgress): string =>
-  progress.overBy !== null && progress.overBy > 0 ? 'Over by' : 'Left';
+export const remainingLabel = (progress: GoalProgress): string => {
+  const over = progress.overBy !== null && progress.overBy > 0;
+  switch (progress.semantic) {
+    case 'completion':
+      return over ? 'Above target' : 'Left';
+    case 'used':
+      return over ? 'Over limit' : 'Available';
+    default:
+      return assertNever(progress.semantic);
+  }
+};
 
 export const goalStatusMessage = (goal: GoalSummary): string | null => {
   switch (goal.progress.status) {

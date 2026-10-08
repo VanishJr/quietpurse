@@ -102,7 +102,15 @@ because it can mean missing history or an unconverted row. Editing reads the com
 from `/api/goals/:id`; the goal type is fixed after creation, and Financial independence costs are
 replaced atomically with that configuration. The screen uses the shared `screen-inner` gutter at
 its root, and each card's Edit and Delete controls include the goal name in their accessible name,
-so narrow layouts and assistive action lists keep the card context.
+so narrow layouts and assistive action lists keep the card context. Name and explicit server status
+lead each summary; current and target values precede period, source and support context. Completion
+surplus reads as Above target, while spending consumption reads as Used and Over limit rather than
+completion. Only the server's excess chooses the surplus figure. The progressbar clamps its numeric
+range but retains the supplied percentage's meaning in text; unavailable progress remains
+indeterminate. Ordinary figures remain neutral, with independent favorable and over-limit roles.
+Narrow summaries stack their principal value before supporting metrics, keeping currency attached
+and allowing only an oversized value to scroll. Edit and lower-emphasis Delete belong to the goal,
+not its headline; final deletion retains goal-only consequences and safe initial focus.
 
 **A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
 goal are one retryable load; a new attempt clears the previous account list and currency before any

@@ -4,6 +4,7 @@ import { useEditorSession } from '../editor';
 import { Button } from '../components/Button';
 import { FormActions } from '../components/FormActions';
 import { Notice } from '../components/Notice';
+import { PageHeader } from '../components/PageHeader';
 import { GoalCard } from '../components/GoalCard';
 import { GoalEditor } from '../components/GoalEditor';
 import { Sheet } from '../components/Sheet';
@@ -84,46 +85,33 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   };
 
   return (
-    <section className="screen-inner">
-      <header className="header goals-header">
-        <div>
-          <h1 ref={titleRef} tabIndex={-1}>Goals</h1>
-        </div>
-        <button
-          className="btn btn-primary"
-          disabled={goals === null}
-          onClick={() => {
-            setNotice(null);
-            setUrl({ screen: 'goal', goal: 'new' });
-          }}
-        >
+    <section className="screen-inner goals-screen">
+      <PageHeader title="Goals" titleRef={titleRef} action={goals?.length === 0 && !error ? undefined : (
+        <Button type="button" variant="primary" size="standard" disabled={goals === null}
+          onClick={() => { setNotice(null); setUrl({ screen: 'goal', goal: 'new' }); }}>
           New goal
-        </button>
-      </header>
+        </Button>
+      )} />
 
-      {goals === null && !error && <p className="state-note">Loading goals…</p>}
-      {notice && <p className="state-note" role="status">{notice}</p>}
+      {goals === null && !error && <Notice placement="content" role="status">Loading goals…</Notice>}
+      {notice && <Notice role="status">{notice}</Notice>}
       {error && (
-        <div className="error-row" role="alert">
-          <span>Couldn’t load goals: {error}</span>
-          <button className="btn btn-small" onClick={() => { titleRef.current?.focus(); void load(true); }}>
+        <Notice tone="error" placement="content" role="alert" remedy={
+          <Button type="button" variant="secondary" size="standard" onClick={() => { titleRef.current?.focus(); void load(true); }}>
             Retry
-          </button>
-        </div>
+          </Button>
+        }>
+          Couldn’t load goals: {error}
+        </Notice>
       )}
       {goals !== null && goals.length === 0 && !error && (
         <div className="empty-state goals-empty">
           <h2>No goals yet.</h2>
           <p>Create one to track progress from your financial data.</p>
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setNotice(null);
-              setUrl({ screen: 'goal', goal: 'new' });
-            }}
-          >
+          <Button type="button" variant="primary" size="standard"
+            onClick={() => { setNotice(null); setUrl({ screen: 'goal', goal: 'new' }); }}>
             Create a goal
-          </button>
+          </Button>
         </div>
       )}
       {goals !== null && goals.length > 0 && (
@@ -166,16 +154,15 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
         busy={deleting}
         restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
         title={deleteTarget ? `Delete ${deleteTarget.name}` : 'Delete goal'}
-      >
-        {deleteTarget && (
+        header={deleteTarget && <h2>Delete “{deleteTarget.name}”?</h2>}
+        initialFocus={() => document.querySelector<HTMLElement>('[data-goal-delete-cancel]')}
+        footer={deleteTarget && (
           <>
-            <h2>Delete “{deleteTarget.name}”?</h2>
-            <p className="body-text">This removes the goal only. Accounts and transactions are unchanged.</p>
             {deleteError && <Notice tone="error" role="alert">{deleteError}</Notice>}
             {deleting && <Notice role="status">Deleting goal…</Notice>}
             <FormActions
               cancel={
-                <Button type="button" variant="secondary" size="standard" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+                <Button data-goal-delete-cancel type="button" variant="secondary" size="standard" disabled={deleting} onClick={deleteEditor.requestClose}>
                   Cancel
                 </Button>
               }
@@ -186,6 +173,10 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
               }
             />
           </>
+        )}
+      >
+        {deleteTarget && (
+          <p className="body-text">This removes the goal only. Accounts and transactions are unchanged.</p>
         )}
       </Sheet>
     </section>
