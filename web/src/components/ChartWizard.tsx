@@ -289,7 +289,7 @@ function DetailStep({
 
       <div className="wiz-split">
         <div className="wiz-form">
-          <ChoiceGroup label="Account" help="All accounts use converted workspace amounts. One account uses its native currency.">
+          <ChoiceGroup label="Account">
             <div className="chip-wrap wiz-chips">
               <Choice
                 label="All accounts"
@@ -340,7 +340,7 @@ function DetailStep({
             </ChoiceGroup>
           )}
 
-          <ChoiceGroup label="Period" help="The window includes the current calendar period.">
+          <ChoiceGroup label="Period">
             <div className="chip-wrap wiz-chips">
               {RANGES.map((r) => (
                 <Choice
@@ -353,7 +353,7 @@ function DetailStep({
             </div>
           </ChoiceGroup>
 
-          <Field id={nameId} label="Chart name" control="input" help="Suggested until you type your own name." error={draft.title.trim() === '' ? 'Enter a chart name.' : undefined}
+          <Field id={nameId} label="Chart name" control="input" error={draft.title.trim() === '' ? 'Enter a chart name.' : undefined}
             controlProps={{ value: draft.title, maxLength: CHART_TITLE_MAX, onChange: (event) => onName(event.target.value), placeholder: suggestedTitle(draft, accountName) }} />
         </div>
 
@@ -395,13 +395,12 @@ function Preview({
   return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} ground="page" />;
 }
 
-function ChoiceGroup({ label, help, error, children }: { label: string; help?: string; error?: string; children: React.ReactNode }) {
+function ChoiceGroup({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   const id = useId();
   return (
-    <fieldset className="wiz-field choice-chips" aria-invalid={!!error || undefined} aria-describedby={[help && `${id}-help`, error && `${id}-error`].filter(Boolean).join(' ') || undefined}>
+    <fieldset className="wiz-field choice-chips" aria-invalid={!!error || undefined} aria-describedby={error ? `${id}-error` : undefined}>
       <legend className="wiz-legend">{label}</legend>
       {children}
-      {help && <p id={`${id}-help`} className="native-field__help">{help}</p>}
       {error && <p id={`${id}-error`} className="native-field__error">{error}</p>}
     </fieldset>
   );

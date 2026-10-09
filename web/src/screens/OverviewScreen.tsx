@@ -499,12 +499,6 @@ export function OverviewScreen({
           </div>
         )}
 
-        {selected && mine && !selected.hidden && figures && (
-          <p className="ov-footnote">
-            Transfers affect your balance, but are excluded from income and expenses.
-          </p>
-        )}
-
         {dialog && (
           <AccountDialog
             kind={dialog.kind}

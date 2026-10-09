@@ -55,7 +55,7 @@ describe('the screen itself', () => {
     const { container } = mount();
 
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/Set how Finto counts your money/)).toBeInTheDocument();
+    expect(container.querySelector('.page-header__context')).toBeNull();
     expect(Array.from(container.querySelectorAll('.settings-section h2'), (heading) => heading.textContent))
       .toEqual([
         'Financial setup',
@@ -148,7 +148,7 @@ describe('financial setup', () => {
     mount();
     await settled();
 
-    expect(currency()).toHaveAccessibleDescription(/EUR · Euro.*Every total is converted/);
+    expect(currency()).toHaveAccessibleDescription('EUR · Euro');
     expect(owners()).toHaveAccessibleDescription(/Without it a transfer between your own accounts is counted as income/);
     expect(currency().closest('.native-field')).toBeInTheDocument();
     expect(owners().closest('.native-field')).toBeInTheDocument();

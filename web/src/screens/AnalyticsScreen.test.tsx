@@ -323,7 +323,7 @@ describe('contextual workspace controls', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More actions for Spending, monthly' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(screen.getByRole('button', { name: 'Keep' })).toHaveFocus();
-    expect(screen.getByText(/Accounts and transactions stay/)).toBeVisible();
+    expect(screen.getByText('Delete “Spending, monthly”?')).toBeVisible();
     expect(puts).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await screen.findByText('Nothing plotted yet')).toBeInTheDocument();

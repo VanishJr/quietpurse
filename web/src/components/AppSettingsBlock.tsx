@@ -186,13 +186,9 @@ export function AppSettingsBlock({ onChanged = () => {} }: Props) {
       {stored && (
         <form onSubmit={save}>
           <Field id="app-currency" label="Base currency" control="input" className="settings-currency-field"
-            help={<>
-              {currencyName(currency) && <span className="settings-currency-name">
-                {currency.trim().toUpperCase()} · {currencyName(currency)}
-              </span>}
-              Every total is converted into this one. Changing it recomputes them in the
-              background, so the amounts on screen stay the old ones until that finishes.
-            </>}
+            help={currencyName(currency) && <span className="settings-currency-name">
+              {currency.trim().toUpperCase()} · {currencyName(currency)}
+            </span>}
             controlProps={{
               className: 'settings-currency-input', list: 'settings-currencies', value: currency,
               readOnly: busy, onChange: (event) => { edit(); setCurrency(event.target.value); }, placeholder: 'EUR',

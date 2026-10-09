@@ -989,15 +989,13 @@ describe('one account, filtered by the server', () => {
     expect(screen.getAllByText('statement.csv')).toHaveLength(2);
   });
 
-  it('states the order and withholds nothing when the page is the whole of it', async () => {
+  it('says nothing about the order when the page is the whole of it', async () => {
     // importsResponse derives its totals from the records, so this is the whole page
     mockFetch(BASE);
     mountFor(ACCOUNT);
     await screen.findByText('statement.csv');
 
-    // on the clause and not on the paragraph: the line prints on both arms, so
-    // asserting the paragraph is absent would pass on any wording at all
-    expect(screen.getByText('Newest first.')).toBeInTheDocument();
+    expect(screen.queryByText(/Newest first/)).toBeNull();
     // the withheld count is what this arm may not carry, and the sentence this
     // one replaced said it unconditionally
     expect(screen.queryByText(/not listed/)).toBeNull();

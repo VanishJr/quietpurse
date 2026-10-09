@@ -137,8 +137,7 @@ describe('the Import page foundation', () => {
     mount();
 
     expect(screen.getByRole('heading', { level: 1, name: 'Import a statement' })).toBeInTheDocument();
-    expect(screen.getByText('Bring in a CSV, Excel or PDF statement. Finto reads it on this device.'))
-      .toBeInTheDocument();
+    expect(document.querySelector('.page-header__context')).toBeNull();
 
     const setup = screen.getByRole('region', { name: 'Set up your import' });
     expect(within(setup).getByRole('button', { name: /choose a CSV, Excel or PDF/i })).toBeInTheDocument();
@@ -203,9 +202,6 @@ describe('the setup steps', () => {
     expect(disclosure.querySelector('[aria-label="Statement preset"]')).toBeInTheDocument();
     openPresets();
     expect(within(disclosure).getByRole('group', { name: 'Statement preset' })).toBeInTheDocument();
-    expect(within(disclosure).getByText(
-      'Pick your bank if it\'s listed. "Any statement" reads the header and finds the date, amount and description columns on its own — try it first.',
-    )).toBeInTheDocument();
   });
 
   it('shows every server preset with Any statement initially pressed', async () => {

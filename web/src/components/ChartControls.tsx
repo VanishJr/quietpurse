@@ -117,7 +117,6 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
           {confirming ? (
             <>
               <p className="dock-menu-ask">Delete “{label}”?</p>
-              <p className="dock-menu-ask">Only this saved chart is removed. Accounts and transactions stay.</p>
               <div className="dock-menu-row">
                 <Button type="button" variant="secondary" size="compact" onClick={() => setConfirming(false)}>Keep</Button>
                 <Button type="button" variant="destructive-primary" size="compact" onClick={() => act(onDelete, true)}>Delete</Button>

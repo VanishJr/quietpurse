@@ -444,7 +444,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     <section className="screen-inner import-page">
       <PageHeader
         title="Import a statement"
-        context="Bring in a CSV, Excel or PDF statement. Finto reads it on this device."
         returnAction={
           <Button type="button" variant="tertiary" size="compact"
             aria-disabled={busy} onClick={() => { if (!busyAction.current) onBack(); }}>
@@ -459,7 +458,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             <h2 id={`${id}-setup-heading`} ref={setupHeading} tabIndex={-1}>Set up your import</h2>
             <div className="import-step" aria-labelledby={`${id}-file-heading`}>
               <h3 id={`${id}-file-heading`} className="import-step-heading">Choose a file</h3>
-              <p className="import-step-lead">Choose a statement from your bank, or drop it below.</p>
               <Button
                 type="button" variant="secondary" size="standard"
                 className={`import-dropzone${dragging ? ' import-dropzone-active' : ''}${file ? ' import-dropzone-selected' : ''}`}
@@ -540,21 +538,15 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 <Notice role="status">Loading your accounts…</Notice>
               )}
               {accounts !== null && accounts.length > 0 && (
-                <>
-                  <Chips
-                    label="Account for this import"
-                    options={[
-                      ...accounts.map((a) => ({ key: chipKey(a.id), label: a.name })),
-                      { key: NEW_ACCOUNT, label: '+ New account' },
-                    ]}
-                    selected={pickedKey ?? ''}
-                    onSelect={(key) => { if (!busyAction.current) setPickedKey(key); }}
-                  />
-                  <p className="import-help">
-                    Pick the account this statement belongs to — its rows join what's already
-                    there, and nothing is duplicated.
-                  </p>
-                </>
+                <Chips
+                  label="Account for this import"
+                  options={[
+                    ...accounts.map((a) => ({ key: chipKey(a.id), label: a.name })),
+                    { key: NEW_ACCOUNT, label: '+ New account' },
+                  ]}
+                  selected={pickedKey ?? ''}
+                  onSelect={(key) => { if (!busyAction.current) setPickedKey(key); }}
+                />
               )}
               {accounts !== null && (
                 <p className="import-help">Hidden accounts aren't listed here — unhide one first.</p>
@@ -585,10 +577,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 selected={preset}
                 onSelect={(key) => { if (!busyAction.current) setPreset(key); }}
               />
-              <p className="import-help">
-                Pick your bank if it's listed. "Any statement" reads the header and finds the
-                date, amount and description columns on its own — try it first.
-              </p>
             </details>
             <div className="import-submit">
               <p>No transactions are added until you review and confirm.</p>

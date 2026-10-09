@@ -246,7 +246,7 @@ export function SettingsScreen({
       )}
       <ScreenShown.Provider value={shown && !historyOpen}>
       <div className="screen-inner settings-page" hidden={historyOpen}>
-      <PageHeader title="Settings" context="Set how Finto counts your money, review recurring payments, and manage your local data." />
+      <PageHeader title="Settings" />
 
         <section className="settings-section" aria-labelledby="settings-financial-title">
           <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
@@ -321,9 +321,6 @@ export function SettingsScreen({
 
       <section className="settings-section" aria-labelledby="settings-data-title">
         <h2 className="settings-title" id="settings-data-title">Data &amp; backup</h2>
-        <p className="settings-lead">
-          What you have uploaded, and how to take all of it away with you.
-        </p>
 
         <div className="settings-data-actions">
           <div className="settings-data-item">

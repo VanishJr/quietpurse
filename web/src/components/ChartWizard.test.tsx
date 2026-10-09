@@ -43,13 +43,13 @@ describe('ChartWizard field and preview context', () => {
     mockFetch(previewRoutes);
     renderThemed(wizard(null, vi.fn(), save));
     chooseLine();
-    expect(screen.getByRole('group', { name: 'Period' })).toHaveAccessibleDescription('The window includes the current calendar period.');
+    expect(screen.getByRole('group', { name: 'Period' })).not.toHaveAttribute('aria-describedby');
     expect(screen.queryByText('Ticks')).not.toBeInTheDocument();
     const name = screen.getByRole('textbox', { name: 'Chart name' });
-    expect(name).toHaveAccessibleDescription('Suggested until you type your own name.');
+    expect(name).not.toHaveAttribute('aria-describedby');
     fireEvent.change(name, { target: { value: '' } });
     expect(name).toHaveAttribute('aria-invalid', 'true');
-    expect(name).toHaveAccessibleDescription('Suggested until you type your own name. Enter a chart name.');
+    expect(name).toHaveAccessibleDescription('Enter a chart name.');
     fireEvent.click(screen.getByRole('button', { name: 'Expenses' }));
     const measures = screen.getByRole('group', { name: 'Measures' });
     expect(measures).toHaveAttribute('aria-invalid', 'true');

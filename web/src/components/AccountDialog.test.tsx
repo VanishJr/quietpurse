@@ -97,10 +97,12 @@ describe('account name drafts', () => {
       }
       renderThemed(<Flow />);
       const input = screen.getByRole('textbox', { name: 'Name' });
-      expect(input).toHaveAttribute('aria-describedby', `${input.id}-help`);
-      expect(document.getElementById(`${input.id}-help`)).toHaveTextContent(
-        kind === 'add' ? 'your base currency' : 'transactions, the imports and the files stay',
-      );
+      if (kind === 'add') {
+        expect(input).toHaveAttribute('aria-describedby', `${input.id}-help`);
+        expect(document.getElementById(`${input.id}-help`)).toHaveTextContent('your base currency');
+      } else {
+        expect(input).not.toHaveAttribute('aria-describedby');
+      }
       fireEvent.change(input, { target: { value: 'Draft account' } });
       fireEvent.click(screen.getByRole('button', { name: commit }));
       const leaving = screen.getByRole('button', { name: leave });

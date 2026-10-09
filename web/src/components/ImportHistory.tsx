@@ -43,9 +43,9 @@ const deduplicated = (r: ImportRecord): boolean =>
 const ownedClause = (n: number): string =>
   n === 1 ? '1 transaction that belongs' : `${n} transactions that belong`;
 
-const orderingLine = (list: ImportList): string => {
+const orderingLine = (list: ImportList): string | null => {
   const n = list.totals.imports - list.imports.length;
-  if (n <= 0) return 'Newest first.';
+  if (n <= 0) return null;
   const older = n === 1 ? 'One older import is' : `${n} older imports are`;
   return `Newest first — the most recent ${list.imports.length} of ${list.totals.imports}. ${older} not listed.`;
 };
@@ -213,6 +213,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
   };
 
   const confirmationTitle = confirm?.kind === 'document' ? 'Delete stored file?' : 'Delete import?';
+  const ordering = list && orderingLine(list);
   const selected = confirm?.record;
 
   return (
@@ -221,10 +222,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
         context={account?.name ?? 'All accounts'}
         returnAction={<Button type="button" variant="tertiary" size="compact" aria-disabled={busy}
           onClick={() => { if (!pending.current) onBack(); }}>← {backLabel}</Button>} />
-      <div className="history-intro">
-        {list && <p>{orderingLine(list)}</p>}
-        <p>The statement file you uploaded is kept. "Delete file" removes it and leaves the import and its transactions alone.</p>
-      </div>
+      {ordering && <div className="history-intro"><p>{ordering}</p></div>}
       {loading && <Notice role="status">{list ? 'Updating import history…' : 'Loading import history…'}</Notice>}
       {error && <Notice title="History could not be loaded" tone="error" role="alert" remedy={
         <Button type="button" variant="secondary" size="standard" aria-disabled={busy || loading} onClick={() => {

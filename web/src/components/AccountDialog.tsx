@@ -202,9 +202,7 @@ export function AccountDialog({
             create it from the import screen while you upload the first one.
           </p>}
           <Field control="input" id={kind === 'add' ? 'acct-new-name' : 'acct-name'} label="Name"
-            help={kind === 'add'
-              ? `It will hold amounts in ${baseCurrency}, your base currency.`
-              : 'Only the tab changes. The transactions, the imports and the files stay where they are.'}
+            help={kind === 'add' ? `It will hold amounts in ${baseCurrency}, your base currency.` : undefined}
             controlProps={{ ref: nameRef, value: name, readOnly: busy,
               placeholder: kind === 'add' ? 'Sparkasse, cash, Revolut…' : undefined,
               onChange: (e) => setName(e.target.value) }}
@@ -216,21 +214,15 @@ export function AccountDialog({
         <div className="acct-menu">
           <Button type="button" variant="tertiary" size="standard" className="acct-menu-item" onClick={() => onStep('rename')}>
             <span className="acct-menu-label">Rename</span>
-            <span className="acct-menu-sub">The name on the tab. Nothing else about the account changes.</span>
           </Button>
           <Button type="button" variant="tertiary" size="standard" className="acct-menu-item" onClick={() => onOpenHistory(account)}>
             <span className="acct-menu-label">Import history</span>
-            <span className="acct-menu-sub">Which files went into this account, when, and how many rows. Download the file you uploaded, or remove it.</span>
           </Button>
           <Button type="button" variant="tertiary" size="standard" className="acct-menu-item" onClick={() => onStep('hide')}>
             <span className="acct-menu-label">{account.hidden ? 'Unhide' : 'Hide'}</span>
-            <span className="acct-menu-sub">{account.hidden
-              ? 'Bring it back to the tabs and to every total.'
-              : 'Off the screens and out of the totals. Nothing is deleted, and you can bring it back.'}</span>
           </Button>
           <Button type="button" variant="destructive-secondary" size="standard" className="acct-menu-item" onClick={() => onStep('delete')}>
             <span className="acct-menu-label">Delete</span>
-            <span className="acct-menu-sub">Destroys the transactions, the imports and the uploaded files. Permanent.</span>
           </Button>
         </div>
       )}
