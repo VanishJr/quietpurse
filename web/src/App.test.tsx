@@ -135,7 +135,7 @@ describe('the shell', () => {
     const heading = await screen.findByRole('heading', { name: 'Import a statement' });
     expect(heading).toBeVisible();
     expect(heading.closest('.import-page')?.parentElement).toHaveClass('screen');
-    expect(screen.getByRole('group', { name: 'Theme' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dark mode' })).toBeVisible();
     expect(tabs.getByRole('link', { name: 'Import' })).toHaveAttribute('aria-current', 'page');
     expect(tabs.getByRole('link', { name: 'Overview' })).not.toHaveAttribute('aria-current');
 
@@ -498,65 +498,26 @@ describe('the shell', () => {
     expect(document.getElementById('screens')).toBe(screen.getByRole('main'));
   });
 
-  it('selects one named theme at a time, remembers each choice, and shows the device status once', async () => {
+  it('switches between dark and light with one toggle, remembers it, and shows the device status once', async () => {
     mockFetch(FIRST_PAINT_ROUTES);
     let view = render(<App />);
     expect(await appMounted()).toBeVisible();
 
-    const group = () => within(screen.getByRole('group', { name: 'Theme' }));
-    const selected = (name: string) =>
-      group().getByRole('button', { name: `${name} theme`, pressed: true });
-    const choices = () => group().getAllByRole('button');
-    expect(choices()).toHaveLength(3);
-    expect(selected('Dark')).toHaveAttribute('aria-pressed', 'true');
-    expect(choices().filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([
-      selected('Dark'),
-    ]);
+    const toggle = () => screen.getByRole('button', { name: 'Dark mode' });
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(screen.queryByRole('button', { name: /System/ })).not.toBeInTheDocument();
     expect(screen.getAllByText('Stored on this device')).toHaveLength(1);
 
-    for (const name of ['System', 'Light', 'Dark'] as const) {
-      fireEvent.click(group().getByRole('button', { name: `${name} theme` }));
-      expect(selected(name)).toHaveAttribute('aria-pressed', 'true');
-      expect(choices().filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([
-        selected(name),
-      ]);
-      expect(localStorage.getItem('finto.theme')).toBe(name.toLowerCase());
+    for (const [pressed, scheme] of [['false', 'light'], ['true', 'dark']] as const) {
+      fireEvent.click(toggle());
+      expect(toggle()).toHaveAttribute('aria-pressed', pressed);
+      expect(document.documentElement.dataset.theme).toBe(scheme);
+      expect(localStorage.getItem('finto.theme')).toBe(scheme);
       view.unmount();
       view = render(<App />);
       expect(await appMounted()).toBeVisible();
-      expect(selected(name)).toHaveAttribute('aria-pressed', 'true');
-    }
-  });
-
-  it('follows OS changes in System mode, but holds a chosen palette in Light mode', async () => {
-    const original = window.matchMedia;
-    let onChange: ((event: MediaQueryListEvent) => void) | undefined;
-    window.matchMedia = vi.fn((query: string) => ({
-      matches: false,
-      media: query,
-      addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => { onChange = listener; },
-      removeEventListener: () => {},
-    })) as unknown as typeof window.matchMedia;
-    try {
-      mockFetch(FIRST_PAINT_ROUTES);
-      render(<App />);
-      expect(await appMounted()).toBeVisible();
-      const group = within(screen.getByRole('group', { name: 'Theme' }));
-      fireEvent.click(group.getByRole('button', { name: 'System theme' }));
-      expect(document.documentElement.dataset.theme).toBe('light');
-
-      act(() => onChange?.({ matches: true } as MediaQueryListEvent));
-      expect(document.documentElement.dataset.theme).toBe('dark');
-
-      fireEvent.click(group.getByRole('button', { name: 'Light theme' }));
-      act(() => onChange?.({ matches: false } as MediaQueryListEvent));
-      act(() => onChange?.({ matches: true } as MediaQueryListEvent));
-      expect(document.documentElement.dataset.theme).toBe('light');
-
-      fireEvent.click(group.getByRole('button', { name: 'System theme' }));
-      expect(document.documentElement.dataset.theme).toBe('dark');
-    } finally {
-      window.matchMedia = original;
+      expect(toggle()).toHaveAttribute('aria-pressed', pressed);
     }
   });
 
@@ -566,11 +527,18 @@ describe('the shell', () => {
     render(<App />);
     expect(await appMounted()).toBeVisible();
 
-    expect(screen.getByRole('button', { name: 'Light theme', pressed: true })).toHaveAttribute(
-      'aria-pressed', 'true',
-    );
     // the state is aria-pressed's alone; a name that changed with it would announce it twice
-    expect(screen.getByRole('button', { name: 'Dark theme', pressed: false })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dark mode', pressed: false })).toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('opens a saved choice it no longer offers on the initial dark theme', async () => {
+    localStorage.setItem('finto.theme', 'system');
+    mockFetch(FIRST_PAINT_ROUTES);
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+
+    expect(screen.getByRole('button', { name: 'Dark mode', pressed: true })).toBeInTheDocument();
+    expect(document.documentElement.dataset.theme).toBe('dark');
   });
 });

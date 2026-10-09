@@ -923,9 +923,9 @@ the strip a composite widget with a roving tabindex nobody asked for. The accoun
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 
-Dark is the initial theme; an existing saved choice takes precedence. The shell offers System,
-Light and Dark as explicit choices, with System following the OS preference. Its theme control
-moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
+Dark is the initial theme; an existing saved choice takes precedence, and a saved value the shell
+no longer offers opens on the initial theme. The shell offers one toggle between dark and light;
+there is no mode that follows the OS preference. Its theme control moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
 indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
 together. Income series and their legend marks use the income role, independent of action and
 success colors; Overview expense series retain their existing encoding while Analytics uses

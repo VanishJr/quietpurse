@@ -190,7 +190,7 @@ describe('the page heading', () => {
     mount();
     await panel('Sparkasse Giro');
 
-    expect(screen.queryByRole('group', { name: 'Theme' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dark mode' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 

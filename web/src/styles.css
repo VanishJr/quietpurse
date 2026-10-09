@@ -216,38 +216,65 @@ textarea {
   margin-top: 22px;
 }
 .topbar-actions {
+  display: flex;
+  justify-content: center;
   margin-top: auto;
   padding-top: 40px;
 }
-.theme-title {
-  display: block;
-  margin: 0 0 8px 14px;
-  font-size: 12px;
-  color: var(--ink-secondary);
+.theme-toggle {
+  display: flex;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
 }
-.theme-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-sm);
-  background: var(--ink-surface);
+.theme-toggle:hover .theme-toggle-track {
+  border-color: var(--ink-primary);
 }
-.theme-option {
-  min-width: 0;
-  min-height: var(--control-compact);
-  border-radius: var(--r-sm);
-  font-size: 12px;
-  color: var(--ink-secondary);
+.theme-toggle[aria-pressed='true']:hover .theme-toggle-track {
+  border-color: var(--ink-actionHover);
+  background: var(--ink-actionHover);
 }
-.theme-option:hover {
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--ink-focus);
+  outline-offset: 2px;
+}
+.theme-toggle-track {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  border: 1px solid var(--ink-controlBorder);
+  border-radius: 999px;
   background: var(--ink-raised);
-  color: var(--ink-primary);
+  transition: background 0.15s;
 }
-.theme-option[aria-pressed='true'] {
+.theme-toggle-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ink-secondary);
+  color: var(--ink-surface);
+  transition: transform 0.15s;
+}
+.theme-toggle-thumb svg {
+  width: 14px;
+  height: 14px;
+}
+.theme-toggle[aria-pressed='true'] .theme-toggle-track {
+  border-color: var(--ink-action);
   background: var(--ink-action);
-  color: var(--ink-onAction);
+}
+.theme-toggle[aria-pressed='true'] .theme-toggle-thumb {
+  transform: translateX(20px);
+  background: var(--ink-onAction);
+  color: var(--ink-action);
 }
 .device-note {
   display: flex;
@@ -291,13 +318,6 @@ textarea {
   .topbar-actions {
     padding: 0;
     margin: 0;
-  }
-  .theme-title {
-    display: none;
-  }
-  .theme-option {
-    min-height: var(--control-touch);
-    padding: 0 9px;
   }
   .device-note {
     display: none;
@@ -3419,7 +3439,6 @@ select.native-field__control {
 }
 
 @media (forced-colors: active) {
-  .theme-option,
   .kind-tile,
   .choice-chips .chip {
     position: relative;
@@ -3427,7 +3446,6 @@ select.native-field__control {
 
   /* A ring inside the control, not its own border: a thicker border on the selected one alone
      resizes it. ::before, because a pending action already draws ::after. */
-  .theme-option[aria-pressed='true']::before,
   .transactions-screen .transaction-choice[aria-pressed='true']::before,
   .kind-tile[aria-pressed='true']::before,
   .choice-chips .chip[aria-pressed='true']::before {
@@ -3458,6 +3476,31 @@ select.native-field__control {
   .native-field__select::after {
     forced-color-adjust: none;
     background: ButtonText;
+  }
+
+  .theme-toggle-track,
+  .theme-toggle-thumb {
+    forced-color-adjust: none;
+  }
+
+  .theme-toggle-track {
+    border-color: ButtonText;
+    background: Canvas;
+  }
+
+  .theme-toggle-thumb {
+    background: ButtonText;
+    color: Canvas;
+  }
+
+  .theme-toggle[aria-pressed='true'] .theme-toggle-track {
+    border-color: Highlight;
+    background: Highlight;
+  }
+
+  .theme-toggle[aria-pressed='true'] .theme-toggle-thumb {
+    background: HighlightText;
+    color: Highlight;
   }
 
   .transactions-screen .switch:checked {

@@ -6,7 +6,7 @@ import { TestResizeObserver, resetResizeObservers } from './resize';
 
 /** jsdom implements neither of these, and both are on a mounted screen's path. */
 
-// ThemeProvider calls it unconditionally and attaches a listener to the result.
+// AccountDialog asks it whether the pointer is coarse before it moves focus.
 window.matchMedia = (query: string): MediaQueryList =>
   ({
     matches: false,

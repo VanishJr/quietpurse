@@ -145,13 +145,11 @@ const DARK_CATEGORY_COLORS: Record<string, string> = {
 };
 
 export type Scheme = 'light' | 'dark';
-export type ThemeMode = 'system' | 'light' | 'dark';
 
 interface ThemeValue {
   ink: Ink;
   scheme: Scheme;
-  mode: ThemeMode;
-  setMode: (m: ThemeMode) => void;
+  setScheme: (s: Scheme) => void;
   categoryColor: (category: string) => string;
 }
 
@@ -159,9 +157,8 @@ const ThemeContext = createContext<ThemeValue | null>(null);
 
 const STORAGE_KEY = 'finto.theme';
 
-function readStoredMode(): ThemeMode {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'dark';
+function readStoredScheme(): Scheme {
+  return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
 }
 
 function applyCssVariables(ink: Ink, scheme: Scheme) {
@@ -176,43 +173,28 @@ function applyCssVariables(ink: Ink, scheme: Scheme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>(readStoredMode);
-  const [systemDark, setSystemDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
-
-  // Follow the OS theme while mode === 'system'. The listener stays attached in
-  // every mode — it costs nothing and keeps the value correct on switching back.
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  const scheme: Scheme = mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
+  const [scheme, setSchemeState] = useState<Scheme>(readStoredScheme);
   const ink = scheme === 'dark' ? darkInk : lightInk;
 
   useEffect(() => {
     applyCssVariables(ink, scheme);
   }, [ink, scheme]);
 
-  const setMode = (m: ThemeMode) => {
-    localStorage.setItem(STORAGE_KEY, m);
-    setModeState(m);
+  const setScheme = (s: Scheme) => {
+    localStorage.setItem(STORAGE_KEY, s);
+    setSchemeState(s);
   };
 
   const value = useMemo<ThemeValue>(() => {
     const palette = scheme === 'dark' ? DARK_CATEGORY_COLORS : LIGHT_CATEGORY_COLORS;
     return {
       scheme,
-      mode,
-      setMode,
+      setScheme,
       ink,
       categoryColor: (category) =>
         Object.hasOwn(palette, category) ? palette[category] : palette['other'],
     };
-  }, [scheme, mode, ink]);
+  }, [scheme, ink]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

@@ -3,8 +3,10 @@ import {
   AnalyticsIcon,
   GoalsIcon,
   ImportIcon,
+  MoonIcon,
   OverviewIcon,
   SettingsIcon,
+  SunIcon,
   TransactionsIcon,
 } from './components/NavIcons';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
@@ -13,7 +15,7 @@ import { OverviewScreen } from './screens/OverviewScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ScreenShown } from './screen';
-import { ThemeMode, useTheme } from './theme';
+import { useTheme } from './theme';
 import { TxFocus } from './types';
 import { NavigationNotice } from './components/NavigationNotice';
 import { setUrl, urlFor, useUrl } from './url';
@@ -37,12 +39,6 @@ const patchFor = (key: TabKey) => ({ screen: key, panel: null });
 
 const IMPORT_PATCH = { screen: 'overview', panel: 'import' } as const;
 
-const THEME_MODES: readonly { mode: ThemeMode; label: string }[] = [
-  { mode: 'system', label: 'System' },
-  { mode: 'light', label: 'Light' },
-  { mode: 'dark', label: 'Dark' },
-];
-
 /** One `shown` for both, so the `hidden` a screen sits under and what its sheets are told cannot differ. */
 const Screen = ({ shown, children }: { shown: boolean; children: React.ReactNode }) => (
   <div className="screen" hidden={!shown}>
@@ -54,7 +50,7 @@ const Screen = ({ shown, children }: { shown: boolean; children: React.ReactNode
 );
 
 export function Shell() {
-  const { mode, setMode } = useTheme();
+  const { scheme, setScheme } = useTheme();
 
   const url = useUrl();
   const tab = tabOf(url.screen);
@@ -159,22 +155,18 @@ export function Shell() {
             </div>
           </nav>
 
-          <div className="topbar-actions" role="group" aria-label="Theme">
-            <span className="theme-title" aria-hidden="true">Theme</span>
-            <div className="theme-options">
-              {THEME_MODES.map(({ mode: option, label }) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="theme-option"
-                  onClick={() => setMode(option)}
-                  aria-pressed={mode === option}
-                  aria-label={`${label} theme`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label="Dark mode"
+              aria-pressed={scheme === 'dark'}
+              onClick={() => setScheme(scheme === 'dark' ? 'light' : 'dark')}
+            >
+              <span className="theme-toggle-track" aria-hidden="true">
+                <span className="theme-toggle-thumb">{scheme === 'dark' ? <MoonIcon /> : <SunIcon />}</span>
+              </span>
+            </button>
           </div>
           <p className="device-note">
             <span aria-hidden="true" />

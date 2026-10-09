@@ -106,7 +106,7 @@ it('keeps selected controls and custom switch contrast independent of forced col
   const css = source('styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
   const forced = blockBody(css, '@media (forced-colors: active)');
   const pressed = [
-    ".theme-option[aria-pressed='true']", ".transactions-screen .transaction-choice[aria-pressed='true']",
+    ".transactions-screen .transaction-choice[aria-pressed='true']",
     ".kind-tile[aria-pressed='true']", ".choice-chips .chip[aria-pressed='true']",
   ];
   for (const selector of pressed) {
@@ -116,7 +116,7 @@ it('keeps selected controls and custom switch contrast independent of forced col
     expect(ring).toContain('inset: 0');
     expect(declarationsOf(forced, selector)).not.toMatch(/border/);
   }
-  for (const control of ['.theme-option', '.kind-tile', '.choice-chips .chip']) {
+  for (const control of ['.kind-tile', '.choice-chips .chip']) {
     expect(declarationsOf(forced, control)).toContain('position: relative');
   }
   expect(declarationsOf(css, '.action-button.action-button')).toContain('position: relative');
@@ -131,6 +131,11 @@ it('keeps selected controls and custom switch contrast independent of forced col
   expect(declarationsOf(forced, '.transactions-screen .switch::after')).toContain('background: ButtonText');
   expect(declarationsOf(forced, '.transactions-screen .switch:checked::after')).toContain('background: HighlightText');
   expect(declarationsOf(forced, ".transactions-screen .switch[aria-disabled='true']::after")).toContain('background: GrayText');
+  for (const part of ['.theme-toggle-track', '.theme-toggle-thumb']) {
+    expect(declarationsOf(forced, part)).toContain('forced-color-adjust: none');
+  }
+  expect(declarationsOf(forced, ".theme-toggle[aria-pressed='true'] .theme-toggle-track")).toContain('background: Highlight');
+  expect(declarationsOf(forced, ".theme-toggle[aria-pressed='true'] .theme-toggle-thumb")).toContain('background: HighlightText');
   expect(forced).not.toMatch(/(?:^|})\s*(?:\*|html|body)\s*\{[^}]*forced-color-adjust:\s*none/);
 });
 
