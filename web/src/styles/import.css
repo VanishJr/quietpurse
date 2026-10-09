@@ -231,6 +231,37 @@
   border-top: 1px solid var(--ink-border);
 }
 
+/*
+ * The guide beside the form rather than under it, by placement alone: it stays after the
+ * form in the document, which is where the single column shows it and the keyboard reaches it.
+ */
+@media (min-width: 1200px) {
+  .import-page-setup {
+    max-width: var(--page-wide);
+  }
+
+  .import-page-setup .import-layout {
+    grid-template-columns: minmax(0, var(--page-editing)) minmax(15rem, 1fr);
+    column-gap: var(--space-12);
+    align-items: start;
+  }
+
+  .import-page-setup .import-layout > * {
+    grid-column: 1;
+  }
+
+  .import-page-setup .import-layout > .import-guide {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: var(--space-6);
+    max-width: 24rem;
+    padding: 0 0 0 var(--space-6);
+    border-top: 0;
+    border-left: 1px solid var(--ink-border);
+  }
+}
+
 @media (max-width: 599px) {
   .import-page .import-review,
   .import-page .import-outcome,

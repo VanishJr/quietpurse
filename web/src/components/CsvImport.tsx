@@ -441,7 +441,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   );
 
   return (
-    <section className="screen-inner import-page">
+    <section className={`screen-inner import-page${preparing ? ' import-page-setup' : ''}`}>
       <PageHeader
         title="Import a statement"
         returnAction={
