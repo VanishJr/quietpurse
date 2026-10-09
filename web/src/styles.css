@@ -3350,15 +3350,28 @@ textarea.native-field__control {
 }
 
 @media (forced-colors: active) {
-  .theme-option[aria-pressed='true'],
-  .transactions-screen .transaction-choice[aria-pressed='true'],
-  .kind-tile[aria-pressed='true'],
-  .choice-chips .chip[aria-pressed='true'] {
-    border: 3px double Highlight;
+  .theme-option,
+  .kind-tile,
+  .choice-chips .chip {
+    position: relative;
   }
 
-  .transactions-screen .transaction-choice[aria-pressed='true'][aria-disabled='true'],
-  .choice-chips .chip[aria-pressed='true'][aria-disabled='true'] {
+  /* A ring inside the control, not its own border: a thicker border on the selected one alone
+     resizes it. ::before, because a pending action already draws ::after. */
+  .theme-option[aria-pressed='true']::before,
+  .transactions-screen .transaction-choice[aria-pressed='true']::before,
+  .kind-tile[aria-pressed='true']::before,
+  .choice-chips .chip[aria-pressed='true']::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 3px double Highlight;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .transactions-screen .transaction-choice[aria-pressed='true'][aria-disabled='true']::before,
+  .choice-chips .chip[aria-pressed='true'][aria-disabled='true']::before {
     border-style: dashed;
   }
 

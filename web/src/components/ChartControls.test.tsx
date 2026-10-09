@@ -123,14 +123,57 @@ describe('ChartControls', () => {
     rerender(<ThemeProvider>{view(false)}</ThemeProvider>);
     const outside = screen.getByRole('button', { name: 'Survivor' });
     act(() => outside.focus());
-    fireEvent(window, new Event('resize'));
     fireEvent.scroll(document);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(menu).toBeInTheDocument();
     expect(outside).toHaveFocus();
     rerender(<ThemeProvider>{view(true)}</ThemeProvider>);
+    expect(outside).toHaveFocus();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
+  });
+
+  it('closes without a focus return when a resize leaves its anchor undrawn', () => {
+    const view = (drawn: boolean) => <>
+      <button id="survivor">Survivor</button>
+      <div hidden={!drawn}><ChartControls {...props()} /></div>
+    </>;
+    const { rerender } = renderThemed(view(true));
+    const trigger = screen.getByRole('button', { name: 'Actions for A' });
+    fireEvent.click(trigger);
+    rerender(<ThemeProvider>{view(false)}</ThemeProvider>);
+    const survivor = screen.getByRole('button', { name: 'Survivor' });
+    act(() => survivor.focus());
+    fireEvent(window, new Event('resize'));
+    expect(screen.queryByRole('group', { hidden: true })).not.toBeInTheDocument();
+    expect(survivor).toHaveFocus();
+    rerender(<ThemeProvider>{view(true)}</ThemeProvider>);
+    fireEvent(window, new Event('resize'));
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(survivor).toHaveFocus();
+  });
+
+  it('keeps a confirmation open when its own question is pressed', () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks = props();
+      renderThemed(<><button id="survivor">Survivor</button><ChartControls {...callbacks} contextual /></>);
+      fireEvent.click(screen.getByRole('button', { name: 'More actions for A' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      const keep = screen.getByRole('button', { name: 'Keep' });
+      expect(keep).toHaveFocus();
+      const question = screen.getByText('Delete “A”?');
+      fireEvent.pointerDown(question);
+      act(() => keep.blur());
+      fireEvent.pointerUp(question);
+      fireEvent.click(question);
+      act(() => vi.runAllTimers());
+      expect(screen.getByRole('group', { name: 'Actions for A' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Keep' })).toBeInTheDocument();
+      expect(callbacks.onDelete).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not focus unavailable controls while opening or confirming a hidden menu', () => {

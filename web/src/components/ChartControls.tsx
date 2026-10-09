@@ -21,6 +21,7 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   const anchor = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const anchorBox = useRef<DOMRect | null>(null);
+  const entered = useRef<boolean | null>(null);
   const menuId = useId();
 
   const close = (restore = true) => {
@@ -34,6 +35,9 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
     () => close(), () => close(false), () => close(false));
 
   useLayoutEffect(() => {
+    const step = open ? confirming : null;
+    const entering = step !== entered.current;
+    entered.current = step;
     if (!open || !shown || !anchor.current || !menu.current
       || !isAvailable(anchor.current) || !isAvailable(menu.current)) return;
     const box = anchor.current.getBoundingClientRect();
@@ -45,6 +49,8 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
       left: Math.max(8, Math.min(box.right - popup.width, window.innerWidth - popup.width - 8)),
       top: Math.max(8, Math.min(wantedTop, window.innerHeight - popup.height - 8)),
     });
+    // Entry focus belongs to opening or confirming; a returning screen's focus is the Shell's.
+    if (!entering) return;
     const first = menu.current.querySelector<HTMLButtonElement>('button');
     if (first && isAvailable(first)) {
       first.focus({ preventScroll: true });
@@ -59,9 +65,14 @@ export function ChartControls({ id, label, contextual = false, onEdit, onDuplica
   useEffect(() => {
     if (!open || !shown) return;
     const moved = (event: Event) => {
-      if (!anchor.current || !isAvailable(anchor.current)) return;
       if (event.target instanceof Node && menu.current?.contains(event.target)) return;
-      if (event.type === 'scroll' && anchor.current && anchorBox.current) {
+      if (!anchor.current || !isAvailable(anchor.current)) {
+        // A scroll under an inert or hidden branch suspends the group; a resize can undraw the
+        // anchor for good, and closing later would hand it focus out of nowhere.
+        if (event.type === 'resize') close(false);
+        return;
+      }
+      if (event.type === 'scroll' && anchorBox.current) {
         const now = anchor.current.getBoundingClientRect();
         const at = anchorBox.current;
         // A delayed opening scroll notification is not a moved anchor.

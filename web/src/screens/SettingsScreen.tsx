@@ -80,7 +80,11 @@ export function SettingsScreen({
     () => setOpenRecurringMenu(null),
   );
 
+  const enteredRecurringMenu = useRef<string | null>(null);
   useEffect(() => {
+    // Entry focus belongs to opening; a return from history or another screen is the Shell's.
+    if (openRecurringMenu === enteredRecurringMenu.current) return;
+    enteredRecurringMenu.current = openRecurringMenu;
     if (!openRecurringMenu || !shown || historyOpen) return;
     const action = recurringActionRef.current;
     if (action && isAvailable(action)) action.focus();

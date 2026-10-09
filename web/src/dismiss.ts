@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef } from 'react';
 import { ScreenShown } from './screen';
 
 export function isAvailable(element: HTMLElement): boolean {
@@ -23,11 +23,16 @@ export function useDismiss(
   onFocusDeparture?: () => void,
 ): void {
   const shown = useContext(ScreenShown);
-  const current = useRef({ inside, onEscape, onOutsidePress, onFocusDeparture, live: !!open && shown });
-  current.current = { inside, onEscape, onOutsidePress, onFocusDeparture, live: !!open && shown };
+  const latest = { inside, onEscape, onOutsidePress, onFocusDeparture, live: !!open && shown };
+  const current = useRef(latest);
+  // Committed renders only: one React discards or suspends must not silence the group still on screen.
+  useLayoutEffect(() => {
+    current.current = latest;
+  });
   useEffect(() => {
     if (!open || !shown) return;
     let insidePress = false;
+    let pressed: Element | null = null;
     let settlement: ReturnType<typeof setTimeout> | undefined;
     const release = () => {
       insidePress = false;
@@ -37,8 +42,15 @@ export function useDismiss(
     const available = () => current.current.live && Array.from(document.querySelectorAll<HTMLElement>('*'))
       .some((element) => current.current.inside(element) && isAvailable(element));
     const departed = (target: EventTarget | null) => {
-      if (current.current.onFocusDeparture && available()
-        && !(target instanceof Element && current.current.inside(target))) current.current.onFocusDeparture();
+      if (current.current.onFocusDeparture && !(target instanceof Element && current.current.inside(target))
+        && available()) current.current.onFocusDeparture();
+    };
+    // Focus on the document, or on an ancestor of what was pressed, is where the browser puts a
+    // press on something it does not focus — the group's own text — and not a place the reader went.
+    const departedFromCurrent = () => {
+      const focused = document.activeElement;
+      if (!focused || focused === document.body || (pressed && focused.contains(pressed))) return;
+      departed(focused);
     };
     const settle = () => {
       if (!insidePress) return;
@@ -46,13 +58,13 @@ export function useDismiss(
       // A microtask can run before click; retain the pressed action until that dispatch finishes.
       settlement = setTimeout(() => {
         release();
-        departed(document.activeElement);
+        departedFromCurrent();
       }, 0);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Tab') {
         release();
-        departed(document.activeElement);
+        departedFromCurrent();
       }
       if (event.key !== 'Escape' || event.defaultPrevented || !available()) return;
       event.preventDefault();
@@ -60,9 +72,11 @@ export function useDismiss(
     };
     const onPointer = (event: Event) => {
       release();
+      pressed = null;
       if (!available()) return;
       if (event.target instanceof Element && current.current.inside(event.target)) {
         insidePress = !!current.current.onFocusDeparture;
+        pressed = event.target;
       } else current.current.onOutsidePress();
     };
     const onFocus = (event: FocusEvent) => {

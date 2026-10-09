@@ -466,6 +466,30 @@ describe('record actions and confirmations', () => {
     expect(deletes()).toEqual([]);
   });
 
+  it('does not replay entry focus into a record menu left open when its screen returns', async () => {
+    mockFetch(BASE);
+    const view = (shown: boolean) => (
+      <ThemeProvider>
+        <button type="button">Outside history</button>
+        <div className="screen" hidden={!shown}>
+          <ScreenShown value={shown}>
+            <ImportHistory onBack={vi.fn()} backLabel="Back to accounts" onChanged={vi.fn()} />
+          </ScreenShown>
+        </div>
+      </ThemeProvider>
+    );
+    const { rerender } = render(view(true));
+    const { group } = await openActions();
+    expect(within(group).getByRole('button', { name: 'Delete the file for statement.csv' })).toHaveFocus();
+    rerender(view(false));
+    const outside = screen.getByRole('button', { name: 'Outside history' });
+    act(() => outside.focus());
+    rerender(view(true));
+    expect(group).toBeInTheDocument();
+    expect(outside).toHaveFocus();
+    expect(deletes()).toEqual([]);
+  });
+
   it.each([false, true])('keeps confirmation entry usable after outside-ancestor focus (pointerup: %s)', async (up) => {
     mockFetch(BASE);
     const { container, onChanged } = mount();

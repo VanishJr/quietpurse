@@ -82,21 +82,55 @@ it('gives native and focus-retaining disabled actions a readable neutral pair an
   }
 });
 
+/** The body of the first `opener` block, by brace depth, so a rule after its close cannot answer for it. */
+function blockBody(css: string, opener: string): string {
+  const start = css.indexOf(opener);
+  const open = css.indexOf('{', start);
+  let depth = 0;
+  for (let at = open; start >= 0 && open >= 0 && at < css.length; at++) {
+    if (css[at] === '{') depth++;
+    else if (css[at] === '}' && --depth === 0) return css.slice(open + 1, at);
+  }
+  throw new Error(`No closed block for ${opener}`);
+}
+
+/** Every declaration a flat block gives one exact selector, across the rules that list it. */
+function declarationsOf(block: string, selector: string): string {
+  return [...block.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, selectors]) => selectors.split(',').map((one) => one.trim()).includes(selector))
+    .map(([, , body]) => body)
+    .join('');
+}
+
 it('keeps selected controls and custom switch contrast independent of forced colors', () => {
-  const css = source('styles.css');
-  const forced = css.slice(css.indexOf('@media (forced-colors: active)'));
-  for (const selector of [
+  const css = source('styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const forced = blockBody(css, '@media (forced-colors: active)');
+  const pressed = [
     ".theme-option[aria-pressed='true']", ".transactions-screen .transaction-choice[aria-pressed='true']",
     ".kind-tile[aria-pressed='true']", ".choice-chips .chip[aria-pressed='true']",
-  ]) expect(forced).toContain(selector);
-  expect(forced).toContain('border: 3px double Highlight');
-  const track = forced.match(/\.transactions-screen \.switch \{([^}]*)\}/)?.[1];
+  ];
+  for (const selector of pressed) {
+    const ring = declarationsOf(forced, `${selector}::before`);
+    expect(ring).toContain('border: 3px double Highlight');
+    expect(ring).toContain('position: absolute');
+    expect(ring).toContain('inset: 0');
+    expect(declarationsOf(forced, selector)).not.toMatch(/border/);
+  }
+  for (const control of ['.theme-option', '.kind-tile', '.choice-chips .chip']) {
+    expect(declarationsOf(forced, control)).toContain('position: relative');
+  }
+  expect(declarationsOf(css, '.action-button.action-button')).toContain('position: relative');
+  for (const locked of [
+    ".transactions-screen .transaction-choice[aria-pressed='true'][aria-disabled='true']::before",
+    ".choice-chips .chip[aria-pressed='true'][aria-disabled='true']::before",
+  ]) expect(declarationsOf(forced, locked)).toContain('border-style: dashed');
+  const track = declarationsOf(forced, '.transactions-screen .switch');
   expect(track).toContain('forced-color-adjust: none');
   expect(track).toContain('background: Canvas');
   expect(track).toContain('border-color: ButtonText');
-  expect(forced.match(/\.transactions-screen \.switch::after \{([^}]*)\}/)?.[1]).toContain('background: ButtonText');
-  expect(forced.match(/\.transactions-screen \.switch:checked::after \{([^}]*)\}/)?.[1]).toContain('background: HighlightText');
-  expect(forced.match(/\.transactions-screen \.switch\[aria-disabled='true'\]::after \{([^}]*)\}/)?.[1]).toContain('background: GrayText');
+  expect(declarationsOf(forced, '.transactions-screen .switch::after')).toContain('background: ButtonText');
+  expect(declarationsOf(forced, '.transactions-screen .switch:checked::after')).toContain('background: HighlightText');
+  expect(declarationsOf(forced, ".transactions-screen .switch[aria-disabled='true']::after")).toContain('background: GrayText');
   expect(forced).not.toMatch(/(?:^|})\s*(?:\*|html|body)\s*\{[^}]*forced-color-adjust:\s*none/);
 });
 

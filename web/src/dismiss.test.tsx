@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, startTransition, use, useRef } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { useDismiss } from './dismiss';
 import { Sheet } from './components/Sheet';
@@ -12,6 +12,15 @@ function Popover({ onEscape, onPress, onDeparture, insideId = 'toggle', onClick 
 }) {
   useDismiss(true, (target) => target.id === insideId, onEscape, onPress, onDeparture);
   return <><button id="toggle" onClick={onClick}>Toggle</button><button id="other">Other</button></>;
+}
+
+function Question({ onDeparture }: { onDeparture: () => void }) {
+  const group = useRef<HTMLDivElement>(null);
+  useDismiss(true, (target) => !!group.current?.contains(target), vi.fn(), vi.fn(), onDeparture);
+  return <>
+    <main tabIndex={-1}><div ref={group}><p>Delete this chart?</p><button>Keep</button></div></main>
+    <button>Elsewhere</button>
+  </>;
 }
 
 describe('useDismiss', () => {
@@ -129,6 +138,46 @@ describe('useDismiss', () => {
     fireEvent.keyDown(document, { key: 'Tab' });
     if (!left) act(() => other.focus());
     expect(onDeparture).toHaveBeenCalledOnce();
+  });
+
+  it.each(['document', 'ancestor'] as const)(
+    'keeps a group its own non-focusable content was pressed in, with focus left on the %s', (fallback) => {
+      vi.useFakeTimers();
+      try {
+        const onDeparture = vi.fn();
+        render(<Question onDeparture={onDeparture} />);
+        const keep = screen.getByRole('button', { name: 'Keep' });
+        const question = screen.getByText('Delete this chart?');
+        act(() => keep.focus());
+        fireEvent.pointerDown(question);
+        act(() => (fallback === 'document' ? keep.blur() : screen.getByRole('main').focus()));
+        fireEvent.pointerUp(question);
+        fireEvent.click(question);
+        act(() => vi.runAllTimers());
+        fireEvent.keyDown(document, { key: 'Tab' });
+        expect(onDeparture).not.toHaveBeenCalled();
+        act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
+        expect(onDeparture).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('keeps the committed group live while a transition render that would close it is suspended', () => {
+    const onEscape = vi.fn();
+    const never = new Promise<never>(() => {});
+    const Gate = ({ wait }: { wait: boolean }) => (wait ? use(never) : null);
+    const Host = ({ open, wait }: { open: boolean; wait: boolean }) => {
+      useDismiss(open, (target) => target.id === 'toggle', onEscape, vi.fn());
+      return <><button id="toggle">Toggle</button><Gate wait={wait} /></>;
+    };
+    const view = (open: boolean, wait: boolean) => <Suspense fallback={null}><Host open={open} wait={wait} /></Suspense>;
+    const { rerender } = render(view(true, false));
+    act(() => startTransition(() => rerender(view(false, true))));
+    expect(screen.getByRole('button', { name: 'Toggle' })).toBeInTheDocument();
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(false);
+    expect(onEscape).toHaveBeenCalledOnce();
   });
 
   it('a new press invalidates stale protection and its scheduled settlement', () => {

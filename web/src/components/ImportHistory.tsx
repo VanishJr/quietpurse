@@ -65,6 +65,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
   const records = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const menuGroup = useRef<HTMLDivElement>(null);
+  const enteredMenu = useRef<string | null>(null);
   const pending = useRef<'download' | 'document' | 'import' | null>(null);
   const pendingRecord = useRef<string | null>(null);
   const lastConfirmRecord = useRef<string | undefined>(undefined);
@@ -114,6 +115,9 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
   }, () => setMenu(null), () => setMenu(null));
 
   useLayoutEffect(() => {
+    // Entry focus belongs to opening; a returning screen's focus is the Shell's.
+    if (menu === enteredMenu.current) return;
+    enteredMenu.current = menu;
     if (!menu || !shown) return;
     const action = menuGroup.current?.querySelector<HTMLButtonElement>('[data-record-removal]');
     if (action && isAvailable(action)) action.focus();

@@ -454,7 +454,8 @@ Focus departure dismisses a lightweight action group without stealing the new fo
 keyboard traversal to another chart never leaves competing Escape owners. A deleted action owner
 restores focus to the stable workspace creation control, as does contextual duplication when
 selection replaces its owner. Scroll dismissal follows actual anchor movement, not a delayed
-notification from the press that opened the group. A capped group reveals its safe focused
+notification from the press that opened the group. A resize that leaves the anchor undrawn closes
+the group without a focus return; a scroll beneath an inert or hidden branch only suspends it. A capped group reveals its safe focused
 action within its own scroll area rather than moving the chart behind it; coarse-pointer strip
 controls use the shared touch size.
 
@@ -813,8 +814,9 @@ scrolling, hidden-screen exclusion and navigation safe-area clearance remain the
 Grouped surfaces remain flat, subordinate relationships use spacing, and transient dialogs have a
 separate radius from ordinary cards. Analytics surfaces share the grouped-surface radius rather
 than keeping another card-size role. Focus is visible on the actual ground; reduced-motion behavior
-does not depend on transitions to establish the final state. Forced-color selection uses boundary
-geometry independently of fills; custom switches use system-color track and thumb pairs, with
+does not depend on transitions to establish the final state. Forced-color selection draws a ring
+inside the control, independently of fills and of the control's own border, so selecting never
+resizes it or moves its neighbours; custom switches use system-color track and thumb pairs, with
 forced adjustment disabled only for that control so its thumb cannot vanish into the track.
 
 `Button` owns native action presentation with explicit type, variant and size. Foreground and ground
@@ -1034,10 +1036,14 @@ dialog is neither a modal focus owner nor a reason to suppress the visible panel
 Escape before its sheet; a background popover beneath the modal cannot consume that dismissal.
 Optional focus departure closes a group without restoring its opener or stealing the destination.
 An inside pointer press protects its action through outside-ancestor focus and click; release or
-cancellation settles against current focus in a later task. A new press or Tab invalidates stale
+cancellation settles against current focus in a later task. Focus the browser leaves on the
+document, or on an ancestor of the press, is not a departure at settlement or at a later Tab, so
+pressing a group's own text keeps it open. A new press or Tab invalidates stale
 protection. Current callbacks do not restart press ownership. Closing, hiding or unmounting releases
 listeners and pending settlement. Settings' recurring actions also suspend ownership when history
-takes over their composition. Opening focus requires an available visible target; explicit recurring
+takes over their composition. Opening focus requires an available visible target and is not replayed
+when a screen or history returns: that focus is the Shell's, and a group still open then closes by
+departure. Explicit recurring
 read Retry focuses its stable heading before removing Retry, while automatic reads stay passive.
 Like a sheet, a hidden screen's popover hears nothing.
 `Chips` takes `locked`, which marks every chip `aria-disabled` and ignores a press, for a form

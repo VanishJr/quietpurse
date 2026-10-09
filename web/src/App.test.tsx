@@ -364,6 +364,28 @@ describe('the shell', () => {
     expect(screen.queryByRole('heading', { name: 'Import history' })).not.toBeInTheDocument();
   });
 
+  it('returns to Settings on its heading, closing a recurring menu left open without re-entering it', async () => {
+    const gym = { key: 'gym', description: 'Gym', category: 'subscriptions', months: 6, count: 6,
+      avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored: false };
+    mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/recurring': () => ok({ baseCurrency: 'EUR', monthlyTotal: -10, groups: [gym] }) });
+    render(<App />);
+    expect(await appMounted()).toBeVisible();
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Sections' })).getByRole('link', { name: 'Settings' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Gym' }));
+    const action = screen.getByRole('button', { name: 'Exclude from recurring: Gym' });
+    await waitFor(() => expect(action).toHaveFocus());
+    const entered = vi.fn();
+    action.addEventListener('focus', entered);
+
+    act(() => window.history.back());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Overview' })).toHaveFocus());
+    expect(action).toBeInTheDocument();
+    act(() => window.history.forward());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Settings' })).toHaveFocus());
+    expect(entered).not.toHaveBeenCalled();
+    expect(action).not.toBeInTheDocument();
+  });
+
   it('orients History on Back past a retained pristine income editor and re-enters it on Forward', async () => {
     mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports': () => ok(importsResponse([])) });
     render(<App />);

@@ -1042,10 +1042,10 @@ describe('recurring payments', () => {
     expect(action).toBeInTheDocument();
     fireEvent.click(back);
     expect(action).toBeVisible();
-    expect(action).toHaveFocus();
+    expect(action).not.toHaveFocus();
   });
 
-  it('does not focus an unavailable action on opening but enters when its screen returns', async () => {
+  it('does not focus an unavailable action on opening, nor replay that entry when its screen returns', async () => {
     mockFetch({ ...BASE, 'GET /api/recurring': () => ok(answer(payment('Gym'))) });
     const onOpenImport = vi.fn();
     const view = (shown: boolean) => <><button>Elsewhere</button><ScreenShown value={shown}>
@@ -1059,7 +1059,8 @@ describe('recurring payments', () => {
     expect(elsewhere).toHaveFocus();
     expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
     rerender(<ThemeProvider>{view(true)}</ThemeProvider>);
-    expect(screen.getByRole('button', { name: 'Exclude from recurring: Gym' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Exclude from recurring: Gym' })).toBeVisible();
+    expect(elsewhere).toHaveFocus();
   });
 
   it('opens a named action, closes on Escape or outside press, and returns focus on Escape', async () => {
