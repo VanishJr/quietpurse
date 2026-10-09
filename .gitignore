@@ -22,19 +22,11 @@ docs/
 # not travelling with them.
 REDESIGN-BACK-DEBT.md
 
-# agent pipeline. The mechanism is published - how a task is run, the agent definitions,
-# the commands and the concepts they share - and the material a task produces is not:
-# briefs and memos outweigh the source, and a request is the owner's words about their
-# own data. Listed rather than un-ignored wholesale, so that a future
-# .claude/settings.local.json is excluded by default instead of by remembering to.
-.claude/*
-!.claude/agents/
-!.claude/commands/
-.agents/*
-!.agents/README.md
-!.agents/concepts/
-# CLAUDE.md carries the half that rots - test counts, what a green run covered on which
-# tip. AGENTS.md carries the durable half and is published.
+# a contributor's own AI-assistant setup and working notes. Whole directories, not a list:
+# a task's notes are the owner's words about their own data. AGENTS.md is the published
+# half and stays tracked.
+.claude/
+.agents/
 CLAUDE.md
 # the spec tool's working files: the task-specs it writes under context/ and whatever else
 # it keeps per checkout. It seeds a nested .gitignore there, which specs.test.ts's walk

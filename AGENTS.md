@@ -14,14 +14,11 @@ client cannot reach, no state that lives only in the browser.
 ## What is in this file, and what is not
 
 This is the durable half: layout, commands, the invariants, and the shape of what the test suite
-cannot see. It is the file to read before changing anything.
+cannot see. It is the file to read before changing anything — whether you are a person or an
+agent working for one. `CONTRIBUTING.md` is the short version of how to propose a change.
 
-Two things it deliberately does not carry. **Counts** — how many tests, which tip they were
-measured on — live in a working file outside the repository, because a number published here is
-wrong by the next merge. And **the work** — what the owner asked for, and the findings that did
-not become a task — is not in the public tree either: a task starts from the owner's words in
-chat, and its record under `.agents/tasks/` and `DEBT.md` are per-machine files that
-`.agents/README.md` describes and you are not missing. Nothing here depends on them.
+One thing it deliberately does not carry: **counts** — how many tests, which tip they were
+measured on — because a number published here is wrong by the next merge.
 
 ## Layout
 
@@ -37,7 +34,6 @@ web/        React 19 + Vite + Recharts
 package.json  the two commands a person runs: setup, start
 ```
 
-`.agents/README.md` is how a task is run — the pipeline, and which checks are worth trusting.
 `ARCHITECTURE.md` is the module map and the path one statement takes through it. `SECURITY.md` is
 the threat model.
 
@@ -141,11 +137,10 @@ What jsdom cannot see is a limit of the environment, not a gap waiting to be fil
 nothing from `styles.css`, so the only visibility fact available is the `hidden` attribute; no real
 navigation and no download, so whether a file lands on disk is unanswerable here; no chart
 rendering — recharts measures a 0×0 box, so a test can mount a donut and assert nothing about it.
-Those checks stay manual, and an agent can run them: a real Chrome is reachable through the
-`claude-in-chrome` tools, and each check is recorded with how it was observed (`.agents/README.md`,
-and rule 9 in `.claude/agents/reviewer.md`). The carve-out is Settings' **`Export backup`**, which
-stays the maintainer's — it writes every transaction to a file, and that is not an export an agent
-runs on anyone's behalf.
+Those checks stay manual: open the screens in a real browser, and record in the pull request
+which screens were opened, how, and what was observed. An agent driving a browser can run them
+too, with one carve-out: Settings' **`Export backup`** stays the maintainer's — it writes every
+transaction to a file, and that is not an export an agent runs on anyone's behalf.
 
 Several screens and both shared controls are mounted by a test and asserted about by nothing:
 mounting is not coverage, and `Sheet`'s and `Chips`' own behaviour — the backdrop, Escape, focus,
@@ -236,6 +231,8 @@ everywhere.
   - `COMPUTED_PREFIX`'s docblock in `src/db/dedup.ts` is the shape to copy.
 - Match the style, naming and idiom of the file being edited — **but never its comment volume.**
   Matching a dense neighbour is how the density spread.
-- **Never commit, push, or `git add` without being asked.** Work is left in the working tree; the
-  human commits. The task pipeline is the one standing request: its commands commit every round
-  on the task's branch, per `.agents/concepts/commits.md`, and no agent inside it commits.
+- **An agent never commits, pushes, or runs `git add` without being asked.** Work is left in the
+  working tree; the person it works for commits.
+- **No real statement enters the repository** — not as a fixture, not pasted into an issue or a
+  pull request. Fixtures are built in code with invented values (`backend/test/pdffixture.ts`
+  for PDFs), and `*.csv` and `*.pdf` are ignored at the root for that reason.

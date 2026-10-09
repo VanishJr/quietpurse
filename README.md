@@ -144,7 +144,7 @@ it (`npm run db:generate`) into `backend/drizzle/` and applied when the app star
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | The module map, the path one statement takes from upload to committed rows, and how to add a format |
 | [`SECURITY.md`](SECURITY.md) | What protects your data on your own machine, and the one trade-off taken on purpose |
 | [`AGENTS.md`](AGENTS.md) | What to read before changing anything: the invariants, and what the test suite structurally cannot see |
-| [`.agents/README.md`](.agents/README.md) | How a task is run here, and which checks are worth trusting — ranked by whether a check can be wrong about itself |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to set up, which checks a change has to pass, and how to report a statement that would not import |
 
 ## License
 

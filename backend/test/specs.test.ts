@@ -19,9 +19,8 @@ import { commentsOf, type Comment } from '../scripts/comment-tokens';
  *
  * The unpublished set is DERIVED from .gitignore, never listed here. The rule is
  * "ignored by .gitignore" and never "is a root-level .md": AGENTS.md is a root-level
- * .md and is published, and .claude/agents/ is un-ignored by a negation sitting
- * beside the pattern that ignores its parent. A list maintained by hand beside the
- * thing it describes gets both of those backwards and still looks right.
+ * .md and is published, beside root-level notes that are not. A list maintained by
+ * hand beside the thing it describes gets that backwards and still looks right.
  */
 const ROOT = path.resolve(process.cwd(), '..');
 
@@ -467,9 +466,9 @@ const parseGitignore = (text: string): IgnoreRule[] =>
 /**
  * git's model rather than substring containment: every prefix of the path, every
  * pattern in file order, last match wins, a `!` line un-ignores. Containment would
- * refuse `.agents/README.md`, which is published; matching only the full path would
- * permit a decisions file two levels inside the ignored directory beside it, which is
- * not, because what excludes it is the pattern hitting its parent directory.
+ * refuse a published path that merely contains an ignored name; matching only the full
+ * path would permit a decisions file two levels inside an ignored directory, which is
+ * not published, because what excludes it is the pattern hitting its parent directory.
  *
  * A file under an excluded directory cannot be re-included, so a level that comes out
  * ignored ends the walk.
@@ -772,20 +771,18 @@ describe('the rules those clauses are built from', () => {
   it('permits what the public tree carries', () => {
     const denied = [
       'AGENTS.md',
-      '.agents/README.md',
-      '.claude/agents/reviewer.md',
+      'CONTRIBUTING.md',
+      '.github/ISSUE_TEMPLATE/bug.md',
       'backend/src/db/schema.ts',
     ].filter((p) => isIgnored(p, RULES));
-    expect(
-      denied,
-      'these are tracked and published - a negation beside an ignore pattern is what makes two of them so, and dropping it makes this check stricter than the rule it states',
-    ).toEqual([]);
+    expect(denied, 'these are tracked and published').toEqual([]);
   });
 
   it('denies what only this machine can open', () => {
     const permitted = [
       ...KNOWN_UNPUBLISHED,
       '.agents/tasks/048-summary-per-account/decisions.md',
+      '.claude/agents/reviewer.md',
       '.claude/settings.local.json',
       '.thinkrail/context/TASK-x.md',
       'backend/data/report_03-09-2026_11-22-33.pdf',
@@ -988,8 +985,8 @@ describe('the rules those clauses are built from', () => {
   });
 
   it('tells a spec from a document that merely opens with frontmatter', () => {
-    // a real frontmatter with keys of its own, read off disk: the agent definitions
-    expect(hasIdentity(read('.claude/agents/reviewer.md'))).toBe(false);
+    // a real frontmatter with keys of its own, read off disk: the issue templates
+    expect(hasIdentity(read('.github/ISSUE_TEMPLATE/bug.md'))).toBe(false);
     expect(hasIdentity(fenced(HEAD))).toBe(true);
     for (const [label, text] of [
       ['an id alone', fenced(['id: a'])],
@@ -1252,7 +1249,7 @@ describe('the rules those clauses are built from', () => {
       'const b = 2;',
       '/* backend/data/ */',
       'const c = 3;',
-      '// .agents/README.md and backend/src/app.ts',
+      '// .github/ISSUE_TEMPLATE/bug.md and backend/src/app.ts',
       'const d = 4;',
     ]);
     expect(deadPathsIn(source).map((r) => r.split(',')[0])).toEqual([
