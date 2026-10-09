@@ -2003,6 +2003,42 @@ textarea {
   user-select: text;
 }
 
+@media (min-width: 1200px) {
+  .settings-page {
+    max-width: var(--page-wide);
+  }
+
+  .settings-page .settings-section {
+    display: grid;
+    grid-template-columns: minmax(0, 17rem) minmax(0, 1fr);
+    column-gap: var(--space-12);
+    align-items: start;
+  }
+
+  .settings-page .settings-section-head {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .settings-page .settings-section-body {
+    grid-column: 2;
+  }
+
+  /* its title and its total belong to different columns here */
+  .settings-page .settings-recurring-header {
+    display: contents;
+  }
+
+  .settings-page .settings-recurring-summary {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .settings-page .settings-recurring .settings-section-body {
+    grid-row: 2;
+  }
+}
+
 @media (max-width: 899px) {
   .settings-page .settings-recurring-summary {
     align-items: flex-start;

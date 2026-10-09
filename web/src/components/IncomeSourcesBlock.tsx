@@ -227,127 +227,130 @@ export function IncomeSourcesBlock({ onChanged }: Props) {
 
   return (
     <>
-      <h2 className="settings-title" id="settings-income-title" ref={headingRef} tabIndex={-1}>Income sources</h2>
-      <p className="settings-lead">
-        Support is tracked separately and does not count toward earnings goals.
-      </p>
+      <div className="settings-section-head">
+        <h2 className="settings-title" id="settings-income-title" ref={headingRef} tabIndex={-1}>Income sources</h2>
+        <p className="settings-lead">
+          Support is tracked separately and does not count toward earnings goals.
+        </p>
+      </div>
+      <div className="settings-section-body">
+        {error && (
+          <Notice tone="error" role="alert" remedy={!sources && (
+            <Button ref={retryRef} type="button" variant="tertiary" size="standard" onClick={() => {
+              const heading = headingRef.current;
+              if (shown && heading && isAvailable(heading)) heading.focus();
+              load();
+            }}>Retry</Button>
+          )}>Error: {error}</Notice>
+        )}
 
-      {error && (
-        <Notice tone="error" role="alert" remedy={!sources && (
-          <Button ref={retryRef} type="button" variant="tertiary" size="standard" onClick={() => {
-            const heading = headingRef.current;
-            if (shown && heading && isAvailable(heading)) heading.focus();
-            load();
-          }}>Retry</Button>
-        )}>Error: {error}</Notice>
-      )}
+        {!sources && !error && <Notice role="status">Loading income sources…</Notice>}
 
-      {!sources && !error && <Notice role="status">Loading income sources…</Notice>}
-
-      {sources && (
-        <>
-          <div className="settings-income-list">
-          {sources.map((s) => {
-            const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
-            return (
-              <article key={s.id} className="settings-income-row" aria-label={`Income source ${s.label}`}
-                ref={mine?.form === 'delete' ? deleteRowRef : undefined}>
-                <div className="settings-income-info">
-                  <div className="settings-income-heading">
-                    <h3 className="settings-income-name">{s.label}</h3>
-                    <span className="settings-income-kind">{kindLabel(s.kind)}</span>
-                  </div>
-                  <div className="settings-income-context">
-                    {s.patterns.length > 0
-                      ? `${s.patterns.length} automatic match ${s.patterns.length === 1 ? 'pattern' : 'patterns'}`
-                      : 'Manual only'}
-                  </div>
-                  {mine?.form === 'delete' && (
-                    <>
-                      <p className="settings-consequence">
-                        Delete “{s.label}”? {destination
-                          ? `Assigned transactions move to ${destination.label}. Manual assignments cannot be restored.`
-                          : 'The destination source is unavailable. Reload the catalog before deleting.'}
-                      </p>
-                      {actionError && <Notice tone="error" role="alert">Error: {actionError}</Notice>}
-                      {busy && <Notice role="status">Deleting source…</Notice>}
-                      <FormActions cancel={
-                        <Button type="button" variant="secondary" size="standard" ref={deleteCancelRef}
-                          aria-disabled={busy} onClick={() => {
-                            if (busy) return;
-                            const focused = document.activeElement;
-                            if (!focused || focused === document.body || deleteRowRef.current?.contains(focused)) {
-                              cancelledDelete.current = { id: s.id, owner: focused };
-                            }
-                            close();
-                          }}>Cancel</Button>
-                      } completion={
-                        <Button type="button" variant="destructive-primary" size="standard" pending={busy}
-                          aria-disabled={busy || !destination} onClick={() => { if (destination) remove(s.id); }}>
-                          Delete
-                        </Button>
-                      } />
-                    </>
-                  )}
-                </div>
-                {mine?.form !== 'delete' && (
-                  <div className="settings-income-actions">
-                    <Button type="button" variant="secondary" size="compact"
-                      ref={(button) => {
-                        if (button) editRefs.current.set(s.id, button);
-                        else editRefs.current.delete(s.id);
-                      }}
-                      aria-disabled={busy}
-                      onClick={() => openEdit(s)}
-                      aria-label={`Edit ${s.label}`}
-                    >
-                      Edit
-                    </Button>
-                    {/* a builtin has no delete control, and the route refuses one anyway;
-                        a deleted source's rows move to `other` */}
-                    {!s.builtin && !mine && (
-                      <Button type="button" variant="destructive-secondary" size="compact"
-                        aria-disabled={busy}
-                        onClick={() => { setActionError(null); setOpen({ form: 'delete', id: s.id }); }}
-                        aria-label={`Delete ${s.label}`}
-                      >
-                        Delete
-                      </Button>
+        {sources && (
+          <>
+            <div className="settings-income-list">
+            {sources.map((s) => {
+              const mine = open && open.form !== 'add' && open.id === s.id ? open : null;
+              return (
+                <article key={s.id} className="settings-income-row" aria-label={`Income source ${s.label}`}
+                  ref={mine?.form === 'delete' ? deleteRowRef : undefined}>
+                  <div className="settings-income-info">
+                    <div className="settings-income-heading">
+                      <h3 className="settings-income-name">{s.label}</h3>
+                      <span className="settings-income-kind">{kindLabel(s.kind)}</span>
+                    </div>
+                    <div className="settings-income-context">
+                      {s.patterns.length > 0
+                        ? `${s.patterns.length} automatic match ${s.patterns.length === 1 ? 'pattern' : 'patterns'}`
+                        : 'Manual only'}
+                    </div>
+                    {mine?.form === 'delete' && (
+                      <>
+                        <p className="settings-consequence">
+                          Delete “{s.label}”? {destination
+                            ? `Assigned transactions move to ${destination.label}. Manual assignments cannot be restored.`
+                            : 'The destination source is unavailable. Reload the catalog before deleting.'}
+                        </p>
+                        {actionError && <Notice tone="error" role="alert">Error: {actionError}</Notice>}
+                        {busy && <Notice role="status">Deleting source…</Notice>}
+                        <FormActions cancel={
+                          <Button type="button" variant="secondary" size="standard" ref={deleteCancelRef}
+                            aria-disabled={busy} onClick={() => {
+                              if (busy) return;
+                              const focused = document.activeElement;
+                              if (!focused || focused === document.body || deleteRowRef.current?.contains(focused)) {
+                                cancelledDelete.current = { id: s.id, owner: focused };
+                              }
+                              close();
+                            }}>Cancel</Button>
+                        } completion={
+                          <Button type="button" variant="destructive-primary" size="standard" pending={busy}
+                            aria-disabled={busy || !destination} onClick={() => { if (destination) remove(s.id); }}>
+                            Delete
+                          </Button>
+                        } />
+                      </>
                     )}
                   </div>
-                )}
-              </article>
-            );
-          })}
-          </div>
+                  {mine?.form !== 'delete' && (
+                    <div className="settings-income-actions">
+                      <Button type="button" variant="secondary" size="compact"
+                        ref={(button) => {
+                          if (button) editRefs.current.set(s.id, button);
+                          else editRefs.current.delete(s.id);
+                        }}
+                        aria-disabled={busy}
+                        onClick={() => openEdit(s)}
+                        aria-label={`Edit ${s.label}`}
+                      >
+                        Edit
+                      </Button>
+                      {/* a builtin has no delete control, and the route refuses one anyway;
+                          a deleted source's rows move to `other` */}
+                      {!s.builtin && !mine && (
+                        <Button type="button" variant="destructive-secondary" size="compact"
+                          aria-disabled={busy}
+                          onClick={() => { setActionError(null); setOpen({ form: 'delete', id: s.id }); }}
+                          aria-label={`Delete ${s.label}`}
+                        >
+                          Delete
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+            </div>
 
-          <Button type="button" variant="secondary" size="standard" ref={addRef}
-            className="settings-income-add" aria-disabled={busy || open !== null} onClick={openAdd}>
-            Add source
-          </Button>
-        </>
-      )}
-      <Sheet
-        open={open?.form === 'add' || open?.form === 'edit'}
-        onClose={editor.requestClose}
-        guard={editor.guard}
-        pattern="short-editor"
-        stepKey={open?.form}
-        busy={busy}
-        title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
-        header={<h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>}
-        footer={<>
-          {actionError && <Notice tone="error" role="alert">Error: {actionError}</Notice>}
-          {busy && <Notice role="status">Saving source…</Notice>}
-          <FormActions cancel={
-            <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={editor.requestClose}>Cancel</Button>
-          } completion={
-            <Button type="submit" form="settings-income-form" variant="primary" size="standard" pending={busy}>Save</Button>
-          } />
-        </>}
-      >
-        {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}
-      </Sheet>
+            <Button type="button" variant="secondary" size="standard" ref={addRef}
+              className="settings-income-add" aria-disabled={busy || open !== null} onClick={openAdd}>
+              Add source
+            </Button>
+          </>
+        )}
+        <Sheet
+          open={open?.form === 'add' || open?.form === 'edit'}
+          onClose={editor.requestClose}
+          guard={editor.guard}
+          pattern="short-editor"
+          stepKey={open?.form}
+          busy={busy}
+          title={open?.form === 'edit' ? 'Edit source' : 'Add source'}
+          header={<h2 className="sheet-title">{open?.form === 'edit' ? 'Edit source' : 'Add source'}</h2>}
+          footer={<>
+            {actionError && <Notice tone="error" role="alert">Error: {actionError}</Notice>}
+            {busy && <Notice role="status">Saving source…</Notice>}
+            <FormActions cancel={
+              <Button type="button" variant="secondary" size="standard" aria-disabled={busy} onClick={editor.requestClose}>Cancel</Button>
+            } completion={
+              <Button type="submit" form="settings-income-form" variant="primary" size="standard" pending={busy}>Save</Button>
+            } />
+          </>}
+        >
+          {open?.form === 'add' ? form(add) : open?.form === 'edit' ? form(() => save(open.id)) : null}
+        </Sheet>
+      </div>
     </>
   );
 }

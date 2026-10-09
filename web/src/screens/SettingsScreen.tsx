@@ -249,11 +249,15 @@ export function SettingsScreen({
       <PageHeader title="Settings" />
 
         <section className="settings-section" aria-labelledby="settings-financial-title">
-          <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
-          <p className="settings-lead">
-            These settings decide what totals and income-based goals mean across all accounts.
-          </p>
-          <AppSettingsBlock onChanged={onDataChanged} />
+          <div className="settings-section-head">
+            <h2 className="settings-title" id="settings-financial-title">Financial setup</h2>
+            <p className="settings-lead">
+              These settings decide what totals and income-based goals mean across all accounts.
+            </p>
+          </div>
+          <div className="settings-section-body">
+            <AppSettingsBlock onChanged={onDataChanged} />
+          </div>
         </section>
 
         <section className="settings-section" aria-labelledby="settings-income-title">
@@ -262,7 +266,7 @@ export function SettingsScreen({
 
       <section className="settings-section settings-recurring" aria-labelledby="settings-recurring-title">
         <div className="settings-recurring-header">
-          <div>
+          <div className="settings-section-head">
             <h2 className="settings-title" id="settings-recurring-title" ref={recurringTitleRef} tabIndex={-1}>Recurring payments</h2>
             <p className="settings-lead">Detected across every account, over the last twelve months.</p>
           </div>
@@ -273,56 +277,60 @@ export function SettingsScreen({
             </p>
           )}
         </div>
-        {!recurring && !recurringReadError && (
-          <Notice role="status">Loading recurring payments…</Notice>
-        )}
-        {recurringReadError && (
-          <Notice tone="error" role="alert" remedy={
-            <Button type="button" variant="tertiary" size="standard" onClick={() => {
-              const title = recurringTitleRef.current;
-              if (shown && !historyOpen && title && isAvailable(title)) title.focus();
-              void loadRecurring();
-            }}>Retry</Button>
-          }>Error: {recurringReadError}</Notice>
-        )}
-        {recurringActionErrors.map((failed) => (
-          <Notice key={failed.key} tone="error" role="alert" id={`settings-recurring-error-${encodeURIComponent(failed.key)}`}>
-            Error: {failed.description}: {failed.message}
-          </Notice>
-        ))}
-        {recurringBusy && <Notice role="status">Updating recurring payments…</Notice>}
-        {recurring && recurring.groups.length === 0 && (
-          <Notice>
-            Nothing yet. A payment has to appear in several months before Finto calls it recurring.
-          </Notice>
-        )}
-        {recurring && active.length > 0 && (
-          <div className="settings-recurring-list">
-            {(showAllRecurring ? active : active.slice(0, RECURRING_LIMIT)).map((g) => recurringRow(g, false))}
-          </div>
-        )}
-        {!showAllRecurring && active.length > RECURRING_LIMIT && (
-          <Button className="settings-recurring-more" type="button" variant="tertiary" size="standard" onClick={() => setShowAllRecurring(true)}>
-            Show {active.length - RECURRING_LIMIT} more
-          </Button>
-        )}
-        {ignored.length > 0 && (
-          <details className="settings-recurring-excluded">
-            <summary>
-              <span className="settings-recurring-excluded-chevron" aria-hidden="true"><ChevronIcon /></span>
-              Excluded payments ({ignored.length})
-            </summary>
+        <div className="settings-section-body">
+          {!recurring && !recurringReadError && (
+            <Notice role="status">Loading recurring payments…</Notice>
+          )}
+          {recurringReadError && (
+            <Notice tone="error" role="alert" remedy={
+              <Button type="button" variant="tertiary" size="standard" onClick={() => {
+                const title = recurringTitleRef.current;
+                if (shown && !historyOpen && title && isAvailable(title)) title.focus();
+                void loadRecurring();
+              }}>Retry</Button>
+            }>Error: {recurringReadError}</Notice>
+          )}
+          {recurringActionErrors.map((failed) => (
+            <Notice key={failed.key} tone="error" role="alert" id={`settings-recurring-error-${encodeURIComponent(failed.key)}`}>
+              Error: {failed.description}: {failed.message}
+            </Notice>
+          ))}
+          {recurringBusy && <Notice role="status">Updating recurring payments…</Notice>}
+          {recurring && recurring.groups.length === 0 && (
+            <Notice>
+              Nothing yet. A payment has to appear in several months before Finto calls it recurring.
+            </Notice>
+          )}
+          {recurring && active.length > 0 && (
             <div className="settings-recurring-list">
-              {ignored.map((g) => recurringRow(g, true))}
+              {(showAllRecurring ? active : active.slice(0, RECURRING_LIMIT)).map((g) => recurringRow(g, false))}
             </div>
-          </details>
-        )}
+          )}
+          {!showAllRecurring && active.length > RECURRING_LIMIT && (
+            <Button className="settings-recurring-more" type="button" variant="tertiary" size="standard" onClick={() => setShowAllRecurring(true)}>
+              Show {active.length - RECURRING_LIMIT} more
+            </Button>
+          )}
+          {ignored.length > 0 && (
+            <details className="settings-recurring-excluded">
+              <summary>
+                <span className="settings-recurring-excluded-chevron" aria-hidden="true"><ChevronIcon /></span>
+                Excluded payments ({ignored.length})
+              </summary>
+              <div className="settings-recurring-list">
+                {ignored.map((g) => recurringRow(g, true))}
+              </div>
+            </details>
+          )}
+        </div>
       </section>
 
       <section className="settings-section" aria-labelledby="settings-data-title">
-        <h2 className="settings-title" id="settings-data-title">Data &amp; backup</h2>
+        <div className="settings-section-head">
+          <h2 className="settings-title" id="settings-data-title">Data &amp; backup</h2>
+        </div>
 
-        <div className="settings-data-actions">
+        <div className="settings-data-actions settings-section-body">
           <div className="settings-data-item">
             <Button className="settings-data-action" type="button" variant="tertiary" size="standard" onClick={onOpenImport}
               aria-labelledby="settings-import-label" aria-describedby="settings-import-description">
@@ -374,17 +382,19 @@ export function SettingsScreen({
       {/* a button inside the heading rather than a heading inside <summary>: a summary's
           contents are presentational, which takes the heading out of heading navigation */}
       <section className="settings-section settings-advanced" aria-labelledby="settings-advanced-title">
-        <h2 className="settings-title" id="settings-advanced-title">
-          <Button className="settings-advanced-toggle" type="button" variant="tertiary" size="standard"
-            aria-expanded={advancedOpen}
-            aria-controls="settings-advanced-content"
-            onClick={() => setAdvancedOpen((open) => !open)}
-          >
-            <span className="settings-advanced-label">Advanced · API connection</span>
-            <span className="settings-advanced-chevron" aria-hidden="true"><ChevronIcon /></span>
-          </Button>
-        </h2>
-        <div className="settings-advanced-content" id="settings-advanced-content" hidden={!advancedOpen}>
+        <div className="settings-section-head">
+          <h2 className="settings-title" id="settings-advanced-title">
+            <Button className="settings-advanced-toggle" type="button" variant="tertiary" size="standard"
+              aria-expanded={advancedOpen}
+              aria-controls="settings-advanced-content"
+              onClick={() => setAdvancedOpen((open) => !open)}
+            >
+              <span className="settings-advanced-label">Advanced · API connection</span>
+              <span className="settings-advanced-chevron" aria-hidden="true"><ChevronIcon /></span>
+            </Button>
+          </h2>
+        </div>
+        <div className="settings-advanced-content settings-section-body" id="settings-advanced-content" hidden={!advancedOpen}>
           <p className="settings-lead">This is the address of Finto’s local REST API.</p>
           <code className="settings-api-origin">{apiLabel()}</code>
         </div>
