@@ -1,4 +1,5 @@
 import type { ComponentPropsWithRef, ReactNode } from 'react';
+import { ChevronDownIcon } from './NavIcons';
 
 interface FieldBase {
   id: string;
@@ -37,7 +38,7 @@ export function Field(props: FieldProps) {
     <div className={['native-field', className].filter(Boolean).join(' ')}>
       <label className="native-field__label" htmlFor={id}>{label}</label>
       {props.control === 'input' && <input {...props.controlProps} {...shared} />}
-      {props.control === 'select' && <span className="native-field__select"><select {...props.controlProps} {...shared} /></span>}
+      {props.control === 'select' && <span className="native-field__select"><select {...props.controlProps} {...shared} /><ChevronDownIcon /></span>}
       {props.control === 'textarea' && <textarea {...props.controlProps} {...shared} />}
       {hasHelp && <p className="native-field__help" id={`${id}-help`}>{help}</p>}
       {hasError && <p className="native-field__error" id={`${id}-error`}>{error}</p>}

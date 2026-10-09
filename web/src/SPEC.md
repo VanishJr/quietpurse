@@ -805,9 +805,12 @@ stay readable on narrow layouts; ordinary text and controls may grow with the re
 
 `screen-inner` establishes the shared outer page anchor and responsive gutters. Wide data, normal
 composition and narrow editing measures limit breadth without independently centering subordinate
-regions. Settings uses the normal outer measure with a narrower financial form inside it. Existing
-scoped screen compositions retain their own treatment rather than acquiring a new wrapper. Screen
-scrolling, hidden-screen exclusion and navigation safe-area clearance remain the shell's concern.
+regions. Settings uses the normal outer measure until the screen is wide enough to set each
+section's heading beside its body, and the wide one from then on; its financial form keeps a
+narrower measure inside either. Goals uses the wide measure, and the import setup step widens only
+while its guide can stand beside the form. Existing scoped screen compositions retain their own
+treatment rather than acquiring a new wrapper. Screen scrolling, hidden-screen exclusion and
+navigation safe-area clearance remain the shell's concern.
 
 Grouped surfaces remain flat, subordinate relationships use spacing, and transient dialogs have a
 separate radius from ordinary cards. Analytics surfaces share the grouped-surface radius rather
@@ -852,21 +855,22 @@ of order and refund filtering. The grouping limit is independent of that encodin
 remainder has its own neutral palette role, square marker and Remaining label, not the actual Other
 category's identity. Unknown categories retain the neutral category fallback.
 
-Overview shares the outer wide page anchor and header. Independent financial groups size to their
-content rather than stretching the balance to the neighboring chart; subordinate figures and period
-context use spacing instead of additional surfaces. Balance and ordinary expenses are neutral;
-income and caller-interpreted comparisons use their independent roles. Signs and currency stay
-attached to values, with local scrolling for a value that cannot fit rather than smaller type or
-split units. Tablet spending pairs the plot with its legend without reordering the reading sequence.
-The chart tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
-width able to widen a narrow page. Recent transactions retain a caption and native table cells while
-reflowing into records on narrow layouts. Refund and transfer flags qualify neutral signed values,
-not income emphasis; full identity and distinct value-date context remain readable. Unusually long
-amounts take their own mobile line without changing account-focused See all navigation. A
-start-aligned scroll container surrounds a max-content value that aligns right only within its own
-width, so a wide signed amount never begins outside the reachable scroll range. The account
-rail retains ordinary current-account buttons, selected scrolling and paging; overflow has visible
-guidance, and locked paging arrows remain focusable but refuse repeated activation.
+Overview shares the outer wide page anchor and header. On a wide screen the cards run as two
+independent columns, balance then spending beside flows then recent transactions, so the balance is
+never stretched to the neighboring chart; the two lower cards end on one edge. Subordinate figures
+and period context use spacing instead of additional surfaces. Balance and ordinary expenses are
+neutral; income and caller-interpreted comparisons use their independent roles. Signs and currency
+stay attached to values, with local scrolling for a value that cannot fit rather than smaller type
+or split units. Tablet spending pairs the plot with its legend without reordering the reading
+sequence. The chart tables live inside clipped wrappers: clipping the table itself leaves its
+intrinsic width able to widen a narrow page. Recent transactions retain a caption and native table
+cells while reflowing into records on narrow layouts. Refund and transfer flags qualify neutral
+signed values, not income emphasis; full identity and distinct value-date context remain readable.
+Unusually long amounts take their own mobile line without changing account-focused See all
+navigation. A start-aligned scroll container surrounds a max-content value that aligns right only
+within its own width, so a wide signed amount never begins outside the reachable scroll range. The
+account rail retains ordinary current-account buttons, selected scrolling and paging; overflow has
+visible guidance, and locked paging arrows remain focusable but refuse repeated activation.
 
 Navigation uses the same links for the desktop sidebar and mobile bar. Import remains a desktop
 navigation link and a panel of Overview, while Settings takes its place in the mobile bar; Import
@@ -923,14 +927,14 @@ the strip a composite widget with a roving tabindex nobody asked for. The accoun
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 
-Dark is the initial theme; an existing saved choice takes precedence, and a saved value the shell
-no longer offers opens on the initial theme. The shell offers one toggle between dark and light;
-there is no mode that follows the OS preference. Its theme control moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
-indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
-together. Income series and their legend marks use the income role, independent of action and
-success colors; Overview expense series retain their existing encoding while Analytics uses
-neutral expense ink. Chart tooltips use
-a raised surface with its own text colours rather than inheriting colours from the plotted series.
+Dark is the initial theme; an existing saved choice takes precedence, and a saved value the shell no
+longer offers opens on the initial theme. The shell offers one toggle between dark and light; there
+is no mode that follows the OS preference. Its theme control moves between the bottom of the desktop
+sidebar and the mobile top bar, while the local-storage indicator stays in the sidebar. Colours are
+published from `theme.tsx` to CSS and chart components together. Income series and their legend
+marks use the income role, independent of action and success colors; Overview expense series retain
+their existing encoding while Analytics uses neutral expense ink. Chart tooltips use a raised
+surface with its own text colours rather than inheriting colours from the plotted series.
 
 ## Accounts and statements, as the client handles them
 

@@ -252,13 +252,17 @@
 
   .import-page-setup .import-layout > .import-guide {
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1;
     position: sticky;
     top: var(--space-6);
     max-width: 24rem;
     padding: 0 0 0 var(--space-6);
     border-top: 0;
     border-left: 1px solid var(--ink-border);
+  }
+
+  .import-page-setup .import-layout:has(> .import-created) > .import-guide {
+    grid-row: 1 / span 2;
   }
 }
 

@@ -77,3 +77,9 @@ export const MoonIcon = () => (
     <path d="M16.25 12.1A6.75 6.75 0 017.9 3.75a6.75 6.75 0 108.35 8.35z" />
   </svg>
 );
+
+export const ChevronDownIcon = () => (
+  <svg {...ICON_BOX}>
+    <path d="m5 8 5 5 5-5" />
+  </svg>
+);

@@ -229,12 +229,15 @@ textarea {
   background: none;
   cursor: pointer;
 }
-.theme-toggle:hover .theme-toggle-track {
-  border-color: var(--ink-primary);
-}
-.theme-toggle[aria-pressed='true']:hover .theme-toggle-track {
-  border-color: var(--ink-actionHover);
-  background: var(--ink-actionHover);
+/* a tap leaves :hover behind on touch, and under forced colours the track keeps system colours */
+@media (hover: hover) and (forced-colors: none) {
+  .theme-toggle:hover .theme-toggle-track {
+    border-color: var(--ink-primary);
+  }
+  .theme-toggle[aria-pressed='true']:hover .theme-toggle-track {
+    border-color: var(--ink-actionHover);
+    background: var(--ink-actionHover);
+  }
 }
 .theme-toggle:focus-visible {
   outline: 2px solid var(--ink-focus);
@@ -318,6 +321,11 @@ textarea {
   .topbar-actions {
     padding: 0;
     margin: 0;
+  }
+  .theme-toggle {
+    align-items: center;
+    min-height: var(--control-touch);
+    border-radius: var(--r-sm);
   }
   .device-note {
     display: none;
@@ -1043,6 +1051,11 @@ textarea {
   }
   .ov-grid > .ov-spend .ov-spend-more {
     margin-top: auto;
+  }
+  .ov-grid:not(:has(> .tx-recent)) {
+    grid-template-areas:
+      'balance flows'
+      'spend flows';
   }
 }
 .ov-card {
@@ -2054,9 +2067,6 @@ textarea {
     grid-row: 1;
   }
 
-  .settings-page .settings-recurring .settings-section-body {
-    grid-row: 2;
-  }
 }
 
 @media (max-width: 899px) {
@@ -3213,16 +3223,12 @@ select.native-field__control {
   padding-right: calc(var(--space-3) * 2 + 20px);
 }
 
-.native-field__select::after {
-  content: '';
+.native-field__select > svg {
   position: absolute;
   top: 50%;
   right: var(--space-3);
-  width: 20px;
-  height: 20px;
   transform: translateY(-50%);
-  background: var(--ink-secondary);
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+  color: var(--ink-secondary);
   pointer-events: none;
 }
 
@@ -3470,11 +3476,6 @@ select.native-field__control {
   }
 
   .transactions-screen .switch::after {
-    background: ButtonText;
-  }
-
-  .native-field__select::after {
-    forced-color-adjust: none;
     background: ButtonText;
   }
 
