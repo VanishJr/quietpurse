@@ -1001,6 +1001,30 @@ textarea {
   gap: var(--space-6);
   align-items: start;
 }
+/*
+ * Areas rather than a wrapper per column: the cards stay in one list in the order the
+ * single column shows them and the keyboard reaches them, and only placement differs.
+ */
+@media (min-width: 1000px) {
+  .ov-grid {
+    grid-template-areas:
+      'balance flows'
+      'spend flows'
+      'spend recent';
+  }
+  .ov-grid > .ov-balance { grid-area: balance; }
+  .ov-grid > .ov-flows,
+  .ov-grid > .ov-blank { grid-area: flows; }
+  .ov-grid > .ov-spend { grid-area: spend; }
+  .ov-grid > .tx-recent { grid-area: recent; }
+  .ov-grid > .ov-spend,
+  .ov-grid > .tx-recent {
+    align-self: stretch;
+  }
+  .ov-grid > .ov-spend .ov-spend-more {
+    margin-top: auto;
+  }
+}
 .ov-card {
   min-width: 0;
   padding: var(--space-6);
