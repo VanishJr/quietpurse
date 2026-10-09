@@ -1,9 +1,10 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { importRecord, importsResponse } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
 import { Account, AccountDeleted } from '../types';
-import { AccountDialog, COUNT_LIMIT } from './AccountDialog';
+import { AccountDialog, COUNT_LIMIT, type DialogKind } from './AccountDialog';
 
 /**
  * The delete panel, mounted on its own. Reaching its hidden-account branch through
@@ -70,6 +71,158 @@ const mount = (account: Account, routes: Routes, spies: Spies = {}) => {
 const confirmField = () => screen.findByLabelText(/to confirm/);
 const destroyButton = () => screen.getByRole('button', { name: 'Delete permanently' });
 
+describe('account name drafts', () => {
+  const pendingCases = [
+    { label: 'add Cancel', kind: 'add', origin: 'add', leave: 'Cancel', commit: 'Create', route: 'POST /api/accounts' },
+    { label: 'rename Cancel', kind: 'rename', origin: 'rename', leave: 'Cancel', commit: 'Save', route: 'PATCH /api/accounts/acc-1' },
+    { label: 'rename Back', kind: 'rename', origin: 'menu', leave: 'Back', commit: 'Save', route: 'PATCH /api/accounts/acc-1' },
+  ] as const;
+
+  it.each(pendingCases.flatMap((entry) => [{ ...entry, succeed: true }, { ...entry, succeed: false }]))(
+    '$label refuses dismissal until the write settles (success=$succeed)', async ({ kind, origin, leave, commit, route, succeed }) => {
+      let finish!: (response: Response) => void;
+      mockFetch({ [route]: () => new Promise<Response>((resolve) => { finish = resolve; }) });
+      const close = vi.fn();
+      const step = vi.fn();
+      const created = vi.fn();
+      const updated = vi.fn();
+      function Flow() {
+        const [open, setOpen] = useState(true);
+        const [currentKind, setKind] = useState<DialogKind>(kind);
+        return open ? <AccountDialog kind={currentKind} origin={origin}
+          account={kind === 'add' ? null : ACCOUNT} baseCurrency="EUR"
+          onClose={() => { close(); setOpen(false); }}
+          onStep={(next) => { step(next); setKind(next); }}
+          onCreated={created} onUpdated={updated} onDeleted={vi.fn()} onOpenHistory={vi.fn()} /> : null;
+      }
+      renderThemed(<Flow />);
+      const input = screen.getByRole('textbox', { name: 'Name' });
+      if (kind === 'add') {
+        expect(input).toHaveAttribute('aria-describedby', `${input.id}-help`);
+        expect(document.getElementById(`${input.id}-help`)).toHaveTextContent('your base currency');
+      } else {
+        expect(input).not.toHaveAttribute('aria-describedby');
+      }
+      fireEvent.change(input, { target: { value: 'Draft account' } });
+      fireEvent.click(screen.getByRole('button', { name: commit }));
+      const leaving = screen.getByRole('button', { name: leave });
+      expect(leaving).toHaveAttribute('aria-disabled', 'true');
+      expect(leaving).toBeEnabled();
+      expect(input).toHaveAttribute('readonly');
+      leaving.focus();
+      fireEvent.click(leaving);
+      fireEvent.click(leaving, { detail: 0 });
+      fireEvent.keyDown(document, { key: 'Escape' });
+      fireEvent.click(screen.getByRole('button', { name: 'Close dialog' }));
+      const backdrop = screen.getByRole('dialog').parentElement!;
+      fireEvent.pointerDown(backdrop);
+      fireEvent.click(backdrop);
+      expect(leaving).toHaveFocus();
+      expect(close).not.toHaveBeenCalled();
+      expect(step).not.toHaveBeenCalled();
+      expect(created).not.toHaveBeenCalled();
+      expect(updated).not.toHaveBeenCalled();
+      expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
+      expect(requests().filter((request) => request === route)).toHaveLength(1);
+      const saved = { ...ACCOUNT, id: kind === 'add' ? 'new-account' : ACCOUNT.id, name: 'Draft account', balance: kind === 'add' ? 0 : ACCOUNT.balance };
+      await act(async () => { finish(succeed ? ok(saved) : fail(409, { error: 'Name rejected' })); });
+      if (succeed) {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(close).toHaveBeenCalledOnce();
+        expect(step).not.toHaveBeenCalled();
+        expect(kind === 'add' ? created : updated).toHaveBeenCalledExactlyOnceWith(saved);
+      } else {
+        expect(await screen.findByText('Error: Name rejected')).toBeVisible();
+        expect(input).toHaveValue('Draft account');
+        expect(leaving).toHaveAttribute('aria-disabled', 'false');
+        expect(close).not.toHaveBeenCalled();
+        expect(step).not.toHaveBeenCalled();
+        fireEvent.click(leaving);
+        expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+        fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+        if (leave === 'Back') {
+          expect(step).toHaveBeenCalledExactlyOnceWith('menu');
+          expect(close).not.toHaveBeenCalled();
+        } else {
+          expect(close).toHaveBeenCalledOnce();
+        }
+        expect(created).not.toHaveBeenCalled();
+        expect(updated).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each(pendingCases.flatMap((entry) =>
+    (['backdrop', 'escape', 'close', 'leave'] as const).map((dismissal) => ({ ...entry, dismissal }))))(
+    '$label protects an edited name through $dismissal', ({ kind, origin, leave, dismissal }) => {
+      mockFetch({});
+      const close = vi.fn();
+      const step = vi.fn();
+      function Flow() {
+        const [open, setOpen] = useState(true);
+        const [currentKind, setKind] = useState<DialogKind>(kind);
+        return open ? <AccountDialog kind={currentKind} origin={origin}
+          account={kind === 'add' ? null : ACCOUNT} baseCurrency="EUR"
+          onClose={() => { close(); setOpen(false); }}
+          onStep={(next) => { step(next); setKind(next); }}
+          onCreated={vi.fn()} onUpdated={vi.fn()} onDeleted={vi.fn()} onOpenHistory={vi.fn()} /> : null;
+      }
+      renderThemed(<Flow />);
+      const input = screen.getByRole('textbox', { name: 'Name' });
+      input.focus();
+      fireEvent.change(input, { target: { value: 'Edited account' } });
+      const dialog = screen.getByRole('dialog');
+      const dismiss = () => {
+        if (dismissal === 'backdrop') {
+          const backdrop = dialog.parentElement!;
+          fireEvent.pointerDown(backdrop);
+          fireEvent.click(backdrop);
+        } else if (dismissal === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+        else fireEvent.click(screen.getByRole('button', { name: dismissal === 'close' ? 'Close dialog' : leave }));
+      };
+      dismiss();
+      expect(close).not.toHaveBeenCalled();
+      expect(step).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+      fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+      expect(screen.getByRole('textbox', { name: 'Name' })).toBe(input);
+      expect(input).toHaveFocus();
+      expect(input).toHaveValue('Edited account');
+      dismiss();
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+      if (dismissal === 'leave' && leave === 'Back') {
+        expect(step).toHaveBeenCalledExactlyOnceWith('menu');
+        expect(close).not.toHaveBeenCalled();
+      } else {
+        expect(close).toHaveBeenCalledOnce();
+        expect(step).not.toHaveBeenCalled();
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      }
+      expect(requests()).toEqual([]);
+    },
+  );
+
+  it('protects an edited name and treats an undone edit as pristine', () => {
+    const close = vi.fn();
+    renderThemed(<AccountDialog kind="add" origin="add" account={null} baseCurrency="EUR"
+      onStep={vi.fn()} onClose={close} onOpenHistory={vi.fn()} onCreated={vi.fn()}
+      onUpdated={vi.fn()} onDeleted={vi.fn()} />);
+    const input = screen.getByRole('textbox', { name: 'Name' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Cash' } });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(input).toHaveValue('Cash');
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(screen.queryByText('Discard unsaved changes?')).not.toBeInTheDocument();
+  });
+});
+
 describe('the delete preview', () => {
   it('prints the totals of the whole history, not of the page it was sent', async () => {
     mount(ACCOUNT, {
@@ -121,6 +274,53 @@ describe('the delete preview', () => {
     await screen.findByText('137 imports');
 
     expect(screen.queryByText(/an import older than that is not in these numbers/)).toBeNull();
+  });
+});
+
+describe('pending account consequences', () => {
+  it.each(['hide', 'delete'] as const)('%s retains focus and locks conflicting actions until refusal', async (kind) => {
+    let finish!: (response: Response) => void;
+    const route = kind === 'delete' ? 'DELETE /api/accounts/acc-1' : 'PATCH /api/accounts/acc-1';
+    mockFetch({
+      'GET /api/imports': () => ok(TRUNCATED),
+      'GET /api/transactions': () => ok([]),
+      [route]: () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    const close = vi.fn();
+    const step = vi.fn();
+    const history = vi.fn();
+    renderThemed(<AccountDialog kind={kind} origin="menu" account={ACCOUNT} baseCurrency="EUR"
+      onStep={step} onClose={close} onOpenHistory={history} onCreated={vi.fn()}
+      onUpdated={vi.fn()} onDeleted={vi.fn()} />);
+    if (kind === 'delete') fireEvent.change(await confirmField(), { target: { value: ACCOUNT.name } });
+    const action = screen.getByRole('button', { name: kind === 'delete' ? 'Delete permanently' : 'Hide' });
+    action.focus();
+    fireEvent.click(action);
+    expect(action).toHaveFocus();
+    expect(action).toHaveAttribute('aria-busy', 'true');
+    expect(action).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(action);
+    for (const label of ['Back', 'Cancel', 'Close dialog']) {
+      const control = screen.getByRole('button', { name: label });
+      expect(control).toHaveAttribute('aria-disabled', 'true');
+      fireEvent.click(control);
+    }
+    if (kind === 'delete') {
+      expect(await confirmField()).toHaveAttribute('readonly');
+      fireEvent.click(screen.getByRole('button', { name: 'Open import history' }));
+    }
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(close).not.toHaveBeenCalled();
+    expect(step).not.toHaveBeenCalled();
+    expect(history).not.toHaveBeenCalled();
+    expect(requests().filter((request) => request === route)).toHaveLength(1);
+    await act(async () => finish(fail(409, { error: 'Account write refused' })));
+    expect(screen.getByRole('alert')).toHaveTextContent('Error: Account write refused');
+    expect(screen.getByRole('alert').closest('.sheet-footer')).not.toBeNull();
+    expect(action).toHaveFocus();
+    expect(action).not.toHaveAttribute('aria-disabled', 'true');
+    expect(action).toBeEnabled();
+    if (kind === 'delete') expect(await confirmField()).toHaveValue(ACCOUNT.name);
   });
 });
 
@@ -242,5 +442,6 @@ describe('the delete itself', () => {
       await screen.findByText(/confirm it or discard it, then delete the account/),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open import history' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open import history' }).closest('.sheet-footer')).not.toBeNull();
   });
 });

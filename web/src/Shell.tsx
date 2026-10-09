@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AnalyticsIcon,
   GoalsIcon,
   ImportIcon,
+  MoonIcon,
   OverviewIcon,
   SettingsIcon,
+  SunIcon,
   TransactionsIcon,
 } from './components/NavIcons';
 import { AnalyticsScreen } from './screens/AnalyticsScreen';
@@ -13,9 +15,11 @@ import { OverviewScreen } from './screens/OverviewScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { TransactionsScreen } from './screens/TransactionsScreen';
 import { ScreenShown } from './screen';
-import { ThemeMode, useTheme } from './theme';
+import { useTheme } from './theme';
 import { TxFocus } from './types';
+import { NavigationNotice } from './components/NavigationNotice';
 import { setUrl, urlFor, useUrl } from './url';
+import { isAvailable } from './dismiss';
 
 const TABS = [
   { key: 'overview', title: 'Overview', Icon: OverviewIcon },
@@ -35,21 +39,18 @@ const patchFor = (key: TabKey) => ({ screen: key, panel: null });
 
 const IMPORT_PATCH = { screen: 'overview', panel: 'import' } as const;
 
-const THEME_MODES: readonly { mode: ThemeMode; label: string }[] = [
-  { mode: 'system', label: 'System' },
-  { mode: 'light', label: 'Light' },
-  { mode: 'dark', label: 'Dark' },
-];
-
 /** One `shown` for both, so the `hidden` a screen sits under and what its sheets are told cannot differ. */
 const Screen = ({ shown, children }: { shown: boolean; children: React.ReactNode }) => (
   <div className="screen" hidden={!shown}>
-    <ScreenShown value={shown}>{children}</ScreenShown>
+    <ScreenShown value={shown}>
+      {shown && <NavigationNotice className="navigation-notice" />}
+      {children}
+    </ScreenShown>
   </div>
 );
 
 export function Shell() {
-  const { mode, setMode } = useTheme();
+  const { scheme, setScheme } = useTheme();
 
   const url = useUrl();
   const tab = tabOf(url.screen);
@@ -58,6 +59,19 @@ export function Shell() {
 
   const onOverview = tab === 'overview';
   const importing = onOverview && url.panel === 'import';
+  const place = `${tab}:${url.panel ?? ''}`;
+  const previousPlace = useRef(place);
+  useEffect(() => {
+    if (previousPlace.current === place) return;
+    previousPlace.current = place;
+    const screen = document.querySelector<HTMLElement>('.screen:not([hidden])');
+    if (Array.from(screen?.querySelectorAll<HTMLElement>('[role="dialog"]') ?? []).some(isAvailable)) return;
+    const heading = Array.from(screen?.querySelectorAll<HTMLElement>('h1, h2') ?? []).find(isAvailable);
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }, [place]);
 
   const go = (key: TabKey) => {
     // on `tab`, not the URL: the app opens on `/`, where Overview is current without being
@@ -75,8 +89,9 @@ export function Shell() {
   };
 
   const openTransactions = (accountId: string) => {
-    setFocus((prev) => ({ accountId, nonce: (prev?.nonce ?? 0) + 1 }));
-    setUrl({ screen: 'transactions', panel: null });
+    setUrl({ screen: 'transactions', panel: null }, 'push', () => {
+      setFocus((prev) => ({ accountId, nonce: (prev?.nonce ?? 0) + 1 }));
+    });
   };
 
   const openImport = () => setUrl(IMPORT_PATCH);
@@ -140,22 +155,18 @@ export function Shell() {
             </div>
           </nav>
 
-          <div className="topbar-actions" role="group" aria-label="Theme">
-            <span className="theme-title" aria-hidden="true">Theme</span>
-            <div className="theme-options">
-              {THEME_MODES.map(({ mode: option, label }) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="theme-option"
-                  onClick={() => setMode(option)}
-                  aria-pressed={mode === option}
-                  aria-label={`${label} theme`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label="Dark mode"
+              aria-pressed={scheme === 'dark'}
+              onClick={() => setScheme(scheme === 'dark' ? 'light' : 'dark')}
+            >
+              <span className="theme-toggle-track" aria-hidden="true">
+                <span className="theme-toggle-thumb">{scheme === 'dark' ? <MoonIcon /> : <SunIcon />}</span>
+              </span>
+            </button>
           </div>
           <p className="device-note">
             <span aria-hidden="true" />

@@ -64,3 +64,22 @@ export const AccountsIcon = ({ off = false }: { off?: boolean }) => (
     {off && <path d="M3.75 16.75 16.25 3.25" />}
   </svg>
 );
+
+export const SunIcon = () => (
+  <svg {...ICON_BOX}>
+    <circle cx="10" cy="10" r="3.25" />
+    <path d="M10 2.75v1.5M10 15.75v1.5M2.75 10h1.5M15.75 10h1.5M4.87 4.87l1.06 1.06M14.07 14.07l1.06 1.06M4.87 15.13l1.06-1.06M14.07 5.93l1.06-1.06" />
+  </svg>
+);
+
+export const MoonIcon = () => (
+  <svg {...ICON_BOX}>
+    <path d="M16.25 12.1A6.75 6.75 0 017.9 3.75a6.75 6.75 0 108.35 8.35z" />
+  </svg>
+);
+
+export const ChevronDownIcon = () => (
+  <svg {...ICON_BOX}>
+    <path d="m5 8 5 5 5-5" />
+  </svg>
+);

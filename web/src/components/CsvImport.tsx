@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtDay, fmtMoney, rowCount } from '../format';
 import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
@@ -10,7 +10,12 @@ import {
   ImportSummary,
   StatementImportResult,
 } from '../types';
+import { Button } from './Button';
 import { Chips } from './Chips';
+import { Field } from './Field';
+import { FormActions } from './FormActions';
+import { Notice } from './Notice';
+import { PageHeader } from './PageHeader';
 import { ImportIcon } from './NavIcons';
 
 const FALLBACK_PRESETS = [{ key: 'generic', title: GENERIC_PRESET_TITLE }];
@@ -151,7 +156,12 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [result, setResult] = useState<StatementImportResult | null>(null);
   /** what landed once the summary was accepted — the backend's counts, not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
+  const [confirmationUncertain, setConfirmationUncertain] = useState(false);
   const [discarded, setDiscarded] = useState(false);
+  const id = useId();
+  const busyAction = useRef<'reading' | 'confirming' | 'discarding' | null>(null);
+  const setupFocusRequested = useRef(false);
+  const setupHeading = useRef<HTMLHeadingElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
@@ -193,6 +203,11 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    */
   const creating = accounts !== null && (accounts.length === 0 || pickedKey === NEW_ACCOUNT);
   const destinationReady = picked !== null || (creating && accountName.trim() !== '');
+  const summary = result?.outcome === 'awaiting_confirmation' ? result.summary : null;
+  const duplicate = result?.outcome === 'duplicate' ? result : null;
+  const reading = busy && busyAction.current === 'reading';
+  const failed = error !== null && errorArea === 'setup';
+  const preparing = !reading && !summary && !duplicate && !confirmed && !discarded && !failed;
 
   /**
    * New input, whichever way it arrived: the pending read no longer describes it,
@@ -201,6 +216,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    */
   const newInput = (): number => {
     setFileRows(null);
+    setConfirmationUncertain(false);
     setError(null);
     setResult(null);
     setConfirmed(null);
@@ -209,7 +225,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   };
 
   const takeFile = async (chosen: File | undefined) => {
-    if (!chosen) return;
+    if (!chosen || busyAction.current || !preparing) return;
     // before the first await, and fileRows is left cleared if a read throws: the
     // previous file's count standing beside this file's name is an invented number
     const seq = newInput();
@@ -250,10 +266,14 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   };
 
   const runImport = async () => {
+    if (busyAction.current || !preparing || !destinationReady || (!file && !csvText.trim())) return;
+    busyAction.current = 'reading';
+    setDragging(false);
     setBusy(true);
     try {
       setError(null);
       setConfirmed(null);
+      setConfirmationUncertain(false);
       setDiscarded(false);
       // a throw here is the whole of the create arm's refusal: nothing below runs, so
       // a refused create never becomes an upload
@@ -267,11 +287,14 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setErrorArea('setup');
       setError((e as Error).message);
     } finally {
+      busyAction.current = null;
       setBusy(false);
     }
   };
 
   const runConfirm = async (summary: ImportSummary) => {
+    if (busyAction.current || confirmed) return;
+    busyAction.current = 'confirming';
     setBusy(true);
     try {
       setError(null);
@@ -292,14 +315,18 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // created went in when it was created, and does not arrive here
       await loadAccounts();
     } catch (e) {
+      setConfirmationUncertain(true);
       setErrorArea('result');
       setError((e as Error).message);
     } finally {
+      busyAction.current = null;
       setBusy(false);
     }
   };
 
   const runDiscard = async (summary: ImportSummary) => {
+    if (busyAction.current || confirmed) return;
+    busyAction.current = 'discarding';
     setBusy(true);
     try {
       setError(null);
@@ -310,26 +337,48 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setErrorArea('result');
       setError((e as Error).message);
     } finally {
+      busyAction.current = null;
       setBusy(false);
     }
   };
 
-  useEffect(() => {
+  // Layout, not passive: the heading must hold focus in the same commit that shows it, or a reader
+  // (or anything waiting on the heading) acts in the frame where focus is still on the body.
+  useLayoutEffect(() => {
     if (result) {
       (result.outcome === 'awaiting_confirmation' ? reviewHeading : resultHeading).current?.focus();
     }
   }, [result]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (confirmed) resultHeading.current?.focus();
   }, [confirmed]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (discarded) resultHeading.current?.focus();
   }, [discarded]);
 
-  const summary = result?.outcome === 'awaiting_confirmation' ? result.summary : null;
-  const duplicate = result?.outcome === 'duplicate' ? result : null;
+  useLayoutEffect(() => {
+    if (reading || failed) resultHeading.current?.focus();
+  }, [reading, failed]);
+
+  useLayoutEffect(() => {
+    if (!preparing || !setupFocusRequested.current) return;
+    setupFocusRequested.current = false;
+    setupHeading.current?.focus();
+    setupHeading.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [preparing]);
+
+  const startAnother = () => {
+    if (busyAction.current || (summary && !confirmed)) return;
+    setupFocusRequested.current = true;
+    setConfirmationUncertain(false);
+    setError(null);
+    setResult(null);
+    setConfirmed(null);
+    setDiscarded(false);
+  };
+
   /**
    * Rows the summary called new that another import wrote while this one was waiting.
    * Two numbers that disagree with no explanation read as "the rows I approved were not
@@ -372,7 +421,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           // filtered, and nothing wrong with one that moved no money
           say: (n: number) =>
             `${rowCount(n)} couldn't be read. If it's the whole file, the column layout is` +
-            ` probably wrong — discard this and try your bank's preset above.`,
+            ` probably wrong — discard this and try your bank's optional preset in setup.`,
         },
         {
           key: 'noMovement',
@@ -384,382 +433,400 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       ].filter((d) => d.n > 0)
     : [];
 
+  const sourceContext = (
+    <dl className="import-source-context" aria-label="Import source">
+      <div><dt>File</dt><dd>{file?.name ?? 'pasted.csv'}</dd></div>
+      <div><dt>Destination</dt><dd>{summary?.accountName ?? picked?.name ?? accountName.trim()}</dd></div>
+    </dl>
+  );
+
   return (
-    <section className="import-page">
-      <header className="import-header">
-        <button className="btn-link" onClick={onBack}>
-          ← Back to accounts
-        </button>
-        <h1 className="title">Import a statement</h1>
-        <p className="import-subtitle">
-          Bring in a CSV, Excel or PDF statement. Finto reads it on this device.
-        </p>
-      </header>
+    <section className={`screen-inner import-page${preparing ? ' import-page-setup' : ''}`}>
+      <PageHeader
+        title="Import a statement"
+        returnAction={
+          <Button type="button" variant="tertiary" size="compact"
+            aria-disabled={busy} onClick={() => { if (!busyAction.current) onBack(); }}>
+            ← Back to accounts
+          </Button>
+        }
+      />
 
       <div className="import-layout">
-        <section className="import-setup" aria-labelledby="import-setup-heading" aria-busy={busy && !summary}>
-          <h2 id="import-setup-heading">Set up your import</h2>
-
-      <div className="import-step" aria-labelledby="import-file-heading">
-        <h3 id="import-file-heading" className="import-step-heading"><span aria-hidden="true">01</span> Choose a file</h3>
-        <p className="import-step-lead">Choose a statement from your bank, or drop it below.</p>
-      <button
-        type="button"
-        className={`import-dropzone${dragging ? ' import-dropzone-active' : ''}${file ? ' import-dropzone-selected' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragging(false);
-          void takeFile(e.dataTransfer.files?.[0]);
-        }}
-        onClick={() => fileInput.current?.click()}
-        aria-label={file
-          ? 'Choose another CSV, Excel or PDF statement file'
-          : 'Choose a CSV, Excel or PDF statement file'}
-        aria-describedby={file ? 'import-selected-file' : undefined}
-      >
-        <span className="import-dropzone-icon"><ImportIcon /></span>
-        {file ? (
-          <>
-            <span className="import-file-details" id="import-selected-file">
-              <span className="import-file-name">{file.name}</span>
-              <span className="import-file-meta">
-                {fileRows !== null && `${fileRows} rows · `}{fileSize(file.size)}
-              </span>
-              {emptyFile && <span className="import-file-empty" role="status">Empty file</span>}
-            </span>
-            <span className="import-file-choose">Click to choose another</span>
-          </>
-        ) : (
-          <>
-            <span className="import-dropzone-title">Drop a .csv, .xlsx or .pdf statement here</span>
-            <span className="import-dropzone-sub">or click to choose a file</span>
-          </>
-        )}
-      </button>
-      <input
-        ref={fileInput}
-        type="file"
-        accept={ACCEPTED}
-        hidden
-        onChange={(e) => {
-          void takeFile(e.target.files?.[0]);
-          e.target.value = '';
-        }}
-      />
-
-      <details className="import-paste">
-        <summary>…or paste the contents instead</summary>
-        <p className="hint">
-          Pasting here replaces the chosen file.
-        </p>
-        <textarea
-          className="input import-paste-input"
-          value={csvText}
-          onChange={(e) => {
-            newInput();
-            setCsvText(e.target.value);
-            setFile(null);
-          }}
-          placeholder="Buchungstag;Betrag;Verwendungszweck…"
-          aria-label="Statement contents"
-        />
-      </details>
-      </div>
-
-      <div className="import-step" aria-labelledby="import-layout-heading">
-        <h3 id="import-layout-heading" className="import-step-heading"><span aria-hidden="true">02</span> Column layout</h3>
-        <p className="import-step-lead">Tell Finto how to read the columns in your statement.</p>
-      <Chips
-        label="Statement preset"
-        options={presets.map((p) => ({ key: p.key, label: p.title }))}
-        selected={preset}
-        onSelect={setPreset}
-      />
-      <p className="hint">
-        Pick your bank if it's listed. "Any statement" reads the header and finds the
-        date, amount and description columns on its own — try it first.
-      </p>
-      </div>
-
-      <div className="import-step" aria-labelledby="import-account-heading">
-        <h3 id="import-account-heading" className="import-step-heading"><span aria-hidden="true">03</span> Account</h3>
-        <p className="import-step-lead">Choose where this statement's transactions belong.</p>
-      {accountsError && (
-        <p className="error import-accounts-error">
-          Your accounts couldn't be loaded: {accountsError}.
-          {/* only while there is no list at all: after a failed reload the picker below
-              is still the one that loaded, and telling the user nothing can be imported
-              over a working picker is false */}
-          {accounts === null &&
-            ' Nothing can be imported until the list is there — reload the page and try again.'}
-        </p>
-      )}
-
-      {accounts !== null && accounts.length > 0 && (
-        <>
-          <Chips
-            // not "Account": the account filter on the Transactions screen carries that
-            // name, and two controls sharing an accessible name is one ambiguity for a
-            // screen reader and another for anything selecting by it
-            label="Account for this import"
-            options={[
-              ...accounts.map((a) => ({ key: chipKey(a.id), label: a.name })),
-              { key: NEW_ACCOUNT, label: '+ New account' },
-            ]}
-            // nothing is preselected: an account chosen by the screen rather than by
-            // the person is how a statement lands in the wrong one behind a 200
-            selected={pickedKey ?? ''}
-            onSelect={setPickedKey}
-          />
-          <p className="hint">
-            Pick the account this statement belongs to — its rows join what's already
-            there, and nothing is duplicated.
-          </p>
-        </>
-      )}
-
-      {/* on any loaded list, empty included: with every account removed the picker is
-          gone, and this is then the only thing on screen saying why the bank the user
-          is looking for is missing */}
-      {accounts !== null && (
-        <p className="hint">Hidden accounts aren't listed here — unhide one first.</p>
-      )}
-
-      {creating && (
-        <>
-          <label className="setting-label" htmlFor="csv-account">
-            Account name
-          </label>
-          <input
-            id="csv-account"
-            className="input"
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-            placeholder="Sparkasse Giro"
-          />
-          <p className="hint">
-            The account is created when you press Import, before the file is read.
-            {baseCurrency !== null &&
-              ` It will hold amounts in ${baseCurrency}, your base currency.`}
-          </p>
-        </>
-      )}
-
-      </div>
-
-      {error && errorArea === 'setup' && (
-        <div className="import-error" role="alert">
-          <strong>Error</strong>
-          <p>{error}</p>
-        </div>
-      )}
-
-      <div className="import-submit">
-        <p>No transactions are added until you review and confirm.</p>
-        <button
-          className="btn"
-          disabled={busy || !destinationReady || (!file && !csvText.trim())}
-          onClick={runImport}
-        >
-          {busy && !summary ? 'Reading…' : 'Import'}
-        </button>
-      </div>
-        </section>
-
-      {(discarded || created || duplicate || summary || confirmed || (error && errorArea === 'result')) && (
-        <div className="import-results" role="region" aria-label="Import review or result">
-      {error && errorArea === 'result' && (
-        <div className="import-error" role="alert">
-          <strong>Error</strong>
-          <p>{error}</p>
-        </div>
-      )}
-      {discarded && (
-        <section className="card import-outcome import-discarded" aria-labelledby="import-discarded-heading">
-          <h2 id="import-discarded-heading" className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
-            Discarded — nothing was imported.
-          </h2>
-          <p>The file is untouched, so you can fix the column layout or the account above and upload it again.</p>
-        </section>
-      )}
-
-      {duplicate && (
-        <section className="card import-outcome import-duplicate" aria-labelledby="import-duplicate-heading">
-          <h2 id="import-duplicate-heading" className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
-            You've already imported this file
-          </h2>
-          {/*
-            The import as it was read, never where its rows are now: `total` is not the
-            rows that came in, and the day is the upload's. See `web/src/SPEC.md` under
-            *The sentences a person reads, and what is lifted out of a screen to hold
-            them*.
-          */}
-          <p>You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again.</p>
-          <p>It had {rowCount(duplicate.total)} when it was read.</p>
-          {duplicate.skipped > 0 && <p>{duplicate.skipped} of them didn't import.</p>}
-          <p>Nothing was duplicated.</p>
-        </section>
-      )}
-
-      {summary && !confirmed && (
-        <section className="card import-review" aria-labelledby="import-review-heading" aria-busy={busy}>
-          <h2 id="import-review-heading" className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
-            Read {summary.accepted} of {summary.total} rows — nothing imported yet
-          </h2>
-          {/* This qualifies every figure, including a PDF read independently of the chosen chip. */}
-          <p className="import-review-reader">{readAsSentence(summary.readAs)}</p>
-
-          <div className="import-review-metrics" aria-label="Statement figures">
-            <div className="import-review-metric">
-              <span className="import-review-metric-label">Rows</span>
-              <span className="import-review-metric-value">{summary.accepted} of {summary.total}</span>
-            </div>
-            <div className="import-review-metric">
-              <span className="import-review-metric-label">Period</span>
-              <span className="import-review-metric-value">
-                {fmtDay(summary.from)} to {fmtDay(summary.to)}
-              </span>
-            </div>
-            <div className="import-review-metric">
-              <span className="import-review-metric-label">Net</span>
-              <span className="import-review-metric-value import-review-net">
-                {summary.totals.map((t) => fmtMoney(t.net, t.currency)).join(' ·\n')}
-              </span>
-            </div>
-            {balances && balanceLine && (
-              <div className="import-review-metric">
-                <span className="import-review-metric-label">Statement balance</span>{' '}
-                {balances.series && (
-                  <span className="import-review-balance-context">
-                    {balances.series.summed > 1
-                      ? `Combined from ${balances.series.summed} running balances in the file. `
-                      : 'From a running balance in the file. '}
-                  </span>
+        {preparing && (
+          <section className="import-setup" aria-labelledby={`${id}-setup-heading`}>
+            <h2 id={`${id}-setup-heading`} ref={setupHeading} tabIndex={-1}>Set up your import</h2>
+            <div className="import-step" aria-labelledby={`${id}-file-heading`}>
+              <h3 id={`${id}-file-heading`} className="import-step-heading">Choose a file</h3>
+              <Button
+                type="button" variant="secondary" size="standard"
+                className={`import-dropzone${dragging ? ' import-dropzone-active' : ''}${file ? ' import-dropzone-selected' : ''}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (!busyAction.current) setDragging(true);
+                }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragging(false);
+                  void takeFile(e.dataTransfer.files?.[0]);
+                }}
+                onClick={() => { if (!busyAction.current) fileInput.current?.click(); }}
+                aria-label={file
+                  ? 'Choose another CSV, Excel or PDF statement file'
+                  : 'Choose a CSV, Excel or PDF statement file'}
+                aria-describedby={file ? `${id}-selected-file` : undefined}
+              >
+                <span className="import-dropzone-icon"><ImportIcon /></span>
+                {file ? (
+                  <>
+                    <span className="import-file-details" id={`${id}-selected-file`}>
+                      <span className="import-file-name">{file.name}</span>
+                      <span className="import-file-meta">
+                        {fileRows !== null && `${fileRows} rows · `}{fileSize(file.size)}
+                      </span>
+                      {emptyFile && <span className="import-file-empty" role="status">Empty file</span>}
+                    </span>
+                    <span className="import-file-choose">Click to choose another</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="import-dropzone-title">Drop a .csv, .xlsx or .pdf statement here</span>
+                    <span className="import-dropzone-sub">or click to choose a file</span>
+                  </>
                 )}
-                <span className="import-review-metric-value">
-                  {fmtMoney(balances.opening, balances.currency)} →{' '}
-                  {fmtMoney(balances.closing, balances.currency)}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="import-review-details">
-            <h3>Details</h3>
-            <p>They'll join your existing "{summary.accountName}".</p>
-            {/* The pair and its claim stay one sentence: a derived pair does not prove completeness. */}
-            {balances && balanceLine && (
-              <p>
-                {balanceLine.lead}
-                {fmtMoney(balances.opening, balances.currency)} at the start,{' '}
-                {fmtMoney(balances.closing, balances.currency)} at the end.{' '}
-                {balanceLine.claim}
-              </p>
-            )}
-            {summary.balancesNotShown && (
-              <p>{BALANCES_NOT_SHOWN[summary.balancesNotShown]}</p>
-            )}
-            {summary.alreadyPresent > 0 && (
-              <p>
-                {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
-                database — this export overlaps one you imported before. Nothing will be
-                duplicated.
-              </p>
-            )}
-            {summary.supersededImportId && (
-              <p>
-                An earlier upload of this same file was still waiting to be confirmed. It has
-                been dropped in favour of this one — it had imported nothing.
-              </p>
-            )}
-          </div>
-
-          {(drops.length > 0 || summary.problems.length > 0) && (
-            <div className="import-review-warnings">
-              <h3>Warnings</h3>
-              {drops.map((d) => <p key={d.key}>{d.say(d.n)}</p>)}
-              {summary.problems.slice(0, 3).map((p, i) => <p key={i}>{p}</p>)}
+              </Button>
+              <input
+                ref={fileInput} type="file" accept={ACCEPTED} hidden
+                onChange={(e) => {
+                  void takeFile(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+              <details className="import-disclosure import-paste">
+                <summary>…or paste the contents instead</summary>
+                <Field
+                  id={`${id}-paste`} label="Statement contents" control="textarea"
+                  help="Pasting here replaces the chosen file."
+                  controlProps={{
+                    className: 'import-paste-input', value: csvText,
+                    onChange: (e) => {
+                      if (busyAction.current || !preparing) return;
+                      newInput();
+                      setCsvText(e.target.value);
+                      setFile(null);
+                    },
+                    placeholder: 'Buchungstag;Betrag;Verwendungszweck…',
+                  }}
+                />
+              </details>
             </div>
-          )}
-          <div className="btn-row import-review-actions">
-            <button className="btn-ghost" disabled={busy} onClick={() => runDiscard(summary)}>
-              Discard
-            </button>
-            <button className="btn" disabled={busy} onClick={() => runConfirm(summary)}>
-              {busy ? 'Importing…' : 'Confirm'}
-            </button>
-          </div>
-        </section>
-      )}
 
-      {confirmed && (
-        <section className="card import-outcome import-confirmed" aria-labelledby="import-confirmed-heading">
-          <h2 id="import-confirmed-heading" ref={resultHeading} tabIndex={-1}
-            className={`import-outcome-heading${confirmed.inserted > 0 ? ' import-outcome-success' : ''}`}>
-            Imported {confirmed.inserted} of {confirmed.total} rows
-          </h2>
-          {/*
-            A count and no cause, and that is the honest limit rather than an omission:
-            this panel reads imports.rows_rejected, which keeps no reason; see
-            `web/src/SPEC.md` under *The sentences a person reads, and what is lifted out
-            of a screen to hold them*.
-          */}
-          {confirmed.skipped > 0 && (
-            <p>{rowCount(confirmed.skipped)} didn't import.</p>
-          )}
-          {alreadyPresent > 0 && (
-            <p>{alreadyPresent} were already in the database — this export overlaps one you
-              imported before. Nothing was duplicated.</p>
-          )}
-          {shortfall > 0 && (
-            <p>{shortfall} of the rows this summary called new were written by another import
-              while it waited here. They're in your data — under that import, not this one.</p>
-          )}
-        </section>
-      )}
+            <div className="import-step" aria-labelledby={`${id}-account-heading`}>
+              <h3 id={`${id}-account-heading`} className="import-step-heading">Account</h3>
+              <p className="import-step-lead">Choose where this statement's transactions belong.</p>
+              {accountsError && (
+                <Notice tone="error" role="alert" className="import-accounts-error">
+                  <p>
+                    Your accounts couldn't be loaded: {accountsError}.
+                    {accounts === null &&
+                      ' Nothing can be imported until the list is there — reload the page and try again.'}
+                  </p>
+                </Notice>
+              )}
+              {accounts === null && !accountsError && (
+                <Notice role="status">Loading your accounts…</Notice>
+              )}
+              {accounts !== null && accounts.length > 0 && (
+                <Chips
+                  label="Account for this import"
+                  options={[
+                    ...accounts.map((a) => ({ key: chipKey(a.id), label: a.name })),
+                    { key: NEW_ACCOUNT, label: '+ New account' },
+                  ]}
+                  selected={pickedKey ?? ''}
+                  onSelect={(key) => { if (!busyAction.current) setPickedKey(key); }}
+                />
+              )}
+              {accounts !== null && (
+                <p className="import-help">Hidden accounts aren't listed here — unhide one first.</p>
+              )}
+              {creating && (
+                <Field
+                  id={`${id}-account-name`} label="Account name" control="input"
+                  help={
+                    <>The account is created when you press Import, before the file is read.
+                      {baseCurrency !== null &&
+                        ` It will hold amounts in ${baseCurrency}, your base currency.`}
+                    </>
+                  }
+                  controlProps={{
+                    value: accountName,
+                    onChange: (e) => { if (!busyAction.current) setAccountName(e.target.value); },
+                    placeholder: 'Sparkasse Giro',
+                  }}
+                />
+              )}
+            </div>
 
-      {/* The account exists independently of the upload outcome, including a failed upload. */}
-      {created && (
-        <aside className="import-created" aria-label="Account created">
-          <h2>Account created</h2>
-          <p>
-            The account "{created.name}" was created when you pressed Import, before the file
-            was read — it exists whether or not these rows land. Remove it from Overview if
-            you didn't want it.
-          </p>
-        </aside>
-      )}
-        </div>
-      )}
+            <details className="import-disclosure import-presets">
+              <summary>Statement preset (optional)</summary>
+              <Chips
+                label="Statement preset"
+                options={presets.map((p) => ({ key: p.key, label: p.title }))}
+                selected={preset}
+                onSelect={(key) => { if (!busyAction.current) setPreset(key); }}
+              />
+            </details>
+            <div className="import-submit">
+              <p>No transactions are added until you review and confirm.</p>
+              <FormActions completion={
+                <Button type="button" variant="primary" size="standard"
+                  disabled={!destinationReady || (!file && !csvText.trim())} onClick={runImport}>
+                  Import
+                </Button>
+              } />
+            </div>
+          </section>
+        )}
 
-        <aside className="import-guide" aria-labelledby="import-guide-heading">
-          <h2 id="import-guide-heading">Before you import</h2>
-          <div className="import-guide-item">
-            <h3>Getting the file</h3>
-            <p>
-              In your bank's transaction list, choose Export or Download. Finto can read a PDF
-              only if it recognises the layout; otherwise, use the CSV or Excel export.
-            </p>
+        {reading && (
+          <section className="import-reading" aria-labelledby={`${id}-reading-heading`} aria-busy="true">
+            <h2 id={`${id}-reading-heading`} ref={resultHeading} tabIndex={-1}>Reading statement</h2>
+            {sourceContext}
+            <Notice role="status">Reading the file… No transactions are added yet.</Notice>
+          </section>
+        )}
+
+        {(failed || discarded || duplicate || summary || confirmed) && (
+          <div className="import-results" role="region" aria-label="Import review or result">
+            {failed && (
+              <section className="card import-outcome import-failed" aria-labelledby={`${id}-failed-heading`}>
+                <h2 id={`${id}-failed-heading`} className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
+                  Couldn't read this statement
+                </h2>
+                {sourceContext}
+                <Notice title="Error" tone="error" role="alert" className="import-error"
+                  remedy="Change the source to try an optional bank preset or a corrected CSV/XLSX export. PDF statements work only when Finto recognises their layout.">
+                  <p>{error}</p>
+                </Notice>
+              </section>
+            )}
+            {error && errorArea === 'result' && (
+              <Notice title="Error" tone="error" role="alert" className="import-error"><p>{error}</p></Notice>
+            )}
+            {discarded && (
+              <section className="card import-outcome import-discarded" aria-labelledby={`${id}-discarded-heading`}>
+                <h2 id={`${id}-discarded-heading`} className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
+                  Discarded — nothing was imported.
+                </h2>
+                {sourceContext}
+                <p>The file is untouched. Start another import to change the preset or destination and read it again.</p>
+              </section>
+            )}
+            {duplicate && (
+              <section className="card import-outcome import-duplicate" aria-labelledby={`${id}-duplicate-heading`}>
+                <h2 id={`${id}-duplicate-heading`} className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
+                  You've already imported this file
+                </h2>
+                {sourceContext}
+                <p>You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again.</p>
+                <p>It had {rowCount(duplicate.total)} when it was read.</p>
+                {duplicate.skipped > 0 && <p>{duplicate.skipped} of them didn't import.</p>}
+                <p>Nothing was duplicated.</p>
+              </section>
+            )}
+
+            {summary && !confirmed && (
+              <section className="card import-review" aria-labelledby={`${id}-review-heading`} aria-busy={busy}>
+                <h2 id={`${id}-review-heading`} className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
+                  Read {summary.accepted} of {summary.total} rows — {confirmationUncertain ? 'confirmation not verified' : 'nothing imported yet'}
+                </h2>
+                <p className="import-review-reader">{readAsSentence(summary.readAs)}</p>
+                {sourceContext}
+
+                <div className="import-review-metrics" aria-label="Statement figures">
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">Rows</span>
+                    <span className="import-review-metric-value">{summary.accepted} of {summary.total}</span>
+                  </div>
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">New rows</span>
+                    <span className="import-review-metric-value">{summary.newRows}</span>
+                  </div>
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">Already present</span>
+                    <span className="import-review-metric-value">{summary.alreadyPresent}</span>
+                  </div>
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">Omitted</span>
+                    <span className="import-review-metric-value">{summary.skipped}</span>
+                  </div>
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">Period</span>
+                    <span className="import-review-metric-value">
+                      {fmtDay(summary.from)} to {fmtDay(summary.to)}
+                    </span>
+                  </div>
+                  <div className="import-review-metric">
+                    <span className="import-review-metric-label">Net</span>
+                    <span className="import-review-metric-value import-review-net">
+                      {summary.totals.map((t) => fmtMoney(t.net, t.currency)).join(' ·\n')}
+                    </span>
+                  </div>
+                  {balances && balanceLine && (
+                    <div className="import-review-metric">
+                      <span className="import-review-metric-label">Statement balance</span>{' '}
+                      {balances.series && (
+                        <span className="import-review-balance-context">
+                          {balances.series.summed > 1
+                            ? `Combined from ${balances.series.summed} running balances in the file. `
+                            : 'From a running balance in the file. '}
+                        </span>
+                      )}
+                      <span className="import-review-metric-value">
+                        {fmtMoney(balances.opening, balances.currency)} →{' '}
+                        {fmtMoney(balances.closing, balances.currency)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="import-review-details">
+                  <h3>Details</h3>
+                  <p>They'll join your existing "{summary.accountName}".</p>
+                  {/* The pair and its claim stay one sentence: a derived pair does not prove completeness. */}
+                  {balances && balanceLine && (
+                    <p>
+                      {balanceLine.lead}
+                      {fmtMoney(balances.opening, balances.currency)} at the start,{' '}
+                      {fmtMoney(balances.closing, balances.currency)} at the end.{' '}
+                      {balanceLine.claim}
+                    </p>
+                  )}
+                  {summary.balancesNotShown && (
+                    <p>{BALANCES_NOT_SHOWN[summary.balancesNotShown]}</p>
+                  )}
+                  {summary.alreadyPresent > 0 && (
+                    <p>
+                      {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
+                      database — this export overlaps one you imported before. Nothing will be
+                      duplicated.
+                    </p>
+                  )}
+                  {summary.supersededImportId && (
+                    <p>
+                      An earlier upload of this same file was still waiting to be confirmed. It has
+                      been dropped in favour of this one — it had imported nothing.
+                    </p>
+                  )}
+                </div>
+
+                {(drops.length > 0 || summary.problems.length > 0) && (
+                  <Notice tone="warning" className="import-review-warnings">
+                    <h3>Warnings</h3>
+                    {drops.map((d) => <p key={d.key}>{d.say(d.n)}</p>)}
+                    {summary.problems.map((p, i) => <p key={i}>{p}</p>)}
+                  </Notice>
+                )}
+                {confirmationUncertain ? (
+                  <Notice tone="warning">
+                    The confirmation could not be verified. It may have committed despite the error.
+                    Back to accounts leaves this review without claiming a discard; check Import history
+                    or Transactions before trying again.
+                  </Notice>
+                ) : (
+                  <p className="import-help">To change the source or destination, discard this review first. Back to accounts leaves it waiting.</p>
+                )}
+                {busy && (
+                  <Notice role="status" className="import-pending">
+                    {busyAction.current === 'confirming'
+                      ? 'Confirming import… Transactions are being committed. Please wait.'
+                      : 'Discarding review… Please wait.'}
+                  </Notice>
+                )}
+                <FormActions className="import-review-actions" cancel={
+                  <Button type="button" variant="secondary" size="standard" aria-disabled={busy}
+                    pending={busy && busyAction.current === 'discarding'} onClick={() => runDiscard(summary)}>
+                    Discard
+                  </Button>
+                } completion={
+                  <Button type="button" variant="primary" size="standard" aria-disabled={busy}
+                    pending={busy && busyAction.current === 'confirming'} onClick={() => runConfirm(summary)}>
+                    Confirm import
+                  </Button>
+                } />
+              </section>
+            )}
+
+            {confirmed && (
+              <section className="card import-outcome import-confirmed" aria-labelledby={`${id}-confirmed-heading`}>
+                <h2 id={`${id}-confirmed-heading`} ref={resultHeading} tabIndex={-1}
+                  className={`import-outcome-heading${confirmed.inserted > 0 ? ' import-outcome-success' : ''}`}>
+                  Imported {confirmed.inserted} of {confirmed.total} rows
+                </h2>
+                {sourceContext}
+                {confirmed.skipped > 0 && (
+                  <p>{rowCount(confirmed.skipped)} didn't import.</p>
+                )}
+                {alreadyPresent > 0 && (
+                  <p>{alreadyPresent} were already in the database — this export overlaps one you
+                    imported before. Nothing was duplicated.</p>
+                )}
+                {shortfall > 0 && (
+                  <p>{shortfall} of the rows this summary called new were written by another import
+                    while it waited here. They're in your data — under that import, not this one.</p>
+                )}
+              </section>
+            )}
+
+            {(failed || discarded || duplicate || confirmed) && (
+              <FormActions className="import-outcome-actions" completion={
+                <Button type="button" variant="primary" size="standard" aria-disabled={busy} onClick={startAnother}>
+                  {failed ? 'Change source' : 'Start another import'}
+                </Button>
+              } />
+            )}
           </div>
-          <div className="import-guide-item">
-            <h3>Your file stays here</h3>
-            <p>
-              Statements are read on this device. The file and its rows stay in your Finto folder.
-            </p>
-          </div>
-          <div className="import-guide-item">
-            <h3>Re-imports are safe</h3>
-            <p>
-              Rows are matched by content, so re-importing won't duplicate them. You can safely
-              export a wider date range than you need.
-            </p>
-          </div>
-        </aside>
+        )}
+
+        {created && (
+          <aside className="import-created" aria-label="Account created">
+            <Notice title="Account created" role="status">
+              <p>
+                The account "{created.name}" was created when you pressed Import, before the file
+                was read — it exists whether or not these rows land. Remove it from Overview if
+                you didn't want it.
+              </p>
+            </Notice>
+          </aside>
+        )}
+
+        {preparing && (
+          <aside className="import-guide" aria-labelledby={`${id}-guide-heading`}>
+            <h2 id={`${id}-guide-heading`}>Before you import</h2>
+            <div className="import-guide-item">
+              <h3>Getting the file</h3>
+              <p>
+                In your bank's transaction list, choose Export or Download. Finto can read a PDF
+                only if it recognises the layout; otherwise, use the CSV or Excel export.
+              </p>
+            </div>
+            <div className="import-guide-item">
+              <h3>Your file stays here</h3>
+              <p>
+                Statements are read on this device. The file and its rows stay in your Finto folder.
+              </p>
+            </div>
+            <div className="import-guide-item">
+              <h3>Re-imports are safe</h3>
+              <p>
+                Rows are matched by content, so re-importing won't duplicate them. You can safely
+                export a wider date range than you need.
+              </p>
+            </div>
+          </aside>
+        )}
       </div>
     </section>
   );

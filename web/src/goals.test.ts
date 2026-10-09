@@ -41,11 +41,14 @@ describe('Goals presentation', () => {
     expect(progressLabel(progress({ percentage: 76 }))).toBe('76% of target');
     expect(progressLabel(progress({ semantic: 'used', percentage: 76 }))).toBe('76% used');
     expect(progressLabel(progress({ status: 'reached', percentage: 120 }))).toBe('Reached');
+    expect(progressLabel(progress({ percentage: null }))).toBe('Progress unavailable');
   });
 
-  it('uses Over by only when the server reports an excess', () => {
+  it('distinguishes favorable surplus from limit consumption using server semantics', () => {
     expect(remainingLabel(progress())).toBe('Left');
-    expect(remainingLabel(progress({ remaining: 0, overBy: 50 }))).toBe('Over by');
+    expect(remainingLabel(progress({ remaining: 0, overBy: 50 }))).toBe('Above target');
+    expect(remainingLabel(progress({ semantic: 'used', overBy: 0 }))).toBe('Available');
+    expect(remainingLabel(progress({ semantic: 'used', remaining: 0, overBy: 50, status: 'over-limit' }))).toBe('Over limit');
   });
 
   it('maps actionable statuses to accurate complete recovery text', () => {

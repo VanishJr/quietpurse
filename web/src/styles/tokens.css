@@ -2,9 +2,50 @@
   --r-xs: 4px;
   --r-sm: 8px;
   --r-md: 12px;
-  --r-xl: 19px;
+  --r-dialog: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --text-page: 1.75rem;
+  --text-section: 1.125rem;
+  --text-component: 1rem;
+  --text-body: 0.875rem;
+  --text-label: 0.875rem;
+  --text-helper: 0.8125rem;
+  --text-meta: 0.8125rem;
+  --text-financial-primary: 2.25rem;
+  --text-financial-secondary: 1.5rem;
+  --text-financial-row: 0.9375rem;
+  --leading-body: 1.5;
+  --leading-heading: 1.25;
+  --control-compact: 2.5rem;
+  --control-standard: 2.75rem;
+  --control-touch: 2.75rem;
+  --page-wide: 1280px;
+  --page-normal: 960px;
+  --page-editing: 640px;
+  --page-gutter: var(--space-6);
   --dur-1: 140ms;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --z-raised: 10;
   --z-modal: 20;
+}
+
+@media (min-width: 900px) {
+  :root {
+    --page-gutter: var(--space-8);
+  }
+}
+
+@media (max-width: 599px) {
+  :root {
+    --page-gutter: var(--space-4);
+    --text-page: 1.5rem;
+    --text-body: 0.9375rem;
+    --text-meta: 0.875rem;
+  }
 }

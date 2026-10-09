@@ -1,540 +1,280 @@
 .import-page {
-  width: 100%;
-  max-width: 1160px;
-  margin: 0 auto;
-  padding: 24px 24px 32px;
+  max-width: var(--page-normal);
 }
 
-.import-page .import-header {
-  margin-bottom: 24px;
-}
-
-.import-page .import-header .btn-link {
-  min-height: 44px;
-}
-
-.import-page .import-header .title {
-  margin: 12px 0 0;
-  font-size: 30px;
-  line-height: 1.25;
-}
-
-.import-page .import-subtitle {
-  margin: 8px 0 0;
-  color: var(--ink-secondary);
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.import-page .import-layout {
+.import-layout,
+.import-setup,
+.import-results {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
-}
-
-.import-page .import-setup,
-.import-page .import-guide {
+  gap: var(--space-6);
   min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-xl);
-  background: var(--ink-surface);
 }
 
-.import-page .import-setup h2,
-.import-page .import-guide h2 {
-  margin: 0 0 18px;
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.3;
+.import-setup,
+.import-reading,
+.import-created,
+.import-guide {
+  max-width: var(--page-editing);
+  min-width: 0;
 }
 
-.import-page .import-step + .import-step {
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid var(--ink-border);
-}
-
-.import-page .import-step-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
+.import-page h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-section);
   font-weight: 600;
-  line-height: 1.4;
-}
-
-.import-page .import-step-heading span {
-  color: var(--ink-accent);
-  font-size: 13px;
-}
-
-.import-page .import-step-lead {
-  margin: 6px 0 16px;
-  color: var(--ink-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.import-page .import-step .chips {
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0;
-  overflow: visible;
-}
-
-.import-page .import-step .chip {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  min-height: 44px;
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
-  text-align: center;
-}
-
-.import-page .import-step .hint {
-  margin: 12px 0 0;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.import-page .import-step .setting-label {
-  margin: 18px 0 8px;
-  color: var(--ink-primary);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.import-page .import-step input.input {
-  min-height: 44px;
-}
-
-.import-page .import-step input.input:focus-visible,
-.import-page .import-paste .input:focus-visible {
-  outline: 2px solid var(--ink-accent);
-  outline-offset: 2px;
-}
-
-.import-page .import-accounts-error {
-  margin: 0 0 16px;
-  padding: 12px;
-  border: 1px solid var(--ink-bad);
-  border-radius: var(--r-md);
-  line-height: 1.5;
+  line-height: var(--leading-heading);
   overflow-wrap: anywhere;
 }
 
-.import-page .import-submit {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--ink-border);
-}
-
-.import-page .import-submit p {
-  margin: 0;
-  color: var(--ink-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.import-page .import-submit .btn {
-  flex: none;
-  min-height: 44px;
-  padding-inline: 28px;
-}
-
-.import-page .import-guide-item + .import-guide-item {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--ink-border);
-}
-
-.import-page .import-guide-item h3 {
-  margin: 0 0 6px;
-  font-size: 14px;
+.import-page h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-component);
   font-weight: 600;
 }
 
-.import-page .import-guide-item p {
-  margin: 0;
-  color: var(--ink-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.import-page .import-results {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.import-page .import-results,
-.import-page .import-guide {
+.import-page p {
+  margin: 0 0 var(--space-3);
   overflow-wrap: anywhere;
 }
 
-.import-page .import-outcome,
-.import-page .import-created {
-  min-width: 0;
-  padding: 24px;
-  border: 1px solid var(--ink-border);
-  border-radius: var(--r-xl);
-  background: var(--ink-surface);
-}
-
-.import-page .import-outcome-heading {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.import-page .import-outcome-success {
-  color: var(--ink-good);
-}
-
-.import-page .import-outcome-heading:focus,
-.import-page .import-review-heading:focus {
-  outline: 2px solid var(--ink-accent);
-  outline-offset: 4px;
-  border-radius: var(--r-xs);
-}
-
-.import-page .import-outcome p,
-.import-page .import-created p {
-  margin: 10px 0 0;
-  color: var(--ink-secondary);
-  font-size: 13px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.import-page .import-created h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.import-page .import-error {
-  min-width: 0;
-  margin: 0 0 16px;
-  padding: 12px;
-  border: 1px solid var(--ink-bad);
-  border-radius: var(--r-md);
-  color: var(--ink-bad);
-  font-size: 13px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.import-page .import-results > .import-error {
-  margin-bottom: 0;
-}
-
-.import-page .import-error p {
-  margin: 4px 0 0;
-}
-
-.import-page .import-review {
-  min-width: 0;
-  padding: 24px;
-  border-color: var(--ink-border);
-  border-radius: var(--r-xl);
-}
-
-.import-page .import-review-heading {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.import-page .import-review-reader {
-  margin: 10px 0 0;
-  color: var(--ink-secondary);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.import-page .import-review-metrics {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 12px;
-  margin-top: 24px;
-  padding: 20px 0;
-  border-block: 1px solid var(--ink-border);
-}
-
-.import-page .import-review-metric {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.import-page .import-review-metric-label,
-.import-page .import-review-metric-value,
-.import-page .import-review-balance-context {
-  display: block;
-}
-
-.import-page .import-review-net {
-  white-space: pre-line;
-}
-
-.import-page .import-review-metric-label {
-  margin-bottom: 6px;
-  color: var(--ink-secondary);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.import-page .import-review-metric-value {
-  color: var(--ink-primary);
-  font-size: 17px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.import-page .import-review-balance-context {
-  margin: 4px 0;
-  color: var(--ink-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.import-page .import-review-details,
-.import-page .import-review-warnings {
-  margin-top: 20px;
-}
-
-.import-page .import-review-details h3,
-.import-page .import-review-warnings h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.import-page .import-review-details p,
-.import-page .import-review-warnings p {
-  margin: 0 0 10px;
-  font-size: 13px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.import-page .import-review-details p {
+.import-step-lead,
+.import-help,
+.import-guide p {
   color: var(--ink-secondary);
 }
 
-.import-page .import-review-warnings {
-  padding-left: 14px;
-  border-left: 3px solid var(--ink-sand);
-}
-
-.import-page .import-review-warnings h3 {
-  color: var(--ink-sand);
-}
-
-.import-page .import-review-warnings p {
-  color: var(--ink-primary);
-}
-
-.import-page .import-review-actions {
-  margin-top: 24px;
-}
-
-.import-page .import-review-actions .btn,
-.import-page .import-review-actions .btn-ghost {
-  min-height: 44px;
+.import-help {
+  font-size: var(--text-helper);
 }
 
 .import-page .import-dropzone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: var(--space-6) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
   width: 100%;
-  min-width: 0;
-  min-height: 168px;
-  margin: 12px 0;
-  padding: 24px 16px;
-  border: 2px dashed var(--ink-border);
-  border-radius: var(--r-md);
-  background: var(--ink-surface);
-  text-align: center;
-  line-height: 1.5;
-  transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
-}
-
-.import-page .import-dropzone:hover,
-.import-page .import-dropzone-active {
-  border-color: var(--ink-accent);
+  padding: var(--space-6);
+  border-style: dashed;
+  text-align: left;
 }
 
 .import-page .import-dropzone-active {
-  background: var(--ink-grid);
+  border-color: var(--ink-focus);
+  background: var(--ink-selected);
+  color: var(--ink-onSelected);
 }
 
 .import-page .import-dropzone-selected {
   border-style: solid;
 }
 
-.import-page .import-dropzone-icon {
-  display: flex;
-  color: var(--ink-accent);
-  margin-bottom: 12px;
+.import-dropzone-icon {
+  grid-row: 1 / 3;
 }
 
-.import-page .import-dropzone-icon svg {
-  width: 28px;
-  height: 28px;
+.import-dropzone-icon svg {
+  display: block;
+  width: var(--space-6);
+  height: var(--space-6);
 }
 
-.import-page .import-dropzone-title,
-.import-page .import-file-name {
-  font-size: 15px;
-  font-weight: 600;
+.import-file-details {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.import-file-name,
+.import-dropzone-title {
   overflow-wrap: anywhere;
 }
 
-.import-page .import-dropzone-sub,
-.import-page .import-file-meta {
-  display: block;
-  margin-top: 4px;
+.import-file-meta,
+.import-file-choose,
+.import-dropzone-sub {
   color: var(--ink-secondary);
-  font-size: 13px;
+  font-size: var(--text-meta);
+  font-weight: 400;
 }
 
-.import-page .import-file-details {
-  display: block;
+.import-file-choose,
+.import-dropzone-sub {
+  grid-column: 2;
+}
+
+.import-file-empty {
+  color: var(--ink-error);
+}
+
+.import-disclosure > summary {
+  margin: 0;
+  padding-block: var(--space-3);
+  min-height: var(--control-touch);
+  color: var(--ink-primary);
+  font-size: var(--text-label);
+  font-weight: 500;
+}
+
+.import-disclosure > summary::marker {
+  content: normal;
+}
+
+.import-disclosure > summary::-webkit-details-marker {
+  display: revert;
+}
+
+.import-page .import-paste-input {
+  min-height: calc(var(--control-standard) * 3);
+}
+
+.import-page .choice-chips {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  overflow: visible;
+}
+
+.import-page .chip {
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
+  min-height: var(--control-touch);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.import-page .import-file-name {
-  display: block;
+.import-submit {
+  border-top: 1px solid var(--ink-border);
+  padding-top: var(--space-4);
 }
 
-.import-page .import-file-empty {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink-bad);
-  font-size: 13px;
+.import-source-context {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  font-size: var(--text-meta);
 }
 
-.import-page .import-file-choose {
-  display: block;
-  margin-top: 12px;
-  color: var(--ink-accent);
-  font-size: 13px;
-  font-weight: 600;
+.import-source-context > div {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--space-3);
 }
 
-.import-page .import-paste {
-  margin-top: 18px;
+.import-source-context dt {
+  color: var(--ink-secondary);
 }
 
-.import-page .import-paste > summary {
-  display: list-item;
-  width: fit-content;
-  min-height: 44px;
+.import-source-context dd {
   margin: 0;
-  padding: 12px 0;
-  color: var(--ink-accent);
-  font-size: 13px;
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
 }
 
-.import-page .import-paste .hint {
-  margin: 8px 0;
+.import-page .import-review,
+.import-page .import-outcome {
+  padding: var(--space-6);
 }
 
-.import-page .import-paste .import-paste-input {
-  display: block;
-  min-height: 96px;
-  margin-top: 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  resize: vertical;
+.import-page .import-review-reader {
+  margin-top: var(--space-3);
+  color: var(--ink-secondary);
 }
 
-@media (min-width: 700px) {
-  .import-page .import-review-metrics {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 20px;
+.import-review-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4) var(--space-6);
+  padding-block: var(--space-4);
+  border-block: 1px solid var(--ink-border);
+}
+
+.import-review-metric {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.import-review-metric-label,
+.import-review-balance-context {
+  color: var(--ink-secondary);
+  font-size: var(--text-meta);
+}
+
+.import-review-metric-value {
+  font-size: var(--text-component);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.import-review-net {
+  white-space: pre-line;
+}
+
+.import-review-details,
+.import-review-warnings,
+.import-review-actions {
+  margin-top: var(--space-6);
+}
+
+.import-page .import-outcome-success {
+  color: var(--ink-success);
+}
+
+.import-error p {
+  white-space: pre-wrap;
+}
+
+.import-guide {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--ink-border);
+}
+
+/*
+ * The guide beside the form rather than under it, by placement alone: it stays after the
+ * form in the document, which is where the single column shows it and the keyboard reaches it.
+ */
+@media (min-width: 1200px) {
+  .import-page-setup {
+    max-width: var(--page-wide);
   }
-}
 
-@media (min-width: 1180px) {
-  .import-page {
-    padding: 30px 32px 32px;
+  .import-page-setup .import-layout {
+    grid-template-columns: minmax(0, var(--page-editing)) minmax(15rem, 1fr);
+    column-gap: var(--space-12);
+    align-items: start;
   }
 
-  .import-page .import-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.58fr);
-    gap: 20px;
-  }
-
-  .import-page .import-setup {
+  .import-page-setup .import-layout > * {
     grid-column: 1;
-    grid-row: 1;
   }
 
-  .import-page .import-guide {
+  .import-page-setup .import-layout > .import-guide {
     grid-column: 2;
     grid-row: 1;
-    align-self: start;
+    position: sticky;
+    top: var(--space-6);
+    max-width: 24rem;
+    padding: 0 0 0 var(--space-6);
+    border-top: 0;
+    border-left: 1px solid var(--ink-border);
   }
 
-  .import-page .import-results {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .import-page-setup .import-layout:has(> .import-created) > .import-guide {
+    grid-row: 1 / span 2;
   }
 }
 
 @media (max-width: 599px) {
-  .import-page {
-    padding: 22px 16px 32px;
-  }
-
-  .import-page .import-header .title {
-    font-size: 28px;
-  }
-
-  .import-page .import-setup,
-  .import-page .import-guide,
   .import-page .import-review,
   .import-page .import-outcome,
-  .import-page .import-created {
-    padding: 18px;
+  .import-page .import-dropzone {
+    padding: var(--space-4);
   }
 
-  .import-page .import-review-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .import-page .import-review-actions .btn,
-  .import-page .import-review-actions .btn-ghost {
-    width: 100%;
-  }
-
-  .import-page .import-submit {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .import-page .import-submit .btn {
-    width: 100%;
+  .import-source-context > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
   }
 }

@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { api } from './api';
 import {
   boundsOf,
+  Bounds,
   ChartShape,
   chartKind,
   ComparedPoint,
@@ -26,7 +27,7 @@ import {
 } from './analytics';
 import { Account, Chart } from './types';
 
-export type ChartData =
+export type ChartData = { period: Bounds; priorPeriod: Bounds | null } & (
   | {
       shape: 'series';
       currency: string;
@@ -38,7 +39,8 @@ export type ChartData =
       slices: SharePoint[];
       /** The period beside the one before it. null unless the kind is comparative. */
       compared: ComparedPoint[] | null;
-    };
+    }
+);
 
 export interface ChartLoad {
   data: ChartData | null;
@@ -80,6 +82,8 @@ async function loadSeries(
     const answer = await api.months(from, to);
     return {
       shape: 'series',
+      period: { from, to },
+      priorPeriod: null,
       currency: answer.baseCurrency,
       points: seriesFromMonths(answer.months, ticks, range.grain),
     };
@@ -88,6 +92,8 @@ async function loadSeries(
   const answer = await api.accountMonths(accountId, from, to);
   return {
     shape: 'series',
+    period: { from, to },
+    priorPeriod: null,
     currency: answer.currency,
     points: seriesFromMonths(answer.months, ticks, range.grain),
   };
@@ -116,6 +122,8 @@ async function loadShare(
     const slices = shareFromSummary(summary, spec.breakdown);
     return {
       shape: 'share',
+      period: { from, to },
+      priorPeriod: prior,
       currency: summary.baseCurrency,
       slices,
       /*
@@ -146,6 +154,8 @@ async function loadShare(
   const slices = shareFromSummary(summary, spec.breakdown);
   return {
     shape: 'share',
+    period: { from, to },
+    priorPeriod: prior,
     currency: summary.currency,
     slices,
     // positives only, for the reason the arm above gives

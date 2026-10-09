@@ -15,6 +15,9 @@ import { AccountBalance } from '../components/AccountBalance';
 import { AccountDialog, DialogKind } from '../components/AccountDialog';
 import { AccountFlows } from '../components/AccountFlows';
 import { AccountTabs } from '../components/AccountTabs';
+import { Button } from '../components/Button';
+import { Notice } from '../components/Notice';
+import { PageHeader } from '../components/PageHeader';
 import { CsvImport } from '../components/CsvImport';
 import { ImportIcon } from '../components/NavIcons';
 import { ImportHistory } from '../components/ImportHistory';
@@ -121,6 +124,18 @@ export function OverviewScreen({
   const [window_, setWindow] = useState<MonthWindow>(DEFAULT_WINDOW);
 
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const postWriteFocus = useRef<{ list: Account[] | null } | null>(null);
+  useEffect(() => {
+    const intent = postWriteFocus.current;
+    if (!intent) return;
+    const replaced = accounts !== null && accounts !== intent.list;
+    if (!replaced && !error) return;
+    if (replaced) postWriteFocus.current = null;
+    if (document.activeElement === document.body && !titleRef.current?.closest('[hidden], [inert]')) {
+      titleRef.current?.focus();
+    }
+  }, [accounts, error]);
 
   const [data, setData] = useState<AccountData | null>(null);
   /** The dashboard's own refusal: the rail above it loaded and is still true. */
@@ -230,16 +245,21 @@ export function OverviewScreen({
   }, [selected, loadAccount, dataRevision]);
 
   const applyAccount = (updated: Account) => {
+    if (updated.hidden && accounts?.some((account) => account.id === updated.id && !account.hidden)) {
+      postWriteFocus.current = { list: accounts };
+    }
     setAccounts((list) => list?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
   };
 
   const afterCreate = (created: Account) => {
+    postWriteFocus.current = { list: accounts };
     setDialog(null);
     setUrl({ account: created.id });
     load();
   };
 
   const afterDelete = (deleted: Account, destroyed: AccountDeleted) => {
+    postWriteFocus.current = { list: accounts };
     setDialog(null);
     // before the reload and outside its failure: the account is gone whether or not the
     // list comes back, and a screen that says nothing sends the reader to press again
@@ -302,6 +322,7 @@ export function OverviewScreen({
     return (
       <div className="screen-inner">
         <ImportHistory
+          backLabel="Back to accounts"
           account={selected}
           onBack={() => setUrl({ panel: null })}
           onChanged={() => {
@@ -314,17 +335,17 @@ export function OverviewScreen({
   }
 
   return (
-    <div className="ov">
-      <header className="ov-heading">
-        <div>
-          <p className="ov-date">{fmtWeekday(today)}</p>
-          <h1 className="overview-title">Overview</h1>
-          <p className="ov-subtitle">A clear view of your everyday account.</p>
-        </div>
-        <button className="btn ov-import" onClick={() => setUrl({ panel: 'import' })}>
-          <ImportIcon /> Import statement
-        </button>
-      </header>
+    <div className="screen-inner ov">
+      <PageHeader
+        title="Overview"
+        titleRef={titleRef}
+        context={<><p className="ov-date">{fmtWeekday(today)}</p>A clear view of your everyday account.</>}
+        action={
+          <Button type="button" variant="primary" size="standard" onClick={() => setUrl({ panel: 'import' })}>
+            <ImportIcon /> Import statement
+          </Button>
+        }
+      />
 
       {onRail.length > 0 && (
         <AccountTabs
@@ -340,13 +361,13 @@ export function OverviewScreen({
 
       <div className="ov-body">
         {((accounts === null && !error) || (selected && !mine && !dataError)) && (
-          <p className="ov-loading" role="status">
-            Loading your account…
-          </p>
+          <Notice placement="content" role="status">Loading your account…</Notice>
         )}
         <div aria-live="polite">
-          {error && <p className="error ov-notice">Error: {error}</p>}
-          {notice && <p className="hint ov-notice">{notice}</p>}
+          {error && <Notice tone="error" remedy={
+            <Button type="button" variant="secondary" size="compact" onClick={load}>Retry accounts</Button>
+          }>Error: {error}</Notice>}
+          {notice && <Notice>{notice}</Notice>}
         </div>
 
         {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
@@ -360,16 +381,15 @@ export function OverviewScreen({
               them in an account you name on the way in.
             </p>
             <div className="acct-blank-actions">
-              <button className="btn" onClick={() => setUrl({ panel: 'import' })}>
-                <span aria-hidden="true">⭳</span> Import a statement
-              </button>
-              <button
-                className="btn-ghost"
+              <Button type="button" variant="secondary" size="standard" onClick={() => setUrl({ panel: 'import' })}>
+                <ImportIcon /> Import a statement
+              </Button>
+              <Button type="button" variant="tertiary" size="standard"
                 onClick={() => setDialog(openAt('add', null))}
                 disabled={baseCurrency === null}
               >
                 Create an empty account
-              </button>
+              </Button>
             </div>
             <p className="hint">
               An empty account is for money that has no statement — cash, or a card you
@@ -379,16 +399,17 @@ export function OverviewScreen({
         )}
 
         {accounts !== null && onRail.length === 0 && hidden.length > 0 && (
-          <p className="edit-hint ov-notice">
-            Every account you have is hidden.{' '}
-            <button className="btn-link" onClick={() => setShowHidden(true)}>
+          <Notice remedy={
+            <Button type="button" variant="secondary" size="compact" onClick={() => setShowHidden(true)}>
               Show {hidden.length === 1 ? 'it' : 'them'}
-            </button>
-          </p>
+            </Button>
+          }>Every account you have is hidden.</Notice>
         )}
 
         <div aria-live="polite">
-          {dataError && <p className="error ov-notice">Error: {dataError}</p>}
+          {dataError && <Notice tone="error" remedy={selected &&
+            <Button type="button" variant="secondary" size="compact" onClick={() => loadAccount(selected)}>Retry account</Button>
+          }>Error: {dataError}</Notice>}
         </div>
 
         {selected && mine && (
@@ -405,20 +426,18 @@ export function OverviewScreen({
                   it brings all of them back.
                 </p>
                 <div className="acct-blank-actions">
-                  <button
-                    className="btn"
+                  <Button type="button" variant="primary" size="standard"
                     onClick={() => setDialog(openAt('hide', selected))}
                   >
                     Unhide this account
-                  </button>
-                  <button
-                    className="btn-ghost"
+                  </Button>
+                  <Button type="button" variant="secondary" size="standard"
                     onClick={() => setDialog(openAt('menu', selected))}
                     aria-haspopup="dialog"
                     aria-label={`Account menu: ${selected.name}`}
                   >
                     Account menu
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -451,9 +470,9 @@ export function OverviewScreen({
                       into it and the figures, the chart and the transactions fill in.
                     </p>
                     <div className="acct-blank-actions">
-                      <button className="btn" onClick={() => setUrl({ panel: 'import' })}>
-                        <span aria-hidden="true">⭳</span> Import a statement
-                      </button>
+                      <Button type="button" variant="secondary" size="standard" onClick={() => setUrl({ panel: 'import' })}>
+                        <ImportIcon /> Import a statement
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -480,18 +499,13 @@ export function OverviewScreen({
           </div>
         )}
 
-        {selected && mine && !selected.hidden && figures && (
-          <p className="ov-footnote">
-            Transfers affect your balance, but are excluded from income and expenses.
-          </p>
-        )}
-
         {dialog && (
           <AccountDialog
             kind={dialog.kind}
             origin={dialog.origin}
             account={dialog.account}
             baseCurrency={baseCurrency ?? ''}
+            restoreFocus={() => titleRef.current}
             onStep={(kind) => setDialog({ ...dialog, kind })}
             onClose={() => setDialog(null)}
             // the account as well as the panel: the dialog's account is the one on the
@@ -499,8 +513,7 @@ export function OverviewScreen({
             // account on the rail of whoever opens it, rather than only in a session
             // that got here by opening this menu
             onOpenHistory={(account) => {
-              setDialog(null);
-              setUrl({ account: account.id, panel: 'history' });
+              setUrl({ account: account.id, panel: 'history' }, 'push', () => setDialog(null));
             }}
             onCreated={afterCreate}
             onUpdated={applyAccount}

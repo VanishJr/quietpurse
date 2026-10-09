@@ -46,7 +46,7 @@ beforeEach(() => {
 describe('IncomeSourcesBlock', () => {
   it('uses concise Settings copy and names automatic versus manual matching', async () => {
     await mount();
-    const rowOf = (label: string): HTMLElement => screen.getByText(label, { selector: '.row-title' }).closest('.row') as HTMLElement;
+    const rowOf = (label: string): HTMLElement => screen.getByRole('article', { name: `Income source ${label}` });
 
     expect(screen.getByText('Support is tracked separately and does not count toward earnings goals.')).toBeVisible();
     expect(within(rowOf('Salary')).getByText('Earnings')).toBeVisible();
@@ -64,12 +64,43 @@ describe('IncomeSourcesBlock', () => {
         source({ patterns: ['Acme Limited', 'Example GmbH'] }),
       ]),
     });
-    const stipend = screen.getByText('Stipend', { selector: '.row-title' }).closest('.row') as HTMLElement;
+    const stipend = screen.getByRole('article', { name: 'Income source Stipend' });
     expect(within(stipend).getByText('2 automatic match patterns')).toBeVisible();
     expect(within(stipend).queryByText(/Acme Limited|Example GmbH/)).not.toBeInTheDocument();
     fireEvent.click(within(stipend).getByRole('button', { name: 'Edit Stipend' }));
     expect(screen.getByRole('dialog', { name: 'Edit source' })).toBeVisible();
     expect(screen.getByLabelText('Statement match patterns')).toHaveValue('Acme Limited, Example GmbH');
+  });
+
+  it('uses one editor body and action frame with described interpretation choices', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Stipend' }));
+    const dialog = screen.getByRole('dialog', { name: 'Edit source' });
+    expect(within(dialog).getByRole('heading', { name: 'Edit source' }).closest('.sheet-header')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Save' }).closest('.sheet-footer')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Source name').closest('.sheet-body')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText('Statement match patterns')).toHaveAccessibleDescription(/Comma-separate phrases/);
+    expect(dialog.querySelector('fieldset')).toHaveAccessibleDescription(/Changing this updates every income-based goal/);
+  });
+
+  it('submits from the native source form while pending duplicate submits are refused', async () => {
+    let finish: (response: Response) => void = () => {};
+    await mount({
+      'POST /api/income-sources': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add source' }));
+    const input = screen.getByLabelText('Source name');
+    fireEvent.change(input, { target: { value: 'Grant' } });
+    const form = input.closest('form')!;
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toHaveAttribute('form', form.id);
+    expect(save).toHaveAttribute('type', 'submit');
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(requests().filter((request) => request === 'POST /api/income-sources')).toHaveLength(1);
+    await act(async () => finish(fail(400, { error: 'refused source' })));
+    expect(screen.getByRole('alert')).toHaveTextContent('refused source');
+    expect(input).toHaveValue('Grant');
   });
 
   it('keeps builtins editable but not deletable', async () => {
@@ -226,7 +257,9 @@ describe('IncomeSourcesBlock', () => {
     // held without `disabled`: a browser takes focus off a control disabled under it, and
     // in a modal that leaves the Tab trap nothing to hold - jsdom never does, so the
     // attribute is what is asserted
-    const saving = screen.getByRole('button', { name: 'Saving…' });
+    const saving = screen.getByRole('button', { name: 'Save' });
+    expect(saving).toHaveAttribute('data-pending', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('Saving source…');
     expect(saving).not.toBeDisabled();
     expect(saving).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute('aria-disabled', 'true');
@@ -236,12 +269,74 @@ describe('IncomeSourcesBlock', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add source' })).not.toBeInTheDocument());
   });
 
+  const dirtyDismissals = (['add', 'edit'] as const).flatMap((mode) =>
+    (['name', 'kind', 'patterns'] as const).flatMap((field) =>
+      (['backdrop', 'escape', 'close', 'cancel'] as const).map((dismissal) => ({ mode, field, dismissal }))));
+
+  it.each(dirtyDismissals)('$mode source $field survives $dismissal until explicit discard', async ({ mode, field, dismissal }) => {
+    await mount();
+    const opener = screen.getByRole('button', { name: mode === 'add' ? 'Add source' : 'Edit Stipend' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = screen.getByRole('dialog');
+    const edited = field === 'kind' ? within(dialog).getByRole('button', { name: 'Earnings' })
+      : within(dialog).getByRole('textbox', { name: field === 'name' ? 'Source name' : 'Statement match patterns' });
+    edited.focus();
+    if (field === 'kind') fireEvent.click(edited);
+    else fireEvent.change(edited, { target: { value: field === 'name' ? 'Edited grant' : 'Example Limited' } });
+    const dismiss = () => {
+      if (dismissal === 'backdrop') {
+        const backdrop = dialog.parentElement!;
+        fireEvent.pointerDown(backdrop);
+        fireEvent.click(backdrop);
+      } else if (dismissal === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+      else fireEvent.click(within(dialog).getByRole('button', { name: dismissal === 'close' ? 'Close dialog' : 'Cancel' }));
+    };
+    dismiss();
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    expect(screen.queryByRole('textbox', { name: 'Source name' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(edited).toHaveFocus();
+    expect(within(dialog).getByRole('textbox', { name: 'Source name' })).toHaveValue(field === 'name' ? 'Edited grant' : mode === 'add' ? '' : 'Stipend');
+    expect(within(dialog).getByRole('textbox', { name: 'Statement match patterns' })).toHaveValue(field === 'patterns' ? 'Example Limited' : '');
+    expect(within(dialog).getByRole('button', { name: field === 'kind' ? 'Earnings' : 'Support' })).toHaveAttribute('aria-pressed', 'true');
+    dismiss();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+    expect(requests().filter((request) => /^(POST|PUT|PATCH|DELETE) /.test(request))).toEqual([]);
+  });
+
+  it('guards edited source dismissal and keeps the same draft until explicit discard', async () => {
+    await mount();
+    const edit = screen.getByRole('button', { name: 'Edit Stipend' });
+    edit.focus();
+    fireEvent.click(edit);
+    const input = screen.getByRole('textbox', { name: 'Source name' });
+    input.focus();
+    fireEvent.change(input, { target: { value: 'Edited grant' } });
+    const backdrop = screen.getByRole('dialog').parentElement!;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
+    expect(screen.getByRole('button', { name: 'Keep editing' })).toHaveFocus();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('Edited grant');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(edit).toHaveFocus();
+    fireEvent.click(edit);
+    expect(screen.getByRole('textbox', { name: 'Source name' })).toHaveValue('Stipend');
+    expect(requests().some((request) => request.startsWith('PATCH'))).toBe(false);
+  });
+
   it('restores focus to Add and Edit after the Sheet closes', async () => {
     await mount();
     const add = screen.getByRole('button', { name: 'Add source' });
     add.focus();
     fireEvent.click(add);
-    expect(screen.getByRole('dialog', { name: 'Add source' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Add source' })).toHaveFocus();
     // the Sheet takes its opener as it opens, and a disabled one is already out of focus
     expect(add).not.toBeDisabled();
     expect(add).toHaveAttribute('aria-disabled', 'true');
@@ -251,13 +346,82 @@ describe('IncomeSourcesBlock', () => {
     const edit = screen.getByRole('button', { name: 'Edit Stipend' });
     edit.focus();
     fireEvent.click(edit);
-    expect(screen.getByRole('dialog', { name: 'Edit source' })).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Edit source' })).toHaveFocus();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(edit).toHaveFocus();
     fireEvent.click(edit);
-    fireEvent.click(screen.getByRole('dialog', { name: 'Edit source' }).parentElement!);
+    const backdrop = screen.getByRole('dialog', { name: 'Edit source' }).parentElement!;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.click(backdrop);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(edit).toHaveFocus();
+  });
+
+  it('enters inline deletion on safe Cancel without sending a delete or acquiring modality', async () => {
+    const changed = await mount();
+    const trigger = screen.getByRole('button', { name: 'Delete Stipend' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(trigger).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Delete' })).not.toHaveFocus();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe('');
+    expect(screen.getByRole('button', { name: 'Add source' }).closest('[inert]')).toBeNull();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('returns inline Cancel to the same source Edit without a write, reread or invalidation', async () => {
+    const changed = await mount();
+    const trigger = screen.getByRole('button', { name: 'Delete Stipend' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    fireEvent.click(cancel);
+
+    expect(cancel).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Stipend' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Delete Stipend' })).not.toHaveFocus();
+    expect(screen.queryByText(/Assigned transactions move/)).not.toBeInTheDocument();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('recovers lost focus on inline Cancel but leaves a later outside choice alone', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    cancel.blur();
+    expect(document.body).toHaveFocus();
+    fireEvent.click(cancel);
+    expect(screen.getByRole('button', { name: 'Edit Stipend' })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
+    const outside = screen.getByRole('button', { name: 'Edit Salary' });
+    outside.focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(outside).toHaveFocus();
+    await act(async () => {});
+    expect(outside).toHaveFocus();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+  });
+
+  it.each(['edit', 'add'] as const)('falls back from unavailable %s controls on inline Cancel', async (unavailable) => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
+    const row = screen.getByRole('article', { name: 'Income source Stipend' });
+    const add = screen.getByRole('button', { name: 'Add source' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    row.hidden = true;
+    if (unavailable === 'add') add.hidden = true;
+    fireEvent.click(cancel);
+    expect(unavailable === 'edit' ? add : screen.getByRole('heading', { name: 'Income sources' })).toHaveFocus();
+    expect(requests()).toEqual(['GET /api/income-sources']);
   });
 
   it('explains delete consequences before sending the write', async () => {
@@ -328,6 +492,7 @@ describe('IncomeSourcesBlock', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Delete Stipend' }));
     const confirm = screen.getByRole('button', { name: 'Delete' });
+    expect(confirm).toHaveClass('action-button--destructive-primary');
     confirm.focus();
     fireEvent.click(confirm);
     expect(confirm).not.toBeDisabled();
@@ -335,7 +500,7 @@ describe('IncomeSourcesBlock', () => {
     expect(confirm).toHaveFocus();
 
     await act(async () => { finish(fail(400, { error: 'cannot delete this source' })); });
-    const confirmation = screen.getByText(/Delete “Stipend”/).closest('.row') as HTMLElement;
+    const confirmation = screen.getByRole('article', { name: 'Income source Stipend' });
     expect(within(confirmation).getByRole('alert')).toHaveTextContent('cannot delete this source');
     expect(confirm).toHaveAttribute('aria-disabled', 'false');
     expect(confirm).toHaveFocus();
@@ -375,6 +540,53 @@ describe('IncomeSourcesBlock', () => {
     expect(await screen.findByText(/the list could not be read/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Stipend')).toBeVisible();
+  });
+
+  it('orients explicit catalog Retry before removing its control and never steals a later outside choice', async () => {
+    let reads = 0;
+    let finish: (response: Response) => void = () => {};
+    let focusAtRetry: Element | null = null;
+    const changed = vi.fn();
+    mockFetch({
+      'GET /api/income-sources': () => {
+        if (reads++ === 0) return fail(500, { error: 'catalog unavailable' });
+        focusAtRetry = document.activeElement;
+        return new Promise<Response>((resolve) => { finish = resolve; });
+      },
+    });
+    renderThemed(<><button type="button">Outside choice</button><IncomeSourcesBlock onChanged={changed} /></>);
+    const outside = screen.getByRole('button', { name: 'Outside choice' });
+    const heading = screen.getByRole('heading', { name: 'Income sources' });
+    outside.focus();
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    expect(outside).toHaveFocus();
+    expect(heading).toHaveAttribute('tabindex', '-1');
+    retry.focus();
+    fireEvent.click(retry);
+    expect(focusAtRetry).toBe(heading);
+    expect(retry).not.toBeInTheDocument();
+    expect(heading).toHaveFocus();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading income sources…');
+
+    outside.focus();
+    await act(async () => { finish(ok(CATALOG)); });
+    expect(screen.getByRole('button', { name: 'Add source' })).toBeVisible();
+    expect(outside).toHaveFocus();
+    expect(changed).not.toHaveBeenCalled();
+    expect(requests()).toEqual(['GET /api/income-sources', 'GET /api/income-sources']);
+  });
+
+  it('keeps mount catalog reads passive through a deferred answer', async () => {
+    let finish: (response: Response) => void = () => {};
+    mockFetch({
+      'GET /api/income-sources': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    renderThemed(<><button type="button">Outside choice</button><IncomeSourcesBlock onChanged={vi.fn()} /></>);
+    const outside = screen.getByRole('button', { name: 'Outside choice' });
+    outside.focus();
+    await act(async () => { finish(ok(CATALOG)); });
+    expect(screen.getByRole('button', { name: 'Add source' })).toBeVisible();
+    expect(outside).toHaveFocus();
   });
 
   it('gives focus back to the edited row after a committed save, though the rows were re-read', async () => {
@@ -417,20 +629,139 @@ describe('IncomeSourcesBlock', () => {
   });
 
   /** The Shell's own arrangement: the screen's `hidden` and its `ScreenShown` from one value. */
-  const mountOnScreen = () => {
-    let setShown: (shown: boolean) => void = () => {};
+  const mountOnScreen = (changed: () => void = vi.fn()) => {
+    let setShown: (shown: { value: boolean }) => void = () => {};
     const Host = () => {
-      const [shown, set] = useState(true);
+      const [shown, set] = useState({ value: true });
       setShown = set;
       return (
-        <div hidden={!shown}>
-          <ScreenShown value={shown}><IncomeSourcesBlock onChanged={vi.fn()} /></ScreenShown>
+        <div hidden={!shown.value}>
+          <ScreenShown value={shown.value}><IncomeSourcesBlock onChanged={changed} /></ScreenShown>
         </div>
       );
     };
     renderThemed(<Host />);
-    return (shown: boolean) => act(() => setShown(shown));
+    return (shown: boolean) => act(() => setShown({ value: shown }));
   };
+
+  it('does not re-enter inline Cancel after rerenders or a harmless hidden-screen return', async () => {
+    mockFetch({ 'GET /api/income-sources': () => ok(CATALOG) });
+    const show = mountOnScreen();
+    const trigger = await screen.findByRole('button', { name: 'Delete Stipend' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+    const outside = screen.getByRole('button', { name: 'Edit Salary' });
+    outside.focus();
+    show(true);
+    expect(outside).toHaveFocus();
+    show(false);
+    outside.blur();
+    expect(document.body).toHaveFocus();
+    show(true);
+    expect(document.body).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+  });
+
+  it.each(['screen', 'availability'] as const)('does not focus hidden inline deletion on entry or replay it on return: %s', async (hiddenBy) => {
+    mockFetch({ 'GET /api/income-sources': () => ok(CATALOG) });
+    const show = mountOnScreen();
+    const trigger = await screen.findByRole('button', { name: 'Delete Stipend' });
+    const row = screen.getByRole('article', { name: 'Income source Stipend' });
+    trigger.focus();
+    trigger.blur();
+    if (hiddenBy === 'screen') show(false);
+    else row.hidden = true;
+    fireEvent.click(trigger);
+    const cancel = screen.getByRole('button', { name: 'Cancel', hidden: true });
+    expect(cancel).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
+    if (hiddenBy === 'screen') show(true);
+    else {
+      row.hidden = false;
+      show(false);
+      show(true);
+    }
+    expect(cancel).toBeVisible();
+    expect(document.body).toHaveFocus();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+  });
+
+  it('does not recover hidden inline Cancel or replay recovery after the screen returns', async () => {
+    mockFetch({ 'GET /api/income-sources': () => ok(CATALOG) });
+    const show = mountOnScreen();
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete Stipend' }));
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    show(false);
+    fireEvent.click(cancel);
+    expect(document.body).toHaveFocus();
+    show(true);
+    expect(screen.getByRole('button', { name: 'Edit Stipend' })).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
+    expect(requests()).toEqual(['GET /api/income-sources']);
+  });
+
+  it.each(['screen', 'availability'] as const)('does not orient hidden catalog Retry or steal focus on its deferred answer: %s', async (hiddenBy) => {
+    let reads = 0;
+    let finish: (response: Response) => void = () => {};
+    mockFetch({
+      'GET /api/income-sources': () => reads++ === 0 ? fail(500, { error: 'catalog unavailable' })
+        : new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    const show = mountOnScreen();
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    const heading = screen.getByRole('heading', { name: 'Income sources' });
+    retry.focus();
+    retry.blur();
+    if (hiddenBy === 'screen') show(false);
+    else heading.hidden = true;
+    fireEvent.click(retry);
+    expect(document.body).toHaveFocus();
+    await act(async () => { finish(ok(CATALOG)); });
+    expect(document.body).toHaveFocus();
+    heading.hidden = false;
+    show(true);
+    expect(screen.getByRole('button', { name: 'Add source' })).toBeVisible();
+    expect(document.body).toHaveFocus();
+    expect(requests()).toEqual(['GET /api/income-sources', 'GET /api/income-sources']);
+  });
+
+  it('keeps inline deletion focus stable while pending and refused, without repeating entry focus', async () => {
+    let finish: (response: Response) => void = () => {};
+    const changed = vi.fn();
+    mockFetch({
+      'GET /api/income-sources': () => ok(CATALOG),
+      'DELETE /api/income-sources/stipend': () => new Promise<Response>((resolve) => { finish = resolve; }),
+    });
+    const show = mountOnScreen(changed);
+    const trigger = await screen.findByRole('button', { name: 'Delete Stipend' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancel).toHaveFocus();
+    const confirm = screen.getByRole('button', { name: 'Delete' });
+    confirm.focus();
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    fireEvent.click(cancel);
+    expect(confirm).toHaveFocus();
+    expect(confirm).toHaveAttribute('aria-disabled', 'true');
+    expect(confirm).not.toBeDisabled();
+    expect(cancel).toHaveAttribute('aria-disabled', 'true');
+    expect(cancel).not.toBeDisabled();
+    show(false);
+    confirm.blur();
+    await act(async () => { finish(fail(400, { error: 'cannot delete this source' })); });
+    expect(document.body).toHaveFocus();
+    show(true);
+    expect(document.body).toHaveFocus();
+    expect(screen.getByRole('alert')).toHaveTextContent('cannot delete this source');
+    expect(confirm).toHaveAttribute('aria-disabled', 'false');
+    expect(requests()).toEqual(['GET /api/income-sources', 'DELETE /api/income-sources/stipend']);
+    expect(changed).not.toHaveBeenCalled();
+  });
 
   it('keeps its form and its refusal while its screen is hidden, without holding the page scroll', async () => {
     mockFetch({

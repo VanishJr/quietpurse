@@ -30,7 +30,6 @@ import {
 } from 'recharts';
 import { drawnShares, METRICS, rankingSeriesName, SharePoint } from '../analytics';
 import { ChartData } from '../chartData';
-import { CATEGORY_LABELS } from '../categories';
 import { tooltipMoney, tooltipProps, type TooltipGround } from '../chartTooltip';
 import { fmtMoney, fmtShort, niceMax } from '../format';
 import { useTheme } from '../theme';
@@ -46,24 +45,6 @@ const NAME_AXIS_WIDTH = 104;
  */
 const DOTTED_UP_TO = 3;
 
-/**
- * Category slugs the ramp is walked in, by position, for a key that is not a category
- * slug. Slugs rather than hexes so the two schemes keep answering for themselves;
- * `categoryColor` is what turns one into a colour.
- */
-const RAMP = [
-  'food',
-  'transport',
-  'subscriptions',
-  'health',
-  'shopping',
-  'cash',
-  'entertainment',
-  'housing',
-  'cashback',
-  'salary',
-];
-
 interface Props {
   spec: Chart;
   data: ChartData;
@@ -77,8 +58,10 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
   const axisTick = { fill: ink.muted, fontSize: 11 };
   const tooltip = tooltipProps(ink, ground, tooltipMoney(data.currency));
 
+  const sourceColors = [ink.income, ink.lavender, ink.net, ink.accent, ink.secondary];
   const sliceColor = (key: string, index: number): string =>
-    categoryColor(CATEGORY_LABELS[key] ? key : RAMP[index % RAMP.length]);
+    // Source ids may collide with category slugs; only the breakdown chooses meaning.
+    spec.breakdown === 'income-sources' ? sourceColors[index % sourceColors.length] : categoryColor(key);
 
   if (data.shape === 'series') {
     const { points } = data;
@@ -144,7 +127,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
         <div className="chart-plot" style={{ height }} aria-hidden="true">
           <ResponsiveContainer width="100%" height="100%">
             {spec.kind === 'column' ? (
-              <BarChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <BarChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Bar
@@ -159,7 +142,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
                 ))}
               </BarChart>
             ) : spec.kind === 'area' ? (
-              <AreaChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <AreaChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Area
@@ -180,7 +163,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
                 ))}
               </AreaChart>
             ) : (
-              <LineChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+              <LineChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
                 {axes}
                 {drawn.map((m) => (
                   <Line
@@ -227,7 +210,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
         </div>
         <div className="chart-plot" style={{ height }} aria-hidden="true">
           <ResponsiveContainer width="100%" height="100%">
-            <RadarChart data={rows} outerRadius="72%">
+            <RadarChart accessibilityLayer={false} data={rows} outerRadius="72%">
               <PolarGrid stroke={ink.grid} />
               <PolarAngleAxis dataKey="label" tick={{ fill: ink.muted, fontSize: 10 }} />
               <Tooltip {...tooltip} />
@@ -263,6 +246,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
       <div className="chart-plot" style={{ height }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
+            accessibilityLayer={false}
             data={rows}
             layout="vertical"
             margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
@@ -338,8 +322,9 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
       </div>
       <div className="chart-wrap chart-plot" style={{ height }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
+          <PieChart accessibilityLayer={false}>
             <Pie
+              rootTabIndex={-1}
               data={sectors}
               dataKey="value"
               nameKey="label"

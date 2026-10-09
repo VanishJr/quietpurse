@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Account } from '../types';
 import { AccountTabs } from './AccountTabs';
+import { notifyResizeObservers } from '../test/resize';
 
 /**
  * The strip's own arithmetic: which page is shown, and when it is allowed to move.
@@ -83,6 +84,36 @@ describe('which page the strip shows', () => {
     expect(tab).toHaveAttribute('aria-current', 'true');
     expect(screen.queryByRole('button', { name: 'Charlie' })).not.toBeInTheDocument();
     expect(label()).toHaveTextContent('1 of 2');
+  });
+
+  it('keeps paging focus when the last page locks Next and refuses repeated activation', () => {
+    render(strip([ALPHA, BRAVO, CHARLIE, ZULU], ALPHA.id));
+    const next = screen.getByRole('button', { name: 'Next accounts' });
+    next.focus();
+    fireEvent.click(next);
+    expect(next).toHaveFocus();
+    expect(next).toHaveAttribute('aria-disabled', 'true');
+    expect(next).toBeEnabled();
+    fireEvent.click(next);
+    expect(screen.getByRole('button', { name: 'Zulu' })).toBeInTheDocument();
+    expect(label()).toHaveTextContent('2 of 2');
+    const previous = screen.getByRole('button', { name: 'Previous accounts' });
+    fireEvent.click(previous);
+    expect(previous).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(previous);
+    expect(label()).toHaveTextContent('1 of 2');
+  });
+
+  it('exposes local horizontal overflow without relying on the document width', () => {
+    render(strip([ALPHA, BRAVO, CHARLIE], ALPHA.id));
+    const rail = screen.getByRole('group', { name: 'Accounts' });
+    Object.defineProperty(rail, 'clientWidth', { configurable: true, value: 200 });
+    Object.defineProperty(rail, 'scrollWidth', { configurable: true, value: 500 });
+    act(() => notifyResizeObservers());
+    expect(screen.getByText('Scroll to see all accounts on this page.')).toBeVisible();
+    Object.defineProperty(rail, 'clientWidth', { configurable: true, value: 600 });
+    act(() => notifyResizeObservers());
+    expect(screen.queryByText('Scroll to see all accounts on this page.')).not.toBeInTheDocument();
   });
 
   it('keeps the paging region in the DOM while there is nothing to page', () => {

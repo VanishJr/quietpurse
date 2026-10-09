@@ -56,7 +56,7 @@ export const KIND_DEFS = {
   column: {
     name: 'Column',
     shape: 'series',
-    blurb: 'One bar per tick. For reading single months off against each other.',
+    blurb: 'One bar per period. For reading single months off against each other.',
   },
   area: {
     name: 'Area',
@@ -94,12 +94,12 @@ export interface MetricDef {
    * because the two schemes have two palettes and a literal here would be right in
    * one of them.
    */
-  ink: 'good' | 'lavender' | 'net';
+  ink: 'income' | 'secondary' | 'net';
 }
 
 export const METRIC_DEFS = {
-  income: { label: 'Income', ink: 'good' },
-  expense: { label: 'Expenses', ink: 'lavender' },
+  income: { label: 'Income', ink: 'income' },
+  expense: { label: 'Expenses', ink: 'secondary' },
   net: { label: 'Net', ink: 'net' },
 } satisfies Record<ChartMetric, Omit<MetricDef, 'key'>>;
 

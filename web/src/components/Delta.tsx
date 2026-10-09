@@ -19,7 +19,7 @@ export function Delta({ pct, favourable, note }: Props) {
   if (pct === null) return null;
   const up = pct >= 0;
   return (
-    <p className={`fig-delta${favourable ? ' is-good' : ' is-bad'}`}>
+    <p className={`fig-delta${favourable ? ' is-favorable' : ' is-unfavorable'}`}>
       <span className="fig-arrow" aria-hidden="true">
         {up ? '↗' : '↘'}
       </span>

@@ -14,6 +14,7 @@ import { useTheme } from '../theme';
 import { Account, AccountMonthTotals } from '../types';
 import { Chips } from './Chips';
 import { Delta } from './Delta';
+import { Notice } from './Notice';
 
 const CHART_HEIGHT = 180;
 
@@ -90,7 +91,7 @@ export function AccountFlows({
             Income
           </h3>
           <p className="fig-label">{label}</p>
-          <p className="fig-value">+{fmtMoney(month.income, account.currency)}</p>
+          <p className="fig-value financial-value is-income">+{fmtMoney(month.income, account.currency)}</p>
           <Delta
             pct={deltas.income}
             favourable={(deltas.income ?? 0) >= 0}
@@ -105,7 +106,7 @@ export function AccountFlows({
           </h3>
           <p className="fig-label">{label}</p>
 
-          <p className="fig-value">
+          <p className="fig-value financial-value">
             {/* Net refunds reverse the sign; a fixed minus would print it twice. */}
             {month.expense < 0 ? '+' : '−'}
             {fmtMoney(Math.abs(month.expense), account.currency)}
@@ -121,7 +122,7 @@ export function AccountFlows({
 
       <div className="acct-chart" style={{ height: CHART_HEIGHT }} aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
+          <LineChart accessibilityLayer={false} data={points} margin={{ top: 8, right: 10, bottom: 0, left: 0 }}>
             <CartesianGrid stroke={ink.grid} strokeDasharray="3 4" vertical={false} />
             <XAxis
               dataKey="label"
@@ -145,9 +146,9 @@ export function AccountFlows({
               name="Income"
               dataKey="income"
               type="linear"
-              stroke={ink.good}
+              stroke={ink.income}
               strokeWidth={2.5}
-              dot={dot ? { r: 3.5, strokeWidth: 0, fill: ink.good } : false}
+              dot={dot ? { r: 3.5, strokeWidth: 0, fill: ink.income } : false}
               activeDot={{ r: 4.5, strokeWidth: 0 }}
               isAnimationActive={false}
             />
@@ -179,13 +180,13 @@ export function AccountFlows({
         // nothing here was told. The claim is screen-wide: the donut's total sums the
         // same unconverted rows, and one sentence said once is worth more than the same
         // paragraph on every card.
-        <p className="error">
+        <Notice tone="warning">
           This account holds transactions in {otherCurrencies.join(', ')}, not{' '}
           {account.currency}. The account's balance adds them in as though they were{' '}
           {account.currency}, so it is wrong. So is any other figure on this screen
           covering a month one of them falls in — and nothing here knows which months
           those are.
-        </p>
+        </Notice>
       )}
 
       <div className="visually-hidden">

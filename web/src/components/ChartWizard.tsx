@@ -5,7 +5,7 @@
  * nobody finishes. Split, the first step is one click and the second is a page of chips
  * with every default already filled in.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   BREAKDOWNS,
   CHART_KINDS,
@@ -17,10 +17,15 @@ import {
   suggestedTitle,
 } from '../analytics';
 import { useChartData } from '../chartData';
+import { useEditorSession } from '../editor';
 import { Account, Chart, ChartBreakdown, ChartKind, ChartMetric, ChartRange } from '../types';
 import { ChartGlyph } from './ChartGlyphs';
 import { ChartPlot } from './ChartPlot';
 import { Sheet } from './Sheet';
+import { Button } from './Button';
+import { FormActions } from './FormActions';
+import { Field } from './Field';
+import { Notice } from './Notice';
 
 const PREVIEW_HEIGHT = 190;
 
@@ -48,6 +53,9 @@ interface Props {
   onSave: (spec: Chart) => void;
 }
 
+const meaningOf = ({ kind, accountId, metrics, breakdown, range }: Chart) =>
+  JSON.stringify({ kind, accountId, metrics: [...metrics].sort(), breakdown, range });
+
 export function ChartWizard({
   open,
   editing,
@@ -58,6 +66,7 @@ export function ChartWizard({
   onSave,
 }: Props) {
   const [draft, setDraft] = useState<Chart | null>(null);
+  const [baseline, setBaseline] = useState<Chart | null>(null);
   const [step, setStep] = useState<'kind' | 'detail'>('kind');
   /**
    * Whether the reader has typed a name of their own. Until they have, the box
@@ -78,18 +87,33 @@ export function ChartWizard({
   useEffect(() => {
     if (key === '') return;
     setDraft(editing);
+    setBaseline(editing);
     setStep(editing ? 'detail' : 'kind');
     setNamed(editing !== null);
     // `editing` deliberately absent: `key` stands in for it
   }, [key]);
-
-  if (!open) return null;
 
   /* The suggested title names the account a chart is about — see `suggestedTitle`. */
   const nameOf = (id: string | null): string | null =>
     id ? (accounts?.find((a) => a.id === id)?.name ?? null) : null;
 
   const suggest = (spec: Chart): string => suggestedTitle(spec, nameOf(spec.accountId));
+
+  const dirty = draft !== null && baseline !== null && (
+    meaningOf(draft) !== meaningOf(baseline) ||
+    ((editing !== null || named) && draft.title !== (editing ? baseline.title : suggest(baseline)))
+  );
+  const { requestClose, finish, guard } = useEditorSession({
+    open, dirty, onClose,
+    onNavigationDiscard: () => {
+      setDraft(editing ? baseline : null);
+      setBaseline(editing ? baseline : null);
+      setStep(editing ? 'detail' : 'kind');
+      setNamed(editing !== null);
+    },
+  });
+
+  if (!open) return null;
 
   /*
    * An existing chart opens straight at step two with its own values in it, and "Change
@@ -99,6 +123,7 @@ export function ChartWizard({
    */
   const pickKind = (kind: ChartKind) => {
     const next = draft ? { ...draft, kind } : blankChart(kind);
+    if (!baseline) setBaseline(next);
     setDraft(named ? next : { ...next, title: suggest(next) });
     setStep('detail');
   };
@@ -120,16 +145,30 @@ export function ChartWizard({
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={requestClose}
+      guard={guard}
       position="center"
       wide
       title={editing ? 'Edit chart' : 'New chart'}
+      pattern="builder"
+      stepKey={step}
+      restoreFocus={() => document.querySelector<HTMLElement>('.screen:not([hidden]) h1')}
+      footer={
+        <FormActions
+          back={step === 'detail' && draft ? <Button type="button" variant="tertiary" size="standard" onClick={() => setStep('kind')}>Change shape</Button> : undefined}
+          cancel={<Button type="button" variant="secondary" size="standard" onClick={requestClose}>Cancel</Button>}
+          completion={step === 'detail' && draft ? (
+            <Button type="button" variant="primary" size="standard" onClick={() => finish(() => onSave(draft))} disabled={draft.title.trim() === '' || incomplete(draft)}>
+              {editing ? 'Save' : 'Create chart'}
+            </Button>
+          ) : null}
+        />
+      }
     >
       {step === 'kind' || !draft ? (
         <KindStep
           chosen={draft?.kind ?? null}
           onPick={pickKind}
-          onCancel={onClose}
           editing={editing !== null}
         />
       ) : (
@@ -143,10 +182,6 @@ export function ChartWizard({
             setNamed(true);
             setDraft((d) => (d ? { ...d, title } : d));
           }}
-          onBack={() => setStep('kind')}
-          onCancel={onClose}
-          onSave={() => onSave(draft)}
-          editing={editing !== null}
         />
       )}
     </Sheet>
@@ -156,12 +191,10 @@ export function ChartWizard({
 function KindStep({
   chosen,
   onPick,
-  onCancel,
   editing,
 }: {
   chosen: ChartKind | null;
   onPick: (k: ChartKind) => void;
-  onCancel: () => void;
   editing: boolean;
 }) {
   return (
@@ -187,12 +220,6 @@ function KindStep({
           </button>
         ))}
       </div>
-
-      <div className="btn-row">
-        <button className="btn-ghost btn-sm" onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
     </>
   );
 }
@@ -204,10 +231,6 @@ function DetailStep({
   dataRevision,
   patch,
   onName,
-  onBack,
-  onCancel,
-  onSave,
-  editing,
 }: {
   draft: Chart;
   accounts: Account[] | null;
@@ -215,11 +238,8 @@ function DetailStep({
   dataRevision: number;
   patch: (change: Partial<Chart>) => void;
   onName: (title: string) => void;
-  onBack: () => void;
-  onCancel: () => void;
-  onSave: () => void;
-  editing: boolean;
 }) {
+  const nameId = useId();
   const isSeries = chartKind(draft.kind).shape === 'series';
   const missing = incomplete(draft);
   /*
@@ -269,7 +289,7 @@ function DetailStep({
 
       <div className="wiz-split">
         <div className="wiz-form">
-          <Field label="Account">
+          <ChoiceGroup label="Account">
             <div className="chip-wrap wiz-chips">
               <Choice
                 label="All accounts"
@@ -287,10 +307,13 @@ function DetailStep({
                 />
               ))}
             </div>
-          </Field>
+          </ChoiceGroup>
+          {accounts === null && !accountsError && <Notice role="status">Reading account choices…</Notice>}
+          {accountsError && <Notice tone="error">Account choices could not be read: {accountsError}. All accounts remains available.</Notice>}
+          {accounts !== null && draft.accountId !== null && accountName === null && <Notice tone="warning">Saved account {draft.accountId} is unavailable. Choose another account or All accounts.</Notice>}
 
           {isSeries ? (
-            <Field label="Measures">
+            <ChoiceGroup label="Measures" error={missing ? 'Pick at least one.' : undefined}>
               <div className="chip-wrap wiz-chips">
                 {METRICS.map((m) => (
                   <Choice
@@ -301,13 +324,9 @@ function DetailStep({
                   />
                 ))}
               </div>
-              {/* the refusal sits under the chips it is about, and the submit is
-                  disabled beside it — a reader who has cleared them all is told so
-                  here rather than by a button that does nothing when pressed */}
-              {missing && <p className="error wiz-error">Pick at least one.</p>}
-            </Field>
+            </ChoiceGroup>
           ) : (
-            <Field label="Split by">
+            <ChoiceGroup label="Split by">
               <div className="chip-wrap wiz-chips">
                 {breakdowns.map((b) => (
                   <Choice
@@ -318,10 +337,10 @@ function DetailStep({
                   />
                 ))}
               </div>
-            </Field>
+            </ChoiceGroup>
           )}
 
-          <Field label="Ticks">
+          <ChoiceGroup label="Period">
             <div className="chip-wrap wiz-chips">
               {RANGES.map((r) => (
                 <Choice
@@ -332,26 +351,14 @@ function DetailStep({
                 />
               ))}
             </div>
-          </Field>
+          </ChoiceGroup>
 
-          <Field label="Name">
-            <input
-              className="input"
-              value={draft.title}
-              /* the door's own bound, at the keyboard. `normaliseForSave` would cut
-                 what is past it on the way out instead, which is a word going missing
-                 from a tab later where this is a keystroke not appearing under the
-                 caret */
-              maxLength={CHART_TITLE_MAX}
-              onChange={(e) => onName(e.target.value)}
-              placeholder={suggestedTitle(draft, accountName)}
-              aria-label="Chart name"
-            />
-          </Field>
+          <Field id={nameId} label="Chart name" control="input" error={draft.title.trim() === '' ? 'Enter a chart name.' : undefined}
+            controlProps={{ value: draft.title, maxLength: CHART_TITLE_MAX, onChange: (event) => onName(event.target.value), placeholder: suggestedTitle(draft, accountName) }} />
         </div>
 
         <div className="wiz-preview">
-          <p className="wiz-preview-label">Preview</p>
+          <h4 className="wiz-preview-label" tabIndex={-1}>Preview</h4>
           <Preview
             draft={draft}
             accounts={accounts}
@@ -359,22 +366,6 @@ function DetailStep({
             dataRevision={dataRevision}
           />
         </div>
-      </div>
-
-      <div className="btn-row">
-        <button className="btn-ghost btn-sm" onClick={onBack}>
-          Change shape
-        </button>
-        <button className="btn-ghost btn-sm" onClick={onCancel}>
-          Cancel
-        </button>
-        <button
-          className="btn btn-sm"
-          onClick={onSave}
-          disabled={draft.title.trim() === '' || missing}
-        >
-          {editing ? 'Save' : 'Create chart'}
-        </button>
       </div>
     </>
   );
@@ -391,26 +382,26 @@ function Preview({
   accountsError: string | null;
   dataRevision: number;
 }) {
+  const [retry, setRetry] = useState(0);
   const { data, error, loading } = useChartData(
     draft,
     accounts,
     accountsError,
-    dataRevision,
+    dataRevision + retry,
   );
-  if (error) return <p className="error wiz-preview-note">{error}</p>;
-  if (loading || !data) return <p className="hint wiz-preview-note">Reading the numbers…</p>;
+  const canRetry = draft.accountId === null || (accountsError === null && accounts?.some((account) => account.id === draft.accountId));
+  if (error) return <Notice tone="error" role="alert" remedy={canRetry && <Button type="button" variant="secondary" size="compact" onClick={(event) => { event.currentTarget.closest('.wiz-preview')?.querySelector<HTMLElement>('h4')?.focus(); setRetry((value) => value + 1); }}>Retry preview</Button>}>{error}</Notice>;
+  if (loading || !data) return <Notice role="status">Reading the numbers…</Notice>;
   return <ChartPlot spec={draft} data={data} height={PREVIEW_HEIGHT} ground="page" />;
 }
 
-/**
- * A label and its controls, and nothing between them: a caption over a row of chips
- * says what the words on the chips already say.
- */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function ChoiceGroup({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  const id = useId();
   return (
-    <fieldset className="wiz-field">
+    <fieldset className="wiz-field choice-chips" aria-invalid={!!error || undefined} aria-describedby={error ? `${id}-error` : undefined}>
       <legend className="wiz-legend">{label}</legend>
       {children}
+      {error && <p id={`${id}-error`} className="native-field__error">{error}</p>}
     </fieldset>
   );
 }
@@ -420,7 +411,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
  * not, and one control that says "on/off" serves both.
  */
 const Choice = ({ label, on, onPick }: { label: string; on: boolean; onPick: () => void }) => (
-  <button className="chip" aria-pressed={on} onClick={onPick}>
+  <button type="button" className="chip" aria-pressed={on} onClick={onPick}>
     {label}
   </button>
 );

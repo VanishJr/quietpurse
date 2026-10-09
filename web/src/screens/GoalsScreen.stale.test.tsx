@@ -20,9 +20,7 @@ describe('GoalsScreen stale goal location', () => {
 
     renderThemed(<GoalsScreen />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'That goal is no longer available.',
-    );
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('That goal is no longer available.'));
     await waitFor(() => {
       expect(new URLSearchParams(window.location.search).get('goal')).toBeNull();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { COUNT_LIMIT } from '../components/AccountDialog';
 import { RECENT_LIMIT } from '../components/RecentTransactions';
+import { categoryLabel } from '../categories';
 import {
   ACCOUNTS,
   accountMonths,
@@ -25,6 +26,8 @@ import {
   Routes,
 } from '../test/harness';
 import { fmtWeekday } from '../format';
+import { notifyResizeObservers } from '../test/resize';
+import { darkInk, lightInk } from '../theme';
 import {
   Account,
   AccountDeleted,
@@ -187,7 +190,7 @@ describe('the page heading', () => {
     mount();
     await panel('Sparkasse Giro');
 
-    expect(screen.queryByRole('group', { name: 'Theme' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dark mode' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Settings' })).not.toBeInTheDocument();
   });
 
@@ -197,7 +200,7 @@ describe('the page heading', () => {
     const heading = await screen.findByRole('heading', { name: 'Import a statement' });
     expect(heading).toBeInTheDocument();
     expect(heading.closest('.import-page')).toBeInTheDocument();
-    expect(heading.closest('.screen-inner')).toBeNull();
+    expect(heading.closest('.screen-inner')).toBeInTheDocument();
   });
 
   it('drops the panel from the URL on the way out, which is what the bar reads', async () => {
@@ -557,13 +560,142 @@ describe('spending by category', () => {
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
     // the legend is the top three, and then the tail named as a tail — 100 of 1000
-    expect(rows.getByText('Other · 1 category')).toBeInTheDocument();
+    expect(rows.getByText('Remaining · 1 category')).toBeInTheDocument();
     expect(rows.getByText('100 EUR')).toBeInTheDocument();
     expect(rows.queryByText('Health')).not.toBeInTheDocument();
     // the fourth one is not lost: the table beside the ring has all of them, which is
     // what a screen reader gets and what jsdom can see of a donut
     const table = within(card).getByRole('table', { name: /Spending by category/ });
     expect(within(table).getByRole('rowheader', { name: 'Health' })).toBeInTheDocument();
+  });
+
+  describe.each([
+    {
+      scheme: 'light', ink: lightInk,
+      colors: { housing: '#8c5a2b', food: '#2a78d6', transport: '#1baf7a', health: '#4a3aa7', other: '#898781' },
+    },
+    {
+      scheme: 'dark', ink: darkInk,
+      colors: { housing: '#c99367', food: '#6aa6ef', transport: '#3ecf9a', health: '#9d8df1', other: '#9a9891' },
+    },
+  ] as const)('$scheme category encoding', ({ scheme, ink, colors }) => {
+    const drawRing = (card: HTMLElement) => {
+      const container = card.querySelector<HTMLElement>('.recharts-responsive-container')!;
+      container.getBoundingClientRect = () => new DOMRect(0, 0, 240, 240);
+      act(() => notifyResizeObservers());
+    };
+    const sectorFills = (card: HTMLElement) =>
+      Array.from(card.querySelectorAll('.recharts-pie-sector path'), (path) => path.getAttribute('fill'));
+
+    it('keeps sector and legend colors tied to slugs when the ranks swap', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const first = [
+        { category: 'housing', total: 400 },
+        { category: 'food', total: 300 },
+        { category: 'transport', total: 200 },
+        { category: 'health', total: 100 },
+      ];
+      const swapped = [
+        { category: 'food', total: 400 },
+        { category: 'transport', total: 300 },
+        { category: 'housing', total: 200 },
+        { category: 'health', total: 100 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/accounts': () => ok([ACCOUNTS[0], account({ id: 'acc-3', name: 'Savings' })]),
+        'GET /api/summary': (_init, url) => ok(summaryBody(url, {
+          totals: { income: 0, expense: 1000 },
+          byCategory: askedFor(url) === 'acc-1' ? first : swapped,
+        })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 1000, net: -1000 }])),
+      });
+
+      for (const [index, spend] of [first, swapped].entries()) {
+        if (index > 0) {
+          fireEvent.click(await tab('Savings'));
+          await panel('Balance of Savings');
+        }
+        const card = await panel('Spending by category, Aug 2026');
+        const rows = within(await legend());
+        expect(rows.getAllByRole('listitem').map((row) => row.querySelector('.ov-spend-name')?.textContent))
+          .toEqual([...spend.slice(0, 3).map((c) => categoryLabel(c.category)), 'Remaining · 1 category']);
+        for (const slug of ['housing', 'food', 'transport'] as const) {
+          const dot = rows.getByText(categoryLabel(slug)).closest('li')!.querySelector('.dot');
+          expect(dot).toHaveStyle({ background: colors[slug] });
+          expect(dot).toHaveAttribute('aria-hidden', 'true');
+        }
+        drawRing(card);
+        await waitFor(() => expect(sectorFills(card)).toEqual([
+          ...spend.slice(0, 3).map((c) => colors[c.category as keyof typeof colors]),
+          ink.categoryRemainder,
+        ]));
+      }
+    });
+
+    it('distinguishes actual Other from the grouped remainder in label, color and marker shape', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const spend = [
+        { category: 'other', total: 100 },
+        { category: 'food', total: 80 },
+        { category: 'health', total: 60 },
+        { category: 'cash', total: 40 },
+        { category: 'transport', total: 20 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/summary': (_init, url) =>
+          ok(summaryBody(url, { totals: { income: 0, expense: 300 }, byCategory: spend })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 300, net: -300 }])),
+      });
+
+      const card = await panel('Spending by category, Aug 2026');
+      const rows = within(await legend());
+      const other = rows.getByText('Other').closest('li')!;
+      const remainder = rows.getByText('Remaining · 2 categories').closest('li')!;
+      expect(other.querySelector('.dot')).toHaveStyle({ background: colors.other });
+      expect(other.querySelector('.swatch')).toBeNull();
+      expect(other).toHaveTextContent('100 EUR');
+      expect(remainder.querySelector('.swatch')).toHaveStyle({ background: ink.categoryRemainder });
+      expect(remainder.querySelector('.swatch')).toHaveAttribute('aria-hidden', 'true');
+      expect(remainder.querySelector('.dot')).toBeNull();
+      expect(remainder).toHaveTextContent('60 EUR');
+      expect(ink.categoryRemainder).toMatch(/^#[\da-f]{6}$/i);
+      expect(ink.categoryRemainder).not.toBe(colors.other);
+      expect(lightInk.categoryRemainder).not.toBe(darkInk.categoryRemainder);
+      drawRing(card);
+      await waitFor(() => expect(sectorFills(card)).toEqual([
+        colors.other, colors.food, colors.health, ink.categoryRemainder,
+      ]));
+    });
+
+    it('uses the existing neutral fallback for unknown slugs in sectors and legend dots', async () => {
+      localStorage.setItem('finto.theme', scheme);
+      const spend = [
+        { category: 'groceries-2', total: 100 },
+        { category: '__proto__', total: 80 },
+        { category: 'other', total: 60 },
+      ];
+      mount({
+        ...OVERVIEW_ROUTES,
+        'GET /api/summary': (_init, url) =>
+          ok(summaryBody(url, { totals: { income: 0, expense: 240 }, byCategory: spend })),
+        'GET /api/summary/months': (_init, url) =>
+          ok(monthsBody(url, [{ month: '2026-08', income: 0, expense: 240, net: -240 }])),
+      });
+
+      const card = await panel('Spending by category, Aug 2026');
+      const rows = within(await legend());
+      for (const label of ['groceries-2', '__proto__', 'Other']) {
+        expect(rows.getByText(label).closest('li')!.querySelector('.dot'))
+          .toHaveStyle({ background: colors.other });
+      }
+      expect(rows.queryByText(/Remaining/)).not.toBeInTheDocument();
+      drawRing(card);
+      await waitFor(() => expect(sectorFills(card)).toEqual([colors.other, colors.other, colors.other]));
+    });
   });
 
   it('says so rather than drawing an empty ring when the month spent nothing', async () => {
@@ -608,7 +740,7 @@ describe('spending by category', () => {
     expect(
       within(card).getByText('Total includes net refunds; the ring shows positive spending.'),
     ).toBeInTheDocument();
-    const tail = within(await legend()).getByText('Other · 2 categories').closest('li');
+    const tail = within(await legend()).getByText('Remaining · 2 categories').closest('li');
     expect(tail).toHaveTextContent('0 EUR');
     expect(within(card).getByText('180')).toBeInTheDocument();
   });
@@ -633,9 +765,13 @@ describe('spending by category', () => {
     mount();
     const card = await panel('Spending by category, Aug 2026');
 
-    fireEvent.click(within(card).getByRole('button', { name: 'All analytics' }));
+    const more = within(card).getByRole('button', { name: 'All analytics' });
+    expect(more).toHaveAttribute('type', 'button');
+    expect(more).toHaveClass('action-button--tertiary', 'action-button--compact');
+    expect(more).not.toHaveClass('btn-link');
+    fireEvent.click(more);
 
-    expect(onOpenAnalytics).toHaveBeenCalled();
+    expect(onOpenAnalytics).toHaveBeenCalledOnce();
   });
 });
 
@@ -937,6 +1073,42 @@ describe('the recent transactions', () => {
     }
   });
 
+  it('keeps positive refunds and transfers neutral while ordinary income uses income emphasis', async () => {
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04', 900, { description: 'Earned income' }),
+        txn('2026-08-03', 60, { description: 'Returned purchase', refund: true }),
+        txn('2026-08-02', 300, { description: 'Own-account incoming', transfer: true }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const amount = (title: string) => within(list).getByText(title).closest('tr')!.querySelector('.tx-amount');
+    expect(amount('Earned income')).toHaveClass('is-income');
+    expect(amount('Returned purchase')).not.toHaveClass('is-income');
+    expect(amount('Own-account incoming')).not.toHaveClass('is-income');
+    expect(within(list).getByText('Refund')).toBeVisible();
+    expect(within(list).getByText('Transfer')).toBeVisible();
+  });
+
+  it('keeps long identities, signed native amounts and distinct value dates in a named table', async () => {
+    const title = 'Regional merchant identity '.repeat(8);
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/transactions': () => ok([
+        txn('2026-08-04', -9876543210.45, { description: title, currency: 'USD', valueDate: '2026-08-03', refund: true }),
+      ]),
+    });
+    const list = await panel('Recent transactions in Sparkasse Giro');
+    const table = within(list).getByRole('table', { name: 'Recent transactions in Sparkasse Giro' });
+    const row = within(table).getByText(title.trim()).closest('tr')!;
+    expect(row).toHaveClass('tx-row-long');
+    expect(row.querySelectorAll('td')).toHaveLength(4);
+    expect(within(row).getByText('−9,876,543,210.45 USD')).toBeInTheDocument();
+    expect(within(row).getByText('Value date 03.08.2026')).toBeInTheDocument();
+    expect(within(row).getByText('Refund')).toBeVisible();
+  });
+
   it('keeps every cell in its own column', async () => {
     // `display: flex` on a <td> takes it out of the table, and CSS fixup then wraps it
     // together with its adjacent non-cell siblings into ONE anonymous cell — which put
@@ -1221,12 +1393,17 @@ describe('the account menu', () => {
       ...OVERVIEW_ROUTES,
       'PATCH /api/accounts/acc-1': () => ok({ ...ACCOUNTS[0], hidden: true }),
     });
+    const opener = await screen.findByRole('button', { name: 'Account menu: Sparkasse Giro' });
+    opener.focus();
     const menu = await openMenu();
 
     fireEvent.click(within(menu).getByText('Hide'));
     fireEvent.click(await screen.findByRole('button', { name: 'Hide' }));
 
     expect(await screen.findByText(/Every account you have is hidden/)).toBeInTheDocument();
+    expect(opener).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add account' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Overview' })).toHaveFocus();
   });
 
   it('names what deleting would destroy before offering anything', async () => {
@@ -1320,6 +1497,54 @@ describe('deleting an account', () => {
     fireEvent.change(await screen.findByLabelText(/to confirm/), { target: { value: name } });
     fireEvent.click(screen.getByRole('button', { name: 'Delete permanently' }));
   };
+
+  it.each([false, true])('handles delayed first-account focus without stealing a surviving user choice (chosen=%s)', async (chosen) => {
+    let created = false;
+    let finish!: (response: Response) => void;
+    const cash = account({ id: 'cash-new', name: 'Cash' });
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => created ? new Promise<Response>((resolve) => { finish = resolve; }) : ok([]),
+      'POST /api/accounts': () => { created = true; return ok(cash); },
+    });
+    const opener = await screen.findByRole('button', { name: 'Create an empty account' });
+    await waitFor(() => expect(opener).toBeEnabled());
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Cash' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+    const heading = screen.getByRole('heading', { name: 'Overview' });
+    const survivor = within(heading.closest('header')!).getByRole('button', { name: 'Import statement' });
+    if (chosen) survivor.focus();
+    await act(async () => finish(ok([cash])));
+    await screen.findByRole('button', { name: 'Cash' });
+    expect(opener).not.toBeInTheDocument();
+    expect(chosen ? survivor : heading).toHaveFocus();
+  });
+
+  it('recovers focus after a delayed post-delete refresh removes the restored account opener', async () => {
+    let deleted = false;
+    let finish!: (response: Response) => void;
+    const remaining = account({ id: 'acc-3', name: 'Cash' });
+    mount({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => deleted ? new Promise<Response>((resolve) => { finish = resolve; }) : ok([ACCOUNTS[0], remaining]),
+      'GET /api/imports': () => ok(PREVIEW),
+      'DELETE /api/accounts/acc-1': () => { deleted = true; return ok(DESTROYED); },
+    });
+    await panel('Sparkasse Giro');
+    const opener = await screen.findByRole('button', { name: 'Account menu: Sparkasse Giro' });
+    opener.focus();
+    await openDelete('Sparkasse Giro');
+    await confirmDelete('Sparkasse Giro');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+    await act(async () => finish(ok([remaining])));
+    await screen.findByRole('button', { name: 'Cash' });
+    expect(screen.getByRole('heading', { name: 'Overview' })).toHaveFocus();
+  });
 
   it('drops the account from the rail and names what the server destroyed', async () => {
     const other = account({ id: 'acc-3', name: 'Cash' });

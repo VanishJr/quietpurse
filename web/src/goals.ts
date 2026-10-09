@@ -43,7 +43,7 @@ export const GOAL_INCOME_SCOPE_DEFS = {
 } satisfies Record<GoalIncomeScope, string>;
 
 export const GOAL_STATUS_LABELS = {
-  tracking: '',
+  tracking: 'Tracking',
   reached: 'Reached',
   'needs-setup': 'Needs setup',
   'not-enough-data': 'Not enough data',
@@ -81,7 +81,7 @@ export const formatWorkHours = (value: number): string =>
 
 export const progressLabel = (progress: GoalProgress): string => {
   if (progress.status === 'reached') return 'Reached';
-  if (progress.percentage === null) return GOAL_STATUS_LABELS[progress.status] || 'Progress unavailable';
+  if (progress.percentage === null) return progress.status === 'tracking' ? 'Progress unavailable' : GOAL_STATUS_LABELS[progress.status];
   const percentage = `${Math.round(progress.percentage)}%`;
   switch (progress.semantic) {
     case 'completion':
@@ -93,8 +93,17 @@ export const progressLabel = (progress: GoalProgress): string => {
   }
 };
 
-export const remainingLabel = (progress: GoalProgress): string =>
-  progress.overBy !== null && progress.overBy > 0 ? 'Over by' : 'Left';
+export const remainingLabel = (progress: GoalProgress): string => {
+  const over = progress.overBy !== null && progress.overBy > 0;
+  switch (progress.semantic) {
+    case 'completion':
+      return over ? 'Above target' : 'Left';
+    case 'used':
+      return over ? 'Over limit' : 'Available';
+    default:
+      return assertNever(progress.semantic);
+  }
+};
 
 export const goalStatusMessage = (goal: GoalSummary): string | null => {
   switch (goal.progress.status) {

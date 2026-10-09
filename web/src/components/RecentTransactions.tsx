@@ -1,7 +1,9 @@
 import { categoryLabel } from '../categories';
-import { fmtDate, fmtMoney } from '../format';
+import { fmtDate, fmtDay, fmtMoney } from '../format';
 import { TransactionsIcon } from './NavIcons';
 import { Account, Transaction } from '../types';
+import { useTheme } from '../theme';
+import { Button } from './Button';
 
 /** How many rows the block shows. The screen fetches exactly this many. */
 export const RECENT_LIMIT = 7;
@@ -14,6 +16,7 @@ interface Props {
 }
 
 export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
+  const { categoryColor } = useTheme();
   return (
     <section
       className="ov-card tx-recent"
@@ -21,9 +24,9 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
     >
       <div className="header">
         <h2 className="block-title">Recent transactions</h2>
-        <button className="btn-link" onClick={onSeeAll}>
+        <Button type="button" variant="tertiary" size="compact" onClick={onSeeAll}>
           See all <span aria-hidden="true">↗</span>
-        </button>
+        </Button>
       </div>
 
       {transactions.length === 0 ? (
@@ -31,6 +34,7 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
       ) : (
         <div className="tx-card">
           <table className="tx-table">
+            <caption className="visually-hidden">Recent transactions in {account.name}</caption>
             <thead>
               <tr>
                 <th scope="col">Description</th>
@@ -47,7 +51,7 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
             </thead>
             <tbody>
               {transactions.map((t) => (
-                <tr key={t.id}>
+                <tr key={t.id} className={fmtMoney(t.amount).length > 10 ? 'tx-row-long' : undefined}>
                   <td className="tx-desc">
                     <span className="tx-cell tx-desc-cell">
                       <span
@@ -74,16 +78,22 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                   </td>
                   <td className="tx-cat">
                     <span className="tx-cell tx-cat-cell">
+                      <span className="dot" style={{ background: categoryColor(t.category) }} aria-hidden="true" />
                       <span className="tx-cat-name">{categoryLabel(t.category)}</span>
                     </span>
                   </td>
                   <td className="tx-date">
                     <span className="tx-cell">{fmtDate(t.date)}</span>
+                    {t.valueDate && t.valueDate !== t.date.slice(0, 10) && (
+                      <span className="tx-value-date">Value date {fmtDay(t.valueDate)}</span>
+                    )}
                   </td>
-                  <td className={`tx-num tx-amount${t.amount > 0 ? ' is-income' : ''}`}>
+                  <td className={`tx-num tx-amount${t.amount > 0 && !t.refund && !t.transfer ? ' is-income' : ''}`}>
                     <span className="tx-cell">
-                      {t.amount > 0 ? '+' : ''}
-                      {fmtMoney(t.amount, t.currency)}
+                      <span className="financial-value-text">
+                        {t.amount > 0 ? '+' : ''}
+                        {fmtMoney(t.amount, t.currency)}
+                      </span>
                     </span>
                   </td>
                 </tr>

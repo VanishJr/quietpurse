@@ -102,7 +102,15 @@ because it can mean missing history or an unconverted row. Editing reads the com
 from `/api/goals/:id`; the goal type is fixed after creation, and Financial independence costs are
 replaced atomically with that configuration. The screen uses the shared `screen-inner` gutter at
 its root, and each card's Edit and Delete controls include the goal name in their accessible name,
-so narrow layouts and assistive action lists keep the card context.
+so narrow layouts and assistive action lists keep the card context. Name and explicit server status
+lead each summary; current and target values precede period, source and support context. Completion
+surplus reads as Above target, while spending consumption reads as Used and Over limit rather than
+completion. Only the server's excess chooses the surplus figure. The progressbar clamps its numeric
+range but retains the supplied percentage's meaning in text; unavailable progress remains
+indeterminate. Ordinary figures remain neutral, with independent favorable and over-limit roles.
+Narrow summaries stack their principal value before supporting metrics, keeping currency attached
+and allowing only an oversized value to scroll. Edit and lower-emphasis Delete belong to the goal,
+not its headline; final deletion retains goal-only consequences and safe initial focus.
 
 **A goal editor does not render from partial dependencies.** Accounts, app settings and the saved
 goal are one retryable load; a new attempt clears the previous account list and currency before any
@@ -111,13 +119,27 @@ when a saved account is gone or no longer uses that currency. Savings selection 
 until the current selection is cleared; incompatible saved accounts remain removable and cannot
 silently retarget the goal. A debt edit continues naming its saved account after the balance reaches
 zero. Form refusals stay with their draft, but Back or a new type clears them; repeated
-essential-cost controls carry their row ordinal in every accessible name.
+essential-cost controls carry their row ordinal in every accessible name. Their control identity
+follows the draft row key instead of its name or displayed position, so correction links survive
+renaming and neighboring removal. Generated keys never establish meaningful unsaved work.
+
+`GoalEditor` supplies correction targets directly from its existing validation predicates. Short
+forms focus the first invalid control or account group after submission; Financial independence
+focuses a linked error summary in the primary body. Links reveal and focus their control without
+changing the navigation address. Failed fields update correction while edited, without moving the
+caret; raw invalid strings stay intact. Retained costs under Current spending still participate in
+validation and replacement, so a hidden cost refusal points to Target basis until its fields are
+revealed rather than linking to absent content. API diagnostics without field identity retain the transport's diagnostic budget and remain
+form-level in the action region. Repeatable costs and account choices use headings and separators,
+not nested scroll surfaces; adding and removing a cost preserves a usable correction focus.
 
 **Goal selection is location, not product state.** The stable navigation key remains
 `screen=goal`, while an optional `goal` query key opens the editor, for a new goal or a saved one. A
 missing id, including one that disappears before an edit is saved, falls back to the list with an
 explicit unavailable message rather than choosing another goal. A new installation's empty list is
-a real empty state and is never shown while the request is unresolved or failed.
+a real empty state and is never shown while the request is unresolved or failed. A post-write list
+retained during its refresh is explicitly Updating; an obsolete response cannot clear that state
+for a newer request. A refused refresh leaves the list beside its own refusal, not an empty claim.
 
 **The wire types are the server's declaration, reached by type only and through one door.**
 `web/src/types.ts` declares nothing of its own but `TxFocus`: every wire shape in it is an `export
@@ -182,12 +204,12 @@ source as text**, and all three resolve their root differently from the checks i
 on purpose. `backend/test/SPEC.md` states that rule and the reason for the divergence; it is not
 restated here.
 
-**A design token with no `var()` behind it is refused**, by `tokens.test.ts`, because
-`web/src/styles/tokens.css` is the one place the radii, motion and stacking values two stylesheets
-had to agree on were pulled into — the palette left it for `theme.tsx` — and CSS fails silently at
-both ends: an unread declaration costs nothing, and a rule naming one that does not exist takes the
-initial value rather than erroring. The check holds one direction only; its own header says which
-and why the other needs three declaration sources modelled at once.
+**A design token with no product reader, and a literal variable with no declaration, are refused**
+by `tokens.test.ts`, because CSS fails silently at both ends. The reader walk excludes tests and
+fixtures so an assertion cannot keep an unused role alive, and follows aliases from styling rules
+rather than accepting a self-contained island of declarations. Variable resolution includes the
+stylesheets and the palettes published by `theme.tsx`; the source check does not prove cascade
+ownership, computed contrast or layout. Those require a rendered browser.
 
 `API_BASE` is empty because the API is always this page's own origin: `web/vite.config.ts` proxies
 `/api` to the backend while the dev server runs, and `npm start` serves the built client from the
@@ -225,6 +247,19 @@ remain exceptions, and existing rules remain accessible for inspection and remov
 change keeps the detail open even if the transaction leaves the current category filter, so the
 person can immediately apply that choice to similar transactions. Returning to a category that
 matches the filter restores the row. Group changes return to the detail and restore focus.
+
+Transactions retains compact whole-row activation rather than adding record actions. Context wraps
+before financial values shrink; long signed amounts may take an aligned line of their own. If an
+unbroken value exceeds even that line under text enlargement, only the value scrolls horizontally
+rather than shrinking or separating its sign and currency. Income
+uses its independent financial role only for incoming rows that are neither refunds nor transfers;
+their labels remain visible alongside neutral figures. Filter reads clear the previous answer and
+announce waiting separately from refusal and genuine no-results. Immediate edits announce pending
+and refusal beside the responsible classification, without introducing a global Save or a draft.
+Conflicting controls stay focusable while locked and refuse activation, so the initiating control
+survives a refused write. Rule previews keep scope before evidence and exceptions, with explicit
+refresh guidance after refusal. Their actions occupy the shared Sheet footer, not another scrolling
+region; when space is insufficient the same frame returns them to its single scrolling flow.
 
 **The word for money somebody else gives you is written in more than one place, across both
 packages, and nothing holds the copies to each other.** In this package it is the `support` entry
@@ -376,7 +411,7 @@ totals on the same card. A refund can push a category negative, the purchase in 
 and the refund in this one, and that is the honest figure: a ranking has a baseline and prints it,
 and a donut or a radar has no such thing as a negative sector and drops it. `SharePoint.key` is the
 backend's slug or the income source's id, and `ChartPlot` takes the React key from it, and the
-colour too when the key is a category slug.
+colour too for a category breakdown, not for a coincidentally matching source id.
 
 `parseChart` reads a stored row field by field and answers null for a shape this version does not
 recognise, because a throw would take the whole screen down on first paint, and a row can have been
@@ -404,16 +439,37 @@ own data, rather than a mock that could disagree with it: a range is easier to j
 it produces than from its name. A fetch or a piece of state added to `ChartPlot` is one the preview
 and the card would each run for themselves.
 
-`ChartCard` is the chart as a picture and carries no control: editing, duplicating and deleting a
-chart are done to it as an object, from its tab in `ChartDock`, because actions on the card put the
-loudest row on the screen above the plot a reader came to look at. `ChartDock` sits under the chart
-it chooses, as an index under its subject rather than a filter over it.
+`ChartCard` keeps title, account scope, selected period, breakdown and response currency beside its plot,
+including the comparison window where applicable. A custom title never replaces that financial
+context, and unreadable units remain unavailable rather than borrowed from the account catalog.
+Displayed calendar bounds travel with the loaded numbers; renaming a chart after a calendar
+rollover cannot relabel retained figures as a newly loaded window.
+Selected-chart controls belong to this context, but `AnalyticsScreen` still owns every mutation.
+`ChartControls` shares action and safe confirmation behavior with the desktop strip, retaining
+non-selected chart actions without changing the chart being read. Narrow layouts use a labeled
+selector above the plot instead of a second bottom dock; primary navigation remains separate.
+Focus departure dismisses a lightweight action group without stealing the new focus, so
+keyboard traversal to another chart never leaves competing Escape owners. A deleted action owner
+restores focus to the stable workspace creation control, as does contextual duplication when
+selection replaces its owner. Scroll dismissal follows actual anchor movement, not a delayed
+notification from the press that opened the group. A resize that leaves the anchor undrawn closes
+the group without a focus return; a scroll beneath an inert or hidden branch only suspends it. A capped group reveals its safe focused
+action within its own scroll area rather than moving the chart behind it; coarse-pointer strip
+controls use the shared touch size.
+
+`AnalyticsScreen` exposes the save pump's unresolved lifecycle as Saving charts, including
+serialized later intents. Optimistic editor closure is not confirmation. A normal refusal retains
+the visible work and retry, while a stale refusal replaces the list without reapplying the edit.
 
 `ChartCard`, `AccountFlows` and `SpendingByCategory` each draw their plot hidden from a screen reader
 and carry its numbers in a visually hidden table beside it — as measured — because the SVG is not
 readable. `ChartWizard`'s preview draws `ChartPlot` with no table beside it, so its figures reach a
 screen reader only once the chart is saved and drawn on a card. A future chart owes the pair
-wherever it is the thing a reader is reading.
+wherever it is the thing a reader is reading. Hidden plots explicitly disable Recharts' keyboard
+accessibility layer, and a pie's root group is likewise outside Tab order. Otherwise the library
+creates focus targets beneath the hidden plot, interrupting editor traversal even though the
+surrounding dialog retains containment. Pointer tooltips and the saved charts' tables remain
+independent of that keyboard layer.
 
 `isAnimationActive` is false on every series `ChartPlot`, `AccountFlows` and `SpendingByCategory`
 draw — as measured, and nothing enforces it. The screens stay mounted, so a chart first renders
@@ -426,7 +482,12 @@ nothing holds the two literals equal; the rule is written beside `ChartPlot`'s c
 `ChartWizard` keeps `metrics` and `breakdown` in the draft across a change of shape, so switching a
 donut to a line and back does not quietly discard the half that was not being read, and the charts
 route takes both whatever the kind: `chartSchema` in `backend/src/app.ts` couples neither `metrics`
-nor `breakdown` to `kind` and sets no minimum on `metrics`.
+nor `breakdown` to `kind` and sets no minimum on `metrics`. Period is reader-facing vocabulary,
+not a renamed range field. Named native input and labeled choice groups associate guidance and
+incomplete choices without changing completion predicates. Unresolved, failed and missing account
+choices remain distinct; no choice silently retargets saved scope. Preview waiting and refusal live
+inside the inset, with retry only for a resolvable scope and stable orientation before replacing
+its control. The shared builder frame retains the primary scroll and action ownership.
 
 `AnalyticsScreen` holds no analysis of its own: it draws the charts the reader made, none of the
 app's choosing. It draws one of them at a time rather than a grid, because the reader who made a
@@ -449,6 +510,15 @@ component state and had no answer to Back, to Reload or to a copied link. `useSy
 the primitive for exactly this — the URL is the store and every reader subscribes to it — and it is
 also what stopped the readers being wired to each other, since a fact none of them owns is read
 from one place.
+
+`read` answers an unchanged address with the very object it answered last, because
+`useSyncExternalStore` compares snapshots by identity and a fresh object per read re-renders forever.
+Snapshot identity follows the full published address, including path and fragment, even though
+`AppUrl` exposes only the owned query values. Native hash navigation must refresh the real link
+destinations without resetting a draft whose keys are unchanged. The publication seam observes
+both `popstate` and `hashchange`; a trailing hash notification already handled by a traversal,
+or made stale by its accepted write, cannot stage another guard or supersede that write. This
+notification deduplication never substitutes URL equality for history-entry identity.
 
 `urlFor` is exported because the navigation is anchors and an `href` is a promise about where a
 click lands. `Shell.tsx` builds its anchors from it rather than composing a second address, because
@@ -482,6 +552,73 @@ a panel opens it again.
 `AppUrl` carries where the reader is and not how they have set a screen up: the Overview's chart
 window and its switch for hidden accounts are component state on purpose, because a link that
 carried them would override the setup of whoever opens it.
+
+`useEditorSession` protects meaningful unsaved changes relative to caller-owned opening values.
+Account names, income-source fields, goal inputs and chart configuration choose their own
+comparison; generated cost keys and suggested chart names are not edits. Undoing changes restores
+pristine dismissal. Keep editing and Discard changes share the existing shell, retaining its body
+rather than remounting inputs. Builder Back preserves values; a different goal type requires explicit
+discard before replacing incompatible fields. Immediate transaction writes do not acquire a draft
+or a global Save action. Category-rule text compares with its opening pattern separately from
+preview freshness: reading an edited preview does not commit that text or clear its leave guard.
+A successful rule mutation establishes the new opening pattern immediately; a failed follow-up
+transaction read remains a refresh error, not unsaved work that Discard could undo.
+Discarding a navigation closes or resets the abandoned local editor without rewriting the history
+entry being left; merely hiding a pristine editor retains its established screen lifetime.
+Pending non-cancellable writes lock dismissal. A pending save of the draft also holds navigation
+until it lands; an immediate transaction write or a read does not, and settles behind the hidden
+screen instead. Confirmed and optimistic completion retain their existing owners and bypass only their own leave guard.
+
+`registerNavigationGuard` stages app navigation before history writes or accepted side effects.
+The published location is frozen during a blocked traversal, so an unrelated render cannot reset
+an active editor from the address bar's new location. Managed entries carry namespaced
+`__fintoNavigation` position metadata alongside foreign state. Opaque state remains untouched;
+native entry identities resolve against the browser's live entry list before deriving a traversal
+offset, because pruning can rebase positions after a snapshot was captured. A known missing identity
+is unavailable, not permission to reuse its cached index. Partial identity information on that seam
+also preserves the barrier instead of mixing a cached scalar into keyed lookup. Browsers without that live-list seam retain
+the established native-index or managed-segment fallback. Replay requires the browser to be at the
+verified source identity. A foreign push after staging restores that source first when a live offset
+is available; otherwise the source barrier remains unverified rather than applying the source's
+delta from another entry. A destination or source lost between staging and acceptance likewise
+retains the barrier, never a reload or acceptance of an unrelated address. Cancellation returns
+to the original indexed entry, and acceptance replays the destination without pushing a duplicate
+or deleting Forward destinations. Derived replacements retain their history role: `replace` is for
+a value the app derived rather than one the reader chose, and it leaves no entry, or Back would land
+on the address the app was about to correct and correct it again. Every open editor's guard is
+asked, newest first, and one that accepts hands the navigation to the older ones, so closing one
+editor never leaves another's draft unguarded. An address equal to the published one is not a
+navigation, but the caller's acceptance still runs behind the guards unless a traversal is
+unresolved.
+
+An entry whose offset neither managed state nor the browser identifies is not compensated by a
+guessed traversal, and only such an entry is reported as unverified: a restore or replay whose
+offset is known is already on its way back, and announcing it would flash a warning that is false
+by the next frame. The draft and published location remain until explicit acceptance, while the
+address bar follows the browser's existing entry. Keep editing leaves a visible explanation of
+that mismatch. An accepted app URL write waits at the source-entry boundary rather than replacing
+the browser's displaced entry; its original push or replace role and callbacks are retained until
+a verified source return. The owned-key intent is composed over that entry's current foreign
+path, query, hash and state rather than replaying a frozen full address. URL equality alone cannot
+prove that return when entries are opaque.
+A newer intent supersedes the older navigation, and explicitly accepting another browser
+destination abandons its queued URL change without undoing any confirmed server mutation.
+
+Saving a goal is not deferred with its address update. A confirmed goal becomes a non-editable
+result when its source entry is still displaced, with no second submission or unsaved-work claim.
+The owning list refreshes immediately; only closing its URL editor waits. A late response belongs
+to its opening: it may refresh committed data, but cannot mark a newer draft saved, release that
+draft's write lock or close another goal selection. Optimistic chart writes
+likewise keep their existing owner and closure, with the pending address update explained on the
+workspace. The visible screen owns the navigation explanation even after its editor closes;
+Sheet repeats it inside the active modal while that screen surface is inert. If the browser
+exposes no usable source identity, automatic return cannot be promised;
+the interface does not guess a traversal or overwrite a foreign entry to fake completion.
+Full-document departure uses the browser's native unsaved-work prompt while an active session is
+dirty or its pending save holds navigation, not browser storage or a recovery promise.
+Inactive editors impose neither navigation nor document-departure guards. A committed write's
+follow-up refresh retains focus-recovery intent until a replacement list arrives; Retry moves to
+stable orientation before removing its own control.
 
 ## The sentences a person reads, and what is lifted out of a screen to hold them
 
@@ -538,8 +675,16 @@ of the rows that were unreadable, filtered by a status or moved no money — the
 before Confirm, and a cause repeated afterwards would be a claim about rows none of the three can
 see.
 
-`CsvImport` stages a read for review rather than treating it as an import. Its reader sentence
-precedes every figure because it qualifies what those figures mean; the balance pair, when present,
+`CsvImport` stages a read for review rather than treating it as an import. Preparation is the working
+surface only until the read begins; a review or outcome replaces it, retaining the source identity
+and destination beside the server's answer. A staged source changes through explicit discard, not
+through editable setup beside Confirm. Optional presets belong to preparation and retry. Parser
+refusals remain whole, accompanied by web-supported next steps rather than a promised mapping editor.
+Every available staged problem remains visible before confirmation. A failed confirmation is an
+unverified outcome, not proof that nothing was written. The review retains its raw refusal and a
+non-pending exit for checking persisted history or transactions; it never synthesizes confirmed
+counts or claims that leaving discards the import. Its reader sentence precedes
+every figure because it qualifies what those figures mean; the balance pair, when present,
 is opening to closing, while its claim stays in the details because a continuous run cannot prove
 the statement is complete. Without a pair the metric is absent, and a reason is shown only when the
 server supplies one. Parser problems on a staged read are warnings, not fatal request errors; the
@@ -584,13 +729,31 @@ many as fit and a count of the rest; a second count beside it would describe the
 as `categoryRuleCaption`'s coupling to that file: a pattern with too few words long enough to count
 is accepted, stored and tags nothing, so the hint and the example in the editor field above it
 must move together when the floor moves. The compact list counts stored patterns rather than
-claiming that they match transactions; full phrases belong in the source editor Sheet, not the card.
+claiming that they match transactions; full phrases belong in the source editor Sheet, not the record.
+Source identity and Earnings or Support interpretation precede matching context and bounded actions.
+Builtins remain editable without a delete entry. Custom deletion keeps the catalog's current
+destination label and irreversible manual-assignment consequence beside its confirmation.
+The short editor uses the shared header, primary body and action frame; native form submission
+keeps the same server validation and write owner. Refusals and unresolved saving remain in the
+action region while the draft and its meaningful-change guard retain their existing lifetime.
+Custom-source deletion remains non-modal. Entry focuses available Cancel on a shown screen without
+replaying that handoff on rerender, refusal or a hidden return. Inline Cancel alone recovers lost
+or decision-owned focus to the same source's available Edit, then Add source or the Income sources
+heading, without rereading or overriding another focus choice. Explicit catalog Retry focuses that
+heading before removing its own control; automatic reads and committed-write recovery retain
+their existing owners.
 
 ## The palette, and what leaves the page
 
 `ink` is the palette published a second time: the custom properties `ThemeProvider` sets on the
 document root are the styling truth, and `ink` exists because recharts wants real colour strings.
-Where the theme is kept is *Boundary*'s ruling and is not restated here.
+Where the theme is kept is *Boundary*'s ruling and is not restated here. Action and selected-state
+foregrounds belong to their grounds, not to whichever text role a consumer happened to inherit.
+Brand identifies the product; success confirms an outcome; income identifies a financial series;
+favorable and unfavorable interpret a comparison whose direction the caller supplies. Those roles
+are independent even where hues are related. A palette role must reach product styling or a chart
+reader rather than survive only through publication as a custom property. Control boundaries and
+focus have their own contrasting roles; a field's focus feedback is not merely a changed border.
 
 `TOOLTIP_CHIP` gives every ground a chart is painted on a fill and the two colours that go on it, as
 one value. A ground is named for the `Ink` key of its own fill, so nothing states twice what colour a
@@ -619,17 +782,59 @@ The client's cleaning is not the server's `cleanName` for a reason: nothing here
 so the server's lone-surrogate rule has nothing to protect, and a `download` attribute is UTF-8 with
 no ASCII half.
 
-`ChartPlot` colours a series by the `Ink` key its entry in `METRICS` names, so what income or
-expenses look like is not decided in the plot, and colours a share part by `sliceColor`: a key that
-is a category slug takes that category's `categoryColor`, and any other key takes a colour off
-`RAMP` by its position. `RAMP` is a list of category slugs rather than of colours, so the two
-schemes keep answering for themselves. An income source whose id is also a category slug is
-coloured as that category.
+`ChartPlot` colours a series by the `Ink` key its entry in `METRICS` names. Analytics expense
+series use neutral ink; income retains its independent financial role and Net is not automatically
+favorable. Category breakdowns always use `categoryColor` by slug, with the neutral unknown fallback
+rather than a rank-dependent hue. Income-source breakdowns use a labeled chart-local palette,
+including when a source id collides with a category slug: breakdown context, not string membership,
+establishes meaning. Metric groups use spacing rather than nested surfaces, keeping full labels
+and currency attached to financial values. Oversized figures scroll only within their own value.
+Clipped wrappers contain intrinsic table width without changing the plot's accessible rows.
 
 `ChartPlot`'s donut key marks each part with the round `.dot` and its series legend with the square
-`.swatch`. As measured, and enforced by nothing, every `.dot` in the product's markup marks a
-category or a sector of a ring — the donut's key, the Overview ring's legend, and the Transactions
-list and its category picker — and every `.swatch` marks a series or a period.
+`.swatch`. Category dots preserve slug identity rather than rank. Overview's aggregate remainder
+uses a square swatch so it is not read as another named category; series and period legends also
+use square markers with their own explicit labels.
+
+## Presentation foundations
+
+`web/src/styles/tokens.css` owns shared type, spacing, control, radius, motion and measure roles; color
+remains the palette's. Text roles separate orientation, reading, labels, helper text and metadata
+from comparable financial numbers. Numeric styling changes neither signs nor formatting. Inputs
+stay readable on narrow layouts; ordinary text and controls may grow with the reader's text size.
+
+`screen-inner` establishes the shared outer page anchor and responsive gutters. Wide data, normal
+composition and narrow editing measures limit breadth without independently centering subordinate
+regions. Settings uses the normal outer measure until the screen is wide enough to set each
+section's heading beside its body, and the wide one from then on; its financial form keeps a
+narrower measure inside either. Goals uses the wide measure, and the import setup step widens only
+while its guide can stand beside the form. Existing scoped screen compositions retain their own
+treatment rather than acquiring a new wrapper. Screen scrolling, hidden-screen exclusion and
+navigation safe-area clearance remain the shell's concern.
+
+Grouped surfaces remain flat, subordinate relationships use spacing, and transient dialogs have a
+separate radius from ordinary cards. Analytics surfaces share the grouped-surface radius rather
+than keeping another card-size role. Focus is visible on the actual ground; reduced-motion behavior
+does not depend on transitions to establish the final state. Forced-color selection draws a ring
+inside the control, independently of fills and of the control's own border, so selecting never
+resizes it or moves its neighbours; custom switches use system-color track and thumb pairs, with
+forced adjustment disabled only for that control so its thumb cannot vanish into the track.
+
+`Button` owns native action presentation with explicit type, variant and size. Foreground and ground
+are a pair; legacy action classes do not choose either for a migrated button. Native disabled and
+focus-retaining locked actions use a readable neutral pair and a visible dashed boundary rather
+than relying on the cursor or faded text. Pending keeps that locked treatment and adds its own
+indicator without changing the action's label or dimensions. Locked actions refuse activation.
+Action consumers use these semantic variants rather than combinable legacy action classes.
+Choice controls likewise have one selected-state treatment instead of a competing accent pair.
+`FormActions` keeps supporting navigation before dismissal and completion in reading order;
+narrow layouts put completion on its own row rather than reshuffling keyboard order.
+
+`Field` renders an explicitly identified native control with a persistent visible label and
+associated help and correction. It supplies no validation rules. `Notice` renders facts and
+remedies chosen by its owner; its tone does not establish success, emptiness or availability,
+and live announcements are deliberate caller choices. `PageHeader` groups orientation, return
+context and the leading action without introducing another outer page anchor.
 
 ## Overview presentation
 
@@ -645,19 +850,40 @@ remainder includes positive categories even when a refund elsewhere in that grou
 the explanation must remain visible whenever those net figures differ from what can be drawn.
 `spendRing` in `categories.ts` is where the drawn sectors and the legend's remainder part ways, so
 the two figures are one function's answer and `categories.test.ts` can hold them apart on a fixture
-whose tail nets to nothing. The ring's named sectors and their legend dots are coloured by rank, not
-by category — the slot's ink keys and how many categories the legend names are one literal,
-`RING_SLOT_INK` in `categories.ts` — so the Overview ring is the one chart where a category's colour
-is its position and not the colour `categoryColor` gives it everywhere else.
-The accessible tables live inside clipped wrappers: clipping the table itself leaves its intrinsic
-width able to widen a narrow page.
+whose tail nets to nothing. Named sectors and legend dots use `categoryColor` by slug, independent
+of order and refund filtering. The grouping limit is independent of that encoding. The aggregate
+remainder has its own neutral palette role, square marker and Remaining label, not the actual Other
+category's identity. Unknown categories retain the neutral category fallback.
+
+Overview shares the outer wide page anchor and header. On a wide screen the cards run as two
+independent columns, balance then spending beside flows then recent transactions, so the balance is
+never stretched to the neighboring chart; the two lower cards end on one edge. Subordinate figures
+and period context use spacing instead of additional surfaces. Balance and ordinary expenses are
+neutral; income and caller-interpreted comparisons use their independent roles. Signs and currency
+stay attached to values, with local scrolling for a value that cannot fit rather than smaller type
+or split units. Tablet spending pairs the plot with its legend without reordering the reading
+sequence. The chart tables live inside clipped wrappers: clipping the table itself leaves its
+intrinsic width able to widen a narrow page. Recent transactions retain a caption and native table
+cells while reflowing into records on narrow layouts. Refund and transfer flags qualify neutral
+signed values, not income emphasis; full identity and distinct value-date context remain readable.
+Unusually long amounts take their own mobile line without changing account-focused See all
+navigation. A start-aligned scroll container surrounds a max-content value that aligns right only
+within its own width, so a wide signed amount never begins outside the reachable scroll range. The
+account rail retains ordinary current-account buttons, selected scrolling and paging; overflow has
+visible guidance, and locked paging arrows remain focusable but refuse repeated activation.
 
 Navigation uses the same links for the desktop sidebar and mobile bar. Import remains a desktop
 navigation link and a panel of Overview, while Settings takes its place in the mobile bar; Import
 is still reachable from Overview and Settings. Screens stay mounted so filters survive navigation,
 with inactive screens excluded through `hidden`. Settings separates financial setup from income
 classification, then presents recurring payments, data and backup actions, and API connection
-information in that order. The API address stays in a closed-by-default Advanced disclosure: it
+information in that order. These independent sections share the page anchor and use headings and
+separators rather than nested cards; financial interpretation has a narrower reading measure.
+The history panel hides the Settings composition without unmounting its forms, so raw inline
+financial drafts and owner-tag identity survive a return. Harmless navigation does not turn these
+retained inline drafts into modal decisions. Hidden income editors release interaction ownership
+through the same screen-visibility contract as other mounted editors.
+The API address stays in a closed-by-default Advanced disclosure: it
 identifies this page's local REST API, not a preference the reader can change. Pending reads and
 failures belong to their respective regions, never to a page-wide empty result. Financial setup
 shows the server's currency with a readable name when one is available; suggestions never
@@ -667,8 +893,11 @@ the entry separates spellings. Removing a spelling hands focus to the next one, 
 or the entry field. Only an exact echo of the requested currency and ordered names resets the form
 to saved; a refusal or different answer leaves the edits available to correct or retry, and a
 different answer names what the server kept, since the fields still show the edits. Validation and recalculation
-remain with the server. Settings' recurring list uses the server's monthly estimate and detected groups without recomputing them; category markers come from the
-category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
+remain with the server. Settings' recurring records put identity before the monthly value and unit,
+then category, detection and exclusion context before actions. Oversized signed values scroll only
+within their own value region instead of splitting currency or widening the page. The list uses the
+server's monthly estimate and detected groups without recomputing them; category markers come from
+the category palette, not guessed merchant identities. Excluded groups stay in a collapsed disclosure
 rather than disappearing, and a mutation replaces the whole recurring answer instead of patching
 one row. A group is followed across answers by the server's `key`, not its description: the
 description is the group's newest spelling and moves between reads. Revision-triggered reads and
@@ -679,7 +908,8 @@ irrelevant when that payment is gone or already in the requested state; an in-fl
 that still leaves the action available does not erase the refusal. A refusal belongs to its
 payment: an action on another payment neither clears nor replaces it. Refusals are shown apart
 from a failed read, which keeps its own Retry for the read; neither hides the other, nor the
-loading status. A control on Settings that would turn disabled while it holds focus — a save
+loading status. A retained refusal names its affected payment and describes that record even after
+its displayed spelling changes; excluded-row refusals remain visible outside the disclosure. A control on Settings that would turn disabled while it holds focus — a save
 pressed or entered, a name just added, a save answered with nothing left to save, an exclude,
 restore or delete in flight, Add source once its form is open — is `aria-disabled` instead and
 ignores a press, and a field being sent is read-only: a browser drops focus from a control
@@ -690,19 +920,21 @@ meanwhile. After a write,
 focus goes to the section's heading only when it was lost or is still inside the card. The summary
 total shows only beside detected groups. Import and history navigate to
 their respective flows; backup uses the checked fetch path and produces a file only after a successful response. A
-refusal stays beside Export, not elsewhere on Settings. The account strip marks the current
+refusal stays beside Export, not elsewhere on Settings. Export retains its action name and focus
+while a separate pending status explains preparation; pending activation cannot start another file. The account strip marks the current
 account with `aria-current` like the navigation does and is deliberately not a tablist: that is the app's one idiom for which of these is the current one, and a tablist makes
 the strip a composite widget with a roving tabindex nobody asked for. The account's import
 button enters the existing staged import flow, where the destination is explicitly selected and
 confirmed. A currently viewed account is not evidence that the next statement belongs to it.
 
-Dark is the initial theme; an existing saved choice takes precedence. The shell offers System,
-Light and Dark as explicit choices, with System following the OS preference. Its theme control
-moves between the bottom of the desktop sidebar and the mobile top bar, while the local-storage
-indicator stays in the sidebar. Colours are published from `theme.tsx` to CSS and chart components
-together. The action accent and income may share a colour,
-so expense series use `lavender` to remain distinct on the other screens as well. Chart tooltips use
-a raised surface with its own text colours rather than inheriting colours from the plotted series.
+Dark is the initial theme; an existing saved choice takes precedence, and a saved value the shell no
+longer offers opens on the initial theme. The shell offers one toggle between dark and light; there
+is no mode that follows the OS preference. Its theme control moves between the bottom of the desktop
+sidebar and the mobile top bar, while the local-storage indicator stays in the sidebar. Colours are
+published from `theme.tsx` to CSS and chart components together. Income series and their legend
+marks use the income role, independent of action and success colors; Overview expense series retain
+their existing encoding while Analytics uses neutral expense ink. Chart tooltips use a raised
+surface with its own text colours rather than inheriting colours from the plotted series.
 
 ## Accounts and statements, as the client handles them
 
@@ -716,7 +948,33 @@ uploaded.
 `ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
 `api.imports` for that one account by its id and never match on `accountName`: the server filters
 imports on the account id, and the name an import row carries is the account's name when the
-statement was staged, which a later rename leaves behind.
+statement was staged, which a later rename leaves behind. The caller supplies the history's return
+destination label; workspace-wide history does not pretend to be an account's panel.
+
+`ImportHistory` gives source identity the record's full reading width before allocating actions on
+narrow screens. Counts describe accepted, rejected and owned rows, never an inferred file total.
+Download requires a readable document claim; file deletion remains reachable without it because
+unclaimed bytes may still need removal. A named ordinary-button group exposes removal, then closes
+before the shared confirmation names the source, operation and ownership consequences. File deletion
+preserves data and does not invalidate financial readers; import deletion does. A failed list reload
+retains the previous records with a visible refusal and retry, rather than reporting empty history.
+Removal retains recovery intent through that reload and any retry; file-only removal returns to
+the same record, while removed imports return to a surviving control or history orientation.
+Recovery owns only lost focus or its own restored target, not a later user choice or another
+confirmation's opener. Explicit Retry reclaims stable heading orientation before replacing its
+control and can then apply the retained removal intent.
+
+`AccountDialog` uses the shared Sheet header, primary body and action frame for every account step.
+The full account name qualifies the decision even when the rail shortens it. Back returns only to an
+existing menu origin; Cancel dismisses through the same draft policy. Native name and confirmation
+fields carry visible labels and associated guidance. Pending actions retain their identity and focus,
+lock conflicting exits, and announce the owning write without implying it was saved. Write refusals
+remain in the action region rather than below scrollable consequences, so a focused completion
+control does not hide its failed outcome. The history remedy stays in that same action region,
+reachable before and after a refusal without moving its control when the response arrives. An unread or
+refused deletion preview offers no final delete. Its counts precede the typed gate; a truncated count
+is a visible lower bound, not a new refusal rule. History remains a reachable remedy for server
+refusals, without interpreting the refusal's text or changing deletion scope.
 
 `AccountDialog`'s delete gate compares the typed name trimmed and case-insensitively because the
 server trims a name before storing it and `accounts_name_unique` in `backend/src/db/schema.ts` is on
@@ -735,34 +993,61 @@ case the strip's paging effect follows.
 
 ## What the shared controls promise
 
-`Sheet` is described here as it behaves while it is the only sheet open, and not while more than one
-sheet is open. `Sheet` is a modal dialog labelled by its `title`, and renders nothing while closed.
-Open, it calls its `onClose` on an Escape keydown that reaches the document and on a click whose
-target is its backdrop, and not on a click inside the card — though a press begun inside the card
-and released over the backdrop can be a click on the backdrop — and whether that call closes it is
-the caller's. It keeps Tab and Shift+Tab, while focus is inside the card, among the card's focusable
-controls that are not hidden, or on the card itself when there are none, and sets `overflow: hidden`
-on the document's body, putting back what it found there when it last set it once it closes or its
-screen is hidden. It does not
-bring back focus that has left a card with controls in it — as when a step change unmounts the
-control that held it — so from there Tab and Shift+Tab move as the browser moves them, and Shift+Tab
-can reach the page behind the sheet. Once it has rendered open it calls `focus()` on the card, and
-when it closes it makes the same call on whatever held focus just before, if that is still in the
-document — so where a child takes focus with `autoFocus` as the sheet opens, the card takes focus
-from that child and, on close, focus returns to nothing. The browser ignores that call on an element
-that cannot take focus, and nothing on a screen the Shell has hidden can: a sheet that opens on a
-hidden screen does not take focus, and one that closes on a hidden screen gives none back to an
-element there. While the Shell has hidden the screen holding it — `ScreenShown` is false there — an
-open sheet stays open and keeps what it holds, but takes nothing from the page: no scroll lock, no
-Escape, no Tab trap. They come back with the screen, and the card takes focus again, while a close
-still returns focus to what held it when the sheet opened. The Shell renders each screen's `hidden`
-and its `ScreenShown` from one value. The Tab trap also stands down while the card sits inside any
-other `hidden` ancestor. Its backdrop is on `--z-modal`, above the `--z-raised` layer a popover
-uses, so a popover left open behind a sheet stays under the backdrop. A caller relies on this
-rather than restating it beside its own sheet.
+`Sheet` owns modal containment, reversible background inertness and scrolling while its screen
+is visible. Tab recovers even after the focused control disappears. Intercepted boundary wraps and
+lost-focus recovery reveal their new control as well as focusing it: in single-flow mode even a
+header or footer control can lie outside the viewport. Ordinary native progression remains the
+browser's responsibility. A browser-native scroll region
+without an explicit tabindex keeps its ordinary keyboard progression; it is not a programmatic
+orientation target merely because the control query does not list it. Opening and deliberate step
+changes enter the caller's target or heading; draft renders do not move the caret. The opener is
+captured before children can take focus. Restoration requires a usable surviving target, with a
+caller-supplied section or record fallback when the opener is gone. A noninteractive fallback
+receives programmatic focus without joining the Tab sequence, even on direct entry before Shell
+has oriented the screen. Native focusable record controls keep their existing Tab position.
+Income-source refresh retains its own asynchronous fallback rather than competing with generic
+restoration.
 
-`useDismiss` is the Escape-and-outside-press close that the recurring menu and `ChartDock`'s
-popover share. Like a sheet, it hears nothing while the Shell hides the screen it sits on.
+Long editors and builders ignore the backdrop; a pristine short editor or confirmation may request
+close only from a press that began on the backdrop. Escape and the named close control request the
+same caller dismissal policy. Pending non-cancellable writes block conflicting dismissal. The
+shared frame provides a primary scrolling body and optional header and action regions; subordinate
+fields and preview records do not establish competing scroll areas. When framing leaves too little
+space for a labeled control, orientation and actions return to the same scrolling flow. This uses
+actual text and control geometry rather than assuming a short viewport has ordinary-sized text;
+mode changes and Keep editing bring the focused control into view without resetting its caret.
+Later content reflow keeps that control visible even when the scrolling mode is unchanged; recovery
+waits for overflow layout to settle and acts on the current focus, not a previously captured target.
+Associated fieldsets and semantic groups remain part of that measurement even when individual
+options fit. The test harness keeps resize observation present as a controlled notification seam;
+cases supply geometry and notifications explicitly, rather than treating the stub as optional or
+as evidence of browser layout.
+
+A screen owns only one active modal decision. In Goals, an accepted URL editor replaces any
+local delete confirmation before either shell acquires modality; Back does not resurrect that
+abandoned confirmation. Pending deletion still blocks navigation through its existing session.
+
+An open sheet on an inactive screen retains its state but releases focus, inertness, scroll locks
+and keyboard ownership. Returning re-enters without replacing the original opener. Shell drives
+`hidden` and `ScreenShown` from the same value. Modal layering stays above raised popovers.
+Accepted screen or panel navigation orients the reader at an available heading, not on background
+refresh or filter changes and not over an available editor's own focus policy. A retained hidden
+dialog is neither a modal focus owner nor a reason to suppress the visible panel's orientation.
+
+`useDismiss` is the Escape-and-outside-press seam for lightweight popovers. A live child receives
+Escape before its sheet; a background popover beneath the modal cannot consume that dismissal.
+Optional focus departure closes a group without restoring its opener or stealing the destination.
+An inside pointer press protects its action through outside-ancestor focus and click; release or
+cancellation settles against current focus in a later task. Focus the browser leaves on the
+document, or on an ancestor of the press, is not a departure at settlement or at a later Tab, so
+pressing a group's own text keeps it open. A new press or Tab invalidates stale
+protection. Current callbacks do not restart press ownership. Closing, hiding or unmounting releases
+listeners and pending settlement. Settings' recurring actions also suspend ownership when history
+takes over their composition. Opening focus requires an available visible target and is not replayed
+when a screen or history returns: that focus is the Shell's, and a group still open then closes by
+departure. Explicit recurring
+read Retry focuses its stable heading before removing Retry, while automatic reads stay passive.
+Like a sheet, a hidden screen's popover hears nothing.
 `Chips` takes `locked`, which marks every chip `aria-disabled` and ignores a press, for a form
 whose values are already on their way.
 

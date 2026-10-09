@@ -2,10 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { resetFetch, takeUnstubbed, unstubbedMessage } from './harness';
+import { TestResizeObserver, resetResizeObservers } from './resize';
 
 /** jsdom implements neither of these, and both are on a mounted screen's path. */
 
-// ThemeProvider calls it unconditionally and attaches a listener to the result.
 window.matchMedia = (query: string): MediaQueryList =>
   ({
     matches: false,
@@ -18,16 +18,10 @@ window.matchMedia = (query: string): MediaQueryList =>
     removeListener: () => {},
   }) as unknown as MediaQueryList;
 
-// recharts constructs one in ResponsiveContainer; nothing in web/src does.
-// Insurance only: the whole dom project passes with this deleted, App test included —
-// recharts 3.9 feature-detects, and the box it measures is 0x0 either way.
-globalThis.ResizeObserver = class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-};
+globalThis.ResizeObserver = TestResizeObserver;
 
 beforeEach(() => {
+  resetResizeObservers();
   resetFetch();
   // jsdom implements neither, and saving a downloaded statement runs through both.
   // Fresh per test rather than declared once: the call log is then reset by

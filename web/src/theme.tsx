@@ -9,19 +9,33 @@ export interface Ink {
   surface: string;
   page: string;
   accent: string;
-  good: string;
-  bad: string;
-  onAccent: string;
-  onBad: string;
   backdrop: string;
 
   brand: string;
   onBrand: string;
-  panel: string;
   net: string;
   raised: string;
   lavender: string;
-  sand: string;
+
+  action: string;
+  actionHover: string;
+  actionPressed: string;
+  onAction: string;
+  selected: string;
+  onSelected: string;
+  danger: string;
+  dangerHover: string;
+  dangerPressed: string;
+  onDanger: string;
+  controlBorder: string;
+  focus: string;
+  success: string;
+  error: string;
+  warning: string;
+  income: string;
+  favorable: string;
+  unfavorable: string;
+  categoryRemainder: string;
 }
 
 export const lightInk: Ink = {
@@ -33,18 +47,31 @@ export const lightInk: Ink = {
   surface: '#ffffff',
   page: '#f4f4f4',
   accent: '#0a213f',
-  good: '#007e04',
-  bad: '#a70000',
-  onAccent: '#ffffff',
-  onBad: '#ffffff',
   backdrop: 'rgba(1,7,16,0.40)',
   brand: '#365323',
   onBrand: '#ffffff',
-  panel: '#ffffff',
   net: '#936921',
   raised: '#e8eee2',
   lavender: '#7955ab',
-  sand: '#936921',
+  action: '#365323',
+  actionHover: '#2e471e',
+  actionPressed: '#263b19',
+  onAction: '#ffffff',
+  selected: '#e8eee2',
+  onSelected: '#365323',
+  danger: '#a70000',
+  dangerHover: '#910000',
+  dangerPressed: '#7a0000',
+  onDanger: '#ffffff',
+  controlBorder: '#747b70',
+  focus: '#365323',
+  success: '#267347',
+  error: '#a70000',
+  warning: '#8a5700',
+  income: '#08766c',
+  favorable: '#28713b',
+  unfavorable: '#a03b32',
+  categoryRemainder: '#636363',
 };
 
 export const darkInk: Ink = {
@@ -56,18 +83,31 @@ export const darkInk: Ink = {
   surface: '#191c19',
   page: '#101211',
   accent: '#c7e89a',
-  good: '#c7e89a',
-  bad: '#eea49b',
-  onAccent: '#182111',
-  onBad: '#101211',
   backdrop: 'rgba(0,0,0,0.65)',
   brand: '#c7e89a',
   onBrand: '#182111',
-  panel: '#191c19',
   net: '#d9c6a0',
   raised: '#20251f',
   lavender: '#b69ae3',
-  sand: '#d9c6a0',
+  action: '#b8d88a',
+  actionHover: '#c7e89a',
+  actionPressed: '#a5c675',
+  onAction: '#182111',
+  selected: '#303a25',
+  onSelected: '#c7e89a',
+  danger: '#eea49b',
+  dangerHover: '#f4b4ac',
+  dangerPressed: '#df948b',
+  onDanger: '#101211',
+  controlBorder: '#788271',
+  focus: '#c7e89a',
+  success: '#83d0a0',
+  error: '#eea49b',
+  warning: '#e6c278',
+  income: '#67c8b8',
+  favorable: '#92cf9c',
+  unfavorable: '#eda49c',
+  categoryRemainder: '#737373',
 };
 
 // keyed by the backend's slugs; the dark palette is the same hue per category, lightened
@@ -105,13 +145,11 @@ const DARK_CATEGORY_COLORS: Record<string, string> = {
 };
 
 export type Scheme = 'light' | 'dark';
-export type ThemeMode = 'system' | 'light' | 'dark';
 
 interface ThemeValue {
   ink: Ink;
   scheme: Scheme;
-  mode: ThemeMode;
-  setMode: (m: ThemeMode) => void;
+  setScheme: (s: Scheme) => void;
   categoryColor: (category: string) => string;
 }
 
@@ -119,9 +157,8 @@ const ThemeContext = createContext<ThemeValue | null>(null);
 
 const STORAGE_KEY = 'finto.theme';
 
-function readStoredMode(): ThemeMode {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'dark';
+function readStoredScheme(): Scheme {
+  return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
 }
 
 function applyCssVariables(ink: Ink, scheme: Scheme) {
@@ -136,43 +173,28 @@ function applyCssVariables(ink: Ink, scheme: Scheme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>(readStoredMode);
-  const [systemDark, setSystemDark] = useState(
-    () => window.matchMedia('(prefers-color-scheme: dark)').matches,
-  );
-
-  // Follow the OS theme while mode === 'system'. The listener stays attached in
-  // every mode — it costs nothing and keeps the value correct on switching back.
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
-
-  const scheme: Scheme = mode === 'system' ? (systemDark ? 'dark' : 'light') : mode;
+  const [scheme, setSchemeState] = useState<Scheme>(readStoredScheme);
   const ink = scheme === 'dark' ? darkInk : lightInk;
 
   useEffect(() => {
     applyCssVariables(ink, scheme);
   }, [ink, scheme]);
 
-  const setMode = (m: ThemeMode) => {
-    localStorage.setItem(STORAGE_KEY, m);
-    setModeState(m);
+  const setScheme = (s: Scheme) => {
+    localStorage.setItem(STORAGE_KEY, s);
+    setSchemeState(s);
   };
 
   const value = useMemo<ThemeValue>(() => {
     const palette = scheme === 'dark' ? DARK_CATEGORY_COLORS : LIGHT_CATEGORY_COLORS;
     return {
       scheme,
-      mode,
-      setMode,
+      setScheme,
       ink,
       categoryColor: (category) =>
         Object.hasOwn(palette, category) ? palette[category] : palette['other'],
     };
-  }, [scheme, mode, ink]);
+  }, [scheme, ink]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
