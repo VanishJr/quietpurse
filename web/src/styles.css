@@ -2620,10 +2620,6 @@ textarea {
   color: var(--ink-muted);
 }
 
-.goals-screen {
-  max-width: var(--page-normal);
-}
-
 .state-note {
   max-width: 920px;
   margin-left: auto;
