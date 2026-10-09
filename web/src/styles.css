@@ -2180,6 +2180,10 @@ textarea {
   line-height: var(--leading-heading);
 }
 
+.chart-fig-value .financial-value-text {
+  text-align: start;
+}
+
 .chart-fig-value--income {
   color: var(--ink-income);
 }
