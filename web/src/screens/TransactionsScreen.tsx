@@ -46,17 +46,15 @@ function TransactionFilter({
   options,
   selected,
   onSelect,
-  help,
 }: {
   label: string;
-  help?: string;
   options: FilterOption[];
   selected: string;
   onSelect: (key: string) => void;
 }) {
   const id = useId();
   return (
-    <Field id={id} label={label} help={help} control="select" className="transaction-filter" controlProps={{
+    <Field id={id} label={label} control="select" className="transaction-filter" controlProps={{
       value: selected,
       onChange: (event) => onSelect(event.target.value),
       children: options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>),
@@ -350,8 +348,7 @@ export function TransactionsScreen({
           selected={period}
           onSelect={(key) => setPeriod(key as PeriodKey)}
         />
-        <TransactionFilter label="Account" options={accountOptions} selected={accountId} onSelect={setAccountId}
-          help={accountId === 'all' ? undefined : accountOptions.find((option) => option.key === accountId)?.label} />
+        <TransactionFilter label="Account" options={accountOptions} selected={accountId} onSelect={setAccountId} />
         <TransactionFilter label="Category" options={categoryOptions} selected={category} onSelect={setCategory} />
       </div>
 

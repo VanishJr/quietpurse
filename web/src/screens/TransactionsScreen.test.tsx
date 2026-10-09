@@ -214,14 +214,13 @@ describe('the transactions list', () => {
 });
 
 describe('the window the screen asks for', () => {
-  it('keeps the full selected account scope readable outside the native selector', async () => {
-    const name = 'Synthetic account with a long name that cannot fit in a narrow native selector';
-    mockFetch({ ...TX_ROUTES, 'GET /api/accounts': () => ok([{ ...ACCOUNTS[0], name }]) });
+  it('does not repeat the selected account beside its selector', async () => {
+    mockFetch(TX_ROUTES);
     mount();
-    await screen.findByRole('option', { name });
+    await screen.findByRole('option', { name: ACCOUNTS[0].name });
     chooseFilter('Account', ACCOUNTS[0].id);
-    expect(screen.getByRole('combobox', { name: 'Account' })).toHaveAccessibleDescription(name);
-    expect(document.querySelector('.transaction-filter .native-field__help')).toHaveTextContent(name);
+    expect(screen.getByRole('combobox', { name: 'Account' })).not.toHaveAttribute('aria-describedby');
+    expect(document.querySelector('.transaction-filter .native-field__help')).toBeNull();
   });
 
   it('keeps the existing choices and sends each selected filter to the API', async () => {

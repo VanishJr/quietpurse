@@ -254,9 +254,7 @@ unbroken value exceeds even that line under text enlargement, only the value scr
 rather than shrinking or separating its sign and currency. Income
 uses its independent financial role only for incoming rows that are neither refunds nor transfers;
 their labels remain visible alongside neutral figures. Filter reads clear the previous answer and
-announce waiting separately from refusal and genuine no-results. A selected account's full name
-remains beside its native filter, rather than relying on the selector to fit its whole scope.
-Immediate edits announce pending
+announce waiting separately from refusal and genuine no-results. Immediate edits announce pending
 and refusal beside the responsible classification, without introducing a global Save or a draft.
 Conflicting controls stay focusable while locked and refuse activation, so the initiating control
 survives a refused write. Rule previews keep scope before evidence and exceptions, with explicit
