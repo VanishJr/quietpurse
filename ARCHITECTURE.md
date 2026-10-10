@@ -2,11 +2,11 @@
 id: architecture
 type: architecture-design
 status: draft
-title: Finto — the module map and the path one statement takes through it
+title: Quietpurse — the module map and the path one statement takes through it
 parent: goal-and-requirements
 ---
 
-Finto is an Express API over Postgres with a React client, and one person runs the whole of it on
+Quietpurse is an Express API over Postgres with a React client, and one person runs the whole of it on
 their own machine: the database is PGlite, Postgres compiled to run inside the Node process, and it
 lives in a folder beside the statements the person uploaded. The API is the contract — the web
 client is one consumer of it, and native clients are planned — so nothing that decides an outcome
@@ -93,13 +93,13 @@ on the server is a `tsc` error in `web/` and never an `undefined` on a screen.
 
 ## One person, one folder
 
-Everything the app keeps is under `FINTO_HOME`, `~/Finto` by default:
+Everything the app keeps is under `QUIETPURSE_HOME`, `~/Quietpurse` by default:
 
 ```
-~/Finto/db/                   the PGlite data directory
-~/Finto/statements/           <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
-~/Finto/finto.lock            the running process's pid
-~/Finto/finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
+~/Quietpurse/db/                        the PGlite data directory
+~/Quietpurse/statements/                <stem>_<import id>.<csv|xlsx|pdf> — the uploaded bytes, plain
+~/Quietpurse/quietpurse.lock            the running process's pid
+~/Quietpurse/quietpurse.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Quietpurse is starting
 ```
 
 There is no sign-in and no tenant. Whoever can reach the port owns the data behind it, so
@@ -161,7 +161,7 @@ itself runs on — and against a real Postgres when `TEST_DATABASE_URL` is set; 
 is single-connection, so the default run proves nothing about concurrency — a unique index losing a
 race is not exercised there. `backend/test/setup.ts` runs once per test file, so every table is truncated
 before each one; it refuses a database not named `*_test`, and it points the statements folder at
-a temporary directory so nothing a test uploads reaches `~/Finto`.
+a temporary directory so nothing a test uploads reaches `~/Quietpurse`.
 
 `web/` runs two vitest projects split by filename so the environment cannot be got wrong, `unit`
 (node) and `dom` (jsdom); the patterns are in `web/vitest.config.ts`. What jsdom structurally cannot check — layout,

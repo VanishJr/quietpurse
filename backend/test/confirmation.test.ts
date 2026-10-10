@@ -794,7 +794,7 @@ describe('backup and restore', () => {
     // the composite foreign key, with no separate staged-table restore path
     await restoreBackup(
       parseBackup({
-        format: 'finto-backup',
+        format: 'quietpurse-backup',
         version: 1,
         tables: { imports: [], transactions: [] },
       }),

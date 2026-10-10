@@ -33,7 +33,7 @@ beforeEach(() => {
   // throws inside the handler that scrolls a caption into view and turns a success
   // into an error on screen. Fresh per test for the same reason as the two above.
   Element.prototype.scrollIntoView = vi.fn();
-  // theme.tsx reads finto.theme at mount, and jsdom keeps localStorage across the
+  // theme.tsx reads quietpurse.theme at mount, and jsdom keeps localStorage across the
   // tests in a file: a test that pins a theme must not pin it for the ones after.
   localStorage.clear();
   // ...and the same for the URL, which is where the screen, the account and the panel

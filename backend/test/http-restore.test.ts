@@ -12,10 +12,10 @@ import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const SQLITE_REFUSAL =
-  'this is a SQLite database from an old version of Finto, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen';
+  'this is a SQLite database from an old version of Quietpurse, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen';
 
 const NOT_A_BACKUP =
-  'backup could not be restored: not a Finto backup file (expected JSON with format: "finto-backup")';
+  'backup could not be restored: not a Quietpurse backup file (expected JSON with format: "quietpurse-backup")';
 
 /**
  * Recognised by its first 16 bytes; the rest is filler. A string and not a Buffer,
@@ -24,7 +24,7 @@ const NOT_A_BACKUP =
  */
 const SQLITE_FILE = `SQLite format 3\0${'\u0007'.repeat(240)}`;
 
-const emptyBackup = { format: 'finto-backup', version: 1, tables: {} };
+const emptyBackup = { format: 'quietpurse-backup', version: 1, tables: {} };
 
 /** An independent literal: a pin that imported the constant would move with it. */
 const CEILING = 25 * 1024 * 1024;
@@ -34,7 +34,7 @@ const BODY_TOO_LARGE =
 
 /** A backup that restores nothing, padded to exactly `size` bytes in a key the envelope drops. */
 const paddedBackup = (size: number): string => {
-  const head = '{"format":"finto-backup","version":1,"tables":{},"pad":"';
+  const head = '{"format":"quietpurse-backup","version":1,"tables":{},"pad":"';
   const tail = '"}';
   const body = `${head}${'x'.repeat(size - head.length - tail.length)}${tail}`;
   expect(Buffer.byteLength(body, 'utf8')).toBe(size);
@@ -81,12 +81,12 @@ describe('what the door refuses', () => {
     [{ hello: 'world' }, NOT_A_BACKUP],
     [{ format: 'something-else', version: 1, tables: {} }, NOT_A_BACKUP],
     [
-      { format: 'finto-backup', version: 99, tables: {} },
+      { format: 'quietpurse-backup', version: 99, tables: {} },
       'backup could not be restored: unsupported backup version: 99',
     ],
-    [{ format: 'finto-backup', version: 1 }, 'backup could not be restored: backup file has no tables'],
+    [{ format: 'quietpurse-backup', version: 1 }, 'backup could not be restored: backup file has no tables'],
     [
-      { format: 'finto-backup', version: 1, tables: { accounts: 'oops' } },
+      { format: 'quietpurse-backup', version: 1, tables: { accounts: 'oops' } },
       'backup could not be restored: backup table accounts is not an array',
     ],
   ])('refuses JSON that is not a backup, %j, with the prefixed sentence', async (body, error) => {

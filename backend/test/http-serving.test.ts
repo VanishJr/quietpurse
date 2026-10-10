@@ -48,7 +48,7 @@ describe('the cache rule on the built client', () => {
    * have, and nothing about it is visible from inside the app.
    */
   it('is not fooled by a checkout that lives under a directory called assets', () => {
-    const outside = path.join(path.sep, 'home', 'someone', 'assets', 'finto', 'index.html');
+    const outside = path.join(path.sep, 'home', 'someone', 'assets', 'quietpurse', 'index.html');
     expect(cacheControlFor(WEB_DIST, outside)).toBe('no-cache');
   });
 });
@@ -71,10 +71,10 @@ describe('the page, served from wherever the checkout lives', () => {
   };
 
   beforeAll(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'finto-serving-'));
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'quietpurse-serving-'));
     for (const [where, marker] of [
-      ['plain', 'finto-serving-plain'],
-      ['.dotted', 'finto-serving-dotted'],
+      ['plain', 'quietpurse-serving-plain'],
+      ['.dotted', 'quietpurse-serving-dotted'],
     ]) {
       fs.mkdirSync(path.join(build(where), 'assets'), { recursive: true });
       fs.writeFileSync(path.join(build(where), 'index.html'), `<!doctype html><title>${marker}</title>`);
@@ -94,7 +94,7 @@ describe('the page, served from wherever the checkout lives', () => {
     const res = await served.get('/').set('Accept', 'text/html');
     expect(res.status, res.text).toBe(200);
     expect(res.headers['content-type']).toMatch(/^text\/html/);
-    expect(res.text).toContain(`finto-serving-${kind}`);
+    expect(res.text).toContain(`quietpurse-serving-${kind}`);
     expect(res.headers['last-modified']).toBeDefined();
     expect(res.headers['cache-control']).toBe('no-cache');
   });
@@ -103,7 +103,7 @@ describe('the page, served from wherever the checkout lives', () => {
     const served = await servedFrom(build('.dotted'));
     const res = await served.get('/transactions').set('Accept', 'text/html');
     expect(res.status, res.text).toBe(200);
-    expect(res.text).toContain('finto-serving-dotted');
+    expect(res.text).toContain('quietpurse-serving-dotted');
   });
 
   it('serves a hashed asset from a build under a dotted path, cached for good', async () => {

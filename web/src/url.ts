@@ -10,12 +10,12 @@ export interface AppUrl {
 
 const KEYS = ['screen', 'account', 'panel', 'chart', 'goal'] as const;
 const EMPTY: AppUrl = { screen: null, account: null, panel: null, chart: null, goal: null };
-const STATE_KEY = '__fintoNavigation';
+const STATE_KEY = '__quietpurseNavigation';
 const session = Math.random().toString(36).slice(2);
 
 type Proceed = (onAccepted?: () => void) => void;
 type Guard = (proceed: Proceed, untracked?: boolean) => boolean;
-type Position = { owner: 'finto:url'; session: string; segment: number; index: number };
+type Position = { owner: 'quietpurse:url'; session: string; segment: number; index: number };
 type Entry = {
   url: string;
   state: unknown;
@@ -57,7 +57,7 @@ function storedPosition(state: unknown): Position | null {
   const value: unknown = (state as Record<string, unknown>)[STATE_KEY];
   if (!value || typeof value !== 'object') return null;
   const position = value as Position;
-  return position.owner === 'finto:url' && typeof position.session === 'string' &&
+  return position.owner === 'quietpurse:url' && typeof position.session === 'string' &&
     Number.isInteger(position.segment) && Number.isInteger(position.index) ? position : null;
 }
 
@@ -91,7 +91,7 @@ function stateAt(state: unknown, position: Position): unknown {
 
 function managed(entry: Entry): Entry {
   if (entry.position) return entry;
-  const state = stateAt(entry.state, { owner: 'finto:url', session, segment: ++segment, index: 0 });
+  const state = stateAt(entry.state, { owner: 'quietpurse:url', session, segment: ++segment, index: 0 });
   if (state !== entry.state) window.history.replaceState(state, '', entry.url);
   return { ...entry, state, position: positionOf(state) };
 }
@@ -143,7 +143,7 @@ function publish(entry: Entry): void {
 function read(): AppUrl {
   const url = listening && published ? published.url : href();
   if (url === cachedUrl) return cached;
-  const params = new URL(url, window.location.href || 'http://finto.invalid').searchParams;
+  const params = new URL(url, window.location.href || 'http://quietpurse.invalid').searchParams;
   cachedUrl = url;
   cached = {
     screen: params.get('screen'),
@@ -281,7 +281,7 @@ function onPopState(): void {
 }
 
 function onHashChange(event: HashChangeEvent): void {
-  const change = new URL(event.newURL || href(), window.location.href || 'http://finto.invalid');
+  const change = new URL(event.newURL || href(), window.location.href || 'http://quietpurse.invalid');
   const url = `${change.pathname}${change.search}${change.hash}`;
   // Suppress duplicate notifications without treating their address as history-entry identity.
   if (url !== href() || url === observedBrowserUrl) return;
@@ -369,7 +369,7 @@ function handlePopState(): void {
 }
 
 function composeUrl(url: string, next: AppUrl): string {
-  const base = new URL(url, window.location.href || 'http://finto.invalid');
+  const base = new URL(url, window.location.href || 'http://quietpurse.invalid');
   const params = new URLSearchParams(base.search);
   for (const key of KEYS) {
     const value = next[key];

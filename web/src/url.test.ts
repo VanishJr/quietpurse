@@ -6,7 +6,7 @@ vi.mock('react', () => ({
   useSyncExternalStore: vi.fn((_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot()),
 }));
 
-const ORIGIN = 'http://finto.test';
+const ORIGIN = 'http://quietpurse.test';
 
 type HistoryEntry = { url: URL; state: unknown };
 let entries: HistoryEntry[] = [];
@@ -1003,7 +1003,7 @@ describe('navigation guard', () => {
     expect(entries).toHaveLength(5);
   });
 
-  it.each([42, 'foreign', ['foreign'], { __fintoNavigation: 'foreign', token: 'kept' }])(
+  it.each([42, 'foreign', ['foreign'], { __quietpurseNavigation: 'foreign', token: 'kept' }])(
     'preserves opaque foreign state %j without repurposing it', (state) => {
       replaceState(state, '', '/?screen=goal&goal=g1');
       registerNavigationGuard(() => false);

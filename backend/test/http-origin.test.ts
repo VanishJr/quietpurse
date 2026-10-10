@@ -27,7 +27,7 @@ let agent: Agent;
  * something they never chose.
  */
 const REFUSAL =
-  'this request did not come from Finto on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
+  'this request did not come from Quietpurse on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
 
 beforeAll(async () => {
   await freshTestDb();
@@ -47,7 +47,7 @@ describe('the request has to have come from this machine', () => {
    * three addresses: everything else in a rebound request is genuinely same-origin,
    * and the attacker's own name in Host is the only part of it that is still theirs.
    */
-  it.each(['evil.example', 'evil.example:4000', 'finto.localhost', 'localhost.evil.example'])(
+  it.each(['evil.example', 'evil.example:4000', 'quietpurse.localhost', 'localhost.evil.example'])(
     'refuses a request whose Host is the name %j',
     async (host) => {
       const res = await agent.get('/api/health').set('Host', host);
@@ -75,7 +75,7 @@ describe('the request has to have come from this machine', () => {
 });
 
 /**
- * `FINTO_HOST=0.0.0.0` — the documented way to open the port so a phone on the same Wi-Fi
+ * `QUIETPURSE_HOST=0.0.0.0` — the documented way to open the port so a phone on the same Wi-Fi
  * can reach it. The whole arm is unreachable on the loopback default, so without this
  * block the rule that governs the OPEN configuration would be held by nothing.
  *
@@ -83,7 +83,7 @@ describe('the request has to have come from this machine', () => {
  * is refused in both configurations, which is the half rebinding needs, and brackets
  * are not what makes something an address.
  */
-describe('with FINTO_HOST set, an address is accepted and a name still is not', () => {
+describe('with QUIETPURSE_HOST set, an address is accepted and a name still is not', () => {
   const restore = config.host;
   beforeAll(() => {
     config.host = '0.0.0.0';
@@ -200,26 +200,26 @@ describe('with FINTO_HOST set, an address is accepted and a name still is not', 
  * second case: HOST set and ignored.
  */
 describe('the variable that opens the port', () => {
-  const load = async (vars: { HOST?: string; FINTO_HOST?: string }): Promise<string> => {
-    const saved = { HOST: process.env.HOST, FINTO_HOST: process.env.FINTO_HOST };
-    const put = (k: 'HOST' | 'FINTO_HOST', v?: string): void => {
+  const load = async (vars: { HOST?: string; QUIETPURSE_HOST?: string }): Promise<string> => {
+    const saved = { HOST: process.env.HOST, QUIETPURSE_HOST: process.env.QUIETPURSE_HOST };
+    const put = (k: 'HOST' | 'QUIETPURSE_HOST', v?: string): void => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     };
     put('HOST', vars.HOST);
-    put('FINTO_HOST', vars.FINTO_HOST);
+    put('QUIETPURSE_HOST', vars.QUIETPURSE_HOST);
     try {
       vi.resetModules();
       return (await import('../src/config')).config.host;
     } finally {
       put('HOST', saved.HOST);
-      put('FINTO_HOST', saved.FINTO_HOST);
+      put('QUIETPURSE_HOST', saved.QUIETPURSE_HOST);
       vi.resetModules();
     }
   };
 
-  it('is FINTO_HOST', async () => {
-    expect(await load({ FINTO_HOST: '0.0.0.0' })).toBe('0.0.0.0');
+  it('is QUIETPURSE_HOST', async () => {
+    expect(await load({ QUIETPURSE_HOST: '0.0.0.0' })).toBe('0.0.0.0');
   });
 
   it('is not HOST, whatever other software set it to', async () => {

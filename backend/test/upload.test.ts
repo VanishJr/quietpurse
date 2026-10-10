@@ -871,7 +871,7 @@ describe('GET /api/imports: the filter and the totals', () => {
 
 // ---------- how the body arrives ----------
 
-const BOUNDARY = '----fintoChunkedBoundary';
+const BOUNDARY = '----quietpurseChunkedBoundary';
 
 /** A multipart body built by hand, so the test owns exactly which bytes go out when. */
 function multipartBody(fields: Record<string, string>, filename: string, bytes: Buffer): Buffer {
@@ -1020,7 +1020,7 @@ describe('a body that spans socket reads still imports', () => {
    * alone: what is under test is the context restoreBackup runs in, not the restore.
    */
   const emptyBackup = Buffer.from(
-    JSON.stringify({ format: 'finto-backup', version: 1, tables: {} }),
+    JSON.stringify({ format: 'quietpurse-backup', version: 1, tables: {} }),
     'utf8',
   );
 

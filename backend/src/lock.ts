@@ -19,7 +19,7 @@ type Holder = string | typeof NO_FILE;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Read from config when called, never at load: a test points each case at a folder of its own. */
-const lockPath = (): string => path.join(config.home, 'finto.lock');
+const lockPath = (): string => path.join(config.home, 'quietpurse.lock');
 const markerPath = (lockFile: string): string => `${lockFile}.takeover`;
 
 /** EPERM is a process that exists under another account, so it is alive. */
@@ -79,10 +79,10 @@ export async function acquireLock(): Promise<void> {
   const lockFile = lockPath();
   await fs.mkdir(config.home, { recursive: true, mode: OWNER_ONLY_DIR });
   // twice, and no more: one pass to claim, one to claim what a dead holder left. A
-  // third would be a spin against another Finto starting at the same instant
+  // third would be a spin against another Quietpurse starting at the same instant
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      // wx and never a look first: two Fintos started together both look at nothing
+      // wx and never a look first: two copies started together both look at nothing
       await fs.writeFile(lockFile, String(process.pid), { flag: 'wx', mode: OWNER_ONLY_FILE });
       return;
     } catch (e) {
@@ -91,16 +91,16 @@ export async function acquireLock(): Promise<void> {
     const held = await readHolder(lockFile);
     if (held === NO_FILE) continue;
     const pid = parseInt(held, 10);
-    // 0 and a negative number are a process group to kill(), never a Finto
+    // 0 and a negative number are a process group to kill(), never a Quietpurse
     if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && pidAlive(pid)) {
       throw new Error(
-        `another Finto (pid ${pid}) is already running on ${config.home} - stop it first, or delete ${lockFile} if that process is gone`,
+        `another Quietpurse (pid ${pid}) is already running on ${config.home} - stop it first, or delete ${lockFile} if that process is gone`,
       );
     }
     await takeOver(lockFile, held);
   }
   throw new Error(
-    `could not claim ${lockFile}: another Finto took it while this one was starting - start again, or delete ${markerPath(lockFile)} if it is still there and no Finto is starting`,
+    `could not claim ${lockFile}: another Quietpurse took it while this one was starting - start again, or delete ${markerPath(lockFile)} if it is still there and no Quietpurse is starting`,
   );
 }
 

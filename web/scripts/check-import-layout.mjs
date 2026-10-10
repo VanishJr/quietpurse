@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
 // The browser-check recipe installs playwright-core outside the repository.
-const require = createRequire('/tmp/finto-check/pw/package.json');
+const require = createRequire('/tmp/quietpurse-check/pw/package.json');
 const { chromium } = require('playwright-core');
 const browser = await chromium.launch({
   executablePath: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',

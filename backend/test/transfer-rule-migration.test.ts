@@ -15,7 +15,7 @@ beforeEach(async () => {
 
 it('a backup from before the matching mode existed restores its transfer rules as exact', async () => {
   const backup = parseBackup({
-    format: 'finto-backup',
+    format: 'quietpurse-backup',
     version: 1,
     tables: {
       transfer_rules: [

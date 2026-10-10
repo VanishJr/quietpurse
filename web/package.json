@@ -1,5 +1,5 @@
 {
-  "name": "finto-web",
+  "name": "quietpurse-web",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "type": "module",
-  "description": "Finto web client: accounts, transactions, analytics and financial goals",
+  "description": "Quietpurse web client: accounts, transactions, analytics and financial goals",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

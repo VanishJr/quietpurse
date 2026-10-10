@@ -607,7 +607,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 </h2>
                 {sourceContext}
                 <Notice title="Error" tone="error" role="alert" className="import-error"
-                  remedy="Change the source to try an optional bank preset or a corrected CSV/XLSX export. PDF statements work only when Finto recognises their layout.">
+                  remedy="Change the source to try an optional bank preset or a corrected CSV/XLSX export. PDF statements work only when Quietpurse recognises their layout.">
                   <p>{error}</p>
                 </Notice>
               </section>
@@ -808,14 +808,14 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             <div className="import-guide-item">
               <h3>Getting the file</h3>
               <p>
-                In your bank's transaction list, choose Export or Download. Finto can read a PDF
+                In your bank's transaction list, choose Export or Download. Quietpurse can read a PDF
                 only if it recognises the layout; otherwise, use the CSV or Excel export.
               </p>
             </div>
             <div className="import-guide-item">
               <h3>Your file stays here</h3>
               <p>
-                Statements are read on this device. The file and its rows stay in your Finto folder.
+                Statements are read on this device. The file and its rows stay in your Quietpurse folder.
               </p>
             </div>
             <div className="import-guide-item">

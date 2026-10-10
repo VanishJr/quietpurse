@@ -513,7 +513,7 @@ describe('the shell', () => {
       fireEvent.click(toggle());
       expect(toggle()).toHaveAttribute('aria-pressed', pressed);
       expect(document.documentElement.dataset.theme).toBe(scheme);
-      expect(localStorage.getItem('finto.theme')).toBe(scheme);
+      expect(localStorage.getItem('quietpurse.theme')).toBe(scheme);
       view.unmount();
       view = render(<App />);
       expect(await appMounted()).toBeVisible();
@@ -522,7 +522,7 @@ describe('the shell', () => {
   });
 
   it('opens on a previously saved theme', async () => {
-    localStorage.setItem('finto.theme', 'light');
+    localStorage.setItem('quietpurse.theme', 'light');
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();
@@ -533,7 +533,7 @@ describe('the shell', () => {
   });
 
   it('opens a saved choice it no longer offers on the initial dark theme', async () => {
-    localStorage.setItem('finto.theme', 'system');
+    localStorage.setItem('quietpurse.theme', 'system');
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();

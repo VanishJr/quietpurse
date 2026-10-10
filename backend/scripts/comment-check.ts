@@ -2,9 +2,9 @@
  * The instrument a comment-only claim is held by, and the census its figures are
  * quoted from.
  *
- *   npm --prefix /path/to/finto/backend run check:comments -- compare --base origin/main backend/src
- *   npm --prefix /path/to/finto/backend run check:comments -- compare --base 9e5f459 --head 8b184dd web/src
- *   npm --prefix /path/to/finto/backend run check:comments -- count backend/src/*.ts
+ *   npm --prefix /path/to/quietpurse/backend run check:comments -- compare --base origin/main backend/src
+ *   npm --prefix /path/to/quietpurse/backend run check:comments -- compare --base 9e5f459 --head 8b184dd web/src
+ *   npm --prefix /path/to/quietpurse/backend run check:comments -- count backend/src/*.ts
  *
  * Paths are relative to the repository root whichever package they are in, because
  * that is what `git show <rev>:<path>` takes and the tool reads both trees. Without

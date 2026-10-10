@@ -27,7 +27,7 @@ const modeOf = async (p: string): Promise<string> =>
 /** chmod does not remove write access on Windows, and root ignores every mode. */
 const ownerOnly = it.skipIf(process.platform === 'win32' || process.getuid?.() === 0);
 
-describe('the folder Finto keeps everything in', () => {
+describe('the folder Quietpurse keeps everything in', () => {
   /**
    * The database probe, aimed at the message and not only at the throw. `Failed
    * query` is drizzle's wrapper talking, and it is what this route answered before:
@@ -131,11 +131,11 @@ describe('the sentence a failed start prints', () => {
   it('does not say a cause twice when the thrower already composed it in', () => {
     const errno = new Error("ENOTDIR: not a directory, mkdir '/x'");
     const composed = new Error(
-      `the database folder (FINTO_HOME/db) at /x is not writable: ${errno.message}`,
+      `the database folder (QUIETPURSE_HOME/db) at /x is not writable: ${errno.message}`,
       { cause: errno },
     );
     expect(reasonFirst(composed)).toBe(
-      "the database folder (FINTO_HOME/db) at /x is not writable: ENOTDIR: not a directory, mkdir '/x'",
+      "the database folder (QUIETPURSE_HOME/db) at /x is not writable: ENOTDIR: not a directory, mkdir '/x'",
     );
   });
 

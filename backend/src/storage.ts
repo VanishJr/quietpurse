@@ -83,7 +83,7 @@ export async function assertWritableDir(dir: string, what: string): Promise<void
       await fs.chmod(dir, OWNER_ONLY_DIR);
       logger.warn(`${what} at ${dir} was readable by other accounts; set to 0700`);
     }
-    await fs.writeFile(probe, 'finto', { mode: OWNER_ONLY_FILE });
+    await fs.writeFile(probe, 'quietpurse', { mode: OWNER_ONLY_FILE });
     await fs.unlink(probe);
   } catch (e) {
     throw new Error(`${what} at ${dir} is not writable: ${causeChain(e)}`, { cause: e });

@@ -10,13 +10,13 @@ import { assertTestDatabase, schemaTables } from './pglite';
  */
 describe('assertTestDatabase', () => {
   it('accepts a database named for the purpose', () => {
-    expect(() => assertTestDatabase('postgres://finto:finto@localhost:5432/finto_test')).not.toThrow();
+    expect(() => assertTestDatabase('postgres://quietpurse:quietpurse@localhost:5432/quietpurse_test')).not.toThrow();
     expect(() => assertTestDatabase('postgres://u:p@host/test')).not.toThrow();
   });
 
   it('refuses the development database, and says what to do', () => {
-    expect(() => assertTestDatabase('postgres://finto:finto@localhost:5432/finto')).toThrow(
-      /finto_test/,
+    expect(() => assertTestDatabase('postgres://quietpurse:quietpurse@localhost:5432/quietpurse')).toThrow(
+      /quietpurse_test/,
     );
   });
 

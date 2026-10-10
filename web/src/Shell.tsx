@@ -105,10 +105,11 @@ export function Shell() {
       <header className="topbar">
         <div className="topbar-inner">
           <div className="nav-mark">
-            <span className="brand-glyph" aria-hidden="true">
-              f
-            </span>
-            Finto<span className="brand-period">.</span>
+            <svg className="brand-mark" viewBox="0 0 300 300" aria-hidden="true">
+              <rect width="300" height="300" rx="62" />
+              <path d="M247 216.5H138A66.5 66.5 0 1 1 187.42 194.5" />
+            </svg>
+            quiet<b>purse</b>
           </div>
 
           <nav className="tabbar" aria-label="Sections">

@@ -5,12 +5,12 @@ import path from 'path';
 const port = parseInt(process.env.PORT || '4000', 10);
 
 /**
- * Everything Finto keeps, in one folder the person can open - resolved here and only
- * here. A relative FINTO_HOME would otherwise land the database under whatever
+ * Everything Quietpurse keeps, in one folder the person can open - resolved here and only
+ * here. A relative QUIETPURSE_HOME would otherwise land the database under whatever
  * directory the process was started from and the statements under backend/, which is
  * two folders and not one, for exactly the input that reads as convenient.
  */
-const home = path.resolve(process.env.FINTO_HOME || path.join(os.homedir(), 'Finto'));
+const home = path.resolve(process.env.QUIETPURSE_HOME || path.join(os.homedir(), 'Quietpurse'));
 
 export const config = {
   port,
@@ -18,13 +18,13 @@ export const config = {
    * Loopback unless told otherwise: there is no sign-in, so a server reachable from
    * the network is a database reachable from the network.
    *
-   * FINTO_HOST and deliberately not HOST. `HOST` is a name other software owns -
+   * QUIETPURSE_HOST and deliberately not HOST. `HOST` is a name other software owns -
    * shells, container images, PaaS wrappers - and reading it lets an environment
    * nobody wrote for this app both open the port and widen the Host check, with no
    * line typed by the owner and nothing but a log line to show for it. A namespaced
    * name can only arrive on purpose.
    */
-  host: process.env.FINTO_HOST || '127.0.0.1',
+  host: process.env.QUIETPURSE_HOST || '127.0.0.1',
   home,
   baseCurrency: (process.env.BASE_CURRENCY || 'EUR').toUpperCase(),
   /** auto tries each provider in turn; ecb or nbu forces one. */
@@ -40,7 +40,7 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  /** Set, and Finto uses that PostgreSQL server instead of the embedded database. */
+  /** Set, and Quietpurse uses that PostgreSQL server instead of the embedded database. */
   databaseUrl: process.env.DATABASE_URL || undefined,
   /** The embedded database: a PGlite data directory. */
   databaseDir: path.join(home, 'db'),

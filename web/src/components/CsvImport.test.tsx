@@ -148,11 +148,11 @@ describe('the Import page foundation', () => {
       'Getting the file', 'Your file stays here', 'Re-imports are safe',
     ]);
     expect(guide).toHaveTextContent(/Export or Download.*PDF.*CSV or Excel export/s);
-    expect(guide).toHaveTextContent(/read on this device.*file and its rows stay in your Finto folder/s);
+    expect(guide).toHaveTextContent(/read on this device.*file and its rows stay in your Quietpurse folder/s);
     expect(guide).toHaveTextContent(/matched by content.*wider date range/s);
     expect(within(guide).getAllByRole('paragraph').map((p) => p.textContent?.trim())).toEqual([
-      "In your bank's transaction list, choose Export or Download. Finto can read a PDF only if it recognises the layout; otherwise, use the CSV or Excel export.",
-      'Statements are read on this device. The file and its rows stay in your Finto folder.',
+      "In your bank's transaction list, choose Export or Download. Quietpurse can read a PDF only if it recognises the layout; otherwise, use the CSV or Excel export.",
+      'Statements are read on this device. The file and its rows stay in your Quietpurse folder.',
       "Rows are matched by content, so re-importing won't duplicate them. You can safely export a wider date range than you need.",
     ]);
   });

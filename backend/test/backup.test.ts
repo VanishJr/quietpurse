@@ -48,7 +48,7 @@ describe('backup and restore (JSON)', () => {
     await setOneOff(marked, true);
 
     const data = await exportBackup();
-    expect(data.format).toBe('finto-backup');
+    expect(data.format).toBe('quietpurse-backup');
     expect(data.version).toBe(2);
     expect(data.tables.transactions.length).toBeGreaterThanOrEqual(2);
 
@@ -214,7 +214,7 @@ describe('backup and restore (JSON)', () => {
    */
   it('a backup taken before the bank integrations were removed still restores', async () => {
     const legacy = {
-      format: 'finto-backup' as const,
+      format: 'quietpurse-backup' as const,
       version: 1 as const,
       exportedAt: '2026-05-01T00:00:00.000Z',
       tables: {
@@ -290,7 +290,7 @@ describe('backup and restore (JSON)', () => {
     `);
 
     const legacy = parseBackup({
-      format: 'finto-backup',
+      format: 'quietpurse-backup',
       version: 1,
       exportedAt: '2026-05-01T00:00:00.000Z',
       tables: {
@@ -392,7 +392,7 @@ describe('backup and restore (JSON)', () => {
 
     const restored = await restoreBackup(
       parseBackup({
-        format: 'finto-backup',
+        format: 'quietpurse-backup',
         version: 1,
         tables: {
           transfer_rules: [
@@ -436,7 +436,7 @@ describe('backup and restore (JSON)', () => {
     await expect(
       restoreBackup(
         parseBackup({
-          format: 'finto-backup',
+          format: 'quietpurse-backup',
           version: 1,
           tables: { imports: [] },
         }),
@@ -478,7 +478,7 @@ describe('backup and restore (JSON)', () => {
 
     for (const [tables, message] of malformed) {
       await expect(
-        restoreBackup(parseBackup({ format: 'finto-backup', version: 1, tables })),
+        restoreBackup(parseBackup({ format: 'quietpurse-backup', version: 1, tables })),
       ).rejects.toThrow(message);
     }
   });
@@ -606,7 +606,7 @@ describe('backup and restore (JSON)', () => {
     expect(accountsBefore.length).toBeGreaterThan(0);
 
     const clashing = {
-      format: 'finto-backup' as const,
+      format: 'quietpurse-backup' as const,
       version: 1 as const,
       tables: {
         accounts: [
@@ -631,16 +631,22 @@ describe('backup and restore (JSON)', () => {
     expect((await listAccounts(true)).map((a) => a.id)).not.toContain('dup-a');
   });
 
-  it('parseBackup rejects files that are not a Finto backup', () => {
-    expect(() => parseBackup(null)).toThrow(/not a Finto backup/);
-    expect(() => parseBackup({ format: 'something-else' })).toThrow(/not a Finto backup/);
-    expect(() => parseBackup({ format: 'finto-backup', version: 99, tables: {} })).toThrow(
+  it('parseBackup rejects files that are not a Quietpurse backup', () => {
+    expect(() => parseBackup(null)).toThrow(/not a Quietpurse backup/);
+    expect(() => parseBackup({ format: 'something-else' })).toThrow(/not a Quietpurse backup/);
+    expect(() => parseBackup({ format: 'quietpurse-backup', version: 99, tables: {} })).toThrow(
       /unsupported backup version/,
     );
-    expect(() => parseBackup({ format: 'finto-backup', version: 1 })).toThrow(/no tables/);
+    expect(() => parseBackup({ format: 'quietpurse-backup', version: 1 })).toThrow(/no tables/);
     expect(() =>
-      parseBackup({ format: 'finto-backup', version: 1, tables: { accounts: 'oops' } }),
+      parseBackup({ format: 'quietpurse-backup', version: 1, tables: { accounts: 'oops' } }),
     ).toThrow(/is not an array/);
+  });
+
+  it('parseBackup reads a backup written under the earlier name, finto-backup', () => {
+    const parsed = parseBackup({ format: 'finto-backup', version: 2, tables: { accounts: [] } });
+    expect(parsed.format).toBe('quietpurse-backup');
+    expect(parsed.tables).toEqual({ accounts: [] });
   });
 
   /**
@@ -736,7 +742,7 @@ describe('backup and restore (JSON)', () => {
         );
       const before = await stored();
       const dump = parseBackup({
-        format: 'finto-backup',
+        format: 'quietpurse-backup',
         version: 2,
         tables: {
           ...Object.fromEntries(goalTables.map((goal) => [goal, []])),

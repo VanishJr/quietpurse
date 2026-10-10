@@ -300,7 +300,7 @@ describe('financial setup', () => {
     fireEvent.change(currency(), { target: { value: 'USD' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await within(cardFor('Financial setup')).findByRole('alert')).toHaveTextContent(
-      '2 transactions have no amount in USD yet: no exchange rate could be fetched for them. Finto tries again later.',
+      '2 transactions have no amount in USD yet: no exchange rate could be fetched for them. Quietpurse tries again later.',
     );
     expect(changed).toHaveBeenCalledTimes(1);
   });
@@ -733,7 +733,7 @@ describe('the data export', () => {
   });
 
   it('shows the refusal beside the control and writes no file', async () => {
-    // as a link this landed in Downloads as finto-backup-<date>.json, and the user
+    // as a link this landed in Downloads as quietpurse-backup-<date>.json, and the user
     // believed they held every transaction they own
     mockFetch({
       ...BASE,

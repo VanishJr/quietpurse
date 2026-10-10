@@ -377,7 +377,7 @@ export function OverviewScreen({
             </h2>
             <p className="acct-blank-text">
               Export a statement from your bank in whatever format it offers — .csv, .xlsx
-              or .pdf — and drop it in. Finto reads the transactions out of it and puts
+              or .pdf — and drop it in. Quietpurse reads the transactions out of it and puts
               them in an account you name on the way in.
             </p>
             <div className="acct-blank-actions">

@@ -1,6 +1,6 @@
 ---
 name: A statement would not import
-about: A file your bank gave you that Finto refused, or imported wrongly
+about: A file your bank gave you that Quietpurse refused, or imported wrongly
 title: ''
 labels: import
 ---

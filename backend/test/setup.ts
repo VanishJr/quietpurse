@@ -18,12 +18,12 @@ process.env.FAMILY_NAMES = 'ANNA BECKER, Becker Anna';
 // pino in tests: silent, and no pino-pretty worker spun up
 process.env.LOG_LEVEL = 'silent';
 process.env.LOG_PRETTY = '0';
-// Nothing a test does may reach the person's own ~/Finto: the home, and with it the
+// Nothing a test does may reach the person's own ~/Quietpurse: the home, and with it the
 // statements folder, go to a per-RUN directory under the OS temp dir. Keyed on the pid
 // because vitest.config.ts runs one process with isolate:false - src/config is read
 // once per module registry, so a value that differed per file would simply be ignored.
-const home = path.join(os.tmpdir(), 'finto-test-home', String(process.pid));
-process.env.FINTO_HOME = home;
+const home = path.join(os.tmpdir(), 'quietpurse-test-home', String(process.pid));
+process.env.QUIETPURSE_HOME = home;
 const documentRoot = path.join(home, 'statements');
 process.env.DOCUMENT_STORE_PATH = documentRoot;
 

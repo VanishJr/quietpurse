@@ -44,15 +44,15 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: finto
-          POSTGRES_PASSWORD: finto
+          POSTGRES_USER: quietpurse
+          POSTGRES_PASSWORD: quietpurse
           # the suite truncates every table it connects to and refuses a database
           # not named for the purpose (test/pglite.ts)
-          POSTGRES_DB: finto_test
+          POSTGRES_DB: quietpurse_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U finto -d finto_test"
+          --health-cmd "pg_isready -U quietpurse -d quietpurse_test"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
@@ -69,7 +69,7 @@ jobs:
       # unique index lose a race, or two writers meet
       - run: npm test
         env:
-          TEST_DATABASE_URL: postgres://finto:finto@localhost:5432/finto_test
+          TEST_DATABASE_URL: postgres://quietpurse:quietpurse@localhost:5432/quietpurse_test
 
   web:
     name: web (typecheck + tests + build)
@@ -118,12 +118,12 @@ jobs:
       PORT: 4000
       API: http://127.0.0.1:4000
     steps:
-      # A folder of the run's own, never the runner's ~/Finto: the steps below read the
+      # A folder of the run's own, never the runner's ~/Quietpurse: the steps below read the
       # database and the lock inside it. Set here rather than in the job's env because
       # the runner context does not reach that block - GitHub rejects the whole file
       # for it, and every job in it, which YAML parsing cannot see. $RUNNER_TEMP is the
       # same value as a plain variable, and the log paths below already use it.
-      - run: echo "FINTO_HOME=$RUNNER_TEMP/finto-home" >> "$GITHUB_ENV"
+      - run: echo "QUIETPURSE_HOME=$RUNNER_TEMP/quietpurse-home" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -137,40 +137,40 @@ jobs:
       - run: npm run setup
       - name: start, and get the app
         run: |
-          npm start > "$RUNNER_TEMP/finto-1.log" 2>&1 &
+          npm start > "$RUNNER_TEMP/quietpurse-1.log" 2>&1 &
           for _ in $(seq 60); do curl -sf "$API/api/health" > /dev/null && break; sleep 1; done
           curl -sf "$API/api/health"
           curl -sf -H 'Accept: text/html' "$API/" | grep -q '<div id="root">'
-          test -f "$FINTO_HOME/db/PG_VERSION"
-          kill -0 "$(cat "$FINTO_HOME/finto.lock")"
+          test -f "$QUIETPURSE_HOME/db/PG_VERSION"
+          kill -0 "$(cat "$QUIETPURSE_HOME/quietpurse.lock")"
       # on a port of its own, so the lock is the only thing that can refuse it
       - name: a second start on the same folder is refused, and by the lock
         run: |
-          ! PORT=$((PORT + 1)) timeout 60 npm start > "$RUNNER_TEMP/finto-2.log" 2>&1
-          grep -q 'another Finto (pid' "$RUNNER_TEMP/finto-2.log"
+          ! PORT=$((PORT + 1)) timeout 60 npm start > "$RUNNER_TEMP/quietpurse-2.log" 2>&1
+          grep -q 'another Quietpurse (pid' "$RUNNER_TEMP/quietpurse-2.log"
           curl -sf "$API/api/health" > /dev/null
       # the lock holds the pid of the process that owns the database, so this is the
       # app dying mid-run and not npm; a SIGKILL runs no shutdown and leaves the file
       - name: write a row, then SIGKILL the process holding the lock
         run: |
           curl -sf -X POST -H 'Content-Type: application/json' -d '{"name":"Smoke"}' "$API/api/accounts"
-          cp "$FINTO_HOME/finto.lock" "$RUNNER_TEMP/killed.pid"
+          cp "$QUIETPURSE_HOME/quietpurse.lock" "$RUNNER_TEMP/killed.pid"
           kill -9 "$(cat "$RUNNER_TEMP/killed.pid")"
           for _ in $(seq 30); do kill -0 "$(cat "$RUNNER_TEMP/killed.pid")" 2> /dev/null || break; sleep 1; done
           ! kill -0 "$(cat "$RUNNER_TEMP/killed.pid")" 2> /dev/null
-          test -f "$FINTO_HOME/finto.lock"
+          test -f "$QUIETPURSE_HOME/quietpurse.lock"
       - name: start again over what the SIGKILL left, and the row is still there
         run: |
-          npm start > "$RUNNER_TEMP/finto-3.log" 2>&1 &
+          npm start > "$RUNNER_TEMP/quietpurse-3.log" 2>&1 &
           for _ in $(seq 60); do curl -sf "$API/api/health" > /dev/null && break; sleep 1; done
           curl -sf "$API/api/accounts" | grep -q '"name":"Smoke"'
-          test "$(cat "$FINTO_HOME/finto.lock")" != "$(cat "$RUNNER_TEMP/killed.pid")"
-          kill -0 "$(cat "$FINTO_HOME/finto.lock")"
+          test "$(cat "$QUIETPURSE_HOME/quietpurse.lock")" != "$(cat "$RUNNER_TEMP/killed.pid")"
+          kill -0 "$(cat "$QUIETPURSE_HOME/quietpurse.lock")"
       - name: stop, and the lock goes with it
         run: |
-          kill -TERM "$(cat "$FINTO_HOME/finto.lock")"
-          for _ in $(seq 30); do test -e "$FINTO_HOME/finto.lock" || break; sleep 1; done
-          ! test -e "$FINTO_HOME/finto.lock"
+          kill -TERM "$(cat "$QUIETPURSE_HOME/quietpurse.lock")"
+          for _ in $(seq 30); do test -e "$QUIETPURSE_HOME/quietpurse.lock" || break; sleep 1; done
+          ! test -e "$QUIETPURSE_HOME/quietpurse.lock"
       - name: what the three starts printed
         if: always()
-        run: for f in "$RUNNER_TEMP"/finto-*.log; do echo "== $f"; cat "$f"; done
+        run: for f in "$RUNNER_TEMP"/quietpurse-*.log; do echo "== $f"; cat "$f"; done

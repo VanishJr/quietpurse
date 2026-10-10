@@ -227,7 +227,7 @@ describe('PATCH /api/accounts/:id', () => {
     expect(res.body.error).toBe('nothing to change: send name, hidden, currency, or any of them');
   });
 
-  it('answers 404 for an id this Finto does not have', async () => {
+  it('answers 404 for an id this Quietpurse does not have', async () => {
     const res = await agent.patch('/api/accounts/no-such-account').send({ hidden: true });
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('account not found');
@@ -451,7 +451,7 @@ describe('DELETE /api/accounts/:id', () => {
     expect(await rowsIn(account.id)).toHaveLength(0);
   });
 
-  it('answers 404 for an id this Finto does not have, and for one just deleted', async () => {
+  it('answers 404 for an id this Quietpurse does not have, and for one just deleted', async () => {
     const unknown = await agent.delete('/api/accounts/no-such-account');
     expect(unknown.status).toBe(404);
     expect(unknown.body.error).toBe('account not found');

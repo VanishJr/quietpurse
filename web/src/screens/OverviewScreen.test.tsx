@@ -242,7 +242,7 @@ describe('the URL', () => {
   });
 
   it('falls back to the first account when the URL names one that is not there', async () => {
-    // deleted, hidden, or from somebody else's Finto — all the same case, and none of
+    // deleted, hidden, or from somebody else's Quietpurse — all the same case, and none of
     // them is a reason to paint a rail with no tab marked and nothing underneath it
     mount(OVERVIEW_ROUTES, '/?account=acc-does-not-exist');
 
@@ -588,7 +588,7 @@ describe('spending by category', () => {
       Array.from(card.querySelectorAll('.recharts-pie-sector path'), (path) => path.getAttribute('fill'));
 
     it('keeps sector and legend colors tied to slugs when the ranks swap', async () => {
-      localStorage.setItem('finto.theme', scheme);
+      localStorage.setItem('quietpurse.theme', scheme);
       const first = [
         { category: 'housing', total: 400 },
         { category: 'food', total: 300 },
@@ -635,7 +635,7 @@ describe('spending by category', () => {
     });
 
     it('distinguishes actual Other from the grouped remainder in label, color and marker shape', async () => {
-      localStorage.setItem('finto.theme', scheme);
+      localStorage.setItem('quietpurse.theme', scheme);
       const spend = [
         { category: 'other', total: 100 },
         { category: 'food', total: 80 },
@@ -672,7 +672,7 @@ describe('spending by category', () => {
     });
 
     it('uses the existing neutral fallback for unknown slugs in sectors and legend dots', async () => {
-      localStorage.setItem('finto.theme', scheme);
+      localStorage.setItem('quietpurse.theme', scheme);
       const spend = [
         { category: 'groceries-2', total: 100 },
         { category: '__proto__', total: 80 },

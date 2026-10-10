@@ -1,4 +1,4 @@
-# Finto
+# Quietpurse
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-22%2B-5FA04E?logo=nodedotjs&logoColor=white)
@@ -7,7 +7,7 @@
 ![PGlite](https://img.shields.io/badge/PGlite-embedded_Postgres-4169E1?logo=postgresql&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-[![CI](https://github.com/VanishJr/finto/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VanishJr/finto/actions/workflows/ci.yml)
+[![CI](https://github.com/VanishJr/quietpurse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/VanishJr/quietpurse/actions/workflows/ci.yml)
 
 A personal finance tracker that turns your own transaction history and account balances into
 clear goals. It still answers the central question — **how much do I need to earn to support
@@ -26,7 +26,7 @@ I actually spend, which part of that is unavoidable, which part is one-off purch
 how much income am I short of living on my own.
 
 Exporting to a spreadsheet answers that exactly once — a month later the data is stale, and
-the category work and exchange rates are back to being done by hand. Finto is an attempt
+the category work and exchange rates are back to being done by hand. Quietpurse is an attempt
 to make that calculation permanent: the import is one button, the categorization lives in
 rules rather than in your head, and the headline number is recomputed every time you open
 the app.
@@ -65,7 +65,7 @@ in one folder, and the only thing the app ever fetches from the internet is exch
 Requires Node.js 22 or newer. Nothing else.
 
 ```bash
-git clone https://github.com/VanishJr/finto.git && cd finto
+git clone https://github.com/VanishJr/quietpurse.git && cd quietpurse
 npm run setup     # installs both packages and builds the web client
 npm start         # http://localhost:4000
 ```
@@ -83,14 +83,14 @@ Stop it with Ctrl+C. Start it again the same way; your data is where you left it
 ## Where your data is
 
 ```
-~/Finto/
-  db/            the database
-  statements/    every statement you uploaded, under a name you can recognise
-  finto.lock     the running app's process id, so a second copy refuses to open the same folder
-  finto.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Finto is starting
+~/Quietpurse/
+  db/                        the database
+  statements/                every statement you uploaded, under a name you can recognise
+  quietpurse.lock            the running app's process id, so a second copy refuses to open the same folder
+  quietpurse.lock.takeover/  left only by a start that died mid-takeover; safe to delete when no Quietpurse is starting
 ```
 
-Set `FINTO_HOME` to keep it somewhere else. The whole folder is yours to copy, back up or
+Set `QUIETPURSE_HOME` to keep it somewhere else. The whole folder is yours to copy, back up or
 delete; the app also has a one-click JSON export of every transaction on the Settings
 screen, and Import history offers each uploaded file back.
 
@@ -105,11 +105,11 @@ Nothing is required. `backend/.env.example` lists what can be set; the ones wort
 | Variable | Purpose |
 |---|---|
 | `PORT` | the port the app is served on, defaults to `4000` |
-| `FINTO_HOME` | the folder everything lives in, defaults to `~/Finto` |
-| `FINTO_HOST` | listen on every network interface (`0.0.0.0`) instead of this machine only — for a phone on the same Wi-Fi. There is no sign-in, so everyone who can reach the port can read and change your data |
+| `QUIETPURSE_HOME` | the folder everything lives in, defaults to `~/Quietpurse` |
+| `QUIETPURSE_HOST` | listen on every network interface (`0.0.0.0`) instead of this machine only — for a phone on the same Wi-Fi. There is no sign-in, so everyone who can reach the port can read and change your data |
 | `OWNER_NAMES`, `FAMILY_NAMES`, `BASE_CURRENCY` | seed the settings on the first start; after that they are edited in the app |
 | `DATABASE_URL` | use a PostgreSQL server instead of the embedded database |
-| `DOCUMENT_STORE_PATH` | keep the uploaded statements somewhere other than `FINTO_HOME/statements` |
+| `DOCUMENT_STORE_PATH` | keep the uploaded statements somewhere other than `QUIETPURSE_HOME/statements` |
 
 ## Development
 

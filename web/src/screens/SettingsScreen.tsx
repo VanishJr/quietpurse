@@ -216,7 +216,7 @@ export function SettingsScreen({
 
   /**
    * A fetch and not a link: /api/backup answers 500 like anything else, and
-   * `<a download>` writes that to disk as finto-backup-<date>.json, and the user
+   * `<a download>` writes that to disk as quietpurse-backup-<date>.json, and the user
    * believes they hold their data.
    */
   const runExport = async () => {
@@ -226,7 +226,7 @@ export function SettingsScreen({
       setExportError(null);
       const blob = await api.backup();
       // the name the backend's own Content-Disposition would have carried
-      saveBlob(blob, `finto-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      saveBlob(blob, `quietpurse-backup-${new Date().toISOString().slice(0, 10)}.json`);
     } catch (e) {
       setExportError((e as Error).message);
     } finally {
@@ -298,7 +298,7 @@ export function SettingsScreen({
           {recurringBusy && <Notice role="status">Updating recurring payments…</Notice>}
           {recurring && recurring.groups.length === 0 && (
             <Notice>
-              Nothing yet. A payment has to appear in several months before Finto calls it recurring.
+              Nothing yet. A payment has to appear in several months before Quietpurse calls it recurring.
             </Notice>
           )}
           {recurring && active.length > 0 && (
@@ -395,7 +395,7 @@ export function SettingsScreen({
           </h2>
         </div>
         <div className="settings-advanced-content settings-section-body" id="settings-advanced-content" hidden={!advancedOpen}>
-          <p className="settings-lead">This is the address of Finto’s local REST API.</p>
+          <p className="settings-lead">This is the address of Quietpurse’s local REST API.</p>
           <code className="settings-api-origin">{apiLabel()}</code>
         </div>
       </section>

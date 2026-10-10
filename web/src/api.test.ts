@@ -159,14 +159,14 @@ describe('the calls the offline product depends on', () => {
   it('api.backup() GETs /api/backup and hands back the bytes as a Blob', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Response('{"format":"finto-backup"}'),
+        new Response('{"format":"quietpurse-backup"}'),
     );
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const blob = await api.backup();
 
     expect(blob).toBeInstanceOf(Blob);
-    expect(await blob.text()).toBe('{"format":"finto-backup"}');
+    expect(await blob.text()).toBe('{"format":"quietpurse-backup"}');
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/backup');
     // The effective method, not the absence of an init: passing no init IS a GET, and
     // a header added later must not read as this assertion breaking.

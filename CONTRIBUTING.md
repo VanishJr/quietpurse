@@ -1,6 +1,6 @@
-# Contributing to Finto
+# Contributing to Quietpurse
 
-Thanks for looking. Finto is a personal finance tracker that runs on one person's own machine, so
+Thanks for looking. Quietpurse is a personal finance tracker that runs on one person's own machine, so
 the bar for a change is that it keeps that person's data correct and on their disk.
 
 ## Before you change anything
@@ -16,7 +16,7 @@ Node.js 22.13 or newer.
 
 ```bash
 npm run setup                     # installs backend/ and web/, builds the client
-npm start                         # http://localhost:4000, data under ~/Finto
+npm start                         # http://localhost:4000, data under ~/Quietpurse
 ```
 
 While working, run the two halves separately:

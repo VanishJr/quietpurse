@@ -160,25 +160,27 @@ textarea {
   display: flex;
   align-items: center;
   padding: 0 14px;
+  color: var(--ink-brand);
   font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.06em;
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
-.brand-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 11px;
-  width: 27px;
+.nav-mark b {
+  font-weight: 700;
+}
+.brand-mark {
+  flex: none;
+  margin-right: 10px;
+  width: 30px;
   height: 30px;
-  border-radius: 7px;
-  background: var(--ink-brand);
-  color: var(--ink-onBrand);
-  font-size: 26px;
-  font-style: italic;
 }
-.brand-period {
-  color: var(--ink-accent);
+.brand-mark rect {
+  fill: var(--ink-brand);
+}
+.brand-mark path {
+  fill: none;
+  stroke: var(--ink-brandMark);
+  stroke-width: 31;
 }
 .tabbar {
   margin-top: 54px;
@@ -313,10 +315,9 @@ textarea {
     padding: 0;
     font-size: 21px;
   }
-  .brand-glyph {
-    width: 24px;
-    height: 27px;
-    font-size: 22px;
+  .brand-mark {
+    width: 26px;
+    height: 26px;
   }
   .topbar-actions {
     padding: 0;

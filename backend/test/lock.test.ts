@@ -61,7 +61,7 @@ async function inHome<T>(
   config.home = home;
   config.databaseUrl = undefined;
   try {
-    return await run(home, path.join(home, 'finto.lock'));
+    return await run(home, path.join(home, 'quietpurse.lock'));
   } finally {
     config.home = before.home;
     config.databaseUrl = before.databaseUrl;
@@ -84,7 +84,7 @@ const deadPid = (): number => {
 };
 
 const refusalNaming = (pid: number, home: string): RegExp =>
-  new RegExp(`^another Finto \\(pid ${pid}\\) is already running on ${home.replace(/[.\\]/g, '\\$&')} `);
+  new RegExp(`^another Quietpurse \\(pid ${pid}\\) is already running on ${home.replace(/[.\\]/g, '\\$&')} `);
 
 interface Outcome {
   won: boolean;
@@ -103,7 +103,7 @@ interface Contestant {
 const contestant = (home: string): Contestant => {
   const proc = spawn(process.execPath, ['--import', 'tsx', 'test/lock.child.ts'], {
     cwd: BACKEND,
-    env: { ...process.env, FINTO_HOME: home, DATABASE_URL: '' },
+    env: { ...process.env, QUIETPURSE_HOME: home, DATABASE_URL: '' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
@@ -334,7 +334,7 @@ describe('a file already there', () => {
         () => new Error('resolved'),
         (err: Error) => err,
       );
-      expect(e.message).toContain('another Finto took it while this one was starting - start again');
+      expect(e.message).toContain('another Quietpurse took it while this one was starting - start again');
       expect(e.message).toContain(marker);
       expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
       expect(await exists(marker)).toBe(true);
@@ -349,7 +349,7 @@ describe('a file already there', () => {
         (err: Error) => err,
       );
       expect(e.message).toContain('EISDIR');
-      expect(e.message).not.toContain('another Finto');
+      expect(e.message).not.toContain('another Quietpurse');
       expect((await fs.stat(lockFile)).isDirectory()).toBe(true);
       expect(await exists(`${lockFile}.takeover`)).toBe(false);
     });
@@ -369,7 +369,7 @@ describe('a file already there', () => {
             (err: Error) => err,
           );
           expect(e.message).toContain('EACCES');
-          expect(e.message).not.toContain('another Finto');
+          expect(e.message).not.toContain('another Quietpurse');
         } finally {
           await fs.chmod(lockFile, 0o600);
         }
@@ -391,7 +391,7 @@ describe('a file already there', () => {
             (err: Error) => err,
           );
           expect(e.message).toContain('EACCES');
-          expect(e.message).not.toContain('another Finto');
+          expect(e.message).not.toContain('another Quietpurse');
           expect(await exists(lockFile)).toBe(false);
         } finally {
           await fs.chmod(home, 0o700);
@@ -413,7 +413,7 @@ describe('a file already there', () => {
             (err: Error) => err,
           );
           expect(e.message).toContain('EACCES');
-          expect(e.message).not.toContain('another Finto');
+          expect(e.message).not.toContain('another Quietpurse');
           expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
           expect(await exists(`${lockFile}.takeover`)).toBe(false);
         } finally {

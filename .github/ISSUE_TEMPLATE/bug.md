@@ -28,7 +28,7 @@ labels: bug
 - Commit or branch:
 - Node version:
 - Operating system:
-- Database: the built-in one under `~/Finto/db`, or your own PostgreSQL (version):
+- Database: the built-in one under `~/Quietpurse/db`, or your own PostgreSQL (version):
 - Browser, if it is a client problem:
 
 ## Anything in the logs

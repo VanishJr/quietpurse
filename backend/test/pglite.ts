@@ -27,14 +27,14 @@ export async function schemaTables(): Promise<string[]> {
     .map((t) => getTableName(t));
 }
 
-const g = globalThis as typeof globalThis & { __fintoTestDb?: Db };
+const g = globalThis as typeof globalThis & { __quietpurseTestDb?: Db };
 
 const MIGRATIONS = { migrationsFolder: path.resolve(process.cwd(), 'drizzle') };
 
 /**
  * The first thing the suite does to a database is TRUNCATE every table in it, so
  * pointing it at the wrong one destroys real data - and a person's own database is
- * one typo away (`finto` vs `finto_test`) from the URL they would paste. Refuse
+ * one typo away (`quietpurse` vs `quietpurse_test`) from the URL they would paste. Refuse
  * anything not named for the purpose rather than discover the mistake afterwards.
  */
 export function assertTestDatabase(url: string): void {
@@ -42,7 +42,7 @@ export function assertTestDatabase(url: string): void {
   if (!/(^|_)test$/.test(name)) {
     throw new Error(
       `TEST_DATABASE_URL points at database "${name}", and the suite truncates every ` +
-        `table it connects to. Name the database with a _test suffix (finto_test) and ` +
+        `table it connects to. Name the database with a _test suffix (quietpurse_test) and ` +
         `create it separately from the one you use.`,
     );
   }
@@ -70,12 +70,12 @@ async function connect(): Promise<Db> {
 
 /** A migrated, empty database (shared instance, all tables truncated). */
 export async function freshTestDb(): Promise<Db> {
-  if (!g.__fintoTestDb) {
-    g.__fintoTestDb = await connect();
+  if (!g.__quietpurseTestDb) {
+    g.__quietpurseTestDb = await connect();
   }
   // a real Postgres survives the process: the previous run's rows are still there
-  await truncateAll(g.__fintoTestDb);
-  return g.__fintoTestDb;
+  await truncateAll(g.__quietpurseTestDb);
+  return g.__quietpurseTestDb;
 }
 
 /** The order does not matter: CASCADE follows the foreign keys. */

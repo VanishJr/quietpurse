@@ -56,7 +56,7 @@ describe('hidden chart keyboard contract', () => {
 
 describe('chart legend encoding', () => {
   it.each(['light', 'dark'] as const)('keeps %s category identity independent of rank and unknown keys neutral', (scheme) => {
-    localStorage.setItem('finto.theme', scheme);
+    localStorage.setItem('quietpurse.theme', scheme);
     const view = renderThemed(<ChartPlot spec={spec} data={data} height={300} ground="surface" />);
     const food = marker('Food').style.background;
     const unknown = marker('Unknown category').style.background;
@@ -68,7 +68,7 @@ describe('chart legend encoding', () => {
   });
 
   it.each(['light', 'dark'] as const)('uses a local source palette for colliding %s income-source ids', (scheme) => {
-    localStorage.setItem('finto.theme', scheme);
+    localStorage.setItem('quietpurse.theme', scheme);
     const ink = scheme === 'light' ? lightInk : darkInk;
     renderThemed(<ChartPlot spec={{ ...spec, breakdown: 'income-sources' }} data={data} height={300} ground="surface" />);
     expect(marker('Food')).toHaveStyle({ background: ink.income });

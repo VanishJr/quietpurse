@@ -1,4 +1,4 @@
-# Finto
+# Quietpurse
 
 A personal finance tracker that runs on one person's own machine. They upload bank statements
 in whatever format they happen to have, and get their financial data organised and readable.
@@ -43,7 +43,7 @@ From the repository root, the two a person runs:
 
 ```
 npm run setup         installs both packages and builds the client into web/dist
-npm start             serves the app on http://localhost:4000, data under ~/Finto
+npm start             serves the app on http://localhost:4000, data under ~/Quietpurse
 ```
 
 From `backend/` unless stated otherwise:
@@ -80,14 +80,14 @@ the case of `tsc`, an unpinned version in the case of `tsx`.
 
 ## Invariants
 
-- **One person, one folder, one process.** Everything the app keeps is under `FINTO_HOME`
-  (`~/Finto` by default): the embedded database in `db/`, the uploaded statements in
+- **One person, one folder, one process.** Everything the app keeps is under `QUIETPURSE_HOME`
+  (`~/Quietpurse` by default): the embedded database in `db/`, the uploaded statements in
   `statements/`, and a lock file holding the running process's pid. PGlite does not refuse a
   second opener, so the lock is the only thing between two `npm start`s and a corrupted
   database; `src/lock.ts` claims it, `src/index.ts` calls the claim before opening anything, and
   it refuses while a live pid holds it.
 - **No sign-in, so the port is the boundary.** Whoever can reach the port owns the data behind
-  it. The server binds the loopback interface unless `FINTO_HOST` says otherwise, and nothing in a
+  it. The server binds the loopback interface unless `QUIETPURSE_HOST` says otherwise, and nothing in a
   route asks who is calling. A feature that needs to know who is acting has nowhere to read it
   from; do not add one that pretends to.
 - **Transaction identity.** `transactions.id` is a surrogate UUID; deduplication runs off a

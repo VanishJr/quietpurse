@@ -404,8 +404,8 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
         {unreadable > 0 && (
           <Notice>
             {unreadable === 1
-              ? '1 chart on this list was made by a newer version of Finto'
-              : `${unreadable} charts on this list were made by a newer version of Finto`}
+              ? '1 chart on this list was made by a newer version of Quietpurse'
+              : `${unreadable} charts on this list were made by a newer version of Quietpurse`}
             . {unreadable === 1 ? 'It is kept' : 'They are kept'} and saved with the rest, and
             cannot be shown here.
           </Notice>

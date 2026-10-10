@@ -13,6 +13,7 @@ export interface Ink {
 
   brand: string;
   onBrand: string;
+  brandMark: string;
   net: string;
   raised: string;
   lavender: string;
@@ -50,6 +51,7 @@ export const lightInk: Ink = {
   backdrop: 'rgba(1,7,16,0.40)',
   brand: '#365323',
   onBrand: '#ffffff',
+  brandMark: '#c7e89a',
   net: '#936921',
   raised: '#e8eee2',
   lavender: '#7955ab',
@@ -86,6 +88,7 @@ export const darkInk: Ink = {
   backdrop: 'rgba(0,0,0,0.65)',
   brand: '#c7e89a',
   onBrand: '#182111',
+  brandMark: '#365323',
   net: '#d9c6a0',
   raised: '#20251f',
   lavender: '#b69ae3',
@@ -155,7 +158,7 @@ interface ThemeValue {
 
 const ThemeContext = createContext<ThemeValue | null>(null);
 
-const STORAGE_KEY = 'finto.theme';
+const STORAGE_KEY = 'quietpurse.theme';
 
 function readStoredScheme(): Scheme {
   return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';

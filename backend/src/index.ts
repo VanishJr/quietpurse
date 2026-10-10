@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   })().catch((e: Error) => logClassify.error(`recompute failed: ${reasonFirst(e)}`));
 
   const server = app.listen(config.port, config.host, () => {
-    logger.info(`Finto is at http://localhost:${config.port}`);
+    logger.info(`Quietpurse is at http://localhost:${config.port}`);
     logger.info(`your data is in ${config.home}`);
     if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
       for (const list of Object.values(os.networkInterfaces())) {

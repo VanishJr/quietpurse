@@ -226,7 +226,7 @@ app.use(headersAndLog);
  * Host closes DNS rebinding. A page at http://evil.example whose name is made to
  * resolve to 127.0.0.1 arrives here same-origin with itself, and the only part of it
  * still under the attacker's control is the NAME in this header - so a name is
- * refused and an address is not. That also leaves FINTO_HOST=0.0.0.0 working: a phone on
+ * refused and an address is not. That also leaves QUIETPURSE_HOST=0.0.0.0 working: a phone on
  * the same Wi-Fi reaches this server by its address and never by a name.
  *
  * Origin closes the plain cross-origin write, which needs no rebind at all.
@@ -244,7 +244,7 @@ app.use(headersAndLog);
  * probe that would need it exempt, and an exemption is how the next route gets one.
  */
 const REQUEST_NOT_LOCAL =
-  'this request did not come from Finto on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
+  'this request did not come from Quietpurse on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
 
 const isLoopbackName = (name: string): boolean =>
   name === 'localhost' || name === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name);
@@ -1338,7 +1338,7 @@ app.get('/api/export.csv', async (req, res) => {
     ].join(','),
   );
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="finto.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="quietpurse.csv"');
   // every transaction the person has, in one response: res.send sets an ETag and no
   // Cache-Control, which permits heuristic caching of the whole of it
   res.setHeader('Cache-Control', 'no-store');
@@ -1856,7 +1856,7 @@ app.get('/api/backup', async (_req, res) => {
   const stamp = new Date().toISOString().slice(0, 10);
   const data = await exportBackup();
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="finto-backup-${stamp}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="quietpurse-backup-${stamp}.json"`);
   // as on the CSV export and the document download: this is every table in the
   // database, and nothing may hold a copy of it that the person did not ask for
   res.setHeader('Cache-Control', 'no-store');
@@ -1873,7 +1873,7 @@ app.post(
     if (Buffer.isBuffer(raw) && raw.subarray(0, 16).equals(Buffer.from('SQLite format 3\0'))) {
       res.status(400).json({
         error:
-          'this is a SQLite database from an old version of Finto, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen',
+          'this is a SQLite database from an old version of Quietpurse, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen',
       });
       return;
     }

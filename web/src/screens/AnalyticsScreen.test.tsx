@@ -587,7 +587,7 @@ describe('a chart that was already there', () => {
   });
 
   /*
-   * A row this version cannot draw — the shape a newer Finto, or a hand-edited backup,
+   * A row this version cannot draw — the shape a newer Quietpurse, or a hand-edited backup,
    * leaves on a list this one then opens. Dropping it was right while the list was one
    * browser's, and is a deletion from every device now that the list is the workspace's.
    */
@@ -601,7 +601,7 @@ describe('a chart that was already there', () => {
     // it gets no tab, because there is nothing here that could draw it...
     expect(screen.queryByRole('button', { name: 'Nope' })).not.toBeInTheDocument();
     // ...and it is not silently absent either
-    expect(screen.getByText(/newer version of Finto/)).toBeInTheDocument();
+    expect(screen.getByText(/newer version of Quietpurse/)).toBeInTheDocument();
 
     // the assertion the old policy could not make: the reader's next save takes it with
     // them, byte for byte and in the position it was in
@@ -627,9 +627,9 @@ describe('a chart that was already there', () => {
     mount();
 
     expect(await screen.findByRole('heading', { name: 'Spending, monthly' })).toBeInTheDocument();
-    // not "made by a newer version of Finto": this client can draw it, and saying it
+    // not "made by a newer version of Quietpurse": this client can draw it, and saying it
     // cannot is the half of the old behaviour a reader would have seen
-    expect(screen.queryByText(/newer version of Finto/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/newer version of Quietpurse/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Spending, monthly' }));
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));

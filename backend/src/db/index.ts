@@ -125,7 +125,7 @@ export interface DatabaseHandle {
 
 /**
  * Opens and migrates the database config names: a PostgreSQL server when
- * DATABASE_URL is set, the embedded one under FINTO_HOME otherwise. Everything in
+ * DATABASE_URL is set, the embedded one under QUIETPURSE_HOME otherwise. Everything in
  * src that needs a handle goes through here, so the two engines are chosen in one
  * place; the suite's harness (test/pglite.ts) opens its own and migrates it from
  * the same directory.
@@ -158,7 +158,7 @@ async function openEmbedded(directory: string): Promise<Opened> {
   // the same probe the statements folder gets, and for a sharper reason: a database
   // folder that cannot be written to is discovered by the migration, which reports
   // the SQL it was running and not the permission that stopped it
-  await assertWritableDir(directory, 'the database folder (FINTO_HOME/db)');
+  await assertWritableDir(directory, 'the database folder (QUIETPURSE_HOME/db)');
   const client = new PGlite(directory);
   const instance = drizzlePglite(client, { schema: s });
   return {
@@ -3545,7 +3545,7 @@ export async function deleteGoal(id: string): Promise<boolean> {
 const LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID = '00000000-0000-4000-8000-000000000001';
 
 export interface BackupData {
-  format: 'finto-backup';
+  format: 'quietpurse-backup';
   version: 1 | 2;
   exportedAt: string;
   tables: Record<string, unknown[]>;
@@ -3624,7 +3624,7 @@ export async function exportBackup(): Promise<BackupData> {
         tables[name] = (await tx.select().from(table)) as Record<string, unknown>[];
       }
       return {
-        format: 'finto-backup' as const,
+        format: 'quietpurse-backup' as const,
         version: 2 as const,
         exportedAt: new Date().toISOString(),
         tables,
@@ -3640,8 +3640,10 @@ export async function exportBackup(): Promise<BackupData> {
  * a restore file is the one place where a user hands us raw rows to insert.
  */
 const backupEnvelope = z.object({
-  format: z.literal('finto-backup', {
-    error: 'not a Finto backup file (expected JSON with format: "finto-backup")',
+  // finto-backup is what the app wrote under its earlier name; those files are someone's
+  // only copy of their data, so they keep restoring
+  format: z.enum(['quietpurse-backup', 'finto-backup'], {
+    error: 'not a Quietpurse backup file (expected JSON with format: "quietpurse-backup")',
   }),
   version: z.union([z.literal(1), z.literal(2)], {
     error: (issue) => `unsupported backup version: ${String(issue.input)}`,
@@ -3652,7 +3654,7 @@ const backupEnvelope = z.object({
 
 export function parseBackup(input: unknown): BackupData {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new Error('not a Finto backup file (expected JSON with format: "finto-backup")');
+    throw new Error('not a Quietpurse backup file (expected JSON with format: "quietpurse-backup")');
   }
   const parsed = backupEnvelope.safeParse(input);
   if (!parsed.success) {
@@ -3661,7 +3663,7 @@ export function parseBackup(input: unknown): BackupData {
   for (const [name, rows] of Object.entries(parsed.data.tables)) {
     if (!Array.isArray(rows)) throw new Error(`backup table ${name} is not an array`);
   }
-  return { exportedAt: '', ...parsed.data } as BackupData;
+  return { exportedAt: '', ...parsed.data, format: 'quietpurse-backup' } as BackupData;
 }
 
 const GOAL_BACKUP_TABLES = [

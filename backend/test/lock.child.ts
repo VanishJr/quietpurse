@@ -1,5 +1,5 @@
 /**
- * One contestant in lock.test.ts's race. FINTO_HOME and DATABASE_URL arrive in the
+ * One contestant in lock.test.ts's race. QUIETPURSE_HOME and DATABASE_URL arrive in the
  * environment from the parent, and config reads them once at load, so this file
  * imports the module under test and nothing else from src.
  *
