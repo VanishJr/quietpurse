@@ -47,10 +47,12 @@ const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[0-9\u00b9\u00b2\u00b3]|LPT[0-9\u
 
 /**
  * The user's filename reduced to what every filesystem accepts: the last path
- * segment, its extension dropped, every other character replaced. The stem never
- * stands alone in a name - the id follows it before the first dot - so a device
- * name is a whole name only when a dot inside the stem ends it early, and that one
- * shape is prefixed.
+ * segment, its extension dropped, every other character replaced.
+ *
+ * Prefixed whenever the part before the stem's first dot is a device name. Only a stem
+ * with a dot in it needs that, since otherwise the id follows the device name before
+ * any dot; but narrowing the test to that shape renames the stored file of every upload
+ * it stops matching, and a renamed key reads as a statement that is not on this disk.
  */
 export function documentStem(originalFilename: string | null): string {
   const base = (originalFilename ?? '').split(/[\\/]/).pop() ?? '';
@@ -66,7 +68,11 @@ export function documentStem(originalFilename: string | null): string {
 }
 
 /**
- * No `_`, and that absence is the whole of what makes a key name one row.
+ * No `_`, no capital letter, and never the digest's own shape: those absences are
+ * half of what makes a key name one row. A key is read from its right: the format
+ * back to the last `.`, the id back to the last `_` before it, the stem the rest. So
+ * the id may not carry `_` and the format may not carry `.`; the format's half is
+ * held where a row is written, not here.
  *
  * `_` is what documentKey puts between the stem and the id, and the stem may contain
  * one. If the id could too, one key would have two readings: a row carrying
@@ -74,11 +80,17 @@ export function documentStem(originalFilename: string | null): string {
  * derive one key. A restored backup chooses both fields, so it could aim a row at
  * a statement it does not own and have DELETE unlink that one instead.
  *
+ * The disk decides whether two keys are one file, and the default disks on macOS and
+ * Windows do not tell case apart: written verbatim, a minted id with its letters
+ * capitalised is another row and the same file. So both arms emit lowercase only,
+ * where a case-blind disk and a byte comparison agree, and the verbatim arm never
+ * spells a digest, so two different ids never share a segment.
+ *
  * Nothing is given up. Every id this server mints is a crypto.randomUUID(), which is
- * hex and dashes, so no key this code has ever produced changes shape - and an id
- * that does carry `_` still names a file, by the hash arm below.
+ * lowercase hex and dashes, so no key this code has ever produced changes - and an id
+ * that fails the shape still names a file, by the hash arm below.
  */
-const ID_SHAPE = /^[A-Za-z0-9-]{1,64}$/;
+const ID_SHAPE = /^(?![0-9a-f]{32}$)[a-z0-9-]{1,64}$/;
 
 /** An id this server minted goes in verbatim; one a restored backup carried is hashed so it can still name a file. */
 const idSegment = (importId: string): string =>

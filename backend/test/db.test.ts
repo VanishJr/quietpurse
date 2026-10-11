@@ -5,6 +5,7 @@ import {
   type ChartKind,
   type ChartRange,
   type ChartsWrite,
+  type ImportSourceType,
   CHART_BREAKDOWNS,
   CHART_KINDS,
   CHART_RANGES,
@@ -21,6 +22,7 @@ import {
   stageImport,
 } from '../src/db';
 import { NewTransaction } from '../src/types';
+import { IMPORT_SOURCE_TYPES } from '../src/wire';
 import { accountFor, idOf } from './helpers';
 
 const tx = (over: Partial<NewTransaction>): NewTransaction => ({
@@ -282,5 +284,28 @@ describe('the chart vocabularies are the column and not only the door', () => {
     );
     expect(breakdowns).toMatchObject({ ok: true });
     expect(breakdowns.charts.map((c) => c.breakdown)).toEqual([...CHART_BREAKDOWNS]);
+  });
+});
+
+/**
+ * The format is the extension of a stored statement's name, and that name has one
+ * reading only while the extension is one of these: a format carrying `_` or `.` lets
+ * one row's fields spell another row's file. The restore refuses such a value before
+ * the insert; this is the guard beneath it, for every writer that is not a restore.
+ */
+describe('the import formats are the column', () => {
+  it('a format outside them is refused, and every member is admitted', async () => {
+    // the cast is the point: no typed writer can produce this value
+    const aimed = createImport({
+      fileHash: 'format-outside',
+      sourceType: 'q_V.csv' as ImportSourceType,
+      parserVersion: 1,
+    });
+    expect(await violated(aimed)).toEqual({ code: '23514', constraint: 'imports_source_type_check' });
+
+    for (const sourceType of IMPORT_SOURCE_TYPES) {
+      const record = await createImport({ fileHash: `format-${sourceType}`, sourceType, parserVersion: 1 });
+      expect(record.sourceType).toBe(sourceType);
+    }
   });
 });

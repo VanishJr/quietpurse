@@ -414,9 +414,34 @@ has to carry all three.
 The last path segment only, its extension dropped, every character outside letters, marks, digits
 and a short list replaced, the whole bounded by code points and never by UTF-16 units. The
 extension comes from the recognised format, never from the name. The stem never stands alone: the
-id follows it before the first dot, which is what keeps `CON`, `NUL` and the other Windows device
-names from ever being a whole name — except where a dot inside the stem would end the name early,
-and that one shape is prefixed.
+id follows it, which keeps `CON`, `NUL` and the other Windows device names from being a whole name
+except where a dot inside the stem ends the name early. The prefix that answers that shape is
+applied to every stem whose part before its first dot is a device name, the undotted ones included,
+and it stays that wide: the name is derived again at every read, so a narrower rule would move the
+name of a statement already stored under the wider one, and the read would report it as not on
+this disk.
+
+**A name has one reading, so no row's fields can spell another row's file.** A key is read from
+its right: the format back to the last dot, the id back to the last `_` before it, the stem the
+rest. The id may not carry `_`, which `backend/src/documents.ts` holds by hashing an id that does.
+The format may not carry a dot, and nothing in that file holds it: a format is one of the three the
+wire names because the restore refuses any other value and the column checks it, and the column's
+check exists only on a database created after it was added. A restored format of `q_<id>.pdf` was
+how one row spelled another's file, and a delete under that name unlinked the other's statement.
+
+**Whether two names are one file is the disk's call, and the default disks on macOS and Windows do
+not tell case apart.** The id is what keeps two rows' names apart, so the part of the name it
+becomes is lowercase whichever way it is made: an id goes in verbatim only when it is lowercase
+letters, digits and dashes and is not shaped like a digest, and any other id is replaced by a digest
+of it, which is lowercase hex. Both conditions are held in `backend/src/documents.ts`, and each
+closes a pair. Verbatim, a restored row carrying a real import's id with its letters capitalised was
+another row to the database and the same file to such a disk, so its delete unlinked the real
+statement; and a restored id spelling the digest of another restored id would derive that id's name
+on any disk. Neither condition moves a stored name, because every id the server mints is lowercase
+and carries dashes. That is the bar a change here has to clear: the name is derived again at every
+read, so a statement whose derivation moves is still on the disk under the old name, and the read
+reports it as not there. The stem is left as typed, since two names whose ids agree belong to one
+row, and one row has one filename.
 
 **The stem's leading edge is cut to what the key shape will OPEN a segment with, read off that
 shape rather than copied.** The two are in different files, and the three classes a key segment

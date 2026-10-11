@@ -133,7 +133,8 @@ CREATE TABLE "imports" (
 	"rows_accepted" integer DEFAULT 0 NOT NULL,
 	"rows_rejected" integer DEFAULT 0 NOT NULL,
 	"error_detail" text,
-	"document_stored" boolean DEFAULT false NOT NULL
+	"document_stored" boolean DEFAULT false NOT NULL,
+	CONSTRAINT "imports_source_type_check" CHECK ("imports"."source_type" IN ('csv', 'xlsx', 'pdf'))
 );
 --> statement-breakpoint
 CREATE TABLE "income_sources" (

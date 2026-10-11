@@ -11,7 +11,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, attachmentDisposition } from '../src/app';
-import { clearImportDocument, createImport, recordImportDocument, seedDefaults } from '../src/db';
+import {
+  type BackupData,
+  clearImportDocument,
+  createImport,
+  recordImportDocument,
+  seedDefaults,
+} from '../src/db';
 import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 import {
@@ -277,6 +283,80 @@ describe('DELETE /api/imports/:id/document', () => {
     const res = await agent.delete('/api/imports/orphan-no-row/document');
     expect(res.status).toBe(404);
     expect(await blobExists('orphan-no-row')).toBe(true);
+  });
+
+  /**
+   * The pair a crafted backup aims with the format once `_` is kept out of the id: V
+   * carrying the filename "b" and a format of `q_`, W's id and the csv extension spells
+   * the name W's upload is stored under when its stem is "b_V.q", so V's delete would
+   * unlink W's statement. The disk is asserted before the statuses, because the defect
+   * is the other row's file going.
+   */
+  it("a restored row cannot aim its delete at another row's statement", async () => {
+    const owner = await committed('Aimed At Bank', 'b_V.q.csv');
+    expect(await blobExists(owner.importId, 'b_V.q')).toBe(true);
+
+    const backup = (await agent.get('/api/backup')).body as BackupData;
+    backup.tables.imports.push({
+      id: 'V',
+      fileHash: crypto.createHash('sha256').update('aimed').digest('hex'),
+      sourceType: `q_${owner.importId}.csv`,
+      originalFilename: 'b',
+      uploadedAt: new Date().toISOString(),
+      parserVersion: 1,
+      status: 'committed',
+      rowsAccepted: 0,
+      rowsRejected: 0,
+      errorDetail: null,
+      documentStored: true,
+    });
+    const restored = await agent.post('/api/restore').send(backup);
+    const aimed = await agent.delete('/api/imports/V/document');
+
+    expect(await blobExists(owner.importId, 'b_V.q')).toBe(true);
+    expect(restored.status, JSON.stringify(restored.body)).toBe(400);
+    expect(aimed.status).toBe(404);
+    const read = await agent.get(`/api/imports/${owner.importId}/document`);
+    expect(read.status).toBe(200);
+    expect(read.body).toEqual(owner.bytes);
+  });
+
+  /**
+   * A crafted row carrying a real import's id with its letters capitalised is another
+   * row to the database and, on a disk that does not tell case apart, was the same
+   * file, so its delete unlinked the real statement. A disk that does tell case apart
+   * cannot show the defect; documents.test.ts compares the keys themselves.
+   */
+  it("a restored row whose id differs only in case cannot delete another row's statement", async () => {
+    const owner = await committed('Case Blind Bank');
+    expect(await blobExists(owner.importId)).toBe(true);
+
+    const backup = (await agent.get('/api/backup')).body as BackupData;
+    const shadow = owner.importId.toUpperCase();
+    backup.tables.imports.push({
+      id: shadow,
+      fileHash: crypto.createHash('sha256').update('shadow').digest('hex'),
+      sourceType: 'csv',
+      originalFilename: 'statement.csv',
+      uploadedAt: new Date().toISOString(),
+      parserVersion: 1,
+      status: 'committed',
+      rowsAccepted: 0,
+      rowsRejected: 0,
+      errorDetail: null,
+      documentStored: true,
+    });
+    const restored = await agent.post('/api/restore').send(backup);
+    expect(restored.status, JSON.stringify(restored.body)).toBe(200);
+
+    const aimed = await agent.delete(`/api/imports/${shadow}/document`);
+
+    expect(await blobExists(owner.importId)).toBe(true);
+    expect(aimed.status).toBe(200);
+    expect(aimed.body).toEqual({ deleted: true, importId: shadow, bytesRemoved: false });
+    const read = await agent.get(`/api/imports/${owner.importId}/document`);
+    expect(read.status).toBe(200);
+    expect(read.body).toEqual(owner.bytes);
   });
 
   /**

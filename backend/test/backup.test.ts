@@ -201,6 +201,40 @@ describe('backup and restore (JSON)', () => {
   });
 
   /**
+   * The restore's own refusal, apart from the column's. Most vocabulary columns carry no
+   * CHECK, and source_type carries one only on a database created after it was added, so
+   * what is asserted is that the restore refuses before the database is asked: by its
+   * message, and by the absence of a driver error under it.
+   */
+  it.each([
+    ['sourceType', 'q_V.csv'],
+    ['status', 'reparsing'],
+  ])("a value outside imports.%s's vocabulary is refused by the restore itself", async (column, value) => {
+    const data = JSON.parse(JSON.stringify(await exportBackup())) as BackupData;
+    data.tables.imports.push({
+      id: crypto.randomUUID(),
+      fileHash: crypto.createHash('sha256').update(`outside ${column}`).digest('hex'),
+      sourceType: 'csv',
+      originalFilename: 'b',
+      uploadedAt: new Date().toISOString(),
+      parserVersion: 1,
+      status: 'failed',
+      rowsAccepted: 0,
+      rowsRejected: 0,
+      errorDetail: null,
+      documentStored: true,
+      [column]: value,
+    });
+
+    const refused = await restoreBackup(parseBackup(data)).then(
+      () => undefined,
+      (e: Error) => e,
+    );
+    expect(refused?.message).toMatch(new RegExp(`^imports\\.${column}: `));
+    expect(refused?.cause).toBeUndefined();
+  });
+
+  /**
    * The operator's own upgrade path: a backup taken before the bank
    * integrations were deleted is the file they restore from AFTER dropping and
    * recreating the database, so it has to keep working with tables and columns this

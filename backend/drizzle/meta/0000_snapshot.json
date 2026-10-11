@@ -923,7 +923,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "imports_source_type_check": {
+          "name": "imports_source_type_check",
+          "value": "\"imports\".\"source_type\" IN ('csv', 'xlsx', 'pdf')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.income_sources": {

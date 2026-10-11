@@ -3863,8 +3863,10 @@ function sanitizeRow(
   if (!row || typeof row !== 'object' || Array.isArray(row)) {
     throw new Error(`${tableName}: a row is not an object`);
   }
-  const columns: Record<string, { notNull: boolean; dataType: string } | undefined> =
-    getTableColumns(table);
+  const columns: Record<
+    string,
+    { notNull: boolean; dataType: string; enumValues?: readonly string[] } | undefined
+  > = getTableColumns(table);
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
     const column = columns[key];
@@ -3884,6 +3886,11 @@ function sanitizeRow(
     }
     if (dataType === 'number' && !Number.isFinite(value)) {
       throw new Error(`${tableName}.${key}: not a finite number`);
+    }
+    // Not left to the database: a vocabulary the schema declares is not necessarily
+    // one the database it was migrated into checks.
+    if (column.enumValues && !column.enumValues.includes(value as string)) {
+      throw new Error(`${tableName}.${key}: expected one of ${column.enumValues.join(', ')}`);
     }
     out[key] = value;
   }

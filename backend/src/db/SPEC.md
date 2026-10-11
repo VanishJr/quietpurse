@@ -222,6 +222,12 @@ written once and updated by nothing, and a function that deletes a file has to b
 off the row before the row goes. `deleteImport` reads them ahead of its delete; the account cascade
 returns them from its.
 
+**The format is checked by the column, because it ends the name.** A format carrying a dot lets one
+row's fields spell another row's file, so `imports.source_type` carries a CHECK over the wire's
+formats although no client composes against it. The restore refuses such a value before the
+insert; the CHECK is for every writer that is not a restore, and it was folded into the initial
+migration, so a database created before it has the restore's refusal and not the column's.
+
 **A cleared pointer means no document can be READ. It does not mean there is no file on disk.**
 A row that died between the file landing and the column being set has nothing there and may well
 have a document. Nothing that deletes may treat the cleared pointer as "no document" — the delete
@@ -291,6 +297,10 @@ an integer lives becomes a driver error mid-transaction, which reaches the user 
 where they should have been told the file was bad — and a JSON object smuggled into a text column
 reappears everywhere that value is displayed. Anything unrecognised is dropped rather than
 rejected, which is what lets a backup from a future version restore what this version understands.
+A value is not dropped: a column the schema gives a vocabulary accepts that vocabulary and nothing
+else, so one value outside it refuses the whole file, a future version's included. That is not
+left to the database, because a vocabulary the schema declares is not one every migrated database
+checks.
 
 **Tables with a generated identity id have their ids dropped and regenerated on restore.** A backup
 may come from another machine whose ids are already taken here. Nothing references those ids across

@@ -155,10 +155,12 @@ describe('the stem a filename becomes', () => {
     // `)` closes a storage key segment and opens none, so it cannot lead a stem
     [')statement.csv', 'statement'],
     [') (2).csv', '(2)'],
-    // a device name that a dot inside the stem would end the name at: prefixed, and
-    // only that shape - `CON` alone is safe because the id follows it before any dot
+    // a device name that a dot inside the stem would end the name at: prefixed
     ['con.txt.csv', '_con.txt'],
     ['COM1 .backup.csv', '_COM1 .backup'],
+    // and without the dot too: needless, but a statement uploaded under such a name
+    // is stored under this stem, and a narrower rule would derive one nothing is under
+    ['CON.csv', '_CON'],
     // a path, whichever way its separators lean: only the last segment is a name
     ['..\\..\\evil.csv', 'evil'],
     ['../../etc/passwd', 'passwd'],
@@ -200,9 +202,9 @@ describe('the stem a filename becomes', () => {
 
   /**
    * `CON`, `NUL`, `AUX`, `COM1` and the like are device names on Windows whatever
-   * extension follows them, and every one of them is a name a user can type. What
-   * keeps them out is not a list - it is that the stem never stands alone: the id
-   * follows it before the first dot, so the name Windows would resolve is `CON_<id>`.
+   * extension follows them, and every one of them is a name a user can type. The id
+   * following the stem keeps the plain ones out; `con.txt` is kept out by the prefix
+   * alone, because the stem's own dot ends the name before the id is reached.
    */
   it.each(['CON', 'NUL', 'AUX', 'PRN', 'COM1', 'LPT9', 'con.txt'])(
     'a Windows device name %s is never a whole name',
@@ -284,6 +286,25 @@ describe('the stem a filename becomes', () => {
       sourceType: 'csv',
     });
     expect(mine).not.toBe(theirs);
+  });
+
+  /**
+   * Whether two keys are one file is the disk's call, and the default disks on macOS
+   * and Windows do not tell case apart, so keys are compared as such a disk reads them.
+   */
+  const asCaseBlindDiskReads = (importId: string): string =>
+    documentKey({ importId, originalFilename: 'statement.csv', sourceType: 'csv' }).toLowerCase();
+
+  it("an id that is a minted one with its letters capitalised does not derive that row's file", () => {
+    const minted = 'c0ffee00-beef-4a11-8b0b-00000000cafe';
+    expect(asCaseBlindDiskReads(minted.toUpperCase())).not.toBe(asCaseBlindDiskReads(minted));
+  });
+
+  it('an id spelling the digest another id is hashed to does not derive that id\'s file', () => {
+    const carried = 'carried_by_a_backup';
+    const theirs = documentKey({ importId: carried, originalFilename: 'statement.csv', sourceType: 'csv' });
+    const digest = theirs.slice('statement_'.length, -'.csv'.length);
+    expect(asCaseBlindDiskReads(digest)).not.toBe(asCaseBlindDiskReads(carried));
   });
 
   it('a minted id is written into the key verbatim, so no stored file is renamed', () => {

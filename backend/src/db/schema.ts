@@ -88,6 +88,7 @@ export const imports = pgTable(
     uniqueIndex('imports_file_hash_unique')
       .on(t.fileHash)
       .where(sql`status = 'committed'`),
+    check('imports_source_type_check', sql`${t.sourceType} IN (${sql.raw(inList(IMPORT_SOURCE_TYPES))})`),
   ],
 );
 
