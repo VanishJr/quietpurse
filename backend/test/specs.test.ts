@@ -27,10 +27,9 @@ const ROOT = path.resolve(process.cwd(), '..');
 /**
  * Literal, not a glob: a glob asserts nothing about a spec that was deleted, which is
  * the one edit this whole file is powerless against if it enumerates by looking. The
- * ones at the root describe the whole and are the top of the tree the parents form.
+ * one at the root describes the whole and is the top of the tree the parents form.
  */
 const SPEC_FILES = [
-  'goal-and-requirements.md',
   'ARCHITECTURE.md',
   'backend/src/SPEC.md',
   'backend/src/db/SPEC.md',
@@ -103,8 +102,8 @@ const LINK_LISTS: readonly Field[] = ['depends-on', 'references', 'implements'];
  * The durable kinds. A task-spec is a working file the tool keeps under a directory
  * .gitignore keeps out of the tree.
  */
-const TYPES = ['goal-and-requirements', 'architecture-design', 'module-design', 'submodule-design'];
-const ROOT_TYPE = 'goal-and-requirements';
+const TYPES = ['architecture-design', 'module-design', 'submodule-design'];
+const ROOT_TYPE = 'architecture-design';
 /** A new or edited spec is draft, and the flip is the owner's review. */
 const STATUSES = ['draft', 'active'];
 
@@ -296,11 +295,11 @@ const parentFaults = (nodes: readonly Node[]): string[] => {
   const isRoot = (n: Node): boolean => scalarOf(n.fm, 'type') === ROOT_TYPE;
   const roots = nodes.filter(isRoot);
   const faults =
-    roots.length === 1 ? [] : [`the tree has ${roots.length} goals: ${roots.map((r) => r.file).join(', ') || 'none'} - one root`];
+    roots.length === 1 ? [] : [`the tree has ${roots.length} roots: ${roots.map((r) => r.file).join(', ') || 'none'} - one root`];
   for (const n of nodes) {
     const parent = scalarOf(n.fm, 'parent');
-    if (isRoot(n) && parent !== undefined) faults.push(`${n.file} declares a parent and is the goal - the goal is the root and the only root`);
-    if (!isRoot(n) && parent === undefined) faults.push(`${n.file} declares no parent - every spec but the goal hangs off one`);
+    if (isRoot(n) && parent !== undefined) faults.push(`${n.file} declares a parent and is the root - the root hangs off nothing`);
+    if (!isRoot(n) && parent === undefined) faults.push(`${n.file} declares no parent - every spec but the root hangs off one`);
     if (parent !== undefined && !ids.has(parent)) faults.push(`${n.file} hangs off "${parent}", which no declared spec carries - a branch in the air`);
   }
   // a cycle never reaches the root and never dangles, so neither line above sees it
@@ -313,7 +312,7 @@ const parentFaults = (nodes: readonly Node[]): string[] => {
       cur = parent === undefined ? undefined : byId.get(parent);
       if (cur === undefined) break;
       if (visited.has(cur.file)) {
-        faults.push(`${n.file}'s parent chain never reaches the goal: ${[...chain, cur.file].join(' -> ')} - a cycle is a tree with no root`);
+        faults.push(`${n.file}'s parent chain never reaches the root: ${[...chain, cur.file].join(' -> ')} - a cycle is a tree with no root`);
         break;
       }
       visited.add(cur.file);
@@ -711,7 +710,7 @@ describe('every spec this repository declares', () => {
     expect(idFaults(specs)).toEqual([]);
   });
 
-  it('hangs off one parent that is a declared spec, and the goal hangs off nothing and is the only root', () => {
+  it('hangs off one parent that is a declared spec, and the root hangs off nothing and is the only one', () => {
     expect(parentFaults(specs)).toEqual([]);
   });
 
@@ -1028,23 +1027,23 @@ describe('the rules those clauses are built from', () => {
   });
 
   const node = (file: string, fm: Frontmatter): Node => ({ file, fm });
-  const goal = node('goal.md', { id: 'goal', type: 'goal-and-requirements', status: 'draft', title: 'g' });
+  const root = node('root.md', { id: 'root', type: 'architecture-design', status: 'draft', title: 'r' });
   const under = (id: string, parent: string, more: Frontmatter = {}): Node =>
     node(`${id}.md`, { id, type: 'module-design', status: 'draft', title: id, parent, ...more });
 
-  it('refuses a dangling parent, a second root, a goal with a parent, a cycle and a dangling link', () => {
-    const clean = [goal, under('a', 'goal'), under('b', 'a', { 'depends-on': ['a'] })];
+  it('refuses a dangling parent, a second root, a root with a parent, a cycle and a dangling link', () => {
+    const clean = [root, under('a', 'root'), under('b', 'a', { 'depends-on': ['a'] })];
     expect([...idFaults(clean), ...parentFaults(clean), ...linkFaults(clean)]).toEqual([]);
 
     const shapes: ReadonlyArray<readonly [string, readonly Node[], (n: readonly Node[]) => string[], string]> = [
-      ['a dangling parent', [goal, under('a', 'nope')], parentFaults, 'a branch in the air'],
-      ['no parent', [goal, node('a.md', { id: 'a', type: 'module-design' })], parentFaults, 'declares no parent'],
-      ['a goal with a parent', [node('goal.md', { ...goal.fm, parent: 'a' }), under('a', 'goal')], parentFaults, 'is the goal'],
-      ['two goals', [goal, node('goal2.md', { ...goal.fm, id: 'goal2' })], parentFaults, 'goals:'],
-      ['no goal', [under('a', 'b'), under('b', 'a')], parentFaults, 'goals: none'],
-      ['a cycle', [goal, under('a', 'b'), under('b', 'a')], parentFaults, 'never reaches the goal'],
-      ['a dangling link', [goal, under('a', 'goal', { references: ['zz'] })], linkFaults, 'a link to nothing'],
-      ['an id twice', [goal, under('a', 'goal'), node('a2.md', { ...under('a', 'goal').fm })], idFaults, 'an id names one document'],
+      ['a dangling parent', [root, under('a', 'nope')], parentFaults, 'a branch in the air'],
+      ['no parent', [root, node('a.md', { id: 'a', type: 'module-design' })], parentFaults, 'declares no parent'],
+      ['a root with a parent', [node('root.md', { ...root.fm, parent: 'a' }), under('a', 'root')], parentFaults, 'is the root'],
+      ['two roots', [root, node('root2.md', { ...root.fm, id: 'root2' })], parentFaults, 'roots:'],
+      ['no root', [under('a', 'b'), under('b', 'a')], parentFaults, 'roots: none'],
+      ['a cycle', [root, under('a', 'b'), under('b', 'a')], parentFaults, 'never reaches the root'],
+      ['a dangling link', [root, under('a', 'root', { references: ['zz'] })], linkFaults, 'a link to nothing'],
+      ['an id twice', [root, under('a', 'root'), node('a2.md', { ...under('a', 'root').fm })], idFaults, 'an id names one document'],
     ];
     const missed = shapes
       .filter(([, nodes, check, fragment]) => !check(nodes).some((f) => f.includes(fragment)))

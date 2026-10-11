@@ -3,10 +3,9 @@ dist/
 # `npm run coverage` prints to the terminal; the html reporter, when asked for, writes here
 coverage/
 
-# secrets and local configuration
-.env
-.env.local
-.env.*.local
+# secrets and local configuration; the examples are the one published form
+.env*
+!.env.example
 backend/secrets/
 
 # personal notes and internal planning, not part of the project
@@ -17,9 +16,7 @@ DEBT.md
 SETTINGS_REDESIGN_PLAN.md
 docs/
 # what the auth redesign needs from a server that cannot do it yet, and the decisions
-# taken while drawing it. A working note on the same footing as the plan above: the
-# comments in AuthScreen.tsx and auth.css cite it by section, and it is deliberately
-# not travelling with them.
+# taken while drawing it: a working note on the same footing as the plan above.
 REDESIGN-BACK-DEBT.md
 
 # a contributor's own AI-assistant setup and working notes. Whole directories, not a list:
@@ -38,11 +35,20 @@ backend/data/
 *.db
 *.db-shm
 *.db-wal
+# a statement in any of the formats the app reads, wherever it is dropped. PDF fixtures
+# are built in code (backend/test/pdffixture.ts), so nothing in the tree needs a rule
+# negated; a redacted one that ever does takes a !line.
 *.csv
-# a statement dropped anywhere but backend/data/ was committable until row 6c added
-# this. PDF fixtures are built in code (backend/test/pdffixture.ts), so nothing in
-# the tree needs the rule negated; a redacted one that ever does takes a !line.
+*.xlsx
 *.pdf
+# the app's own database and lock, for a relative QUIETPURSE_HOME. It resolves from backend/,
+# where npm runs the server, so the database lands in backend/ or a folder directly inside
+# it; the source directory of the same name is the exception. Stored statements need no
+# rule of their own: each one carries the extension of a format above.
+/backend/db/
+/backend/*/db/
+!/backend/src/db/
+quietpurse.lock*
 
 *.log
 .DS_Store

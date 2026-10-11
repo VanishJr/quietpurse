@@ -4,6 +4,9 @@
   // there, and awaiting freshTestDb() at module scope is the whole guarantee
   // that a migrated database exists before the first test imports src/db.
   "compilerOptions": { "module": "es2022" },
+  // test/ and nothing else: a test directory created anywhere else is checked as
+  // CommonJS by tsconfig.json, where ESM-only code goes red rather than slipping
+  // past both configs.
   "include": ["test"],
   "exclude": ["node_modules"]
 }

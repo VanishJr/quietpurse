@@ -1,37 +1,35 @@
 ---
 name: Bug report
-about: Something behaves differently from what it says it does
+about: Something does not work the way it says it does
 title: ''
 labels: bug
 ---
 
-<!-- If a bank statement would not import, use the other template instead — it asks for the things
-     that turn out to matter for parser problems.
-
-     If this is a security issue, do not open an issue at all: use GitHub's private vulnerability
-     reporting. See SECURITY.md. -->
+<!-- A bank statement would not import? Use the other template: it asks what parser problems need.
+     A security issue? Do not open an issue. Use GitHub's private vulnerability reporting (see SECURITY.md). -->
 
 ## What happened
 
-<!-- What you did, what you saw. Quote any message the app showed, exactly. -->
+<!-- What you did and what you saw. Quote any message from the app exactly. -->
 
-## What you expected instead
+## What you expected
 
 ## Where
 
-- [ ] Web client — which screen:
-- [ ] API — which endpoint:
-- [ ] Startup / migrations
+- [ ] Web client, screen:
+- [ ] API, endpoint:
+- [ ] Startup or migrations
 
 ## Setup
 
 - Commit or branch:
 - Node version:
 - Operating system:
-- Database: the built-in one under `~/Quietpurse/db`, or your own PostgreSQL (version):
-- Browser, if it is a client problem:
+- Database: the built-in one in `~/Quietpurse/db`, or your own PostgreSQL (version):
+- Browser, for a client problem:
 
-## Anything in the logs
+## Logs
 
-<!-- `LOG_LEVEL=debug` turns on HTTP logging. It logs the path of every request, so check for an
-     account name or a statement filename before pasting. -->
+<!-- With LOG_LEVEL=debug every request is logged with its full URL, query included: account ids,
+     categories, dates. A refused request is logged that way even without it. Check for account
+     names and statement filenames before pasting. -->

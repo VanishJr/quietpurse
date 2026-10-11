@@ -115,7 +115,7 @@ else outside those directories, a listener started in a child process, and a tes
 collected only through an `include` written into `backend/vitest.config.ts` or reached through a
 symlinked directory are not seen, and none is closed here, while a quoted name in a comment or a
 string that names no module is refused, which costs a word to rephrase and never a silence;
-`backend/test/specs.test.ts` reads every spec this repository declares — the documents at the root
+`backend/test/specs.test.ts` reads every spec this repository declares — `ARCHITECTURE.md` at the root
 and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
 included, and an untracked probe dropped under either package included — enumerated through
 `commentsOf` in the comment tool's pure core rather than by a walk of its own or a scan of lines,
@@ -138,7 +138,7 @@ is a key, a colon, one space and a value, or an inline list, and nothing else �
 that indexes these files reads YAML whole, and a form that tool reads differently from this holder,
 or drops in silence, is a field filled in and then trusted; it holds the identity a file declares
 to be one the literal declares, the id unique, the type one of the durable ones, the status one of
-two, every parent a declared spec and the parents one tree with the goal as its only root, and a
+two, every parent a declared spec and the parents one tree with `ARCHITECTURE.md` as its only root, and a
 link, where one is written, resolving; a markdown file whose frontmatter carries an id and a type
 is a spec to that tool whether or not anything here declares it, so the walk reads an identity wide
 on purpose — a key indented, quoted, spaced before its colon or with its value on the line below is

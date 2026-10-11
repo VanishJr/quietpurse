@@ -2,89 +2,147 @@
 
 ## Status
 
-Quietpurse is **pre-release, and it runs on your own machine**. There is no hosted copy, no published
-version and no upgrade path; the only data anywhere is what a person put in their own `~/Quietpurse`.
-`main` is the only branch that receives fixes.
+Quietpurse is **pre-release, and it runs on your own machine.** There is no hosted copy, no published
+version and no upgrade path; the only data is what a person put in their own `~/Quietpurse`. Only
+`main` receives fixes.
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Use GitHub's private vulnerability reporting on this repository
-(Security → Report a vulnerability). Please include what you did, what happened, and what you
-expected. Since nothing is hosted, a report against a local checkout is the only kind there is —
-say which commit.
+**Do not open a public issue.** Use GitHub's private vulnerability reporting (Security → Report a
+vulnerability). Say what you did, what happened, what you expected, and which commit you ran: nothing
+is hosted, so every report is against a local checkout.
 
-## What the application is protecting
+## What is protected
 
-Bank statements, on one person's disk. There is no second user for the data to leak to. The threat
-that matters is **whoever reaches the disk**, and after that **whoever reaches the port** — and for
-the first of those the application's own duties are small and stated below, because the protection
-is the machine's.
+Bank statements, on one person's disk. There is no second user for the data to leak to. What matters
+is **whoever reaches the disk**, and after that **whoever reaches the port**. Against the disk, the
+protection is the machine's own.
 
 ## Threat model
 
-| Vector | Mitigation |
-|---|---|
-| Someone who reaches the disk | **The machine's own disk encryption, and nothing else.** The database is a plain PGlite directory and the uploaded statements are plain files under `~/Quietpurse/statements`, under names a person can recognise. That is a deliberate reduction from the hosted product, which sealed every file with AES-256-GCM under a server key: on a personal machine the key would have sat beside the files it guarded, and a folder the person cannot open was the wrong shape for a product whose point is that the files are theirs. Turn on FileVault, BitLocker or LUKS; Quietpurse adds no layer of its own on top of it |
-| Another account on the same machine | **Partly answered, and the file modes are not the half that matters.** Quietpurse creates every folder it owns `0700` and every file it writes `0600`, and `assertWritableDir` now re-checks the mode on every boot and narrows a folder that was created wider — an install made before that code existed is repaired rather than left open. PGlite's own files inside the database folder carry PGlite's modes, which the folder covers. **What the modes do not answer is the port.** Loopback is not a boundary between accounts on Unix: a second account on the machine can reach `127.0.0.1:4000` and there is no sign-in, so it reads and changes everything, and the row below is the honest statement of that. On a single-user machine this actor does not exist; on a shared one, Quietpurse is not the tool for the job today. A person with root, or with the disk, is unaffected by any of it |
-| Someone who reaches the port | The server binds `127.0.0.1` unless `QUIETPURSE_HOST` says otherwise, and there is no sign-in: **everyone who can reach the port can read and change everything.** Setting `QUIETPURSE_HOST=0.0.0.0` is the one way to open it, it is documented as exposing the data to everyone on the network, and nothing else in the configuration widens it |
-| A second Quietpurse on the same folder | PGlite does not refuse a second opener, and two writers corrupt the directory silently. `src/lock.ts`, called by `src/index.ts` before the database opens, claims `~/Quietpurse/quietpurse.lock` by exclusive create, so two copies started together cannot both win it. A file already there is a question about the pid inside: a live pid refuses the start and names the way out, a dead one is dropped under an exclusive marker beside the file and the claim retried, so two starts that both find it cannot each drop the other's claim, and a marker a Quietpurse left behind by dying inside that step is removed by no start — each one that reaches that step waits, refuses and names it, the way the lock file's own refusal does. A recycled pid is indistinguishable from the real holder, which is why the refusal says to delete the file |
-| A page in the person's own browser | Loopback keeps other machines off the port and does nothing about a page the person visits, which is on this machine by definition. Every `/api` route is behind one check: the `Host` header must be a loopback name (`localhost`, `::1`, `127.x`) or, when `QUIETPURSE_HOST` is set, any address literal — a DNS name of the attacker's own is refused in both configurations, which is what closes DNS rebinding; an `Origin`, when present, must name this server; and a `POST`, `PUT`, `PATCH` or `DELETE` carrying `Sec-Fetch-Site` must be `same-origin`, which closes the plain cross-origin form post that needs no rebind at all (`multipart/form-data` is CORS-safelisted, so the browser sends it and the write lands even though the answer is unreadable). `X-Frame-Options: DENY` on every response stops the app being framed. The third check is a defence a browser that omits the header does not provide; the first two stand behind it |
-| A filename reaching the disk | The uploaded name is the first user-chosen string ever written into a path. `src/documents.ts` reduces it to the last path segment, drops the extension, replaces every character outside letters, marks, digits and a short list, trims dots and spaces, bounds it by code points, and puts the import id between the stem and the extension — so `CON`, `NUL` and the other Windows device names never stand alone, and the one shape a dot inside the stem can make of them is prefixed. The extension comes from the recognised format, never from the name. `src/storage.ts`'s key shape refuses anything that reduction did not produce rather than cleaning it up |
-| A file edited in the folder | The bytes are hashed on read and refused if they are not the ones the import recorded; a statement opened in a spreadsheet and saved is a different file and is not handed back as the upload |
-| A crafted backup | A restore filters every row down to real columns holding values the column accepts, and derives every file's name from the row rather than reading a path out of it — so a backup names no path on this disk, and the name it derives belongs to one row only. The second half is a separate property from the first and is held separately: the derived name is the stem, an `_`, the id and the format as its extension. The id may not contain an `_`, and the format must be one of the three the app reads: a restore refuses a backup carrying any other, the database refuses to store one, and no name is derived from one on any database, older ones included. So there is no pair of rows whose fields read as each other's and whose delete would therefore unlink the other's statement. The disk is what judges "one row only", and the default disks on macOS and Windows do not tell case apart, so the id enters the name verbatim only when it is lowercase and not shaped like a digest, and is otherwise replaced by a lowercase digest of it: an id that differs from a real import's only in case, or that spells another id's digest, derives a name of its own. A row's claim to a stored file IS restored, because the person's own backup restored onto their own machine has to open their own statements; what answers a claim the disk cannot honour is the read, which finds no file under the derived key or finds bytes that do not hash to what the row recorded, and refuses either way |
-| Oversized or malicious uploads | multer caps a single upload at **25 MiB** (`MAX_UPLOAD_BYTES` in `src/app.ts`), and `providers/statement.ts` applies a second, per-format cap plus a 200-page ceiling on PDFs — the expansion-sensitive formats are bounded after decode, not only before |
-| Format confusion in the parser | `sniff()` decides the format from bytes, never the filename or the client's content type. It recognises a format on **evidence that the format is present**, never on the absence of others — including the signed-container case where `%PDF-` sits at byte 71 |
-| A half-understood statement importing silently | Nothing is committed on upload. `POST /api/imports` stages; rows reach `transactions` only on an explicit `confirm`. A reconciliation gate refuses rather than importing part of a file |
-| Duplicate or replayed imports | `imports` is uniquely indexed on `file_hash WHERE status = 'committed'`, so a committed file cannot be silently re-imported, while a discarded one does not block a retry |
-| Statements or a database in the repository | `.gitignore` refuses `.env*`, `*.csv`, `*.pdf` and the database files outright. There is no secret anywhere in the tree because the application needs none |
+**Someone who reaches the disk.** Only the machine's disk encryption stands in the way: turn on
+FileVault, BitLocker or LUKS. The database is a plain PGlite directory, and the statements are plain
+files under `~/Quietpurse/statements` with names a person can recognise. This is a decision. The app
+does not encrypt files itself, because on a personal machine the key would sit beside the files it
+guards, and the point is that the files are the person's to open. Without disk encryption the
+statements are readable, and Quietpurse does not warn about that at start.
+
+**Another account on the same machine.** Partly covered, and the file modes are the smaller half.
+Quietpurse creates its folders `0700` and its files `0600`. At every start it re-checks `db/` and
+`statements/` and narrows either if it is wider, which also repairs an older install; `~/Quietpurse`
+itself is created `0700` and not re-checked. PGlite's own files inside `db/` are covered by the
+folder. **The modes do not cover the port:** on Unix, loopback is not a boundary between accounts,
+so another account can reach `127.0.0.1:4000` and, with no sign-in, read and change everything. On a
+single-user machine this threat does not exist; on a shared one, Quietpurse is not the right tool
+today. Root, or the disk itself, gets past all of it.
+
+**Someone who reaches the port** can read and change everything: there is no sign-in and no password,
+and none is planned. The server binds `127.0.0.1` unless `QUIETPURSE_HOST` says otherwise.
+`QUIETPURSE_HOST=0.0.0.0`, meant for a phone on the same Wi-Fi, is the one way to open it, and it
+gives the whole network that access for as long as the app runs. Its name is the warning, and no
+other setting widens the bind.
+
+**A second Quietpurse on the same folder.** PGlite does not refuse a second opener, and two writers
+corrupt it silently. So before the database opens, `backend/src/lock.ts` claims
+`~/Quietpurse/quietpurse.lock` by exclusive create, and of two copies started together only one wins.
+A live holder refuses the start. A lock left by a dead process is taken over, and two starts that
+both find one cannot take each other's claim. A recycled pid looks like a live holder, so the refusal
+also says to delete the file if that process is gone. With `DATABASE_URL` set, the server does its
+own locking and no lock file is written. Migrations are applied at start, which is correct for one
+process: the lock guarantees that for the built-in database. How the takeover works is in
+`backend/src/SPEC.md`, under *What the process entry owes the app*.
+
+**A web page in the person's own browser.** Loopback keeps other machines out, but not a page the
+person visits. Every `/api` route passes three checks:
+
+1. `Host` must be a loopback name (`localhost`, `::1`, `127.x`). When `QUIETPURSE_HOST` is set to
+   something else, an IP address passes too, because the phone arrives by address. A DNS name is
+   always refused, which closes DNS rebinding.
+2. `Origin`, when present, must be a loopback name on any port, or an IP address under that wider
+   bind. This closes the plain cross-origin form post, which needs no rebinding: `multipart/form-data`
+   is CORS-safelisted, so the browser sends it and the write lands even though the page cannot read
+   the answer. While `QUIETPURSE_HOST` is set, a page served from an IP address passes this rule;
+   that configuration is open anyway.
+3. A `POST`, `PUT`, `PATCH` or `DELETE` carrying `Sec-Fetch-Site` must be `same-origin`, which also
+   refuses a page on this machine at another port. A browser that omits the header gets nothing from
+   this check; the first two stand behind it.
+
+`X-Frame-Options: DENY` on every response stops the app from being framed. None of this is a
+password: it refuses a request from a page elsewhere, not someone who reaches the port and asks.
+
+**A filename reaching the disk.** The uploaded filename is the first user-chosen string written
+into a path, and it never reaches the disk as written. `backend/src/documents.ts` reduces it to a stem
+every filesystem accepts and puts the import id after it, so no Windows device name stands alone. The
+extension comes from the recognised format, never from the name. `backend/src/storage.ts` refuses any
+key that reduction did not produce, rather than cleaning it. The reduction is in
+`backend/src/SPEC.md`, under *What is kept of an upload, and what a crash may leave behind*.
+
+**A file edited in the folder.** The bytes are hashed on read and refused if they differ from what
+the import recorded. A statement opened in a spreadsheet and saved is not handed back as the upload.
+
+**A crafted backup.** A restore drops unknown columns and refuses the whole backup when a value does
+not fit its column. A file's name is derived from its row and never read from the backup, so a backup
+names no path on this disk. And the name belongs to one row only: no row's fields can spell another
+row's file, on a disk that ignores case too, so one row's delete cannot unlink another's statement.
+That holds on every database, older ones included. A row's claim to a stored file is restored,
+because a person's own backup on their own machine has to open their statements. When the disk
+cannot honour the claim, the read refuses: it finds no file under the derived name, or bytes that do
+not match the recorded hash. How the name is built is in the same section of `backend/src/SPEC.md`.
+
+**Oversized or malicious uploads.** multer caps one upload at **25 MiB** (`MAX_UPLOAD_BYTES` in
+`backend/src/app.ts`). `backend/src/providers/statement.ts` adds a 10 MiB cap for XLSX and PDF, which
+are held whole while parsed, and for a PDF a 200-page limit and a 20-second deadline. None of these
+bounds what a compressed stream expands to: exceljs expands a workbook whole, and the deadline cannot
+interrupt a pdfjs call. They stop an accidental pathological file, not someone who is trying.
+
+**Format confusion.** `sniff()` decides the format from the bytes, never from the filename or the
+declared content type. XLSX and PDF are recognised by evidence that they are present, including a
+signed container with `%PDF-` at byte 71. CSV is the fallback for a file that is neither and has no
+NUL byte near its start.
+
+**A half-understood statement imported silently.** Nothing is committed on upload: rows reach
+`transactions` only on an explicit `confirm`. A reconciliation gate refuses a file rather than
+importing part of it.
+
+**Duplicate or replayed imports.** `imports` is uniquely indexed on
+`file_hash WHERE status = 'committed'`, so a committed file cannot be imported again silently, and a
+discarded one does not block a retry.
+
+**Statements or a database in the repository.** `.gitignore` refuses `.env*` except the
+`.env.example` files, every statement format wherever it lands (`*.csv`, `*.xlsx`, `*.pdf`), the
+database files of the earlier SQLite version, the lock file, and the PGlite database of a relative
+`QUIETPURSE_HOME`, which resolves from `backend/`. The tree holds no secret, because the app needs
+none.
 
 ## Open trade-offs
 
-Stated because they are decisions, not oversights.
+Decisions, not oversights. Plain files, an open port and the wider bind are described above.
 
-- **Stored statements are plain files.** Decided on purpose, and the first row of the table above
-  is the whole of what stands in for the encryption that went. A machine without disk encryption
-  holds the statements readable, and Quietpurse does not say so at start-up.
-- **A transaction's description is the statement's own text, and it goes wherever a description
-  goes.** Of the detail lines a bank prints under a transaction, the ones the parser keeps are
-  appended to the description whole, never redacted, and on some layouts one of them carries the
-  counterparty's account number beside the counterparty's name: the two are one line and one run
-  of text, so the number is kept because the name is. On the layout that prints the counterparty's
-  account number on a line of its own, that line is dropped. Nothing reads a stored description as
-  anything but text — the categoriser, the transfer detector, the recurring grouping, the CSV
-  export and the backup all read it whole — so a backup or an export the person passes on carries
-  the number with it. It also outlives the statement file: "Delete file" in Import history removes
-  the uploaded file and leaves every transaction, description included, exactly as it was.
-- **The port has no password, and the request check is not one.** A person who sets `QUIETPURSE_HOST=0.0.0.0`
-  for a phone has given their whole network read and write access to their finances for as long as
-  the app runs. The `Host`, `Origin` and `Sec-Fetch-Site` check refuses a request that came from a
-  page somewhere else; it says nothing about a person who can reach the port and simply asks. The
-  name of the setting is the warning; there is no password to put behind it and no plan to add one.
-- **A wider bind widens the `Host` rule with it.** On the default loopback bind only a loopback
-  name or address is accepted. With `QUIETPURSE_HOST` set, an address literal in either family is accepted
-  too, because the phone that setting exists for arrives by address. A DNS name is refused in both,
-  which is the half rebinding needs — but a page served from a public IP address, rather than from
-  a name, is inside the `Origin` rule while `QUIETPURSE_HOST` is set. That is the configuration the row above
-  already describes as open.
+- **A description is the statement's own text, and it goes wherever a description goes.** Of the
+  detail lines a bank prints under a transaction, the parser appends the ones it keeps to the
+  description, whole and unredacted. On some layouts one of them holds the counterparty's account
+  number next to their name, as one line, so the number stays because the name does. On the layout
+  that prints the account number on a line of its own, that line is dropped. The categoriser, the
+  transfer detector, the CSV export and the backup read a description whole, so an export or backup
+  the person passes on carries the number. It also outlives the file: "Delete file" in Import history
+  removes the uploaded file and leaves every transaction, description included, as it was.
 - **The default test run cannot see a concurrency bug.** PGlite is single-connection, so a unique
   index losing a race is exercised only when `TEST_DATABASE_URL` points at a real Postgres. CI does
-  both; a local run usually does not. The product runs on the same single connection, which is
-  also why two processes on one folder is the case worth a lock.
-- **Migrations are applied at start.** Correct for one process, which the lock makes it.
+  both; a local run usually does not. The product on PGlite runs on the same single connection,
+  which is also why two processes on one folder is the case worth a lock.
 
 ## What Quietpurse does not do
 
-- Does not send financial data anywhere. There is no telemetry and no analytics. The transaction
-  path does make third-party requests, for exchange rates, and none of them carries an amount, a
-  description or an account: Frankfurter or the NBU receive the date of a transaction in a currency
-  other than the base currency, that currency's code and the base currency's, and the NBU, when it
-  published nothing for that date, the days before it; Monobank receives a request for its public
-  rates that carries nothing of the person's. Like any request, each one also shows its provider
-  this machine's public address and when it was made.
-- Does not hold bank credentials or API tokens. Direct bank connections were removed; a statement
+- **It sends no financial data anywhere.** No telemetry, no analytics. The only outbound requests
+  fetch exchange rates, and none carries an amount, a description or an account:
+  - Frankfurter (the ECB's rates) or the NBU receive the date of a transaction in a currency other
+    than the base currency, and the codes of both currencies. When the NBU published nothing for that
+    date, it is also asked for the days before.
+  - Monobank receives a request for its public rates that carries nothing of the person's. It is
+    fetched at every re-classification, at most once every ten minutes, to check transfers across
+    currencies.
+
+  Like any request, each one shows the provider this machine's public address and the time.
+- **It holds no bank credentials or API tokens.** Direct bank connections were removed; a statement
   is a file the user uploads.
-- Outbound network access is limited to exchange-rate providers: the ECB's rates through Frankfurter
-  and the NBU for currency conversion, and Monobank's public exchange rates, which the recompute
-  fetches to check cross-currency transfers.
-- Does not keep anything in the browser but the theme choice. There is no cookie, no token and no
-  session.
+- **It keeps nothing in the browser but the theme choice.** No cookie, no token, no session.
