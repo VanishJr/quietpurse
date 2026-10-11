@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { causeChain, logImport } from './logger';
 import { SEGMENT_START, deleteObject, getObject, putObject } from './storage';
+import { IMPORT_SOURCE_TYPES } from './wire';
 
 /**
  * What names a stored statement on disk. Every field is on the import row and none
@@ -71,8 +72,8 @@ export function documentStem(originalFilename: string | null): string {
  * No `_`, no capital letter, and never the digest's own shape: those absences are
  * half of what makes a key name one row. A key is read from its right: the format
  * back to the last `.`, the id back to the last `_` before it, the stem the rest. So
- * the id may not carry `_` and the format may not carry `.`; the format's half is
- * held where a row is written, not here.
+ * the id may not carry `_` and the format may not carry `.`; documentKey holds the
+ * format's half.
  *
  * `_` is what documentKey puts between the stem and the id, and the stem may contain
  * one. If the id could too, one key would have two readings: a row carrying
@@ -98,8 +99,20 @@ const idSegment = (importId: string): string =>
     ? importId
     : crypto.createHash('sha256').update(importId).digest('hex').slice(0, 32);
 
-export const documentKey = (doc: DocumentLocator): string =>
-  `${documentStem(doc.originalFilename)}_${idSegment(doc.importId)}.${doc.sourceType}`;
+/**
+ * Refuses a format outside the list rather than trusting the column: the format ends
+ * the name, so one carrying a `.` or `_` would let this row's fields spell another
+ * row's file, and the column's check is missing from every database created before it.
+ */
+const storedFormat = (sourceType: string): boolean =>
+  (IMPORT_SOURCE_TYPES as readonly string[]).includes(sourceType);
+
+export const documentKey = (doc: DocumentLocator): string => {
+  if (!storedFormat(doc.sourceType)) {
+    throw new Error(`import ${doc.importId} records a format this app does not store files under`);
+  }
+  return `${documentStem(doc.originalFilename)}_${idSegment(doc.importId)}.${doc.sourceType}`;
+};
 
 /**
  * A constant, so the sentence is asserted by equality: a regex over paths and errnos
@@ -170,6 +183,10 @@ export async function getDocument(ref: DocumentRef): Promise<Buffer> {
 
 /** A missing file is not a failure: most imports never had one, or the user removed it by hand. */
 export async function deleteDocument(doc: DocumentLocator): Promise<boolean> {
+  // nothing to remove rather than a refusal: no upload ever stored a file under such a
+  // format, the name it derives may be another row's file, and refusing would leave
+  // the row's account impossible to delete
+  if (!storedFormat(doc.sourceType)) return false;
   const key = documentKey(doc);
   try {
     return await deleteObject(key);

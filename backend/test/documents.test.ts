@@ -307,6 +307,12 @@ describe('the stem a filename becomes', () => {
     expect(asCaseBlindDiskReads(digest)).not.toBe(asCaseBlindDiskReads(carried));
   });
 
+  it.each(['q_c0ffee.csv', 'CSV', 'exe', ''])('a format outside the list, %j, derives no name at all', (sourceType) => {
+    expect(() => documentKey({ importId: 'carried', originalFilename: 'statement.csv', sourceType })).toThrow(
+      /a format this app does not store files under/,
+    );
+  });
+
   it('a minted id is written into the key verbatim, so no stored file is renamed', () => {
     const id = crypto.randomUUID();
     const key = documentKey({ importId: id, originalFilename: 'statement.csv', sourceType: 'csv' });

@@ -42,6 +42,7 @@ import {
   listImports,
   parseBackup,
   restoreBackup,
+  BackupRefused,
   deleteIncomeSource,
   deleteTransferRule,
   getAccount,
@@ -1895,6 +1896,10 @@ app.post(
       tables = done.tables;
       rows = done.rows;
     } catch (e) {
+      if (e instanceof BackupRefused) {
+        res.status(400).json({ error: `backup could not be restored: ${e.message}` });
+        return;
+      }
       // Never the message here: drizzle wraps every driver error, so its message is the
       // whole failed statement and every bound value. The chain goes to the log, and
       // the body gets a sentence that names no column and no row.

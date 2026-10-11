@@ -424,9 +424,10 @@ this disk.
 **A name has one reading, so no row's fields can spell another row's file.** A key is read from
 its right: the format back to the last dot, the id back to the last `_` before it, the stem the
 rest. The id may not carry `_`, which `backend/src/documents.ts` holds by hashing an id that does.
-The format may not carry a dot, and nothing in that file holds it: a format is one of the three the
-wire names because the restore refuses any other value and the column checks it, and the column's
-check exists only on a database created after it was added. A restored format of `q_<id>.pdf` was
+The format may not carry a dot, and `documentKey` refuses any format outside the three the wire
+names, so the guard holds on every database; a delete treats such a row as having no file, since no
+upload ever stored one under it. The restore and the column's check keep such a value
+from being stored in the first place, the check only on a database created after it was added. A restored format of `q_<id>.pdf` was
 how one row spelled another's file, and a delete under that name unlinked the other's statement.
 
 **Whether two names are one file is the disk's call, and the default disks on macOS and Windows do

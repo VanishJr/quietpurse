@@ -226,7 +226,8 @@ returns them from its.
 row's fields spell another row's file, so `imports.source_type` carries a CHECK over the wire's
 formats although no client composes against it. The restore refuses such a value before the
 insert; the CHECK is for every writer that is not a restore, and it was folded into the initial
-migration, so a database created before it has the restore's refusal and not the column's.
+migration, so a database created before it has the restore's refusal and not the column's. What
+holds on every database is the refusal where the name is derived, in `backend/src/documents.ts`.
 
 **A cleared pointer means no document can be READ. It does not mean there is no file on disk.**
 A row that died between the file landing and the column being set has nothing there and may well
@@ -300,7 +301,11 @@ rejected, which is what lets a backup from a future version restore what this ve
 A value is not dropped: a column the schema gives a vocabulary accepts that vocabulary and nothing
 else, so one value outside it refuses the whole file, a future version's included. That is not
 left to the database, because a vocabulary the schema declares is not one every migrated database
-checks.
+checks. Storing the value instead would hand the app a row it reads as nothing it knows: an income
+source of an unknown kind is counted as the person's own earnings, since only `external` is
+subtracted, and the self-sufficiency figure moves without a word. Every row is checked before the transaction deletes anything, and a refusal for what is in
+the file reaches the person as its own sentence, which names the table and the column and never
+the value; a refusal from the database itself names neither.
 
 **Tables with a generated identity id have their ids dropped and regenerated on restore.** A backup
 may come from another machine whose ids are already taken here. Nothing references those ids across

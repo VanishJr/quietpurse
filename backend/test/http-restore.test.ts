@@ -96,6 +96,57 @@ describe('what the door refuses', () => {
   });
 
   /**
+   * Refused for what is in the file, after the envelope was accepted: the sentence says
+   * which column holds a value this version does not know, and nothing was deleted first.
+   */
+  it('a value this version does not know is refused by name, and nothing is replaced', async () => {
+    const before = (await agent.get('/api/backup')).body as { tables: unknown };
+    const imported = {
+      id: 'carried',
+      fileHash: 'carried-hash',
+      sourceType: 'exe',
+      originalFilename: 'statement.exe',
+      uploadedAt: new Date().toISOString(),
+      parserVersion: 1,
+      status: 'committed',
+      rowsAccepted: 0,
+      rowsRejected: 0,
+      errorDetail: null,
+      documentStored: false,
+    };
+    const body = { format: 'quietpurse-backup', version: 1, tables: { transactions: [], imports: [imported] } };
+
+    const res = await restore('application/json', JSON.stringify(body));
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'backup could not be restored: imports.sourceType: expected one of csv, xlsx, pdf',
+    });
+    expect(((await agent.get('/api/backup')).body as { tables: unknown }).tables).toEqual(before.tables);
+  });
+
+  /**
+   * The database's own refusal still says only that the write failed: its message is the
+   * whole failed statement with every bound value, and that goes to the log.
+   */
+  it('a write the database refuses names no column and no row', async () => {
+    const created = await agent.post('/api/accounts').send({ name: 'Twice Bank', currency: 'EUR' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const data = (await agent.get('/api/backup')).body as { tables: { accounts: Record<string, unknown>[] } };
+    const account = data.tables.accounts.find((a) => a.id === created.body.id);
+    data.tables.accounts.push({ ...account });
+
+    const res = await restore('application/json', JSON.stringify(data));
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error:
+        'backup could not be restored: the file was read, but writing it to the database failed - the reason is in the log this server printed',
+    });
+    expect((await agent.get('/api/accounts')).body).toContainEqual(expect.objectContaining({ id: created.body.id }));
+  });
+
+  /**
    * Neither parser claims the body, so the route sees none - and a real backup sent
    * under the wrong content type is refused as if it were not one.
    */

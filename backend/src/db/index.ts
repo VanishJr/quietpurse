@@ -3679,6 +3679,13 @@ const GOAL_BACKUP_TABLES = [
   'baseline_items',
 ] as const satisfies readonly BackupTable[];
 
+/**
+ * A backup refused for what is in the file, before anything was deleted. Its message is
+ * a sentence about the file, so the route can show it; any other throw from a restore
+ * may carry a driver's whole statement and stays in the log.
+ */
+export class BackupRefused extends Error {}
+
 const legacyNumber = (
   settings: Record<string, unknown>,
   key: string,
@@ -3696,7 +3703,7 @@ const legacyNumber = (
     value > max ||
     (whole && !Number.isInteger(value))
   ) {
-    throw new Error(
+    throw new BackupRefused(
       `meta.settings.${key}: expected ${whole ? 'a whole' : 'a finite'} number between ${min} and ${max}`,
     );
   }
@@ -3706,12 +3713,12 @@ const legacyNumber = (
 const migrateLegacyBackup = (data: BackupData): BackupData => {
   if (data.version === 2) {
     for (const name of GOAL_BACKUP_TABLES) {
-      if (!(name in data.tables)) throw new Error(`backup is missing required goal table ${name}`);
+      if (!(name in data.tables)) throw new BackupRefused(`backup is missing required goal table ${name}`);
     }
     return data;
   }
   if (GOAL_BACKUP_TABLES.some((name) => name !== 'baseline_items' && name in data.tables)) {
-    throw new Error('backup version 1 contains unsupported goal tables');
+    throw new BackupRefused('backup version 1 contains unsupported goal tables');
   }
 
   const tables = Object.fromEntries(
@@ -3722,29 +3729,29 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
   const records = (name: string): Record<string, unknown>[] =>
     (data.tables[name] ?? []).map((row) => {
       if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-        throw new Error(`${name}: a row is not an object`);
+        throw new BackupRefused(`${name}: a row is not an object`);
       }
       return row as Record<string, unknown>;
     });
   const legacyMeta = records('meta');
   const legacySettingsRows = legacyMeta.filter((row) => row.key === 'settings');
   if (legacySettingsRows.length > 1) {
-    throw new Error('meta.settings: duplicate singleton rows');
+    throw new BackupRefused('meta.settings: duplicate singleton rows');
   }
   const [legacySettingsRow] = legacySettingsRows;
   let settings: Record<string, unknown> = {};
   if (legacySettingsRow !== undefined) {
     if (typeof legacySettingsRow.value !== 'string') {
-      throw new Error('meta.settings: expected a JSON string');
+      throw new BackupRefused('meta.settings: expected a JSON string');
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(legacySettingsRow.value);
     } catch {
-      throw new Error('meta.settings: invalid JSON');
+      throw new BackupRefused('meta.settings: invalid JSON');
     }
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('meta.settings: expected a JSON object');
+      throw new BackupRefused('meta.settings: expected a JSON object');
     }
     settings = parsed as Record<string, unknown>;
     if (
@@ -3752,7 +3759,7 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
       settings.goalMode !== 'baseline' &&
       settings.goalMode !== 'lifestyle'
     ) {
-      throw new Error('meta.settings.goalMode: expected baseline or lifestyle');
+      throw new BackupRefused('meta.settings.goalMode: expected baseline or lifestyle');
     }
   }
 
@@ -3776,7 +3783,7 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
         : legacyNumber(settings, 'hourlyRate', 0, 0.01, 10_000);
     const hoursPerWeek = legacyNumber(settings, 'hoursCapPerWeek', 20, 0.01, 168);
     if (hourlyRate !== null && fromCents(toCents(hourlyRate)) !== hourlyRate) {
-      throw new Error('meta.settings.hourlyRate: expected a number with at most two decimal places');
+      throw new BackupRefused('meta.settings.hourlyRate: expected a number with at most two decimal places');
     }
     tables.goals.push({
       id: LEGACY_FINANCIAL_INDEPENDENCE_GOAL_ID,
@@ -3810,7 +3817,7 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
       !Number.isSafeInteger(budget.monthlyCents) ||
       budget.monthlyCents <= 0
     ) {
-      throw new Error('budgets: invalid category or monthly cents');
+      throw new BackupRefused('budgets: invalid category or monthly cents');
     }
     const id = `legacy-budget-${crypto.createHash('md5').update(budget.category).digest('hex')}`;
     tables.goals.push({
@@ -3861,7 +3868,7 @@ function sanitizeRow(
   tableName: string,
 ): Record<string, unknown> {
   if (!row || typeof row !== 'object' || Array.isArray(row)) {
-    throw new Error(`${tableName}: a row is not an object`);
+    throw new BackupRefused(`${tableName}: a row is not an object`);
   }
   const columns: Record<
     string,
@@ -3872,7 +3879,7 @@ function sanitizeRow(
     const column = columns[key];
     if (!column) continue; // unknown column
     if (value === null) {
-      if (column.notNull) throw new Error(`${tableName}.${key}: null in a required column`);
+      if (column.notNull) throw new BackupRefused(`${tableName}.${key}: null in a required column`);
       out[key] = null;
       continue;
     }
@@ -3880,17 +3887,17 @@ function sanitizeRow(
     // to compare all of them against the same runtime typeof
     const dataType: string = column.dataType;
     if (typeof value !== dataType) {
-      throw new Error(
+      throw new BackupRefused(
         `${tableName}.${key}: expected ${dataType}, got ${Array.isArray(value) ? 'array' : typeof value}`,
       );
     }
     if (dataType === 'number' && !Number.isFinite(value)) {
-      throw new Error(`${tableName}.${key}: not a finite number`);
+      throw new BackupRefused(`${tableName}.${key}: not a finite number`);
     }
     // Not left to the database: a vocabulary the schema declares is not necessarily
     // one the database it was migrated into checks.
     if (column.enumValues && !column.enumValues.includes(value as string)) {
-      throw new Error(`${tableName}.${key}: expected one of ${column.enumValues.join(', ')}`);
+      throw new BackupRefused(`${tableName}.${key}: expected one of ${column.enumValues.join(', ')}`);
     }
     out[key] = value;
   }
@@ -3904,9 +3911,19 @@ function sanitizeRow(
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const provided = new Set(Object.keys(data.tables));
   if (provided.has('imports') && !provided.has('transactions')) {
-    throw new Error('backup table imports requires transactions');
+    throw new BackupRefused('backup table imports requires transactions');
   }
+  // every refusal for what is in the file is met here, before the transaction deletes anything
   const migrated = migrateLegacyBackup(data);
+  const prepared: Record<string, Record<string, unknown>[]> = {};
+  for (const [name, table] of Object.entries(BACKUP_TABLES)) {
+    const dropId = IDENTITY_TABLES.has(name);
+    prepared[name] = (migrated.tables[name] ?? []).map((row) => {
+      const clean = sanitizeRow(table, row, name);
+      const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
+      return dropId ? rest : { ...rest, id };
+    });
+  }
   let tables = 0;
   let rows = 0;
   await getDb().transaction(async (tx) => {
@@ -3919,12 +3936,7 @@ export async function restoreBackup(data: BackupData): Promise<{ tables: number;
       if (!incoming && !goalTables.has(name)) continue;
       if (!goalTables.has(name)) await tx.execute(sql`DELETE FROM ${sql.raw(name)}`);
       const valuesIn = incoming ?? [];
-      const dropId = IDENTITY_TABLES.has(name);
-      const values = valuesIn.map((row) => {
-        const clean = sanitizeRow(table, row, name);
-        const { id, ...rest } = name === 'imports' ? coerceRestoredImport(clean) : clean;
-        return dropId ? rest : { ...rest, id };
-      });
+      const values = prepared[name];
       for (const chunk of chunked(values, 500)) {
         await tx.insert(table).values(chunk as never[]);
       }

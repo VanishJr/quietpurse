@@ -9,6 +9,7 @@
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
+import { sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app, attachmentDisposition } from '../src/app';
 import {
@@ -32,6 +33,7 @@ const csvFor = (label: string): Buffer =>
   Buffer.from(['date,amount,description', `2026-03-01,-10.00,${label}`].join('\n'), 'utf8');
 
 let agent: Agent;
+let testDb: Awaited<ReturnType<typeof freshTestDb>>;
 
 interface Uploaded {
   importId: string;
@@ -101,7 +103,7 @@ const blobExists = (importId: string, stem = 'statement'): Promise<boolean> =>
  * the file rather than on a setup file it never names.
  */
 beforeAll(async () => {
-  await freshTestDb();
+  testDb = await freshTestDb();
   await seedDefaults();
   agent = await serve(app);
 });
@@ -286,19 +288,19 @@ describe('DELETE /api/imports/:id/document', () => {
   });
 
   /**
-   * The pair a crafted backup aims with the format once `_` is kept out of the id: V
+   * The pair a crafted backup aims with the format once `_` is kept out of the id: v
    * carrying the filename "b" and a format of `q_`, W's id and the csv extension spells
-   * the name W's upload is stored under when its stem is "b_V.q", so V's delete would
+   * the name W's upload is stored under when its stem is "b_v.q", so v's delete would
    * unlink W's statement. The disk is asserted before the statuses, because the defect
    * is the other row's file going.
    */
   it("a restored row cannot aim its delete at another row's statement", async () => {
-    const owner = await committed('Aimed At Bank', 'b_V.q.csv');
-    expect(await blobExists(owner.importId, 'b_V.q')).toBe(true);
+    const owner = await committed('Aimed At Bank', 'b_v.q.csv');
+    expect(await blobExists(owner.importId, 'b_v.q')).toBe(true);
 
     const backup = (await agent.get('/api/backup')).body as BackupData;
     backup.tables.imports.push({
-      id: 'V',
+      id: 'v',
       fileHash: crypto.createHash('sha256').update('aimed').digest('hex'),
       sourceType: `q_${owner.importId}.csv`,
       originalFilename: 'b',
@@ -311,11 +313,41 @@ describe('DELETE /api/imports/:id/document', () => {
       documentStored: true,
     });
     const restored = await agent.post('/api/restore').send(backup);
-    const aimed = await agent.delete('/api/imports/V/document');
+    const aimed = await agent.delete('/api/imports/v/document');
 
-    expect(await blobExists(owner.importId, 'b_V.q')).toBe(true);
+    expect(await blobExists(owner.importId, 'b_v.q')).toBe(true);
     expect(restored.status, JSON.stringify(restored.body)).toBe(400);
     expect(aimed.status).toBe(404);
+    const read = await agent.get(`/api/imports/${owner.importId}/document`);
+    expect(read.status).toBe(200);
+    expect(read.body).toEqual(owner.bytes);
+  });
+
+  /**
+   * A database created before the column's check holds whatever format a writer stored
+   * there, so the name is refused where it is derived rather than trusted from the row.
+   */
+  it("a format no check stopped still cannot aim a delete at another row's statement", async () => {
+    const owner = await committed('Older Database Bank', 'b_o.q.csv');
+    expect(await blobExists(owner.importId, 'b_o.q')).toBe(true);
+
+    await testDb.execute(sql`ALTER TABLE imports DROP CONSTRAINT imports_source_type_check`);
+    try {
+      await testDb.execute(sql`
+        INSERT INTO imports (id, file_hash, source_type, original_filename, uploaded_at, parser_version, status, document_stored)
+        VALUES ('o', 'aimed-from-an-older-database', ${`q_${owner.importId}.csv`}, 'b', ${new Date().toISOString()}, 1, 'committed', true)
+      `);
+      const aimed = await agent.delete('/api/imports/o/document');
+
+      expect(await blobExists(owner.importId, 'b_o.q')).toBe(true);
+      expect(aimed.status).toBe(200);
+      expect(aimed.body).toEqual({ deleted: true, importId: 'o', bytesRemoved: false });
+    } finally {
+      await testDb.execute(sql`DELETE FROM imports WHERE id = 'o'`);
+      await testDb.execute(
+        sql`ALTER TABLE imports ADD CONSTRAINT imports_source_type_check CHECK (source_type IN ('csv', 'xlsx', 'pdf'))`,
+      );
+    }
     const read = await agent.get(`/api/imports/${owner.importId}/document`);
     expect(read.status).toBe(200);
     expect(read.body).toEqual(owner.bytes);
