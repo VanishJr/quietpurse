@@ -73,9 +73,11 @@ function periodBounds(p: PeriodKey): { from?: string; to: string } {
 export function TransactionsScreen({
   focus,
   dataRevision = 0,
+  accountsRevision = 0,
 }: {
   focus?: TxFocus | null;
   dataRevision?: number;
+  accountsRevision?: number;
 }) {
   const { categoryColor } = useTheme();
 
@@ -108,8 +110,14 @@ export function TransactionsScreen({
   const [sourceLoadAttempt, setSourceLoadAttempt] = useState(0);
   const loadGeneration = useRef(0);
   useEffect(() => {
-    api.accounts(true).then(setAccounts).catch(() => {});
-  }, []);
+    let live = true;
+    api.accounts(true).then((next) => {
+      if (live) setAccounts(next);
+    }).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [dataRevision, accountsRevision]);
   useEffect(() => {
     let live = true;
     setSources(null);

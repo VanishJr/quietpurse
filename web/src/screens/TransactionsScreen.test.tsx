@@ -1186,6 +1186,44 @@ describe('the income source', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('keeps the newer account list when an older read answers last', async () => {
+    const cash = { ...ACCOUNTS[0], id: 'acc-3', name: 'Cash' };
+    let reads = 0;
+    let releaseOld: (response: Response) => void = () => {};
+    mockFetch({
+      ...TX_ROUTES,
+      'GET /api/accounts': () => {
+        reads += 1;
+        if (reads === 2) return new Promise<Response>((resolve) => { releaseOld = resolve; });
+        return ok(reads === 1 ? ACCOUNTS : [...ACCOUNTS, cash]);
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Accounts changed</button>
+          <TransactionsScreen accountsRevision={revision} />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+    const options = () =>
+      Array.from(
+        (screen.getByRole('combobox', { name: 'Account' }) as HTMLSelectElement).options,
+        (option) => option.text,
+      );
+    await waitFor(() => expect(options()).toContain('Sparkasse Giro'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accounts changed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accounts changed' }));
+    await waitFor(() => expect(options()).toContain('Cash'));
+    releaseOld(ok(ACCOUNTS));
+    await settle();
+
+    expect(options()).toContain('Cash');
+  });
+
   it('badges outside help with the catalogue’s own word, and reads the derived source as its category', async () => {
     const fromFamily = row({ id: 'tx-fam', description: 'From family', amount: 200, incomeSource: 'family' });
     const derived = row({ id: 'tx-sup', description: 'Support row', amount: 300, category: 'support', incomeSource: 'category:support' });

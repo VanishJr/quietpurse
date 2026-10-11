@@ -241,7 +241,7 @@ export function SettingsScreen({
     <>
       {historyOpen && (
         <div className="screen-inner">
-          <ImportHistory backLabel="Back to Settings" onBack={() => setHistoryOpen(false)} onChanged={loadRecurring} />
+          <ImportHistory backLabel="Back to Settings" onBack={() => setHistoryOpen(false)} onChanged={onDataChanged} />
         </div>
       )}
       <ScreenShown.Provider value={shown && !historyOpen}>

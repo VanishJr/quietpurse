@@ -56,6 +56,7 @@ export function Shell() {
   const tab = tabOf(url.screen);
   const [focus, setFocus] = useState<TxFocus | null>(null);
   const [dataRevision, setDataRevision] = useState(0);
+  const [accountsRevision, setAccountsRevision] = useState(0);
 
   const onOverview = tab === 'overview';
   const importing = onOverview && url.panel === 'import';
@@ -97,6 +98,7 @@ export function Shell() {
   const openImport = () => setUrl(IMPORT_PATCH);
 
   const dataChanged = () => setDataRevision((value) => value + 1);
+  const accountsChanged = () => setAccountsRevision((value) => value + 1);
 
   return (
     <div className="app">
@@ -184,17 +186,22 @@ export function Shell() {
             onOpenTransactions={openTransactions}
             onOpenAnalytics={() => go('analytics')}
             onDataChanged={dataChanged}
+            onAccountsChanged={accountsChanged}
             dataRevision={dataRevision}
           />
         </Screen>
         <Screen shown={tab === 'transactions'}>
-          <TransactionsScreen focus={focus} dataRevision={dataRevision} />
+          <TransactionsScreen
+            focus={focus}
+            dataRevision={dataRevision}
+            accountsRevision={accountsRevision}
+          />
         </Screen>
         <Screen shown={tab === 'analytics'}>
-          <AnalyticsScreen dataRevision={dataRevision} />
+          <AnalyticsScreen dataRevision={dataRevision} accountsRevision={accountsRevision} />
         </Screen>
         <Screen shown={tab === 'goal'}>
-          <GoalsScreen reloadToken={dataRevision} />
+          <GoalsScreen reloadToken={dataRevision} accountsRevision={accountsRevision} />
         </Screen>
         <Screen shown={tab === 'settings'}>
           <SettingsScreen

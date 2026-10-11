@@ -948,8 +948,20 @@ uploaded.
 A confirmed import invalidates every mounted reader through the Shell's shared data revision, as an
 income-source write does: the panel is the Overview's, but the rows it commits are read by every
 screen, and a hidden screen keeps whatever it read before. An upload that stages rows invalidates
-nothing, and neither does the create arm's account: it holds no rows yet, and the Overview's own
-reload is what brings it to the rail.
+nothing. The create arm's account holds no rows yet, so it moves only the accounts revision below,
+and the Overview's own reload is what brings it to the rail.
+
+Deleting an import invalidates the same readers from both screens that open `ImportHistory`, so
+each passes its `onChanged` on to the revision. So do deleting an account and hiding or unhiding
+one: the server leaves a hidden account's rows out of every read. The Overview re-reads its own
+account list on the revision too, because a balance on the rail is the sum of that account's rows.
+
+The Shell's second counter, `accountsRevision`, is for a write that changes the account list and
+no rows: creating or renaming an account. Transactions and Analytics re-read their account lists
+on it and on the data revision, since a delete or a hide changes the list as well. Goals re-reads
+on it too, because a goal's source line names its accounts. The data revision is not used for
+these writes because it closes an open rule editor on Transactions and re-reads every screen's
+figures, none of which moved.
 
 `ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
 `api.imports` for that one account by its id and never match on `accountName`: the server filters

@@ -98,6 +98,7 @@ interface Props {
   onOpenTransactions: (accountId: string) => void;
   onOpenAnalytics: () => void;
   onDataChanged?: () => void;
+  onAccountsChanged?: () => void;
   dataRevision?: number;
 }
 
@@ -105,6 +106,7 @@ export function OverviewScreen({
   onOpenTransactions,
   onOpenAnalytics,
   onDataChanged = () => {},
+  onAccountsChanged = () => {},
   dataRevision = 0,
 }: Props) {
   /**
@@ -150,25 +152,33 @@ export function OverviewScreen({
    */
   const [today] = useState(() => new Date());
 
+  const accountsRequest = useRef(0);
+
   const load = useCallback(async () => {
+    const token = ++accountsRequest.current;
     try {
       setError(null);
       // hidden ones too: without them there is no way to bring one back
-      setAccounts(await api.accounts(true));
+      const next = await api.accounts(true);
+      if (token !== accountsRequest.current) return;
+      setAccounts(next);
       // read for one thing — the currency a new account is created in: the client never
       // sends one, the endpoint defaults to the base currency, and both create arms say which.
       api
         .appSettings()
-        .then((s) => setBaseCurrency(s.baseCurrency))
+        .then((s) => {
+          if (token === accountsRequest.current) setBaseCurrency(s.baseCurrency);
+        })
         .catch(() => {});
     } catch (e) {
+      if (token !== accountsRequest.current) return;
       setError((e as Error).message);
     }
   }, []);
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, dataRevision]);
 
   const visible = useMemo(() => (accounts ?? []).filter((a) => !a.hidden), [accounts]);
   const hidden = useMemo(() => (accounts ?? []).filter((a) => a.hidden), [accounts]);
@@ -201,7 +211,7 @@ export function OverviewScreen({
    */
   const request = useRef(0);
 
-  const loadAccount = useCallback(async (account: Account) => {
+  const loadAccount = useCallback(async (account: Pick<Account, 'id' | 'hidden'>) => {
     const token = ++request.current;
     setDataError(null);
     setData(null);
@@ -242,15 +252,20 @@ export function OverviewScreen({
     }
   }, []);
 
+  const selectedId = selected?.id;
+  const selectedHidden = selected?.hidden;
   useEffect(() => {
-    if (selected) loadAccount(selected);
-  }, [selected, loadAccount, dataRevision]);
+    if (selectedId !== undefined) loadAccount({ id: selectedId, hidden: !!selectedHidden });
+  }, [selectedId, selectedHidden, loadAccount, dataRevision]);
 
   const applyAccount = (updated: Account) => {
-    if (updated.hidden && accounts?.some((account) => account.id === updated.id && !account.hidden)) {
+    const previous = accounts?.find((account) => account.id === updated.id);
+    if (updated.hidden && previous && !previous.hidden) {
       postWriteFocus.current = { list: accounts };
     }
     setAccounts((list) => list?.map((a) => (a.id === updated.id ? updated : a)) ?? null);
+    if (previous?.hidden !== updated.hidden) onDataChanged();
+    else onAccountsChanged();
   };
 
   const afterCreate = (created: Account) => {
@@ -258,6 +273,7 @@ export function OverviewScreen({
     setDialog(null);
     setUrl({ account: created.id });
     load();
+    onAccountsChanged();
   };
 
   const afterDelete = (deleted: Account, destroyed: AccountDeleted) => {
@@ -270,6 +286,7 @@ export function OverviewScreen({
     // it. Deleting an account also un-pairs every transfer whose other leg was in it, so
     // the SURVIVING account's income and expenses move and its rows have to be re-read.
     load();
+    onDataChanged();
   };
 
   // A sentence about the account that is gone must not stand above the panel of
@@ -308,10 +325,13 @@ export function OverviewScreen({
           load();
           onDataChanged();
         }}
-        // the rail's reload without the revision, and deliberately not the same prop:
-        // onBack closes the panel without one, so an account created in there reaches
+        // the accounts revision and not the data one, and deliberately not the same prop:
+        // onBack closes the panel without a reload, so an account created in there reaches
         // the rail here, and it has no rows yet for another screen to re-read
-        onAccountCreated={load}
+        onAccountCreated={() => {
+          load();
+          onAccountsChanged();
+        }}
         baseCurrency={baseCurrency}
       />
     );
@@ -333,7 +353,7 @@ export function OverviewScreen({
           onBack={() => setUrl({ panel: null })}
           onChanged={() => {
             load();
-            loadAccount(selected);
+            onDataChanged();
           }}
         />
       </div>

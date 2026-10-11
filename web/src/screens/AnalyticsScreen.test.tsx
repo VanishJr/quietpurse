@@ -215,6 +215,41 @@ describe('shared data revisions', () => {
     );
     await waitFor(() => expect(reads).toBe(2));
   });
+
+  it('keeps the newer account list when an older read answers last', async () => {
+    const cash = { ...ACCOUNTS[0], id: 'acc-3', name: 'Cash' };
+    let reads = 0;
+    let releaseOld: (response: Response) => void = () => {};
+    mockFetch({
+      ...ROUTES,
+      'GET /api/accounts': () => {
+        reads++;
+        if (reads === 2) return new Promise<Response>((resolve) => { releaseOld = resolve; });
+        return ok(reads === 1 ? ACCOUNTS : [...ACCOUNTS, cash]);
+      },
+    });
+    const view = renderThemed(<AnalyticsScreen accountsRevision={0} />);
+    const at = (accountsRevision: number) =>
+      view.rerender(
+        <ThemeProvider>
+          <AnalyticsScreen accountsRevision={accountsRevision} />
+        </ThemeProvider>,
+      );
+    await screen.findByText('Nothing plotted yet');
+    await waitFor(() => expect(reads).toBe(1));
+
+    at(1);
+    at(2);
+    fireEvent.click(screen.getByRole('button', { name: 'New chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Column/ }));
+    expect(await screen.findByRole('button', { name: 'Cash' })).toBeInTheDocument();
+    await act(async () => {
+      releaseOld(ok(ACCOUNTS));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByRole('button', { name: 'Cash' })).toBeInTheDocument();
+  });
 });
 
 describe('the empty workspace', () => {

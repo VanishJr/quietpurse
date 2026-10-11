@@ -51,6 +51,35 @@ const categoryGoal: GoalSummary = {
 };
 
 describe('GoalsScreen', () => {
+  it('keeps the goals on screen while an account change is re-read', async () => {
+    let release: (response: Response) => void = () => {};
+    let reads = 0;
+    window.history.replaceState(null, '', '/?screen=goal');
+    mockFetch({
+      'GET /api/goals': () => {
+        reads += 1;
+        if (reads === 1) return ok({ goals: [SAVINGS_GOAL] });
+        return new Promise<Response>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    const view = renderThemed(<GoalsScreen accountsRevision={0} />);
+    expect(await screen.findByText(SAVINGS_GOAL.name)).toBeVisible();
+
+    view.rerender(
+      <ThemeProvider>
+        <GoalsScreen accountsRevision={1} />
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.getByText(SAVINGS_GOAL.name)).toBeVisible();
+    expect(screen.queryByText('Loading goals…')).not.toBeInTheDocument();
+
+    await act(async () => release(ok({ goals: [{ ...SAVINGS_GOAL, source: 'Imported balances · Wallet' }] })));
+    expect(await screen.findByText('Imported balances · Wallet')).toBeVisible();
+  });
+
   it('replaces Delete with the URL editor across Back and Forward without retaining modal locks', async () => {
     window.history.replaceState(null, '', '/?screen=goal');
     mockFetch({

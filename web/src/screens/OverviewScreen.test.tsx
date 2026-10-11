@@ -833,6 +833,94 @@ describe('switching tabs while a read is in flight', () => {
     expect(screen.getByRole('region', { name: 'Balance of Sparkasse Giro' })).toBeVisible();
   });
 
+  it('keeps the newer account list when an older read answers last', async () => {
+    let releaseOld: (response: Response) => void = () => {};
+    let reads = 0;
+    const giro = (balance: number) => [{ ...ACCOUNTS[0], balance }];
+    window.history.replaceState(null, '', '/');
+    mockFetch({
+      ...OVERVIEW_ROUTES,
+      'GET /api/accounts': () => {
+        reads += 1;
+        if (reads === 2) {
+          return new Promise<Response>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return ok(giro(reads === 1 ? 1242 : 1200));
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Data changed</button>
+          <OverviewScreen
+            onOpenTransactions={onOpenTransactions}
+            onOpenAnalytics={onOpenAnalytics}
+            dataRevision={revision}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+    expect(await panel('Balance of Sparkasse Giro')).toHaveTextContent('1,242');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data changed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Data changed' }));
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Balance of Sparkasse Giro' })).toHaveTextContent('1,200'),
+    );
+    releaseOld(ok(giro(1300)));
+    await settle();
+
+    expect(screen.getByRole('region', { name: 'Balance of Sparkasse Giro' })).toHaveTextContent('1,200');
+  });
+
+  it('keeps the newer base currency when an older settings read answers last', async () => {
+    let releaseOld: (response: Response) => void = () => {};
+    let reads = 0;
+    window.history.replaceState(null, '', '/');
+    mockFetch({
+      ...OVERVIEW_ROUTES,
+      'GET /api/app-settings': () => {
+        reads += 1;
+        if (reads === 2) {
+          return new Promise<Response>((resolve) => {
+            releaseOld = resolve;
+          });
+        }
+        return ok({ ...APP_SETTINGS, baseCurrency: reads === 1 ? 'EUR' : 'GBP' });
+      },
+    });
+    const Host = () => {
+      const [revision, setRevision] = useState(0);
+      return (
+        <>
+          <button onClick={() => setRevision((value) => value + 1)}>Data changed</button>
+          <OverviewScreen
+            onOpenTransactions={onOpenTransactions}
+            onOpenAnalytics={onOpenAnalytics}
+            dataRevision={revision}
+          />
+        </>
+      );
+    };
+    renderThemed(<Host />);
+    await panel('Balance of Sparkasse Giro');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data changed' }));
+    await waitFor(() => expect(reads).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Data changed' }));
+    await waitFor(() => expect(reads).toBe(3));
+    await settle();
+    releaseOld(ok({ ...APP_SETTINGS, baseCurrency: 'USD' }));
+    await settle();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add account' }));
+    expect(screen.getByText(/It will hold amounts in GBP/)).toBeInTheDocument();
+  });
+
   it('drops the answer for the tab the reader left', async () => {
     const two = [account({ id: 'acc-1', name: 'Slow' }), account({ id: 'acc-2', name: 'Quick' })];
     let release: (r: Response) => void = () => {};

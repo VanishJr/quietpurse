@@ -70,7 +70,13 @@ function editsSentence(cleaned: Normalised): string | null {
   return said.length === 0 ? null : said.join(' ');
 }
 
-export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number }) {
+export function AnalyticsScreen({
+  dataRevision = 0,
+  accountsRevision = 0,
+}: {
+  dataRevision?: number;
+  accountsRevision?: number;
+}) {
   const [charts, setCharts] = useState<ChartsState>({ phase: 'loading' });
   /** null while the list is in flight — `useChartData` needs the two apart. */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
@@ -261,15 +267,19 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
    * per-account chart at once, so the way out of it has to be a step and not a fresh
    * start on the whole screen.
    */
+  const accountsRequest = useRef(0);
   const loadAccounts = useCallback(() => {
+    const request = ++accountsRequest.current;
     setAccountsError(null);
     api
       .accounts(true)
       .then((rows) => {
+        if (request !== accountsRequest.current) return;
         setAccounts(rows);
         setAccountsError(null);
       })
       .catch((e: unknown) => {
+        if (request !== accountsRequest.current) return;
         // an empty list would be a claim that the reader has no accounts, and every
         // per-account chart would then say its account had been deleted
         setAccounts(null);
@@ -277,7 +287,7 @@ export function AnalyticsScreen({ dataRevision = 0 }: { dataRevision?: number })
       });
   }, []);
 
-  useEffect(loadAccounts, [loadAccounts]);
+  useEffect(loadAccounts, [loadAccounts, dataRevision, accountsRevision]);
 
   const ready = charts.phase === 'ready';
   const entries = ready ? charts.list.entries : [];

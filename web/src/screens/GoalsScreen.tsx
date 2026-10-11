@@ -13,9 +13,10 @@ import { setUrl, useUrl } from '../url';
 
 interface Props {
   reloadToken?: number;
+  accountsRevision?: number;
 }
 
-export function GoalsScreen({ reloadToken = 0 }: Props) {
+export function GoalsScreen({ reloadToken = 0, accountsRevision = 0 }: Props) {
   const url = useUrl();
   const selection = useRef({ goal: url.goal, token: 0 });
   if (selection.current.goal !== url.goal) {
@@ -63,6 +64,13 @@ export function GoalsScreen({ reloadToken = 0 }: Props) {
   useEffect(() => {
     void load(true);
   }, [load, reloadToken]);
+
+  const accountsSeen = useRef(accountsRevision);
+  useEffect(() => {
+    if (accountsSeen.current === accountsRevision) return;
+    accountsSeen.current = accountsRevision;
+    void load();
+  }, [load, accountsRevision]);
 
   const handleMissingGoal = useCallback(() => {
     setUrl({ goal: null }, 'replace');
