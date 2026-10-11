@@ -97,12 +97,14 @@ const destroyedSentence = (name: string, d: AccountDeleted): string =>
 interface Props {
   onOpenTransactions: (accountId: string) => void;
   onOpenAnalytics: () => void;
+  onDataChanged?: () => void;
   dataRevision?: number;
 }
 
 export function OverviewScreen({
   onOpenTransactions,
   onOpenAnalytics,
+  onDataChanged = () => {},
   dataRevision = 0,
 }: Props) {
   /**
@@ -302,9 +304,13 @@ export function OverviewScreen({
     return (
       <CsvImport
         onBack={() => setUrl({ panel: null })}
-        onImported={load}
-        // the same reload, and deliberately not the same prop: onBack closes the
-        // panel without one, so an account created in there reaches the rail here
+        onImported={() => {
+          load();
+          onDataChanged();
+        }}
+        // the rail's reload without the revision, and deliberately not the same prop:
+        // onBack closes the panel without one, so an account created in there reaches
+        // the rail here, and it has no rows yet for another screen to re-read
         onAccountCreated={load}
         baseCurrency={baseCurrency}
       />

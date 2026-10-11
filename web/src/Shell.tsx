@@ -96,6 +96,8 @@ export function Shell() {
 
   const openImport = () => setUrl(IMPORT_PATCH);
 
+  const dataChanged = () => setDataRevision((value) => value + 1);
+
   return (
     <div className="app">
       <a className="skip" href="#screens">
@@ -181,6 +183,7 @@ export function Shell() {
           <OverviewScreen
             onOpenTransactions={openTransactions}
             onOpenAnalytics={() => go('analytics')}
+            onDataChanged={dataChanged}
             dataRevision={dataRevision}
           />
         </Screen>
@@ -196,7 +199,7 @@ export function Shell() {
         <Screen shown={tab === 'settings'}>
           <SettingsScreen
             onOpenImport={openImport}
-            onDataChanged={() => setDataRevision((value) => value + 1)}
+            onDataChanged={dataChanged}
             dataRevision={dataRevision}
           />
         </Screen>

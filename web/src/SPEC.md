@@ -945,6 +945,12 @@ account is created by its own request and never by an upload — the upload rout
 `accountName` and `currency` outright — so the create arm makes the account before the file is
 uploaded.
 
+A confirmed import invalidates every mounted reader through the Shell's shared data revision, as an
+income-source write does: the panel is the Overview's, but the rows it commits are read by every
+screen, and a hidden screen keeps whatever it read before. An upload that stages rows invalidates
+nothing, and neither does the create arm's account: it holds no rows yet, and the Overview's own
+reload is what brings it to the rail.
+
 `ImportHistory`, when it is handed an `account`, and `AccountDialog`'s delete preview ask
 `api.imports` for that one account by its id and never match on `accountName`: the server filters
 imports on the account id, and the name an import row carries is the account's name when the
