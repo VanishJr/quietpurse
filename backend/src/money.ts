@@ -1,6 +1,6 @@
 /**
- * Decimal amount -> integer cents, rounding half away from zero to match the SQLite
- * ROUND() the rows were first converted with.
+ * Decimal amount -> integer cents, rounding half away from zero like ROUND(numeric)
+ * in applyBaseRate; change both or neither.
  *
  * Floats cannot represent 0.1 exactly, so a sum of decimal amounts drifts; integer
  * cents is what makes a SUM exact. toPrecision(15) first, because 1.005 * 100 is

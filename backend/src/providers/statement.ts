@@ -1553,7 +1553,7 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
 }
 
 /**
- * The three states a sheet's balances can be in, and there is no fourth:
+ * The states a sheet's balances can be in, and there is no other:
  * "this file states no running balance" and "it stated one and it could not be used"
  * are different variants, so collapsing the second into the first cannot happen by
  * omission - it would have to be written out - and the exhaustive switch below makes
@@ -1584,13 +1584,13 @@ type SheetBalances =
  *
  * `stated` is required and not optional at the call site: an optional
  * one forgotten at a sheet caller reads as "this format states no balances", which is
- * exactly the collapse the type below exists to prevent. The pdf path passes
+ * exactly the collapse SheetBalances exists to prevent. The pdf path passes
  * `{ kind: 'none' }`, which is true of it - the sheet mapper stated nothing for a PDF
  * - and the pdf arm never looks at it.
  *
  * Exported for the test, like readSheet and noRowsParsed and for the same reason:
- * the mixed-currency arm is unreachable through today's one template, which declares
- * a single currency symbol, so nothing else can watch it throw.
+ * every template declares one currency, so the mixed-currency arm is unreachable
+ * through a template and nothing else can watch it throw.
  */
 export function reconcile(
   parsed: ParsedFile,

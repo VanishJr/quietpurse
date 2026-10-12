@@ -102,7 +102,7 @@ export const transactionSchema = z.strictObject({
   id: z.string(),
   accountId: z.string(),
   provider: providerSchema,
-  /** decimal amount in the account's currency; spending < 0, income > 0 */
+  /** decimal amount in this row's `currency`; spending < 0, income > 0 */
   amount: z.number(),
   currency: z.string(),
   /** ISO 8601 */
@@ -112,11 +112,11 @@ export const transactionSchema = z.strictObject({
   displayDescription: z.string().optional(),
   valueDate: z.string().optional(),
   category: z.string(),
-  /** true — the category above was set by hand and no recompute will change it */
+  /** true: the category above was set by hand and no recompute will change it */
   categoryManual: z.boolean(),
-  /** a transfer between the user's own accounts — neither income nor expense */
+  /** a transfer between the user's own accounts: neither income nor expense */
   transfer: z.boolean(),
-  /** the user's manual flag; null — decided by auto-detection */
+  /** the user's manual flag; null = auto-detection decides */
   transferManual: z.boolean().nullable(),
   /** refund / cancelled purchase: arrives positive, but subtracts from spending */
   refund: z.boolean(),
@@ -131,7 +131,7 @@ export const transactionSchema = z.strictObject({
   oneOff: z.boolean(),
   /**
    * The fee the statement stated for this operation, as it printed it (positive).
-   * Absent on the way out and null on the way in — the source stated none; never a
+   * Absent on the way out and null on the way in: the source stated none, never a
    * zero this importer invented. `amount` is already net of it.
    */
   fee: z.number().optional(),
@@ -241,7 +241,9 @@ export const monthTotalsSchema = z.strictObject({
 export type MonthTotals = z.infer<typeof monthTotalsSchema>;
 
 /**
- * One month of an account's own transactions, in that account's currency.
+ * One month of an account's own transactions, labelled with the account's currency.
+ * A row in another currency is summed in as it is, and `otherCurrencies` on the body
+ * names every such currency.
  *
  * `net` is every row of the month summed, transfers included - the rule
  * recalcAccountBalanceFromTransactions computes a balance by, and the only reason the

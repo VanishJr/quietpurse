@@ -71,8 +71,8 @@ export const imports = pgTable(
     rowsRejected: integer('rows_rejected').notNull().default(0),
     // the failure message, truncated; never a stack trace - it lands in the backup
     errorDetail: text('error_detail'),
-    // whether the uploaded file can be READ for this row - not whether bytes are on
-    // disk: a restored row has this cleared while its file may still be there
+    // whether the row claims a readable file, not whether bytes are on disk: a
+    // restore keeps the claim whether or not the file came with it
     documentStored: boolean('document_stored').notNull().default(false),
   },
   (t) => [
@@ -136,7 +136,8 @@ export const transactions = pgTable(
     incomeSourceManual: text('income_source_manual'),
     // recurring payment (subscription, rent): detected from history
     recurring: boolean('recurring').notNull().default(false),
-    // one-off large purchase: spread over 12 months in the goal calculation
+    // a large purchase marked by hand; goals amortize it instead of counting it in
+    // its month
     oneOff: boolean('one_off').notNull().default(false),
     // MATCH SIMPLE: with import_id NULL the constraint is not checked at all, which
     // is what the rows no import owns need
@@ -150,9 +151,8 @@ export const transactions = pgTable(
     // PG does not index a foreign key for you, and the cascade delete scans on this
     index('idx_tx_import').on(t.importId),
     // A fee is a magnitude and the mapper subtracts it, so a negative one would
-    // INCREASE the movement. Here rather than in the mapper because the mapper is
-    // not the last producer this column will have - the PDF path states its fees on
-    // a continuation line and reads none of them yet.
+    // INCREASE the movement. Here rather than in the mapper, because not every write
+    // goes through it: a restore inserts the backup's rows as they are.
     check('transactions_fee_cents_nonneg', sql`${t.feeCents} >= 0`),
   ],
 );
@@ -188,9 +188,14 @@ export const stagedTransactions = pgTable(
 export const fxRates = pgTable(
   'fx_rates',
   {
-    date: text('date').notNull(), // YYYY-MM-DD
-    currency: text('currency').notNull(), // ISO code
-    rate: doublePrecision('rate').notNull(), // base currency per unit of currency
+    // YYYY-MM-DD, the day asked for: the NBU's lookback files an earlier day's rate
+    // under it
+    date: text('date').notNull(),
+    // a key, not always a currency: an ISO code for the NBU's rate to the hryvnia,
+    // FROM:TO for the ECB's rate between two codes
+    currency: text('currency').notNull(),
+    // hryvnias per unit of the code, or units of TO per unit of FROM
+    rate: doublePrecision('rate').notNull(),
   },
   (t) => [primaryKey({ columns: [t.date, t.currency] })],
 );

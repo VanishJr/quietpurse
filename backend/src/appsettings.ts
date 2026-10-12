@@ -4,8 +4,6 @@ import type { AppSettings } from './wire';
 export type { AppSettings } from './wire';
 
 export async function getAppSettings(): Promise<AppSettings> {
-  // No env fallback: OWNER_NAMES is the operator's own household, so falling back to
-  // it would show those names in another user's settings.
   let ownerNames: string[] = [];
   const raw = await getSetting('owner_names');
   if (raw !== undefined) {

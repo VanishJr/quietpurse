@@ -101,8 +101,8 @@ const idSegment = (importId: string): string =>
 
 /**
  * Refuses a format outside the list rather than trusting the column: the format ends
- * the name, so one carrying a `.` or `_` would let this row's fields spell another
- * row's file, and the column's check is missing from every database created before it.
+ * the name, so one carrying a `.` would let this row's fields spell another row's
+ * file, and the column's check is missing from every database created before it.
  */
 const storedFormat = (sourceType: string): boolean =>
   (IMPORT_SOURCE_TYPES as readonly string[]).includes(sourceType);

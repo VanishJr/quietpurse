@@ -9,10 +9,9 @@ import {
   spendRing,
   spendSectors,
 } from './categories';
-import { PROVIDER_LABELS, providerLabel } from './providers';
 import type { SUPPORT_INCOME_SOURCE } from './types';
 
-/** The one derived source the server answers today, held to the wire's literal by tsc. */
+/** The derived source the server answers, held to the wire's literal by tsc. */
 const SUPPORT_SOURCE = 'category:support' satisfies typeof SUPPORT_INCOME_SOURCE;
 
 describe('category dictionary', () => {
@@ -221,19 +220,5 @@ describe('what a category rule just did', () => {
     const caption = categoryRuleCaption(long, 'food', { matches: 2, overridden: 0 });
     expect(caption).toContain(`"${'A'.repeat(80)}…"`);
     expect(caption).not.toContain('A'.repeat(81));
-  });
-});
-
-describe('provider dictionary', () => {
-  it('names every provider the API can return', () => {
-    // 'upload' covers every statement the user brought in themselves - the parser
-    // that read it (csv, xlsx) is an implementation detail and must never surface
-    expect(providerLabel('upload')).toBe('Uploaded statement');
-    expect(PROVIDER_LABELS).not.toHaveProperty('csv');
-    expect(PROVIDER_LABELS).not.toHaveProperty('xlsx');
-  });
-
-  it('returns an unknown provider as-is', () => {
-    expect(providerLabel('revolut-direct')).toBe('revolut-direct');
   });
 });

@@ -3,8 +3,7 @@ import { defineConfig } from 'vite';
 
 /**
  * Where the dev server forwards /api. This is resolved on the machine running
- * Vite, so it stays 'localhost' even when the browser is on another device —
- * deliberately NOT VITE_API_URL, which is a client-side address.
+ * Vite, so it stays 'localhost' even when the browser is on another device.
  */
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:4000';
 

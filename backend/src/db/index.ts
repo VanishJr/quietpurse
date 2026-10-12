@@ -1087,28 +1087,6 @@ export async function goalCurrentCategoryTotals(
   }));
 }
 
-export async function avgMonthlyByCategory(
-  from: string,
-  to: string,
-  months: number,
-): Promise<CategorySummary[]> {
-  if (months <= 0) return [];
-  const { where, money } = scopeSql({ kind: 'all' });
-  const rows = await rowsOf<{ category: string; total_cents: string }>(sql`
-    SELECT ${CATEGORY} AS category, SUM(-${money}) AS total_cents
-    FROM transactions
-    WHERE ${where} AND NOT one_off
-      AND (amount_cents < 0 OR refund) AND date >= ${from} AND date <= ${to}
-    GROUP BY 1
-    HAVING SUM(-${money}) > 0
-    ORDER BY total_cents DESC`);
-  // the sum is exact; the division by months is a genuine fraction - round to whole cents
-  return rows.map((r) => ({
-    category: r.category,
-    total: Math.round(Number(r.total_cents) / months) / 100,
-  }));
-}
-
 export async function accountOtherCurrencies(scope: AccountScope): Promise<string[]> {
   const rows = await rowsOf<{ currency: string }>(sql`
     SELECT DISTINCT currency FROM transactions
@@ -1445,8 +1423,8 @@ const SUPERSEDED_BY_REUPLOAD =
 /**
  * Clears the way for a re-upload of the same bytes: an *older* import of this hash
  * still awaiting confirmation is discarded, and its ids come back so the summary can
- * say so. There is no imports-history screen, which makes re-uploading the file the
- * re-uploading the file the only way back to an import whose tab was closed.
+ * say so. The import history lists such an import but cannot confirm it, so
+ * re-uploading the file is the only way back to one whose tab was closed.
  *
  * Nothing is deleted to do this - a staged import owns no transactions - and the
  * document is kept, referenced by the row that stays behind at `discarded`.
@@ -1850,7 +1828,7 @@ async function renumberGroups(
  * whose balance is recomputed afterwards.
  *
  * The ordinals of whatever survives in the affected groups are renumbered in the
- * same transaction - see renumberGroup for what a hole would do.
+ * same transaction by renumberGroups; why a hole matters is in dedup.ts.
  */
 export async function deleteImport(
   id: string,
@@ -1891,7 +1869,7 @@ export async function deleteImport(
   //
   // A failure here is logged rather than raised: the rows really are deleted, and
   // reporting otherwise would send the user to press the button again. It is logged
-  // in a form an operator can act on, because "delete my data" that quietly leaves
+  // in a form the person can act on, because "delete my data" that quietly leaves
   // the bank statement on disk is the failure a data-deletion promise cannot have.
   try {
     await deleteDocument({ importId: id, ...existing[0] });

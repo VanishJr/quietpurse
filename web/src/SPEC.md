@@ -123,12 +123,11 @@ a label read by a missing key, which throws in render and, with no error boundar
 the whole app down. A client wider than the wire composes lists nobody can save.
 
 Every pin assumes the wire's export has a literal type. `web/src/types.test.ts` checks that under
-`tsc`: each client constant equals its export's type, and each union equals its record's keys,
-except the goal-status labels, which only their own `satisfies` holds. A constant widened to
-`number`, or a tuple that lost its `as const`, fails there instead of silencing every pin. Order is
-not held. The wire's zod enums carry no order, and a picker follows its record literal's key order,
-which the language keeps for every key but an array index: a vocabulary member spelled as a bare
-integer would reorder.
+`tsc`: each client constant equals its export's type, and each union equals its record's keys. A
+constant widened to `number`, or a tuple that lost its `as const`, fails there instead of silencing
+every pin. Order is not held. The wire's zod enums carry no order, and a picker follows its record
+literal's key order, which the language keeps for every key but an array index: a vocabulary member
+spelled as a bare integer would reorder.
 
 **The checks here that read source as text** (`copy.test.ts`, `tokens.test.ts` and `types.test.ts`
 among them) resolve their root from `import.meta.url`, unlike the backend's checks, which use
@@ -433,9 +432,8 @@ pending save holds navigation. Nothing promises recovery.
 
 ## The sentences a person reads
 
-`CATEGORY_LABELS`, `PROVIDER_LABELS` and `IMPORT_STATUS_LABELS` turn slugs into words, and nothing
-is sent back through them. No code branches on a `PROVIDER_LABELS` or `IMPORT_STATUS_LABELS` label,
-so either can change without a slug moving.
+`CATEGORY_LABELS` and `IMPORT_STATUS_LABELS` turn slugs into words, and nothing is sent back through
+them. No code branches on an `IMPORT_STATUS_LABELS` label, so one can change without a slug moving.
 
 `categoryRuleCaption` states the rule and a transaction count, never which category rows ended up
 in, because two backend facts would make that false. `overridden` in `backend/src/db/index.ts`

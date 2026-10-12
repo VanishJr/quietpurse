@@ -2446,6 +2446,15 @@ describe('pdf: where a template says an amount currency comes from', () => {
       }
     }
   });
+
+  it("names one currency, which keeps reconcile's mixed-currency arm out of a real file's reach", () => {
+    for (const t of TEMPLATES) {
+      const { currency } = t.amount;
+      const codes =
+        currency.kind === 'in-the-cell' ? new Set(Object.values(currency.symbols)) : new Set([currency.code]);
+      expect([...codes], t.id).toHaveLength(1);
+    }
+  });
 });
 
 describe('pdf: what a template says about its gross totals', () => {

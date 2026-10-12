@@ -501,9 +501,7 @@ describe('deleting an account', () => {
    * different in kind: it is momentary and one click from over in either direction.
    *
    * Without the clause the delete takes the outstanding import too, and the summary the
-   * user is looking at answers "import not found" on Confirm. Measured, not assumed: with
-   * the clause removed this assertion reads `{ ok: true, deleted: { imports: 3,
-   * transactions: 3, ... } }`.
+   * user is looking at answers "import not found" on Confirm.
    */
   it('refuses while an import for it is awaiting confirmation, and deletes once it is gone', async () => {
     const id = await populate('Awaiting Confirmation');
@@ -528,12 +526,12 @@ describe('deleting an account', () => {
 
   /**
    * restoreBackup inserts `imports` and `transactions` straight from a user-supplied file
-   * and sanitizeRow checks column names and types only, so an import attributed to one
-   * account owning another account's rows is constructible and nothing in the repository
-   * refuses it. The rows go with the provenance being destroyed (deleteImport's
-   * semantics), and what is left in the surviving account is repaired: the ordinals go
-   * back to a dense 1..n and the balance is recomputed. Refusing instead would make an
-   * account undeletable over a state its owner can neither see nor repair.
+   * and sanitizeRow checks each row on its own, never against another, so an import
+   * attributed to one account owning another account's rows is constructible and nothing
+   * in the repository refuses it. The rows go with the provenance being destroyed
+   * (deleteImport's semantics), and what is left in the surviving account is repaired:
+   * the ordinals go back to a dense 1..n and the balance is recomputed. Refusing instead
+   * would make an account undeletable over a state its owner can neither see nor repair.
    */
   it("takes rows an import claims for another account, and repairs what is left there", async () => {
     const doomed = await newAccount('Stray Owner');
@@ -572,11 +570,8 @@ describe('deleting an account', () => {
 
   /**
    * The compile-time census has a hole `satisfies` cannot close - it proves an entry
-   * exists, not that it is executed - so a sixth account-scoped table must also make
-   * a test fail, not only the type checker. Five names, spelled out.
-   *
-   * analyticsCharts is in the census and is the one entry the delete does NOT act
-   * on: a chart naming a deleted account stays, and says so on the card.
+   * exists, not that it is executed - so a new account-scoped table must also make a
+   * test fail, not only the type checker.
    */
   it('accounts for every account-scoped table in the schema', () => {
     expect([...ACCOUNT_CASCADE_TABLES].sort()).toEqual([

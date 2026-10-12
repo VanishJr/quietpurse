@@ -46,11 +46,7 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['src/**/*.test.tsx'],
           setupFiles: ['src/test/setup.ts'],
-          // VITE_API_URL is pinned empty: web/.env is developer-local, and one line
-          // in it prefixes every fetch with a machine-dependent origin. The route
-          // matcher keys on pathnames and is immune, but a fetch that fails to
-          // resolve is not.
-          env: { TZ: 'UTC', VITE_API_URL: '' },
+          env: { TZ: 'UTC' },
         },
       },
     ],

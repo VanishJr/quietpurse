@@ -377,11 +377,11 @@ describe('an account with no rows in the window', () => {
 
 /**
  * The clause list is a convention - SQL is a string, and there is no type that can
- * refuse a sixth summary query written with the all-accounts arm's filters. The cases
- * above cover the five that exist; this one covers the one nobody has written yet.
+ * refuse a new summary query written with the all-accounts arm's filters. The cases
+ * above cover the ones that exist; this one covers the one nobody has written yet.
  *
- * It reads source, so it asserts nothing at all if its anchors move: the first three
- * expectations are the guard that the slice is really the summary block.
+ * It reads source, so it asserts nothing at all if its anchors move: the first case is
+ * the guard that the slice is really the summary block.
  */
 describe('nothing but scopeSql picks the filters', () => {
   const source = fs.readFileSync(path.resolve(process.cwd(), 'src/db/index.ts'), 'utf8');
@@ -391,7 +391,7 @@ describe('nothing but scopeSql picks the filters', () => {
   /** the rule is about code, not about the comments explaining it */
   const code = block.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   const scopedCode = code.replace(
-    /export interface GoalMonthTotals[\s\S]*?(?=export async function avgMonthlyByCategory)/,
+    /export interface GoalMonthTotals[\s\S]*?(?=export async function accountOtherCurrencies)/,
     '',
   );
 
@@ -405,7 +405,6 @@ describe('nothing but scopeSql picks the filters', () => {
       'summaryIncomeBySource',
       'summaryTotals',
       'summaryMonthlyTotals',
-      'avgMonthlyByCategory',
     ]) {
       expect(code, `${name} is not in the slice - the anchors no longer bound it`).toContain(name);
     }

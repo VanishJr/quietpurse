@@ -19,6 +19,14 @@ import type {
   GoalUnit,
 } from './wire';
 
+/**
+ * A one-off leaves the month it was paid in and comes back as an equal share of the
+ * past year's one-offs in every month: left in, one large order lifts a single month;
+ * left out, the target prices a life without large purchases. Divided by the whole
+ * year even on a shorter history, so a rare purchase does not spike on a short one.
+ */
+const ONE_OFF_MONTHS = 12;
+
 const round2 = (value: number): number => Math.round(value * 100) / 100;
 const dayOf = (date: Date): string => date.toISOString().slice(0, 10);
 const monthStart = (date: Date, delta = 0): Date =>
@@ -138,13 +146,16 @@ const financialDetail = (
   const rows = completeRows(context.months, context.now, goal.windowMonths);
   const currencyChanged = goal.baseCurrency !== context.baseCurrency;
   const hasUnconverted = rows.some((row) => row.unconverted > 0);
-  const oneOffRows = completeRows(context.months, context.now, 12);
-  const oneOffMonthly = oneOffRows.reduce((sum, row) => sum + row.expenseOneOff, 0) / 12;
+  const oneOffRows = completeRows(context.months, context.now, ONE_OFF_MONTHS);
+  const oneOffMonthly =
+    oneOffRows.reduce((sum, row) => sum + row.expenseOneOff, 0) / ONE_OFF_MONTHS;
   const spendByMonth = rows.map((row) => row.expense - row.expenseOneOff + oneOffMonthly);
   const essentialBase = goal.essentialCosts.reduce((sum, cost) => sum + cost.monthly, 0);
+  // the median month, not the mean: one unusual month does not set the price
   const spendingBase = median(spendByMonth);
   const base = goal.basis === 'essential-costs' ? essentialBase : spendingBase;
   const configured = goal.basis === 'essential-costs' ? essentialBase > 0 : spendingBase > 0;
+  // the monthly own income that covers the base with bufferPct per cent of it to spare
   const target =
     configured && !(currencyChanged && goal.basis === 'current-spending')
       ? round2(base * (1 + goal.bufferPct / 100))
@@ -167,10 +178,12 @@ const financialDetail = (
     context.asOf,
     completePeriod(context.now, rows, goal.windowMonths),
   );
+  // a monthly figure, like the capacity it is compared with: remaining is per month
   const workHoursLeft =
     goal.hourlyRate !== null && progress.remaining !== null
       ? round2(progress.remaining / goal.hourlyRate)
       : null;
+  // a month is a year's weeks over its months, not four weeks
   const workHoursCapacityPerMonth =
     goal.hoursPerWeek === null ? null : round2((goal.hoursPerWeek * 52) / 12);
   const workHoursCapacityExceeded =
@@ -434,7 +447,7 @@ const detailsFor = async (goals: GoalRecord[], now: Date): Promise<GoalDetail[]>
     ) {
       maxWindow = Math.max(maxWindow, goal.windowMonths);
     }
-    if (goal.type === 'financial-independence') maxWindow = Math.max(maxWindow, 12);
+    if (goal.type === 'financial-independence') maxWindow = Math.max(maxWindow, ONE_OFF_MONTHS);
   }
   const completeTo = endOfPreviousMonth(now);
   const needsCategories = goals.some((goal) => goal.type === 'category-spending-limit');

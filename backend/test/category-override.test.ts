@@ -17,7 +17,6 @@ import { app } from '../src/app';
 import { reclassifyAll } from '../src/classify';
 import {
   addCategoryRule,
-  avgMonthlyByCategory,
   countCategoryRuleMatches,
   createAccount,
   dbInstance,
@@ -216,12 +215,6 @@ describe('the data layer: a manual category, and what may not touch it', () => {
     // and the row is gone from the bucket it used to be counted in: 'other' is every
     // row that really is one, and none of the moved amount
     expect(totalOf(spend, 'other')).toBe(OTHER_SPEND);
-  });
-
-  it('avgMonthlyByCategory reports it too, over the same one bucket', async () => {
-    const rows = await avgMonthlyByCategory(FROM, TO, 1);
-    expect(rows.filter((r) => r.category === 'transport')).toHaveLength(1);
-    expect(totalOf(rows, 'transport')).toBe(AUTO_SPEND + MANUAL_SPEND);
   });
 
   /** The group reports its newest row's category, so that is the row overridden above. */

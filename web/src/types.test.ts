@@ -15,7 +15,12 @@ import type {
 } from './analytics';
 import type { MAX_ERROR_CHARS } from './api';
 import type { KIND_DEFS as INCOME_SOURCE_KIND_DEFS } from './components/IncomeSourcesBlock';
-import type { GOAL_BASIS_DEFS, GOAL_INCOME_SCOPE_DEFS, GOAL_TYPE_DEFS } from './goals';
+import type {
+  GOAL_BASIS_DEFS,
+  GOAL_INCOME_SCOPE_DEFS,
+  GOAL_STATUS_LABELS,
+  GOAL_TYPE_DEFS,
+} from './goals';
 import type {
   CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
   CHART_ID_MAX as WIRE_CHART_ID_MAX,
@@ -414,6 +419,7 @@ describe('the pins stand on literal types, and tsc is what holds this block', ()
     expectTypeOf<GoalType>().toEqualTypeOf<keyof typeof GOAL_TYPE_DEFS>();
     expectTypeOf<GoalBasis>().toEqualTypeOf<keyof typeof GOAL_BASIS_DEFS>();
     expectTypeOf<GoalIncomeScope>().toEqualTypeOf<keyof typeof GOAL_INCOME_SCOPE_DEFS>();
+    expectTypeOf<GoalStatus>().toEqualTypeOf<keyof typeof GOAL_STATUS_LABELS>();
     expectTypeOf<IncomeSourceKind>().toEqualTypeOf<keyof typeof INCOME_SOURCE_KIND_DEFS>();
   });
 });

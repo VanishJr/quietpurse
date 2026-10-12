@@ -214,9 +214,9 @@ describe('a negative fee is refused by the column', () => {
 
 /**
  * The same shape one row down, and the reason is the client rather than a producer:
- * chartKind() SUBSTITUTES an unknown kind for the first one in its list, so a chart
- * restored from a hand-edited backup carrying "pie" would draw as a line chart under
- * the reader's own title. The route's z.enum reads the same arrays these constraints
+ * the client keeps a chart it cannot read and saves it back unchanged, so a value
+ * outside the vocabulary that arrived through a restore would be refused at every save
+ * and take the whole list with it. The route's z.enum reads the same arrays these constraints
  * are generated from, but a restore does not go through the route.
  *
  * Through the data layer rather than raw SQL, and by each constraint's own name: a
@@ -257,7 +257,7 @@ describe('the chart vocabularies are the column and not only the door', () => {
       ),
     ).toEqual({ code: '23514', constraint: 'analytics_charts_breakdown' });
 
-    // and the same write with a kind from the list is stored, so the three above
+    // and the same write with a kind from the list is stored, so the writes above
     // failed on their vocabulary and not on something else in the row
     expect(await replaceCharts(0, [chart({})])).toMatchObject({ ok: true });
   });
@@ -289,8 +289,8 @@ describe('the chart vocabularies are the column and not only the door', () => {
 
 /**
  * The format is the extension of a stored statement's name, and that name has one
- * reading only while the extension is one of these: a format carrying `_` or `.` lets
- * one row's fields spell another row's file. The restore refuses such a value before
+ * reading only while the extension is one of these: a format carrying `.` lets one
+ * row's fields spell another row's file. The restore refuses such a value before
  * the insert; this is the guard beneath it, for every writer that is not a restore.
  */
 describe('the import formats are the column', () => {

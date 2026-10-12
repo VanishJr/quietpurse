@@ -1,8 +1,8 @@
 /**
  * The one-process-per-folder lock, off the process that boots the
  * app so a case can red it: what is claimed, what a file already there means, what is
- * removed and by whom. backend/src/SPEC.md carries the reasoning; this file holds
- * every arm of it that the suite can reach.
+ * removed and by whom. The takeover's reasoning is in backend/src/SPEC.md; a reason that
+ * belongs to one line is beside that line in lock.ts.
  *
  * Every case points config.home at a folder of its own under the suite's per-run home
  * and restores it, and asserts the file at its own literal of the path, never through
@@ -11,27 +11,26 @@
  * undefined for the same span, because test/setup.ts does not set it and a
  * developer's backend/.env can.
  *
- * The race runs real child processes on the same folder, released together by one
- * byte on each stdin (lock.child.ts). The winner holds until told to stop: a winner
- * that exited would leave a dead pid for the next child to take over by design. The
- * children are stopped by their recorded pids and each one is re-observed gone.
+ * The race runs real child processes on the same folder, released together by the
+ * first data on each stdin (lock.child.ts). The winner holds until told to stop: a
+ * winner that exited would leave a dead pid for the next child to take over by design.
+ * The children are stopped by their recorded pids and each one is re-observed gone.
  *
- * Two bounds of the module are raced here. "a claim whose write has not landed"
+ * The module's waits are raced here. "a claim whose write has not landed"
  * races the empty-file wait (EMPTY_WAIT_STEPS × EMPTY_WAIT_MS) and "a takeover another
  * start is inside" the wait on a held marker (MARKER_WAIT_STEPS × MARKER_WAIT_MS); the
  * delays injected sit well inside those bounds rather than beside them. A marker nobody
- * releases is never removed by a start that did not make it, so the two cases that seed
+ * releases is never removed by a start that did not make it, so the cases that seed
  * one wait the whole bound out on both attempts and take as long as that is. A dead pid is
  * a process observed alive and then observed exited, asserted dead again immediately
  * before it is written: on Linux the number is not reissued within the case, on Windows
  * it can be, to the very next spawn.
  *
  * Not held: the second refusal of the two-attempt claim ("took it while this one was
- * starting") on a genuine race needs a process that wins between one removal and the
- * next exclusive create, and the race holds the property that sentence guards - one
- * winner - with every loser reading the first refusal and never the second. The
- * sentence itself is held through the other way it is reached, a marker nobody is
- * inside.
+ * starting") reached when the second attempt also finds a file, and that file then
+ * vanishes or names a dead pid. A start that loses to a live claim reads the first
+ * refusal, which the races with a winner assert of every loser; the second is held
+ * through the other way it is reached, a marker nobody is inside.
  */
 import { ChildProcess, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';

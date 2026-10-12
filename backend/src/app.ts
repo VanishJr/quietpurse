@@ -222,7 +222,7 @@ app.use(headersAndLog);
  * Binding to loopback keeps other machines off the port; it does nothing about a
  * page in the owner's OWN browser, which is on this machine by definition.
  *
- * Three headers, and each closes something the other two do not.
+ * Each header below closes something the others do not.
  *
  * Host closes DNS rebinding. A page at http://evil.example whose name is made to
  * resolve to 127.0.0.1 arrives here same-origin with itself, and the only part of it
@@ -259,15 +259,16 @@ const isAddressLiteral = (name: string): boolean =>
   /^\d{1,3}(?:\.\d{1,3}){3}$/.test(name) || /^[0-9a-f:]*:[0-9a-f:.]*$/.test(name);
 
 /**
- * Set HOST and the owner opened the port deliberately - README and SECURITY.md both
- * say what that costs. The phone that use case exists for arrives by address, so the
- * widening is exactly "an address as well as a loopback name", and a DNS name stays
- * refused in both configurations. That is the half rebinding needs.
+ * Set QUIETPURSE_HOST to anything but a loopback name and the owner opened the port
+ * deliberately - README and SECURITY.md both say what that costs. The phone that use
+ * case exists for arrives by address, so the widening is exactly "an address as well
+ * as a loopback name", and a DNS name stays refused in both configurations. That is
+ * the half rebinding needs.
  *
- * Read per request rather than captured at module load. Nothing else in this file
- * caches a setting, and a value captured here would make the widened arm unreachable
- * from a test - the suite runs on the loopback default, so that arm would be held by
- * nothing at all while being the arm that governs the open configuration.
+ * Read per request rather than captured at module load: a value captured here would
+ * make the widened arm unreachable from a test - the suite runs on the loopback
+ * default, so that arm would be held by nothing at all while being the arm that
+ * governs the open configuration.
  */
 const namesThisServer = (name: string): boolean =>
   isLoopbackName(name) || (!isLoopbackName(config.host) && isAddressLiteral(name));

@@ -8,7 +8,7 @@ import {
   GOAL_TYPE_DEFS,
   GOAL_TYPE_ORDER,
 } from '../goals';
-import type { Account, GoalCreate, GoalDetail, GoalType } from '../types';
+import type { Account, GoalBasis, GoalCreate, GoalDetail, GoalIncomeScope, GoalType } from '../types';
 import { Sheet } from './Sheet';
 import { Button } from './Button';
 import { FormActions } from './FormActions';
@@ -32,7 +32,7 @@ interface Draft {
   type: GoalType | null;
   name: string;
   targetDate: string;
-  basis: 'essential-costs' | 'current-spending';
+  basis: GoalBasis;
   bufferPct: string;
   windowMonths: string;
   hourlyRate: string;
@@ -45,7 +45,7 @@ interface Draft {
   target: string;
   targetDebt: string;
   targetPercent: string;
-  incomeScope: 'own' | 'all';
+  incomeScope: GoalIncomeScope;
   category: string;
   monthlyLimit: string;
   savedCurrency: string | null;
