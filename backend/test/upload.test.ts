@@ -216,6 +216,39 @@ describe('POST /api/imports', () => {
     expect(row.currency).toBe('933');
   });
 
+  it.each([
+    ['933', '933'],
+    ['euro', 'EURO'],
+  ])(
+    'an account an earlier version stored in %j imports a file whose currency column says %j, as the confirm takes it',
+    async (stored, cell) => {
+      const accountId = await makeAccount(`Stated Own Currency Bank ${stored}`);
+      await dbInstance().execute(sql`UPDATE accounts SET currency = ${stored} WHERE id = ${accountId}`);
+      const file = (currency: string) =>
+        Buffer.from(['Date,Description,Amount,Currency', `2026-09-01,Invented shop,-12.50,${currency}`].join('\n'), 'utf8');
+      const send = (currency: string) =>
+        agent
+          .post('/api/imports')
+          .field('accountId', accountId)
+          .field('preset', 'generic')
+          .attach('file', file(currency), `own-currency-${currency}.csv`);
+
+      const res = await send(cell);
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.summary.totals).toEqual([{ currency: cell, net: -12.5 }]);
+      const confirmed = await confirm(res.body.summary.importId);
+      expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+      expect(confirmed.body).toMatchObject({ inserted: 1 });
+      const [row] = (await agent.get('/api/transactions').query({ accountId })).body as { currency: string }[];
+      expect(row.currency).toBe(cell);
+
+      const other = await send('934');
+      expect(other.status).toBe(400);
+      expect(other.body.error).toMatch(/^row 2: the currency is "934", but it must be a three-letter code/);
+    },
+  );
+
   it('an empty file is refused with what to do, and leaves no import', async () => {
     const before = (await imports()).length;
 
@@ -567,8 +600,8 @@ describe('POST /api/imports', () => {
       'camt.xml',
     );
     expect(xml.status).toBe(400);
-    expect(xml.body.error).toMatch(
-      /XML or HTML, not a CSV, Excel \(\.xlsx\) or PDF statement.*CAMT\.053 and MT940 are not supported yet/,
+    expect(xml.body.error).toBe(
+      'this looks like XML or HTML, not a CSV, Excel (.xlsx) or PDF statement. Export the statement in one of those formats from your online banking and upload that. CAMT.053 and MT940 are not supported yet',
     );
 
     const binary = await send(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]), 'chart.png');

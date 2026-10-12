@@ -174,8 +174,8 @@ describe('the comparisons on the three cards', () => {
 
 describe('money is counted in cents, not in doubles', () => {
   it('rounds to cents before deciding whether there is a base at all', () => {
-    // The defect this pins, from a real account: with one month of history, the
-    // balance before it was exactly zero, computed as balance minus the month's net.
+    // The defect this pins: with one month of history, the balance before it was
+    // exactly zero, computed as balance minus the month's net.
     // As doubles that subtraction can leave a tiny residue instead, and the percentage
     // taken against it rendered as an absurdly large number. Rounding first is what
     // makes the null branch reachable exactly where it is needed.

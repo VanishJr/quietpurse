@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { categorize } from '../categorizer';
-import { CURRENCY_CODE, currencyKey } from '../currency';
+import { CURRENCY_CODE, currencyKey, sameCurrency } from '../currency';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
@@ -272,7 +272,7 @@ export function sniff(bytes: Buffer): ImportSourceType {
   while (i < bytes.length && blank.has(bytes[i])) i++;
   if (bytes[i] === 0x3c) {
     throw new Error(
-      `this looks like XML or HTML, not a ${FORMATS} statement. CAMT.053 and MT940 are not supported yet`,
+      `this looks like XML or HTML, not a ${FORMATS} statement. Export the statement in one of those formats from your online banking and upload that. CAMT.053 and MT940 are not supported yet`,
     );
   }
   // A bank's own export can be a signed container: the whole statement inside a CMS
@@ -819,8 +819,8 @@ export type StatedBalances =
        * The series and currency of every row the status filter dropped that stated a
        * balance anyway. The gate covers exactly the rows `onlyWhen` accepts, and that
        * alignment holds only while "has a running balance" and "is accepted" are the
-       * same predicate. That was measured true of the real export, whose pending rows
-       * leave the cell empty. This is the detector for the day a bank diverges from
+       * same predicate. That holds for the bank's export, whose pending rows leave the
+       * cell empty. This is the detector for the day a bank diverges from
        * it, and it is carried per row rather than as a count because a dropped
        * row punches its hole in ONE running balance: which one it names decides
        * whether a break somewhere else in the file is explained by it or not.
@@ -1157,11 +1157,11 @@ async function mapAndStore(
       .filter(Boolean)
       .join(' ')
       .replace(/\s+/g, ' ');
-    // Only a currency the file states. The account's own, taken for an empty cell, is
-    // not checked: an earlier version may have stored one this pattern refuses, and
-    // refusing it would refuse every file without a currency column for that account.
+    // Only a currency the file states, and never the account's own, whether a cell is
+    // empty or names it: an earlier version may have stored one this pattern refuses,
+    // and refusing it would refuse every file in that account's currency.
     const stated = statedCurrency(row);
-    if (stated && !CURRENCY_CODE.test(stated)) {
+    if (stated && !CURRENCY_CODE.test(stated) && !sameCurrency(stated, account.currency)) {
       throw new Error(notACurrency(sheet, i, row[currencyCol]));
     }
     const currency = rowCurrency(row);
@@ -1600,8 +1600,8 @@ type SheetBalances =
  * closing one, and that each half of them comes to what the document printed for it.
  *
  * Summed in minor units rather than decimals for the reason money.ts gives, and here
- * it is not theoretical: a real statement's amounts summed as decimals miss its
- * closing balance by a fraction of a cent, and an exact comparison refuses that.
+ * it is not theoretical: a statement's amounts summed as decimals can miss its closing
+ * balance by a fraction of a cent, and an exact comparison refuses that.
  * Exactly, with no tolerance anywhere: one cent of slack hides a systematically
  * dropped fee on a small statement and lets a drifted template import plausible
  * numbers, which is the one outcome worse than refusing.

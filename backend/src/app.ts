@@ -456,7 +456,8 @@ app.post('/api/accounts', async (req, res) => {
     name: parsed.data.name,
     // absent means the base currency, never a guess made on the client's
     // behalf. This is the one path into accounts.currency that currencyCode does not
-    // see: the fallback is validated at the settings door, so the asymmetry is
+    // see: the settings door and config.ts check the fallback, and one an earlier
+    // version stored is kept as every stored currency is, so the asymmetry is
     // deliberate rather than missed.
     currency: parsed.data.currency ?? (await currentBaseCurrency()).toUpperCase(),
   });

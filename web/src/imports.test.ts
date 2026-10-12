@@ -69,8 +69,8 @@ describe('balanceClaim', () => {
   });
 
   /**
-   * The owner's real July export: two products under one balance column, one of them
-   * a single row. 315.00 of that opening and 445.00 of that closing were compared with
+   * A two-product export: two products under one balance column, one of them a single
+   * row. 315.00 of that opening and 445.00 of that closing were compared with
    * nothing, and the card used to say the rows ran unbroken from one to the other
    * without qualification.
    */

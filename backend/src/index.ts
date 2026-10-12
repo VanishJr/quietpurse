@@ -1,7 +1,7 @@
 import os from 'os';
 import { app } from './app';
 import { type Stale, reclassifyIfStale } from './classify';
-import { config } from './config';
+import { config, configRefused, hostRefusal } from './config';
 import { closeDatabase, connectDatabase, seedDefaults } from './db';
 import { backfillBaseAmounts } from './fxrates';
 import { acquireLock, releaseLock } from './lock';
@@ -14,6 +14,8 @@ const SAID: Record<Stale, string> = {
 };
 
 async function main(): Promise<void> {
+  // ahead of the lock, so a start refused for its settings leaves nothing behind
+  if (configRefused.length > 0) throw new Error(configRefused.join('. '));
   await acquireLock();
   await assertStorageWritable();
   await connectDatabase();
@@ -28,7 +30,10 @@ async function main(): Promise<void> {
     else await backfillBaseAmounts();
   })().catch((e: Error) => logClassify.error(`recompute failed: ${reasonFirst(e)}`));
 
-  const server = app.listen(config.port, config.host, () => {
+  // Express calls this on a failed listen too, with the error, which the handler below
+  // reports; without the return the start would announce an address it does not hold
+  const server = app.listen(config.port, config.host, (error?: Error) => {
+    if (error) return;
     logger.info(`Quietpurse is at http://localhost:${config.port}`);
     logger.info(`your data is in ${config.home}`);
     if (config.host !== '127.0.0.1' && config.host !== 'localhost') {
@@ -46,7 +51,7 @@ async function main(): Promise<void> {
     logger.error(
       e.code === 'EADDRINUSE'
         ? `port ${config.port} is taken. Stop what holds it, or start with PORT=<another port>`
-        : `could not listen: ${e.message}`,
+        : (hostRefusal(e.code) ?? `could not listen: ${e.message}`),
     );
     void shutdown(1);
   });

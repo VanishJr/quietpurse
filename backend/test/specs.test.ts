@@ -18,9 +18,9 @@ import { commentsOf, type Comment } from '../scripts/comment-tokens';
  * both read one way, and everything outside it is refused by name.
  *
  * The unpublished set is DERIVED from .gitignore, never listed here. The rule is
- * "ignored by .gitignore" and never "is a root-level .md": AGENTS.md is a root-level
- * .md and is published, beside root-level notes that are not. A list maintained by
- * hand beside the thing it describes gets that backwards and still looks right.
+ * "ignored by .gitignore" and never a shape such as "is a root-level .md": AGENTS.md
+ * is a root-level .md and is published. A list maintained by hand beside the thing it
+ * describes gets that backwards and still looks right.
  */
 const ROOT = path.resolve(process.cwd(), '..');
 
@@ -470,9 +470,13 @@ const parseGitignore = (text: string): IgnoreRule[] =>
  * A trailing slash is how a caller says the last level is a directory. A directory
  * citation in a spec says it that way, and so does this file's own walk. Without it the
  * data folder is tested as a file and every dirOnly pattern declines to look at it.
+ *
+ * A `.` or `..` level is where a pointer is written from and never an entry git lists,
+ * so no pattern reads it. Read as a name, the rule for folders that start with a dot
+ * takes every `./` for one.
  */
 const isIgnored = (p: string, rules: readonly IgnoreRule[]): boolean => {
-  const parts = p.split('/').filter((part) => part !== '');
+  const parts = p.split('/').filter((part) => part !== '' && part !== '.' && part !== '..');
   const trailing = p.endsWith('/');
   let ignored = false;
   for (let i = 0; i < parts.length; i += 1) {
@@ -493,17 +497,10 @@ const RULES = parseGitignore(GITIGNORE);
 /**
  * NOT the deny set, which is derived. This is what the derivation has to come out denying, so
  * a .gitignore that stops ignoring them empties it rather than passing over every spec in silence.
- * Each is present and untracked here, which is why existence separates none of them from a
+ * Where one is on disk it is untracked, which is why existence separates none of them from a
  * published file.
  */
-const KNOWN_UNPUBLISHED = [
-  'ROADMAP.md',
-  'DEBT.md',
-  'CLAUDE.md',
-  'REDESIGN-BACK-DEBT.md',
-  'Report.md',
-  'Strategy.md',
-];
+const KNOWN_UNPUBLISHED = ['.notes/draft.md', '.vscode/settings.json', '.env', 'statement.csv'];
 
 /**
  * The one walk both sets are read off: the specs on disk, and every source file whose
@@ -772,13 +769,17 @@ describe('the rules those clauses are built from', () => {
     expect(denied, 'these are tracked and published').toEqual([]);
   });
 
+  it('reads a `.` or `..` level as where a pointer is written from, not as a folder', () => {
+    const denied = ['./pglite.ts', '../src/app.ts', './', '../'].filter((p) => isIgnored(p, RULES));
+    expect(denied, 'the rule for folders that start with a dot took a relative pointer for one').toEqual([]);
+  });
+
   it('denies what only this machine can open', () => {
     const permitted = [
       ...KNOWN_UNPUBLISHED,
-      '.agents/tasks/048-summary-per-account/decisions.md',
-      '.claude/agents/reviewer.md',
-      '.claude/settings.local.json',
-      '.thinkrail/context/TASK-x.md',
+      '.notes/import-ideas/decisions.md',
+      '.cache/context/x.md',
+      'backend/.vscode/launch.json',
       'backend/data/report_03-09-2026_11-22-33.pdf',
     ].filter((p) => !isIgnored(p, RULES));
     expect(permitted).toEqual([]);
@@ -812,7 +813,7 @@ describe('the rules those clauses are built from', () => {
     'In a link: [the harness](backend/test/helpers.ts).',
     'Cited: backend/src/app.ts:12.',
     'A directory, backticked: `backend/data/`.',
-    'A directory, bare: .agents/tasks/048-summary-per-account/ and text after it.',
+    'A directory, bare: .notes/import-ideas/ and text after it.',
     'A directory in a link: [the module](backend/src/db/).',
     'A URL to a file: https://example.com/schema.json, which is no pointer at all.',
     'A URL to a directory: https://example.com/docs/, which is no pointer either.',
@@ -824,8 +825,8 @@ describe('the rules those clauses are built from', () => {
    * leaves the deny set silently while the derivation still looks populated.
    */
   const COMPILED: ReadonlyArray<readonly [string, string, boolean]> = [
-    ['.claude/*', '.claude/agents', true],
-    ['.claude/*', '.claude/agents/reviewer.md', false],
+    ['.notes/*', '.notes/drafts', true],
+    ['.notes/*', '.notes/drafts/plan.md', false],
     ['*.pdf', 'report.pdf', true],
     ['*.pdf', 'report.md', false],
     ['**/build', 'build', true],
@@ -861,12 +862,12 @@ describe('the rules those clauses are built from', () => {
       'backend/test/',
       'backend/src/',
       'backend/data/',
-      '.agents/tasks/048-summary-per-account/',
+      '.notes/import-ideas/',
     ]);
   });
 
   it('denies a directory only this machine can open', () => {
-    const permitted = ['backend/data/', '.agents/tasks/048-summary-per-account/', 'docs/'].filter(
+    const permitted = ['backend/data/', '.notes/import-ideas/', '.vscode/'].filter(
       (p) => !isIgnored(p, RULES),
     );
     expect(
@@ -961,7 +962,7 @@ describe('the rules those clauses are built from', () => {
     ['an interior colon', fenced([...HEAD.slice(0, 2), 'title: http://x/y'])],
     ['a clock', fenced([...HEAD.slice(0, 2), 'title: 1:30'])],
     ['an interior hash', fenced([...HEAD.slice(0, 2), 'title: foo#bar'])],
-    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 2), 'title: .agents'])],
+    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 2), 'title: .notes'])],
   ];
 
   it('refuses every frontmatter shape the spec tools read differently, or not at all', () => {
@@ -1177,21 +1178,21 @@ describe('the rules those clauses are built from', () => {
       "const refusal = 'row 2: could not parse the date';",
       "const bank = 'Q1 Bank';",
       'const doc = `/** ROADMAP row 65 */`;',
-      "const where = '.agents/tasks/054-x/decisions.md';",
+      "const where = '.notes/import-ideas/decisions.md';",
       '// row 54',
       'const a = 1;',
-      '/** see DEBT.md */',
+      '/** see statement.csv */',
       'const b = 2;',
     ]);
     expect(source.comments.map((c) => [c.line, c.text])).toEqual([
       [5, '// row 54'],
-      [7, '/** see DEBT.md */'],
+      [7, '/** see statement.csv */'],
     ]);
     expect(planReferencesIn(source)).toEqual([
       'crafted.ts:5 says "row 54" - the plan is not in the tree a reader has; write the reason the reference stood for, or nothing',
     ]);
     expect(deadPathsIn(source)).toEqual([
-      'crafted.ts:7 names DEBT.md, which .gitignore keeps out of the tree - it exists here and nowhere a reader is; state the rule and cite nothing',
+      'crafted.ts:7 names statement.csv, which .gitignore keeps out of the tree - it exists here and nowhere a reader is; state the rule and cite nothing',
     ]);
 
     const jsx = crafted('crafted.tsx', [
@@ -1219,9 +1220,9 @@ describe('the rules those clauses are built from', () => {
 
   it('denies a path only this machine can open inside a comment, and permits a published one', () => {
     const source = crafted('crafted.ts', [
-      '/** see DEBT.md */',
+      '/** see statement.csv */',
       'const a = 1;',
-      '// .agents/tasks/054-x/decisions.md',
+      '// .notes/import-ideas/decisions.md',
       'const b = 2;',
       '/* backend/data/ */',
       'const c = 3;',
@@ -1229,9 +1230,9 @@ describe('the rules those clauses are built from', () => {
       'const d = 4;',
     ]);
     expect(deadPathsIn(source).map((r) => r.split(',')[0])).toEqual([
-      'crafted.ts:1 names DEBT.md',
-      'crafted.ts:3 names .agents/tasks/054-x/decisions.md',
-      'crafted.ts:3 names .agents/tasks/054-x/',
+      'crafted.ts:1 names statement.csv',
+      'crafted.ts:3 names .notes/import-ideas/decisions.md',
+      'crafted.ts:3 names .notes/import-ideas/',
       'crafted.ts:5 names backend/data/',
     ]);
   });

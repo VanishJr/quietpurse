@@ -34,12 +34,10 @@ const page = (...printed: string[]): string[] => [
 
 describe('issuerName: what appears on every page', () => {
   /**
-   * The measured shape of the owner's own N26 statement, and the whole of the evidence
-   * the ranking rule rests on: the account's IBAN once per page across six pages, a
-   * counterparty's twice a page across four. The counterparty is the more frequent by two
-   * to one, and it is at a bank this directory also knows. A rule that ranked by
-   * occurrences would name the counterparty's bank, confidently, to someone holding an
-   * N26 statement.
+   * The shape the ranking rule rests on: a statement prints the account's own IBAN once
+   * per page, and a counterparty at a bank this directory also knows can be printed more
+   * often than that. A rule that ranked by occurrences would name the counterparty's
+   * bank, confidently, to someone holding an N26 statement.
    */
   it("names the account's bank and not the louder counterparty", () => {
     const pages = [1, 2, 3, 4, 5, 6].map((n) =>
@@ -93,7 +91,7 @@ describe('issuerName: what appears on every page', () => {
 
 describe('issuerName: what counts as an IBAN', () => {
   /**
-   * The real C24 statement prints the IBAN after `IBAN:` with `BIC: …` on the baseline
+   * A C24 statement prints the IBAN after `IBAN:` with `BIC: …` on the baseline
    * just below it, which this parser groups as two lines. Other banks print the grouped
    * spelling. All three spellings have to reach the same bank. The one that would catch
    * a greedy run replacing the fixed-length slice is the middle one: squashing THAT line

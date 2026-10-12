@@ -1,9 +1,10 @@
 import pino from 'pino';
+import { config } from './config';
 
-const pretty = process.env.LOG_PRETTY === '1' || (process.stdout.isTTY && process.env.LOG_PRETTY !== '0');
+const pretty = config.logPretty ?? Boolean(process.stdout.isTTY);
 
 export const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
+  level: config.logLevel,
   base: undefined, // no pid/hostname: one process, one host
   timestamp: pino.stdTimeFunctions.isoTime,
   ...(pretty

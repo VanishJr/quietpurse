@@ -173,7 +173,7 @@ describe('a CSV statement: pipeline and deduplication', () => {
   });
 
   /**
-   * The `PENDING` row states a balance, which the real export never does. It is kept as
+   * The `PENDING` row states a balance, which the bank's export never does. It is kept as
    * found, because it is the case the gate's own discriminator was written for: the
    * balance column covers a row this import drops, so the gate turns itself off rather
    * than reading a run it does not cover. `importAndConfirm` hands back no summary, so
@@ -328,9 +328,9 @@ describe('a bank export in a language the preset also accepts', () => {
 
   /**
    * The balance column reads 195.30 and not 195.80, and the pending row states none. Both
-   * were repaired towards what the real export was measured to do: this fixture broke by
+   * were repaired towards what the bank's export does: this fixture broke by
    * EXACTLY the fee, which is the arithmetic from before fees were folded in, and the
-   * bank's own running balance disproves it; and the real export leaves the cell empty on
+   * bank's own running balance disproves it; and the bank's export leaves the cell empty on
    * every `В ОБРАБОТКЕ` row. Tuning either number to make the gate pass would have put
    * that defect back inside a test.
    */
@@ -751,7 +751,7 @@ describe('a fee the statement states beside the amount', () => {
   });
 
   /**
-   * The shape observed live: a real charge whose money sits in a column this file has
+   * The shape this pins: a genuine charge whose money sits in a column this file has
    * not got. The row is told what is known: the amount cell read zero and nothing
    * stated a fee. It is not told that the export is missing a column, which is a guess
    * a genuine 0.00 row would make false.
@@ -923,9 +923,8 @@ describe('a fee the statement states beside the amount', () => {
  * run. A row the parser dropped or misread splits the run in two, and the gap where
  * it splits is the missing money.
  *
- * Every fixture below is fabricated. The first case's opening, closing and net are the
- * ones the owner's real export was measured to state, with two products under one
- * balance column, and the PDF of the same month prints the same figures about itself.
+ * Every fixture below is fabricated. The first case has two products under one balance
+ * column, the shape the bank's export has.
  */
 describe("the statement's own running balance, on the sheet path", () => {
   const HEADER =
@@ -987,7 +986,7 @@ describe("the statement's own running balance, on the sheet path", () => {
   };
 
   // Текущий 72.40 -> 66.72 -> 166.72 -> 134.85 and Сбережения 315.00 -> 445.00, in
-  // the real export's own shape: two products interleaved under one balance column,
+  // the bank export's own shape: two products interleaved under one balance column,
   // the single-row one first, and the file in no date order at all
   const SAVINGS: Row = {
     description: 'Savings top-up',
@@ -1488,7 +1487,7 @@ describe("the statement's own running balance, on the sheet path", () => {
     });
 
     /**
-     * The real export's own shape through real ExcelJS bytes: a product of three rows
+     * The bank export's own shape through real ExcelJS bytes: a product of three rows
      * beside a product of one. The counting rule is in checkSheet and the workbook
      * reaches it through the other branch of the Cell seam, so this is where a float
      * cell reading as its own series would show up as a count rather than as a pair.

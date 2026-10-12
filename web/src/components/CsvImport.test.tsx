@@ -677,7 +677,7 @@ describe('the summary panel', () => {
 
   /**
    * A pair derived from the file's own running balances needs a different sentence.
-   * On the real two-product export neither number appears in any cell, so a card
+   * On a two-product export neither number appears in any cell, so a card
    * saying "the statement's own balances: 387.40" sends the user to compare it with a
    * column that reads 134.85. The closing claim shrinks too. Both ends come out of
    * these same rows, so a row lost from either END moves that end instead of breaking

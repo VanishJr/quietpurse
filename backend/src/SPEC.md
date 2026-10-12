@@ -74,9 +74,10 @@ value, and the parser upper-cases it where it reads it.
 `backend/src/currency.ts` is what the account doors, the settings door and the import accept, so a
 statement cannot store a currency an account would refuse. A currency cell that does not match
 refuses the whole file; the confirm in `backend/src/db` refuses rows an earlier version staged with
-one. Both let the account's own currency through unchecked, because a row takes it for an empty cell
-and an earlier version may have stored one the pattern refuses. The two exemptions move together: one
-without the other stages rows the confirm then refuses, or refuses a file the confirm would take.
+one. Both let the account's own currency through unchecked, compared through `sameCurrency`, whether
+a row takes it for an empty cell or the file names it: an earlier version may have stored one the
+pattern refuses. The two exemptions move together: one without the other stages rows the confirm then
+refuses, or refuses a file the confirm would take.
 
 **A stored currency is compared in one form.** An earlier version could store `eur`, and it is the
 same currency as `EUR`. Every comparison and grouping of a currency read from the database goes
@@ -232,7 +233,11 @@ row for the family patterns. The environment only seeds them, so editing it chan
 exists. After that only the base currency reads the environment again, as the fallback for a missing
 row; the owner names and family patterns have no fallback. So `backend/src/config.ts` answers for
 none of the others at runtime, and the Settings screen is where a person changes these values.
-The settings door, the table and the screen all rely on this split, and none of them states it.
+The settings door, the table and the screen all rely on this split, and none of them states it. The
+environment's base currency is checked against `CURRENCY_CODE` in `backend/src/config.ts`, because an
+account created without a currency takes the base currency unchecked. A value set there that does not
+read stops the start, as it does for every setting that file reads against a fixed set; only an empty
+one takes the default.
 
 **A PostgreSQL connection string changes the engine.** `backend/src/db` reads it to open the database,
 and `backend/src/lock.ts` reads it to claim no file, so the two must read it the same way.

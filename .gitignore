@@ -8,27 +8,10 @@ coverage/
 !.env.example
 backend/secrets/
 
-# personal notes and internal planning, not part of the project
-Report.md
-Strategy.md
-ROADMAP.md
-DEBT.md
-SETTINGS_REDESIGN_PLAN.md
-docs/
-# what the auth redesign needs from a server that cannot do it yet, and the decisions
-# taken while drawing it: a working note on the same footing as the plan above.
-REDESIGN-BACK-DEBT.md
-
-# a contributor's own AI-assistant setup and working notes. Whole directories, not a list:
-# a task's notes are the owner's words about their own data. AGENTS.md is the published
-# half and stays tracked.
-.claude/
-.agents/
-CLAUDE.md
-# the spec tool's working files: the task-specs it writes under context/ and whatever else
-# it keeps per checkout. It seeds a nested .gitignore there, which specs.test.ts's walk
-# never reads; this root line is what keeps that walk out.
-.thinkrail/
+# per-checkout tool folders and notes, never published: every folder whose name
+# starts with a dot, except the one this repository publishes
+.*/
+!.github/
 
 # personal data: database, backups, bank statements
 backend/data/
