@@ -1,3 +1,4 @@
+import { sameCurrency } from './currency';
 import {
   currentBaseCurrency,
   getGoal,
@@ -133,7 +134,7 @@ const unavailableAccounts = (
 ): boolean =>
   goal.accountIds.some((id) => {
     const account = context.accounts.get(id);
-    return !account || account.currency !== goal.currency;
+    return !account || !sameCurrency(account.currency, goal.currency);
   });
 
 const accountNames = (accountIds: string[], context: GoalContext): string[] =>
@@ -144,7 +145,7 @@ const financialDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const rows = completeRows(context.months, context.now, goal.windowMonths);
-  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
+  const currencyChanged = !sameCurrency(goal.baseCurrency, context.baseCurrency);
   const hasUnconverted = rows.some((row) => row.unconverted > 0);
   const oneOffRows = completeRows(context.months, context.now, ONE_OFF_MONTHS);
   const oneOffMonthly =
@@ -249,7 +250,7 @@ const debtDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const account = context.accounts.get(goal.accountId);
-  const missing = !account || account.currency !== goal.currency;
+  const missing = !account || !sameCurrency(account.currency, goal.currency);
   const currentDebt = missing ? null : round2(Math.max(-account.balance, 0));
   const amountToPay = goal.startingDebt - goal.targetDebt;
   const percentage =
@@ -287,7 +288,7 @@ const monthlyIncomeDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const rows = completeRows(context.months, context.now, goal.windowMonths);
-  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
+  const currencyChanged = !sameCurrency(goal.baseCurrency, context.baseCurrency);
   const unavailable =
     currencyChanged || rows.length === 0 || rows.some((row) => row.unconverted > 0);
   const values = rows.map((row) =>
@@ -353,7 +354,7 @@ const categoryDetail = (
   context: GoalContext,
 ): GoalDetail => {
   const row = context.categories.get(goal.category);
-  const currencyChanged = goal.baseCurrency !== context.baseCurrency;
+  const currencyChanged = !sameCurrency(goal.baseCurrency, context.baseCurrency);
   const unavailable =
     currencyChanged || context.currentMonthRows === 0 || (row?.unconverted ?? 0) > 0;
   const current = unavailable ? null : round2(row?.total ?? 0);

@@ -6,7 +6,9 @@ import {
   goalListSchema,
   goalUpdateSchema,
 } from './goals';
+import { currencyKey, currencySchema } from './currency';
 
+export * from './currency';
 export * from './goals';
 
 /**
@@ -83,7 +85,7 @@ export const accountSchema = z.strictObject({
   id: z.string(),
   provider: providerSchema,
   name: z.string(),
-  currency: z.string(),
+  currency: currencySchema,
   balance: z.number(),
   iban: z.string().optional(),
   hidden: z.boolean(),
@@ -129,7 +131,7 @@ export const transactionSchema = z.strictObject({
   provider: providerSchema,
   /** decimal amount in this row's `currency`; spending < 0, income > 0 */
   amount: z.number(),
-  currency: z.string(),
+  currency: currencySchema,
   /** ISO 8601 */
   date: calendarDaySchema,
   description: z.string(),
@@ -225,13 +227,13 @@ export const incomeSourceTotalSchema = z.strictObject({
 export type IncomeSourceTotal = z.infer<typeof incomeSourceTotalSchema>;
 
 /** The currencies among this account's rows that are not its own - all time, not the window. */
-const otherCurrenciesSchema = z.array(z.string());
+const otherCurrenciesSchema = z.array(currencySchema);
 
 export const summarySchema = z.strictObject({
   scope: z.literal('all'),
   from: z.string(),
   to: z.string(),
-  baseCurrency: z.string(),
+  baseCurrency: currencySchema,
   totals: summaryTotalsSchema,
   byCategory: z.array(categorySummarySchema),
   incomeByCategory: z.array(categorySummarySchema),
@@ -244,7 +246,7 @@ export const accountSummarySchema = z.strictObject({
   from: z.string(),
   to: z.string(),
   accountId: z.string(),
-  currency: z.string(),
+  currency: currencySchema,
   otherCurrencies: otherCurrenciesSchema,
   totals: summaryTotalsSchema,
   byCategory: z.array(categorySummarySchema),
@@ -294,7 +296,7 @@ export const monthlySummarySchema = z.strictObject({
   scope: z.literal('all'),
   from: z.string(),
   to: z.string(),
-  baseCurrency: z.string(),
+  baseCurrency: currencySchema,
   months: z.array(monthTotalsSchema),
 });
 export type MonthlySummary = z.infer<typeof monthlySummarySchema>;
@@ -304,7 +306,7 @@ export const accountMonthlySummarySchema = z.strictObject({
   from: z.string(),
   to: z.string(),
   accountId: z.string(),
-  currency: z.string(),
+  currency: currencySchema,
   otherCurrencies: otherCurrenciesSchema,
   months: z.array(accountMonthTotalsSchema),
 });
@@ -349,14 +351,14 @@ export const recurringGroupSchema = z.strictObject({
 export type RecurringGroup = z.infer<typeof recurringGroupSchema>;
 
 export const recurringSummarySchema = z.strictObject({
-  baseCurrency: z.string(),
+  baseCurrency: currencySchema,
   monthlyTotal: z.number(),
   groups: z.array(recurringGroupSchema),
 });
 export type RecurringSummary = z.infer<typeof recurringSummarySchema>;
 
 export const conversionSchema = z.strictObject({
-  baseCurrency: z.string(),
+  baseCurrency: currencySchema,
   converting: z.boolean(),
   unconverted: z.number(),
 });
@@ -364,7 +366,7 @@ export type Conversion = z.infer<typeof conversionSchema>;
 
 export const appSettingsSchema = z.strictObject({
   /** base currency of all totals; changing it requires recomputing base_amount */
-  baseCurrency: z.string(),
+  baseCurrency: currencySchema,
   ownerNames: z.array(z.string()),
 });
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -432,7 +434,7 @@ export const seriesCountsSchema = z.strictObject({
 export type SeriesCounts = z.infer<typeof seriesCountsSchema>;
 
 export const statementTotalSchema = z.strictObject({
-  currency: z.string(),
+  currency: currencySchema,
   net: z.number(),
 });
 export type StatementTotal = z.infer<typeof statementTotalSchema>;
@@ -440,7 +442,7 @@ export type StatementTotal = z.infer<typeof statementTotalSchema>;
 export const statementBalancesSchema = z.strictObject({
   opening: z.number(),
   closing: z.number(),
-  currency: z.string(),
+  currency: currencySchema,
   series: seriesCountsSchema.optional(),
 });
 export type StatementBalances = z.infer<typeof statementBalancesSchema>;
@@ -661,3 +663,81 @@ export type JsonRoute = {
   [K in Route]: (typeof ANSWERS)[K] extends { kind: 'json' } ? K : never;
 }[Route];
 export type AnswerBody<R extends JsonRoute> = z.output<(typeof ANSWERS)[R]['body']>;
+
+type Def = {
+  type: string;
+  shape?: Record<string, z.ZodType>;
+  element?: z.ZodType;
+  options?: readonly z.ZodType[];
+  innerType?: z.ZodType;
+  in?: z.ZodType;
+};
+
+const defOf = (schema: z.ZodType): Def => (schema as unknown as { _zod: { def: Def } })._zod.def;
+
+const childrenOf = (def: Def): z.ZodType[] => {
+  switch (def.type) {
+    case 'object':
+      return Object.values(def.shape ?? {});
+    case 'array':
+      return [def.element!];
+    case 'union':
+      return [...(def.options ?? [])];
+    case 'optional':
+    case 'nullable':
+    case 'readonly':
+    case 'default':
+      return [def.innerType!];
+    case 'pipe':
+      return [def.in!];
+    default:
+      return [];
+  }
+};
+
+/** Whether a schema declares a currency anywhere under it; a body that declares none is sent as it is. */
+const holding = new WeakMap<z.ZodType, boolean>();
+const holdsCurrency = (schema: z.ZodType): boolean => {
+  const known = holding.get(schema);
+  if (known !== undefined) return known;
+  const holds = schema === currencySchema || childrenOf(defOf(schema)).some(holdsCurrency);
+  holding.set(schema, holds);
+  return holds;
+};
+
+const folded = (schema: z.ZodType, value: unknown): unknown => {
+  if (!holdsCurrency(schema)) return value;
+  if (schema === currencySchema) return typeof value === 'string' ? currencyKey(value) : value;
+  const def = defOf(schema);
+  switch (def.type) {
+    case 'object': {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+      const shape = def.shape ?? {};
+      return Object.fromEntries(
+        Object.entries(value).map(([key, v]) => [key, Object.hasOwn(shape, key) ? folded(shape[key], v) : v]),
+      );
+    }
+    case 'array':
+      return Array.isArray(value) ? value.map((v) => folded(def.element!, v)) : value;
+    // every option in turn: a field named the same is a currency in all of them or in none,
+    // which backend/test/wire.test.ts holds
+    case 'union':
+      return (def.options ?? []).reduce<unknown>((v, option) => folded(option, v), value);
+    case 'optional':
+    case 'nullable':
+    case 'readonly':
+    case 'default':
+      return folded(def.innerType!, value);
+    case 'pipe':
+      return folded(def.in!, value);
+    default:
+      return value;
+  }
+};
+
+/**
+ * The body as the route sends it: every value declared with currencySchema in currencyKey's form,
+ * so a client compares currencies without knowing what an earlier version stored.
+ */
+export const sentForm = <R extends JsonRoute>(route: R, body: AnswerBody<R>): AnswerBody<R> =>
+  folded(ANSWERS[route].body, body) as AnswerBody<R>;

@@ -341,7 +341,7 @@ describe('xlsx: finding the statement', () => {
     expect(failed[0]).toMatchObject({
       status: 'failed',
       sourceType: 'xlsx',
-      parserVersion: 3,
+      parserVersion: 4,
       transactions: 0,
     });
     expect(await listTransactions({ accountId: await accountFor('Odd Columns Bank') })).toEqual([]);

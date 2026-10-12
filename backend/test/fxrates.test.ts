@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getFxRate, saveFxRate } from '../src/db';
-import { ecbProvider, nbuProvider, resolveRate } from '../src/fxrates';
+import { ecbProvider, nbuProvider, rateToUah, resolveRate } from '../src/fxrates';
 
 const realFetch = globalThis.fetch;
 
@@ -48,6 +48,15 @@ describe('resolveRate: ECB for its own currencies, NBU for the hryvnia', () => {
     expect(await resolveRate('2026-03-02', 'EUR', 'EUR')).toBe(1);
     // the ECB does not know XXX; the NBU returns nothing (network fails) -> the network error propagates
     await expect(resolveRate('2026-03-02', 'XXX', 'EUR')).rejects.toThrow();
+  });
+
+  it('a currency an earlier version stored in lower case is the same currency, without network', async () => {
+    globalThis.fetch = (() => Promise.reject(new Error('network disabled'))) as typeof fetch;
+    await saveFxRate('2026-03-03', 'USD:EUR', 0.91);
+
+    expect(await resolveRate('2026-03-03', 'eur', 'EUR')).toBe(1);
+    expect(await resolveRate('2026-03-03', 'usd', 'EUR')).toBe(0.91);
+    expect(await rateToUah('uah', '2026-03-03')).toBe(1);
   });
 
   it('supports: ECB by its static list, NBU always tries', () => {

@@ -202,10 +202,10 @@ the text primitives in `csv.ts` for a cell that arrives as text, and a workbook'
 the presets in `csv.ts` and `resolveColumns` in `statement.ts`. An edit there can change another
 format and must move that format's number.
 
-**Only the PDF importer's refusals are checked for length, and that is a gap.**
+**Only the PDF importer's refusals are checked for length as a set, and that is a gap.**
 `backend/test/refusal-set.test.ts` requires every refusal `pdf.ts` throws to be named in
 `refusals()`, where its length is checked against what the data layer keeps. `statement.ts` and
-`xlsx.ts` compose refusals inline for the same field, and nothing measures them.
+`xlsx.ts` compose refusals inline for the same field, and no such set holds them.
 
 **No note producer is held to its budget.** The arithmetic is checked, the next producer is not, and
 a note over budget evicts a clause the person needed. The block above `CELL_QUOTE_MAX` says why a

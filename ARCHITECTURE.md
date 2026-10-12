@@ -52,7 +52,7 @@ above the container test inside `sniff`: read it before touching the function.
 | Module | What it owns |
 |---|---|
 | `backend/src/app.ts` | Every route, the body parsers, the built client. Separate from `backend/src/index.ts` so the routes can be tested over real HTTP |
-| `backend/src/wire/` | Every route's answer as zod schemas, and the vocabularies and bounds the client builds against. The backend infers its types from it; the client imports them type-only and pins its copies of the bounds to them. Imports only zod |
+| `backend/src/wire/` | Every route's answer as zod schemas, sent with each currency in one form, and the vocabularies and bounds the client builds against. The backend infers its types from it; the client imports them type-only and pins its copies of the bounds to them. Imports only zod |
 | `backend/src/index.ts` | Start: the lock, the writable-folder check, open and migrate, seed, listen. A recompute runs in the background so the start does not wait for exchange rates. Ctrl+C or SIGTERM closes everything |
 | `backend/src/lock.ts` | One process per folder: the claim by exclusive create, the takeover of a stale lock under a marker, and a release that removes only its own pid |
 | `backend/src/config.ts` | `.env`, with a working default for everything; `DATABASE_URL` swaps the engine |
@@ -71,7 +71,7 @@ above the container test inside `sniff`: read it before touching the function.
 | `backend/src/transaction-description.ts` | The second reading of a stored description: the value-date suffix, the similarity key, and one predicate per rule kind, shared by the classifier, the previews and the counts |
 | `backend/src/goals.ts` | Every goal's progress, in one batch. The API owns every goal figure and the client only formats it. A new installation has no goals until the person creates one |
 | `backend/src/fxrates.ts`, `backend/src/rates.ts` | The ECB's rates (through Frankfurter) and the NBU's, and the backfill of base-currency amounts. Monobank's public rates, for the classifier's check of cross-currency transfers |
-| `backend/src/currency.ts` | ISO 4217 numeric codes to letter codes |
+| `backend/src/currency.ts` | ISO 4217 numeric codes to letter codes, the pattern a letter code must match wherever one enters, and the one form two currencies are compared in |
 | `backend/src/money.ts` | Decimal amounts to integer cents and back. Amounts are stored and reconciled in cents |
 | `backend/src/documents.ts` | Stored statements: a file's name, `putDocument`, `getDocument`, `deleteDocument`, the hash check on read |
 | `backend/src/storage.ts` | The file store under it: an atomic write, and a key shape that refuses rather than cleans |

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { categorize } from '../categorizer';
+import { CURRENCY_CODE, currencyKey } from '../currency';
 import {
   ERROR_DETAIL_MAX,
   ImportSourceType,
@@ -243,7 +244,11 @@ export function sniff(bytes: Buffer): ImportSourceType {
   const starts = (...signature: number[]): boolean =>
     signature.every((b, i) => bytes[i] === b);
 
-  if (bytes.length === 0) throw new Error('the uploaded file is empty');
+  if (bytes.length === 0) {
+    throw new Error(
+      'this file is empty. Export the statement again from your online banking and upload the new file',
+    );
+  }
   if (starts(0x50, 0x4b, 0x03, 0x04)) return 'xlsx';
   if (starts(0x25, 0x50, 0x44, 0x46)) return 'pdf';
   if (starts(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) {
@@ -957,11 +962,14 @@ async function mapAndStore(
   fileHash: string,
 ): Promise<StatementImportResult> {
   const { sheet, preset } = parsed;
-  if (sheet.rows.length < 2) throw new Error('the file has no data rows (header only, or empty)');
+  if (sheet.rows.length === 0) throw new Error(NO_TRANSACTIONS);
 
   const header = sheet.rows[0].map((c) => cellText(c).trim());
   const resolved = resolveColumns(header, preset, parsed.mapping);
   if (!resolved.ok) throw new Error(resolved.error);
+  // after the header resolves: a lone line that does not is a transaction with no header
+  // above it, and telling that file it has no transactions would be false
+  if (sheet.rows.length < 2) throw new Error(NO_TRANSACTIONS);
   const {
     mapping,
     dateCol,
@@ -1067,13 +1075,13 @@ async function mapAndStore(
   const drop = (kind: DropKind): void => {
     dropped[kind]++;
   };
+  const statedCurrency = (row: Cell[]): string =>
+    currencyCol >= 0 ? cellText(row[currencyCol]).trim() : '';
   // read the same way for a row that is dropped as for one that is kept: the two have
   // to agree on which running balance a row belongs to, and a dropped row that read
   // its currency differently would name a run that does not exist
   const rowCurrency = (row: Cell[]): string =>
-    currencyCol >= 0 && cellText(row[currencyCol]).trim()
-      ? cellText(row[currencyCol]).trim().toUpperCase()
-      : account.currency.toUpperCase();
+    currencyKey(statedCurrency(row) || account.currency);
 
   for (let i = 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i];
@@ -1144,6 +1152,13 @@ async function mapAndStore(
       .filter(Boolean)
       .join(' ')
       .replace(/\s+/g, ' ');
+    // Only a currency the file states. The account's own, taken for an empty cell, is
+    // not checked: an earlier version may have stored one this pattern refuses, and
+    // refusing it would refuse every file without a currency column for that account.
+    const stated = statedCurrency(row);
+    if (stated && !CURRENCY_CODE.test(stated)) {
+      throw new Error(notACurrency(sheet, i, row[currencyCol]));
+    }
     const currency = rowCurrency(row);
     // One local, two uses, in one edit. The column and the argument to categorize have
     // to be the same value: reclassifyAll recomputes the category from the stored mcc
@@ -1270,11 +1285,9 @@ async function mapAndStore(
 
 /**
  * How many codes a refusal names before it counts the rest, and what one may spend.
- * Neither bound is reached by anything in the tree - the upload route takes three
- * letters, and a PDF's codes are literals in the template that read it. They exist
- * because the sentence below carries four amounts and up to four codes and is asserted
- * against ERROR_DETAIL_MAX: an assertion over a value nothing bounds is an assertion
- * about the day it was written.
+ * They exist because the sentence below carries four amounts and up to four codes and
+ * is asserted against ERROR_DETAIL_MAX: an assertion over a value nothing bounds is an
+ * assertion about the day it was written.
  *
  * The code bound is exported for exactly that assertion, which builds its codes FROM it
  * rather than beside it: a literal wide enough today stops reaching the bound the moment
@@ -1832,8 +1845,14 @@ export function describeRow(
   }
 }
 
+const NO_TRANSACTIONS =
+  'this file has no transactions in it. Export the statement again from your online banking for a period with transactions, and upload the new file';
+
 const notADate = (sheet: Sheet, i: number, cell: Cell | undefined, wrong: 'day' | 'time'): string =>
   `row ${sheet.rowLabel(i)}: the date cell reads ${quote(cell)}, ${wrong === 'day' ? 'which is not a day on the calendar' : 'whose time of day does not exist'} - nothing was imported, correct the date in the file and upload it again`;
+
+export const notACurrency = (sheet: Sheet, i: number, cell: Cell | undefined): string =>
+  `row ${sheet.rowLabel(i)}: the currency is ${quote(cell)}, but it must be a three-letter code such as EUR or USD. Nothing was imported. Correct the currency in the file and upload it again`;
 
 export const feeRefused = (sheet: Sheet, i: number, text: string): string =>
   `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee - the row is skipped rather than imported without it`;

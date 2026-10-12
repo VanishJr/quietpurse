@@ -1,6 +1,6 @@
 
 /** Bumped whenever a change here would parse an existing file differently. */
-export const CSV_PARSER_VERSION = 3;
+export const CSV_PARSER_VERSION = 4;
 
 /**
  * The uploaded bytes as text. Two decoders and no charset detection: a BOM is

@@ -70,6 +70,23 @@ again: `stageImport` in `backend/src/db` copies it onto the import as read, so a
 not rewritten by an import that asked for nothing of the kind. A row's own currency is a different
 value, and the parser upper-cases it where it reads it.
 
+**A currency is checked where it enters, against one pattern.** `CURRENCY_CODE` in
+`backend/src/currency.ts` is what the account doors, the settings door and the import accept, so a
+statement cannot store a currency an account would refuse. A currency cell that does not match
+refuses the whole file; the confirm in `backend/src/db` refuses rows an earlier version staged with
+one. Both let the account's own currency through unchecked, because a row takes it for an empty cell
+and an earlier version may have stored one the pattern refuses. The two exemptions move together: one
+without the other stages rows the confirm then refuses, or refuses a file the confirm would take.
+
+**A stored currency is compared in one form.** An earlier version could store `eur`, and it is the
+same currency as `EUR`. Every comparison and grouping of a currency read from the database goes
+through `currencyKey` in `backend/src/currency.ts` or `CURRENCY_KEY` in `backend/src/db`. The two
+fold ASCII letters only and agree letter for letter, and `backend/test/currency.test.ts` holds them
+to each other and scans for a comparison written past them. Stored rows keep their spelling; answers
+send the folded form, as `backend/src/wire/SPEC.md` says, and so does the CSV export. The dedup key
+keeps its own `toUpperCase`, because it is stored: a different fold would give an earlier row a
+different key than the same row imported again.
+
 **A builtin income source can be edited but not deleted.** That is safe only because
 `upsertIncomeSource` in `backend/src/db` never sets `builtin` on conflict. An edit there makes a
 renamed builtin deletable.

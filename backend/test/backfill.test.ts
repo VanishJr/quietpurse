@@ -17,12 +17,16 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  applyBaseRate,
   createAccount,
   dbInstance,
   insertTransactions,
+  listUnconvertedDays,
   resetBaseAmounts,
   saveFxRate,
   seedDefaults,
+  setBaseForBaseCurrency,
+  setSetting,
 } from '../src/db';
 import { backfillBaseAmounts } from '../src/fxrates';
 import { toCents } from '../src/money';
@@ -354,6 +358,57 @@ describe('backfillBaseAmounts', () => {
       description: 'split ferry',
       base_amount_cents: roundHalfAway(toCents(HRK_AMOUNT) * K_HRK),
       fx_rate: K_HRK,
+    });
+  });
+});
+
+/**
+ * An earlier version could store a row's currency in lower case. Each step of the
+ * conversion is driven on its own, because the steps cover for each other: a row the
+ * base-currency step misses is still converted at a rate of 1 by the next one.
+ */
+describe('a currency stored in lower case is the same currency', () => {
+  it('a row in the base currency gets its base amount on insert', async () => {
+    await insertTransactions([tx({ amount: EUR_AMOUNT, currency: 'eur', description: 'lower insert' })]);
+
+    expect(await rowOf('lower insert')).toMatchObject({ base_amount_cents: toCents(EUR_AMOUNT), fx_rate: 1 });
+  });
+
+  it('the base-currency step converts it at 1', async () => {
+    await insertTransactions([tx({ amount: EUR_AMOUNT, currency: 'eur', description: 'lower base' })]);
+    await resetBaseAmounts();
+
+    expect(await setBaseForBaseCurrency('EUR')).toEqual({ moved: false, written: 1 });
+    expect(await rowOf('lower base')).toMatchObject({ base_amount_cents: toCents(EUR_AMOUNT), fx_rate: 1 });
+  });
+
+  it('a base setting spelt in lower case has not moved away from the same currency', async () => {
+    await insertTransactions([tx({ amount: EUR_AMOUNT, currency: 'EUR', description: 'lower setting' })]);
+    await resetBaseAmounts();
+    await setSetting('base_currency', 'eur');
+    try {
+      expect(await setBaseForBaseCurrency('EUR')).toEqual({ moved: false, written: 1 });
+    } finally {
+      await setSetting('base_currency', 'EUR');
+    }
+  });
+
+  it('one day in one currency is one rate to find, however the rows spell it', async () => {
+    await insertTransactions([
+      tx({ amount: UAH_AMOUNT, currency: 'uah', description: 'lower day' }),
+      tx({ amount: UAH_AMOUNT - 1, currency: 'UAH', description: 'upper day' }),
+    ]);
+
+    expect(await listUnconvertedDays()).toEqual([{ day: CONVERTED_DAY, currency: 'UAH' }]);
+  });
+
+  it('a rate found for the currency reaches the rows that spell it in lower case', async () => {
+    await insertTransactions([tx({ amount: UAH_AMOUNT, currency: 'uah', description: 'lower rate' })]);
+
+    expect(await applyBaseRate(CONVERTED_DAY, 'UAH', K, 'EUR')).toEqual({ moved: false, written: 1 });
+    expect(await rowOf('lower rate')).toMatchObject({
+      base_amount_cents: roundHalfAway(toCents(UAH_AMOUNT) * K),
+      fx_rate: K,
     });
   });
 });

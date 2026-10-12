@@ -153,6 +153,14 @@ from the bytes, but every writer meets the CHECK on `imports.source_type`, and t
 bad value even earlier. A database created before the CHECK joined the initial migration lacks it;
 the refusal in `backend/src/documents.ts` holds on every database.
 
+**A currency column has no CHECK, and the restore does not check one either.** Earlier versions
+stored whatever a statement's currency cell said, and could store an account's currency as a numeric
+code. A CHECK strict enough to catch `EURO` would refuse a person's own backup, and one loose enough
+to restore it would catch nothing; added to the initial migration, it would also miss every database
+created before it. The rule is held where a currency enters, as `backend/src/SPEC.md` says, and rows
+already stored keep what they have. A query that compares or groups a currency reads it through
+`CURRENCY_KEY`, so a stored `eur` counts as `EUR`.
+
 **A cleared pointer does not mean there is no file.** A process that died after storing the file and
 before setting the column leaves both. Nothing that deletes may read a cleared pointer as "no file":
 the delete path removes the file without consulting it.

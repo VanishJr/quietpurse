@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { CATEGORIES, type Category } from './categorizer';
 import { config } from './config';
 import { reclassifyAll } from './classify';
+import { CURRENCY_CODE, currencyKey } from './currency';
 import {
   ACCOUNT_NAME_MAX,
   CHARTS_MAX,
@@ -106,6 +107,7 @@ import {
   INCOME_SOURCE_KINDS,
   type JsonRoute,
   refusalSchema,
+  sentForm,
 } from './wire';
 
 export const app = express();
@@ -193,7 +195,7 @@ export const answerCheck: express.RequestHandler = (req, res, next) => {
 app.use(answerCheck);
 
 const answer = <R extends JsonRoute>(res: express.Response, route: R, body: AnswerBody<R>): void => {
-  res.status(ANSWERS[route].status).json(body);
+  res.status(ANSWERS[route].status).json(sentForm(route, body));
 };
 
 const headersAndLog: express.RequestHandler = (req, res, next) => {
@@ -356,7 +358,7 @@ const accountNameSchema = z
 const currencyCode = z
   .string({ error: 'currency must be a 3-letter ISO code' })
   .trim()
-  .regex(/^[A-Za-z]{3}$/, { error: 'currency must be a 3-letter ISO code' });
+  .regex(CURRENCY_CODE, { error: 'currency must be a 3-letter ISO code' });
 
 /**
  * The account doors normalise, in one place covering both - a second .toUpperCase()
@@ -1327,9 +1329,9 @@ app.get('/api/export.csv', async (req, res) => {
       t.date,
       esc(accountNames.get(t.accountId) ?? t.accountId),
       t.amount,
-      t.currency,
+      esc(currencyKey(t.currency)),
       t.baseAmount ?? '',
-      baseCurrency,
+      esc(currencyKey(baseCurrency)),
       esc(t.category),
       esc(t.description),
       t.transfer ? 1 : 0,
@@ -1616,6 +1618,15 @@ const confirmRefusal = (status: ImportStatus): string => {
 };
 
 /**
+ * An earlier version kept a currency cell's whole text, and quoted whole it could push
+ * the advice after it past what the client shows of a refusal.
+ */
+const STAGED_CURRENCY_MAX = 24;
+
+const bounded = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+/**
  * One switch over the union rather than a ternary over two of its members: a member
  * added to ConfirmOutcome is then a compile error here instead of a new refusal
  * rendered with somebody else's sentence.
@@ -1632,6 +1643,8 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
       return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
     case 'date-not-real':
       return `nothing was imported: an earlier version read this file and kept the date "${result.date}", which is not a real day or time. Discard this import and upload the file again, and the upload will name the row to correct`;
+    case 'currency-not-a-code':
+      return `nothing was imported: an earlier version read this file and kept the currency "${bounded(result.currency, STAGED_CURRENCY_MAX)}", which is not a three-letter code. Discard this import and upload the file again, and the upload will name the row to correct`;
     default: {
       const unreachable: never = result;
       return unreachable;

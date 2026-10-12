@@ -1,3 +1,4 @@
+import { CURRENCY_CODE, sameCurrency } from './currency';
 import { currentBaseCurrency, getSetting, setSetting } from './db';
 import type { AppSettings } from './wire';
 
@@ -43,7 +44,7 @@ export function parseAppSettingsPatch(body: {
   const patch: { baseCurrency?: string; ownerNames?: string[] } = {};
 
   if (body.baseCurrency !== undefined) {
-    if (typeof body.baseCurrency !== 'string' || !/^[A-Za-z]{3}$/.test(body.baseCurrency.trim())) {
+    if (typeof body.baseCurrency !== 'string' || !CURRENCY_CODE.test(body.baseCurrency.trim())) {
       return { ok: false, error: 'baseCurrency: a three-letter ISO code, e.g. EUR' };
     }
     patch.baseCurrency = body.baseCurrency.trim().toUpperCase();
@@ -78,9 +79,10 @@ export async function updateAppSettings(
   const before = await getAppSettings();
 
   let baseCurrencyChanged = false;
-  if (patch.baseCurrency !== undefined && patch.baseCurrency !== before.baseCurrency) {
+  if (patch.baseCurrency !== undefined) {
+    baseCurrencyChanged = !sameCurrency(patch.baseCurrency, before.baseCurrency);
+    // written even when the currency is the same, so a stored `eur` takes the door's spelling
     await setSetting('base_currency', patch.baseCurrency);
-    baseCurrencyChanged = true;
   }
 
   let ownerNamesChanged = false;

@@ -1,5 +1,6 @@
 import { getAppSettings } from './appsettings';
 import { RULES_VERSION, categorize, isRefund, recurringKey } from './categorizer';
+import { currencyKey, sameCurrency } from './currency';
 import {
   Classification,
   allTransactions,
@@ -140,7 +141,7 @@ function detectRecurring(
   for (const t of txs) {
     if (t.amount >= 0 || !t.description) continue;
     if (result.get(t.id)!.transfer) continue;
-    const key = `${t.currency}\0${recurringKey(t.description)}`;
+    const key = `${currencyKey(t.currency)}\0${recurringKey(t.description)}`;
     const list = groups.get(key);
     if (list) list.push(t);
     else groups.set(key, [t]);
@@ -164,7 +165,7 @@ function detectRecurring(
 
 /** Amount in hryvnia — the common denominator for checking a cross-currency pair. */
 function toUAH(amount: number, currency: string, rates: Record<string, number>): number | null {
-  const rate = rates[currency];
+  const rate = rates[currencyKey(currency)];
   return rate ? Math.abs(amount) * rate : null;
 }
 
@@ -192,7 +193,7 @@ export function pairingGap(expense: Transaction, income: Transaction): number {
   const expenseAt = Date.parse(expense.date);
   const incomeAt = Date.parse(income.date);
   if (!Number.isNaN(expenseAt) && !Number.isNaN(incomeAt)) return Math.abs(incomeAt - expenseAt);
-  if (expense.currency !== income.currency) return NaN;
+  if (!sameCurrency(expense.currency, income.currency)) return NaN;
   const dayOrTime = (at: number, date: string) => (Number.isNaN(at) ? Date.parse(date.slice(0, 10)) : at);
   return Math.abs(dayOrTime(incomeAt, income.date) - dayOrTime(expenseAt, expense.date));
 }
@@ -206,7 +207,7 @@ export function canPair(
   if (expense.accountId === income.accountId) return false;
   // a date whose day does not read either; NaN would pass each window below as not too far
   if (Number.isNaN(gapMs)) return false;
-  if (expense.currency === income.currency) {
+  if (sameCurrency(expense.currency, income.currency)) {
     if (gapMs > SAME_CURRENCY_WINDOW_MS) return false;
     return Math.abs(Math.abs(expense.amount) - income.amount) <= AMOUNTS_EQUAL_EPS;
   }

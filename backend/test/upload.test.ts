@@ -128,6 +128,137 @@ describe('POST /api/imports', () => {
     expect((await agent.post(`/api/imports/${importId}/discard`)).status).toBe(200);
   });
 
+  it.each(['EURO', '€', '978', 'грн'])(
+    'refuses the whole statement over the currency %j: the import ends failed, with no row staged',
+    async (cell) => {
+      const accountId = await makeAccount(`Currency Bank ${cell}`);
+      const file = Buffer.from(
+        [
+          'Date,Description,Amount,Currency',
+          '2026-09-01,Invented shop,-12.50,EUR',
+          `2026-09-02,Invented salary,1000.00,${cell}`,
+        ].join('\n'),
+        'utf8',
+      );
+      const refusal = `row 3: the currency is "${cell}", but it must be a three-letter code such as EUR or USD. Nothing was imported. Correct the currency in the file and upload it again`;
+
+      const res = await agent.post('/api/imports').field('accountId', accountId).field('preset', 'generic').attach('file', file, 'currency.csv');
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ error: refusal });
+      const [latest] = (await agent.get('/api/imports')).body.imports as { id: string }[];
+      expect(latest).toMatchObject({ originalFilename: 'currency.csv', status: 'failed', errorDetail: refusal });
+      const staged = (await dbInstance().execute(
+        sql`SELECT COUNT(*) AS n FROM staged_transactions WHERE import_id = ${latest.id}`,
+      )) as unknown as { rows: { n: number | string }[] };
+      expect(Number(staged.rows[0].n)).toBe(0);
+    },
+  );
+
+  it('takes a currency code in either case and stores it upper-cased', async () => {
+    const accountId = await makeAccount('Lower Case Bank');
+    const file = Buffer.from(['Date,Description,Amount,Currency', '2026-09-01,Invented shop,-12.50,usd'].join('\n'), 'utf8');
+
+    const res = await agent.post('/api/imports').field('accountId', accountId).field('preset', 'generic').attach('file', file, 'lower.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary.totals).toEqual([{ currency: 'USD', net: -12.5 }]);
+    expect((await confirm(res.body.summary.importId)).status).toBe(200);
+    const [row] = (await agent.get('/api/transactions').query({ accountId })).body as { currency: string }[];
+    expect(row.currency).toBe('USD');
+  });
+
+  it.each([
+    ['EURO', 'EURO'],
+    ['E'.repeat(600), `${'E'.repeat(23)}…`],
+  ])('a confirm of rows an earlier version staged with the currency %j sends the user to upload again', async (kept, quoted) => {
+    const accountId = await makeAccount(`Staged Currency Bank ${kept.length}`);
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', accountId)
+      .field('preset', 'generic')
+      .attach('file', csvFile(`Staged currency ${kept.length}`), 'earlier-currency.csv');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const importId = res.body.summary.importId as string;
+    await dbInstance().execute(
+      sql`UPDATE staged_transactions SET currency = ${kept} WHERE import_id = ${importId}`,
+    );
+
+    const refused = await confirm(importId);
+
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe(
+      `nothing was imported: an earlier version read this file and kept the currency "${quoted}", which is not a three-letter code. Discard this import and upload the file again, and the upload will name the row to correct`,
+    );
+    expect((await agent.get('/api/transactions').query({ accountId })).body).toEqual([]);
+    const waiting = ((await agent.get('/api/imports')).body.imports as { id: string; status: string }[])
+      .find((r) => r.id === importId);
+    expect(waiting?.status).toBe('awaiting_confirmation');
+    expect((await agent.post(`/api/imports/${importId}/discard`)).status).toBe(200);
+  });
+
+  it('an account whose currency an earlier version stored as an unmapped numeric code still imports a file without a currency column', async () => {
+    const accountId = await makeAccount('Digits Bank');
+    await dbInstance().execute(sql`UPDATE accounts SET currency = '933' WHERE id = ${accountId}`);
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', accountId)
+      .field('preset', 'generic')
+      .attach('file', csvFile('Digits row'), 'digits.csv');
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary.totals).toEqual([{ currency: '933', net: -10 }]);
+    const confirmed = await confirm(res.body.summary.importId);
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
+    expect(confirmed.body).toMatchObject({ inserted: 1 });
+    const [row] = (await agent.get('/api/transactions').query({ accountId })).body as { currency: string }[];
+    expect(row.currency).toBe('933');
+  });
+
+  it('an empty file is refused with what to do, and leaves no import', async () => {
+    const before = (await imports()).length;
+
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', await makeAccount('Empty File Bank'))
+      .attach('file', Buffer.alloc(0), 'empty.csv');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: 'this file is empty. Export the statement again from your online banking and upload the new file',
+    });
+    expect(await imports()).toHaveLength(before);
+  });
+
+  it.each([
+    ['a header and no rows under it', 'date,amount,description\n'],
+    ['nothing but blank lines', '\n   \n'],
+  ])('a file with %s is refused with what to do', async (_, text) => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', await makeAccount(`No Rows Bank ${text.length}`))
+      .field('preset', 'generic')
+      .attach('file', Buffer.from(text, 'utf8'), 'no-rows.csv');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error:
+        'this file has no transactions in it. Export the statement again from your online banking for a period with transactions, and upload the new file',
+    });
+  });
+
+  it('a lone transaction with no header above it is refused for its header, not as a file with no transactions', async () => {
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', await makeAccount('Lone Line Bank'))
+      .field('preset', 'generic')
+      .attach('file', Buffer.from('2026-03-01,-10.00,Invented shop\n', 'utf8'), 'lone.csv');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/^could not find date\/amount\/description columns in the header/);
+  });
+
   it('takes a CSV as multipart and answers with a summary to confirm', async () => {
     const res = await agent
       .post('/api/imports')
@@ -151,7 +282,7 @@ describe('POST /api/imports', () => {
     const [latest] = await imports();
     expect(latest).toMatchObject({
       sourceType: 'csv',
-      parserVersion: 3,
+      parserVersion: 4,
       originalFilename: 'statement.csv',
     });
 

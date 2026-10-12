@@ -27,6 +27,7 @@ import {
   feeRefused,
   importStatement,
   noRowsParsed,
+  notACurrency,
   reconcile,
   rowVerdict,
 } from '../src/providers/statement';
@@ -1663,6 +1664,21 @@ describe('what the new refusals may spend', () => {
       longest = Math.max(longest, composed.length);
     }
     expect(longest).toBeLessThanOrEqual(199);
+  });
+
+  /**
+   * A whole error_detail rather than a row reason, so ERROR_DETAIL_MAX is its bound. At
+   * Excel's own row ceiling and swept over the cell width, for feeRefused's reason above.
+   */
+  it('the currency refusal fits what error_detail keeps, at its extreme', () => {
+    const sheet: Sheet = { rows: [], rowLabel: () => 1_048_576 };
+    let longest = 0;
+    for (let width = 1; width <= 200; width++) {
+      const composed = notACurrency(sheet, 1, 'Ф'.repeat(width));
+      expect(composed).toMatch(/Correct the currency in the file and upload it again$/);
+      longest = Math.max(longest, composed.length);
+    }
+    expect(longest).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
   });
 
   /**

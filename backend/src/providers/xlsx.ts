@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import { ERROR_DETAIL_MAX } from '../db';
 import { Cell, MAX_DATA_ROWS, Sheet, cellText, hasContent } from './sheet';
 
-export const XLSX_PARSER_VERSION = 3;
+export const XLSX_PARSER_VERSION = 4;
 
 /** How far down a sheet the header may hide behind a title or an account block. */
 const HEADER_SCAN_ROWS = 20;

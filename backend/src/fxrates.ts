@@ -5,6 +5,7 @@
  * keeps working only while it keeps that meaning.
  */
 import { config } from './config';
+import { currencyKey, sameCurrency } from './currency';
 import {
   type BaseWrite,
   type FxMiss,
@@ -170,7 +171,7 @@ async function fetchNbuRate(currency: string, day: string): Promise<number | typ
 
 /** Throws on a network error - the caller decides what to do. */
 export async function rateToUah(currency: string, day: string): Promise<Rate> {
-  if (currency === 'UAH') return 1;
+  if (sameCurrency(currency, 'UAH')) return 1;
   let everyProbeMissed = true;
   for (let back = 0; back <= MAX_LOOKBACK_DAYS; back++) {
     const probeDay = shiftDay(day, -back);
@@ -228,7 +229,10 @@ function activeProviders(): RateProvider[] {
  * is left to ask; null = no provider can do it, or no rate for another reason. The caller logs
  * either. Network errors propagate.
  */
-export async function resolveRate(day: string, from: string, to: string): Promise<Rate> {
+export async function resolveRate(day: string, fromCode: string, toCode: string): Promise<Rate> {
+  // keyed once here, so the providers, their cache keys and their requests never see a stored spelling
+  const from = currencyKey(fromCode);
+  const to = currencyKey(toCode);
   if (from === to) return 1;
   let supported = false;
   let everyAnswerRemembered = true;

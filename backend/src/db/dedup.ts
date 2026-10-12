@@ -20,6 +20,9 @@
  */
 export const COMPUTED_PREFIX = 'c:';
 
+// toUpperCase here and in dedupGroup, not currencyKey: the key is stored, and a fold that
+// differs outside ASCII would give a row an earlier version stored a different key than
+// the same row imported again
 export const computedDedupKey = (
   day: string,
   amountCents: number,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { currencySchema } from './currency';
 
 export const GOAL_TYPES = [
   'financial-independence',
@@ -167,7 +168,7 @@ const goalSummaryFields = {
   targetDate: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
-  currency: z.string().nullable(),
+  currency: currencySchema.nullable(),
   source: z.string(),
   progress: goalProgressSchema,
 };

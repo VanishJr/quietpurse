@@ -12,6 +12,7 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 import { CATEGORIES, type Category, recurringKey } from '../categorizer';
 import { config } from '../config';
+import { CURRENCY_CODE, currencyKey, sameCurrency } from '../currency';
 import { type DocumentLocator, type DocumentRef, deleteDocument } from '../documents';
 import { causeChain, logDb } from '../logger';
 import { fromCents, fromCentsOrUndefined, toCents, toCentsOrNull } from '../money';
@@ -247,6 +248,12 @@ const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
  * third case to fall through to.
  */
 const CATEGORY = sql`COALESCE(category_manual, category)`;
+
+/** A currency as currencyKey gives it, letter for letter: TRANSLATE and not UPPER, for currencyKey's reason. */
+const currencyKeyOf = (value: SQL): SQL =>
+  sql`TRANSLATE(${value}, 'abcdefghijklmnopqrstuvwxyz', 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')`;
+
+const CURRENCY_KEY = currencyKeyOf(sql`currency`);
 
 /**
  * Transactions of hidden accounts are neither shown nor counted. They aren't
@@ -676,7 +683,7 @@ export async function insertTransactionsOn(
     ({ tx: t, date, amountCents, dedupKey }) => {
       // transactions already in the base currency need no conversion - fill it now;
       // for the rest base_amount is filled later by backfillBaseAmounts (fxrates.ts)
-      const isBase = t.currency === baseCurrency;
+      const isBase = sameCurrency(t.currency, baseCurrency);
       return {
         id: crypto.randomUUID(),
         accountId: t.accountId,
@@ -1096,8 +1103,8 @@ export async function goalCurrentCategoryTotals(
 
 export async function accountOtherCurrencies(scope: AccountScope): Promise<string[]> {
   const rows = await rowsOf<{ currency: string }>(sql`
-    SELECT DISTINCT currency FROM transactions
-    WHERE account_id = ${scope.id} AND currency <> ${scope.currency}
+    SELECT DISTINCT ${CURRENCY_KEY} AS currency FROM transactions
+    WHERE account_id = ${scope.id} AND ${CURRENCY_KEY} <> ${currencyKey(scope.currency)}
     ORDER BY 1`);
   return rows.map((r) => r.currency);
 }
@@ -1504,6 +1511,12 @@ class StagedDateNotReal extends Error {
   }
 }
 
+class StagedCurrencyNotACode extends Error {
+  constructor(readonly currency: string) {
+    super(`staged currency ${currency} is not a three-letter code`);
+  }
+}
+
 export class ImportNotConfirmable extends Error {}
 
 const UNIQUE_VIOLATION = '23505';
@@ -1542,7 +1555,8 @@ export type ConfirmOutcome =
   | { confirmed: false; reason: 'file-committed'; heldBy: string }
   | { confirmed: false; reason: 'account-missing' }
   | { confirmed: false; reason: 'account-hidden' }
-  | { confirmed: false; reason: 'date-not-real'; date: string };
+  | { confirmed: false; reason: 'date-not-real'; date: string }
+  | { confirmed: false; reason: 'currency-not-a-code'; currency: string };
 
 export async function confirmImport(id: string): Promise<ConfirmOutcome | undefined> {
   const baseCurrency = await currentBaseCurrency();
@@ -1617,6 +1631,12 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       // and stored it; an upload now refuses the file instead
       const impossible = staged.find((r) => calendarDay(r.date) === null);
       if (impossible) throw new StagedDateNotReal(impossible.date);
+      // the same for a currency. The account's own passes whatever it is: an earlier
+      // version may have stored one this pattern refuses, and an upload stages it for
+      // every empty currency cell
+      const ownCurrency = row.accountCurrency;
+      const notACode = staged.find((r) => !sameCurrency(r.currency, ownCurrency) && !CURRENCY_CODE.test(r.currency));
+      if (notACode) throw new StagedCurrencyNotACode(notACode.currency);
       // The account was there and visible when the file was uploaded; the user
       // removed it while the summary sat on screen.
       //
@@ -1667,6 +1687,9 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
     if (e instanceof AccountRemoved) return { confirmed: false, reason: 'account-hidden' };
     if (e instanceof AccountMissing) return { confirmed: false, reason: 'account-missing' };
     if (e instanceof StagedDateNotReal) return { confirmed: false, reason: 'date-not-real', date: e.date };
+    if (e instanceof StagedCurrencyNotACode) {
+      return { confirmed: false, reason: 'currency-not-a-code', currency: e.currency };
+    }
     // two uploads of one file overlapping in time both reach awaiting_confirmation
     // (the partial index only blocks `committed`), so the second
     // confirm meets the index rather than the status check. Its rows are identical
@@ -2524,11 +2547,11 @@ async function writeBaseAmounts(base: string, set: SQL, where: SQL): Promise<Bas
     WITH stored AS MATERIALIZED (SELECT ${STORED_BASE(true)} AS base),
     written AS (
       UPDATE transactions SET ${set}
-      WHERE base_amount_cents IS NULL AND ${where} AND (SELECT base FROM stored) = ${base}
+      WHERE base_amount_cents IS NULL AND ${where} AND ${currencyKeyOf(sql`(SELECT base FROM stored)`)} = ${currencyKey(base)}
       RETURNING 1
     )
     SELECT (SELECT base FROM stored) AS stored, (SELECT COUNT(*) FROM written)::int AS written`);
-  return row.stored === base
+  return sameCurrency(row.stored, base)
     ? { moved: false, written: row.written }
     : { moved: true, stored: row.stored };
 }
@@ -2537,7 +2560,7 @@ export async function setBaseForBaseCurrency(baseCurrency: string): Promise<Base
   return writeBaseAmounts(
     baseCurrency,
     sql`base_amount_cents = amount_cents, fx_rate = 1`,
-    sql`currency = ${baseCurrency}`,
+    sql`${CURRENCY_KEY} = ${currencyKey(baseCurrency)}`,
   );
 }
 
@@ -2559,7 +2582,7 @@ export async function countUnconverted(): Promise<number> {
 
 export async function listUnconvertedDays(): Promise<{ day: string; currency: string }[]> {
   return rowsOf<{ day: string; currency: string }>(sql`
-    SELECT DISTINCT SUBSTR(date, 1, 10) AS day, currency
+    SELECT DISTINCT SUBSTR(date, 1, 10) AS day, ${CURRENCY_KEY} AS currency
     FROM transactions WHERE base_amount_cents IS NULL ORDER BY day`);
 }
 
@@ -2581,7 +2604,7 @@ export async function applyBaseRate(
   return writeBaseAmounts(
     base,
     sql`base_amount_cents = CAST(ROUND(amount_cents * ${k}::numeric) AS integer), fx_rate = ${k}`,
-    sql`currency = ${currency} AND SUBSTR(date, 1, 10) = ${day}`,
+    sql`${CURRENCY_KEY} = ${currencyKey(currency)} AND SUBSTR(date, 1, 10) = ${day}`,
   );
 }
 
@@ -3247,12 +3270,12 @@ const prepareGoalWrite = async (
       'choose an account that is still visible',
     );
   }
-  const currencies = new Set(accounts.map((account) => account.currency));
+  const currencies = new Set(accounts.map((account) => currencyKey(account.currency)));
   if (currencies.size !== 1) {
     throw new GoalWriteError('currency-mismatch', 'selected accounts must use one currency');
   }
   const currency = accounts[0].currency;
-  if (input.type === 'emergency-fund' && currency !== baseCurrency) {
+  if (input.type === 'emergency-fund' && !sameCurrency(currency, baseCurrency)) {
     throw new GoalWriteError(
       'currency-mismatch',
       `emergency-fund accounts must use the base currency ${baseCurrency}`,

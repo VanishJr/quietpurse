@@ -48,6 +48,26 @@ let agent: Agent;
 const restore = (contentType: string, body: Buffer | string) =>
   agent.post('/api/restore').set('Content-Type', contentType).send(body);
 
+type Dump = { format: string; version: number; tables: Record<string, Record<string, unknown>[]> };
+
+/** The current contents plus `count` transactions on a new account, so the file is a real dump. */
+const dumpWithTransactions = async (count = 1): Promise<{ data: Dump; accountId: string }> => {
+  const created = await agent.post('/api/accounts').send({ name: `Dated Bank ${crypto.randomUUID()}`, currency: 'EUR' });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const accountId = created.body.id as string;
+  await insertTransactions(Array.from({ length: count }, (_, n) => ({
+    accountId,
+    provider: 'upload' as const,
+    amount: -20 - n,
+    currency: 'EUR',
+    date: '2026-10-05T23:30:00.000Z',
+    description: 'Trattoria Nord',
+    category: 'other',
+    fee: null,
+  })));
+  return { data: (await agent.get('/api/backup')).body as Dump, accountId };
+};
+
 beforeAll(async () => {
   await freshTestDb();
   await seedDefaults();
@@ -126,26 +146,6 @@ describe('what the door refuses', () => {
   });
 
   describe('a date in a backup', () => {
-    type Dump = { format: string; version: number; tables: Record<string, Record<string, unknown>[]> };
-
-    /** The current contents plus `count` transactions on a new account, so the file is a real dump. */
-    const dumpWithTransactions = async (count = 1): Promise<{ data: Dump; accountId: string }> => {
-      const created = await agent.post('/api/accounts').send({ name: `Dated Bank ${crypto.randomUUID()}`, currency: 'EUR' });
-      expect(created.status, JSON.stringify(created.body)).toBe(201);
-      const accountId = created.body.id as string;
-      await insertTransactions(Array.from({ length: count }, (_, n) => ({
-        accountId,
-        provider: 'upload' as const,
-        amount: -20 - n,
-        currency: 'EUR',
-        date: '2026-10-05T23:30:00.000Z',
-        description: 'Trattoria Nord',
-        category: 'other',
-        fee: null,
-      })));
-      return { data: (await agent.get('/api/backup')).body as Dump, accountId };
-    };
-
     it.each([
       ['transactions', '05.10.2026'],
       ['transactions', 'Oct 5 2026'],
@@ -179,6 +179,29 @@ describe('what the door refuses', () => {
       const after = ((await agent.get('/api/backup')).body as Dump).tables;
       expect(after.transactions.filter((t) => t.accountId === accountId).map((t) => t.date).sort()).toEqual([...stored].sort());
     });
+  });
+
+  /**
+   * The import refuses a currency that is not a three-letter code, and the restore must
+   * not: earlier versions stored a statement's currency cell whatever it said, and an
+   * account's currency as an unmapped numeric code.
+   */
+  it('restores a currency an earlier version could have stored, on an account and on its rows, unchanged', async () => {
+    const stored = ['EURO', '€', '933', 'eur'];
+    const { data, accountId } = await dumpWithTransactions(stored.length);
+    const account = data.tables.accounts.find((a) => a.id === accountId);
+    if (!account) throw new Error('the dump has no row for the account it was made with');
+    account.currency = '933';
+    data.tables.transactions
+      .filter((t) => t.accountId === accountId)
+      .forEach((t, n) => { t.currency = stored[n]; });
+
+    const res = await restore('application/json', JSON.stringify(data));
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const after = ((await agent.get('/api/backup')).body as Dump).tables;
+    expect(after.accounts.find((a) => a.id === accountId)?.currency).toBe('933');
+    expect(after.transactions.filter((t) => t.accountId === accountId).map((t) => t.currency).sort()).toEqual([...stored].sort());
   });
 
   /**

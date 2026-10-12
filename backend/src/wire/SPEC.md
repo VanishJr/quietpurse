@@ -74,6 +74,13 @@ the client may read it as a boolean and lose nothing.
 **A value a screen shows as prose crosses as a slug**: the reasons a balance pair is not shown,
 categories, income-source ids. The client's dictionary holds the words.
 
+**A currency crosses in one form.** Every currency an answer carries is declared with
+`currencySchema`, and `sentForm` folds each one with `currencyKey` before `answer()` in
+`backend/src/app.ts` sends it, so a stored `eur` reaches every client as `EUR` and a client compares
+currencies letter for letter. The fold follows the declaration, not the route, and
+`backend/test/wire.test.ts` holds a field named for a currency to that schema. The backup is not
+folded: it is not sent through `answer()`, and a restore has to put back what was stored.
+
 **Answers that are not a screen's JSON are declared as such.** The CSV export, a stored statement
 and the built client are `not-json`. The backup is `opaque-json`: JSON whose shape belongs to
 `parseBackup`, which a client should be able to tell apart from "not JSON". A route missing from the

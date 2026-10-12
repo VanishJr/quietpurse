@@ -14,6 +14,8 @@ import { z } from 'zod';
 import {
   ANSWERS,
   calendarDay,
+  currencySchema,
+  sentForm,
   type Declared,
   GOAL_TYPES,
   goalCreateSchema,
@@ -250,6 +252,84 @@ describe('the Goals write contract', () => {
     expect(goalCreateSchema.safeParse({ ...financial, hourlyRate: 0.01 }).success).toBe(true);
     expect(goalCreateSchema.safeParse(debt).success).toBe(true);
     expect(goalCreateSchema.safeParse({ ...rate, targetPercent: 0.01 }).success).toBe(true);
+  });
+});
+
+/**
+ * sentForm folds what is declared with currencySchema and nothing else, so a currency
+ * declared as a plain string reaches a client in whatever spelling an earlier version stored.
+ * Keyed by name both ways, which is also what lets sentForm fold a union under every option.
+ */
+describe('every currency an answer carries is declared with currencySchema', () => {
+  type Field = { at: string; key: string; leaf: z.ZodType };
+  const unwrapped = (schema: z.ZodType): z.ZodType => {
+    const def = defOf(schema);
+    if (def.type === 'array') return unwrapped(def.element!);
+    if (['optional', 'nullable', 'readonly', 'default'].includes(def.type)) return unwrapped(def.innerType!);
+    return schema;
+  };
+  const fieldsOf = (schema: z.ZodType, at: string, out: Field[]): Field[] => {
+    const def = defOf(schema);
+    switch (def.type) {
+      case 'object':
+        for (const [key, child] of Object.entries(def.shape ?? {})) {
+          out.push({ at, key, leaf: unwrapped(child) });
+          fieldsOf(child, `${at}.${key}`, out);
+        }
+        break;
+      case 'array':
+        fieldsOf(def.element!, `${at}[]`, out);
+        break;
+      case 'union':
+        def.options?.forEach((option, i) => fieldsOf(option, `${at}|${i}`, out));
+        break;
+      case 'optional':
+      case 'nullable':
+      case 'readonly':
+      case 'default':
+        fieldsOf(def.innerType!, at, out);
+        break;
+      case 'pipe':
+        fieldsOf(def.in!, at, out);
+        break;
+      default:
+        if (!LEAVES.has(def.type)) {
+          throw new Error(`${at}: unhandled schema type "${def.type}" - teach the walk before trusting it`);
+        }
+    }
+    return out;
+  };
+  const fields = Object.entries(ANSWERS as Record<string, Declared>).flatMap(([route, entry]) =>
+    entry.kind === 'json' ? fieldsOf(entry.body, route, []) : [],
+  );
+  const misdeclared = (all: Field[]): string[] =>
+    all.filter((f) => /currenc/i.test(f.key) !== (f.leaf === currencySchema)).map((f) => `${f.at}.${f.key}`);
+
+  it('a field named for a currency is declared with it, and no other field is', () => {
+    expect(fields.filter((f) => f.leaf === currencySchema).length).toBeGreaterThan(0);
+    expect(misdeclared(fields)).toEqual([]);
+  });
+
+  it('would name a currency declared as a plain string, and currencySchema under another name', () => {
+    const crafted = fieldsOf(
+      z.strictObject({ currency: z.string(), label: currencySchema, otherCurrencies: z.array(currencySchema) }),
+      'crafted',
+      [],
+    );
+    expect(misdeclared(crafted)).toEqual(['crafted.currency', 'crafted.label']);
+    expect(() => fieldsOf(z.strictObject({ m: z.record(z.string(), z.string()) }), 'crafted', [])).toThrow(
+      /unhandled schema type "record"/,
+    );
+  });
+
+  it('sends a body that declares no currency as it is, and folds one that does', () => {
+    const rules: [] = [];
+    expect(sentForm('GET /api/category-rules', rules)).toBe(rules);
+    expect(sentForm('GET /api/conversion', { baseCurrency: 'eur', converting: false, unconverted: 0 })).toEqual({
+      baseCurrency: 'EUR',
+      converting: false,
+      unconverted: 0,
+    });
   });
 });
 

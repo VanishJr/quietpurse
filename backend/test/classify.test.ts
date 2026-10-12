@@ -77,6 +77,19 @@ describe('canPair: pairing rules without touching the database', () => {
     const wrongIncome = pairable({ accountId: 'b', amount: 2000, currency: 'UAH' });
     expect(canPair(expense, wrongIncome, 5 * 60_000, rates)).toBe(false);
   });
+
+  it('a currency an earlier version stored in lower case is the same currency', () => {
+    const lowerIncome = pairable({ accountId: 'b', amount: 20, currency: 'eur' });
+    expect(canPair(expense, lowerIncome, 2 * HOUR, {})).toBe(true);
+
+    const restored = { ...expense, date: '2026-01-05T25:99:00.000Z' } as Transaction;
+    expect(pairingGap(restored, { ...lowerIncome, date: '2026-01-05T09:00:00.000Z' } as Transaction)).toBe(9 * HOUR);
+
+    // the rate is found under its code, so 20 EUR against 2000 UAH is no pair
+    const lowerExpense = pairable({ accountId: 'a', amount: -20, currency: 'eur' });
+    const uahIncome = pairable({ accountId: 'b', amount: 2000, currency: 'UAH' });
+    expect(canPair(lowerExpense, uahIncome, 5 * 60_000, { EUR: 48, UAH: 1 })).toBe(false);
+  });
 });
 
 describe('reclassifyAll: integration on an in-memory database', () => {
@@ -220,5 +233,24 @@ describe('reclassifyAll: integration on an in-memory database', () => {
     expect(salary.baseAmount).toBe(1500);
     // UAH rows stay unconverted without network (filled in when the NBU is reachable)
     expect(family.baseAmount).toBeUndefined();
+  });
+
+  it('a payment is recurring across months whose rows spell its currency in either case', async () => {
+    await insertTransactions(
+      [1, 2, 3].map((m) =>
+        tx({
+          accountId: 'lower:gym',
+          amount: -30,
+          currency: m === 3 ? 'EUR' : 'eur',
+          date: `2025-0${m}-15T00:00:00.000Z`,
+          description: `Invented Gym 0${m}/2025`,
+        }),
+      ),
+    );
+
+    await reclassifyAll();
+
+    for (const m of [1, 2, 3]) expect((await stored(`Invented Gym 0${m}/2025`)).recurring).toBe(true);
+    await dbInstance().execute(sql`DELETE FROM transactions WHERE account_id = 'lower:gym'`);
   });
 });
