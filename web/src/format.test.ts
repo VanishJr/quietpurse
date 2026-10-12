@@ -41,7 +41,7 @@ describe('fmtShort', () => {
 
   it('keeps one decimal just under the rounding threshold', () => {
     // the k-with-a-decimal band ends at 10_000, so 9_999 reads as 10.0k and
-    // 10_000 as 10k - deliberate, an axis should not carry a pointless digit
+    // 10_000 as 10k. That is deliberate: an axis should not carry a pointless digit
     expect(fmtShort(9999)).toBe('10.0k');
     expect(fmtShort(10000)).toBe('10k');
   });

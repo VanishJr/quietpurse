@@ -1,16 +1,15 @@
 /**
  * Where a request is allowed to come from.
  *
- * This is the whole boundary. The sign-in, the session middleware and the CORS allowlist
- * went with the hosted product, and the only thing between a person's finances and a page
- * they happen to visit is this check - so it is held over real HTTP, header by header,
- * and each header is asserted on its own rather than through a request that would fail
- * three ways at once.
+ * This is the whole boundary. There is no sign-in, no session middleware and no CORS
+ * allowlist, so the only thing between a person's finances and a page they happen to
+ * visit is this check. It is held over real HTTP, header by header, and each header is
+ * asserted on its own rather than through a request that would fail every way at once.
  *
- * The three refusals are independent by construction: a bad Host with nothing else
- * wrong, a bad Origin with a good Host, and a cross-site write with both of those
- * good. A guard that only checked one of them would be green on a table that varied
- * all three together.
+ * The refusals are independent by construction: a bad Host with nothing else wrong, a
+ * bad Origin with a good Host, and a cross-site write with both of those good. A guard
+ * that only checked one of them would be green on a table that varied them all
+ * together.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { app } from '../src/app';
@@ -27,7 +26,7 @@ let agent: Agent;
  * something they never chose.
  */
 const REFUSAL =
-  'this request did not come from Quietpurse on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
+  'this request did not come from Quietpurse on this machine, so nothing was read or changed. Open the app at the address the server printed when it started';
 
 beforeAll(async () => {
   await freshTestDb();
@@ -75,8 +74,8 @@ describe('the request has to have come from this machine', () => {
 });
 
 /**
- * `QUIETPURSE_HOST=0.0.0.0` — the documented way to open the port so a phone on the same Wi-Fi
- * can reach it. The whole arm is unreachable on the loopback default, so without this
+ * `QUIETPURSE_HOST=0.0.0.0` is the documented way to open the port so a phone on the same
+ * Wi-Fi can reach it. The whole arm is unreachable on the loopback default, so without this
  * block the rule that governs the OPEN configuration would be held by nothing.
  *
  * What widens is exactly one thing: an address as well as a loopback name. A DNS name

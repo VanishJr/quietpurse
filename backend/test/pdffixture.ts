@@ -6,14 +6,14 @@
  * bank data.
  *
  * What it therefore proves: that the reader turns coordinates into rows. It is a
- * regression pin and it is NOT evidence that a template is right - the fixture is
+ * regression pin and NOT evidence that a template is right, because the fixture is
  * written to match the template. The evidence for a template is a manual check
  * against a real document.
  *
  * The font is a Type0/Identity-H with a ToUnicode map and no embedded program.
  * Nothing here renders, and text extraction reads ToUnicode, so a fixture can carry
- * the Cyrillic column headings the one template in the tree is written against -
- * which a WinAnsi Type1 could not.
+ * the Cyrillic column headings some templates in the tree are written against. A
+ * WinAnsi Type1 font could not carry them.
  */
 
 export interface PlacedText {
@@ -146,9 +146,8 @@ export function buildPdf(pages: PlacedText[][], options: Options = {}): Buffer {
 /**
  * The same document inside a signed container: a bank's own export can be a CMS
  * envelope carrying the statement, so `%PDF-` sits at an offset rather than at 0. It
- * is not valid CMS and does not need to be - what a fixture has to
- * carry is the shape the sniffer classifies on and the bytes it used to be refused
- * for.
+ * is not valid CMS and does not need to be. What a fixture has to carry is the shape
+ * the sniffer classifies on and the bytes it used to be refused for.
  *
  * The NUL that makes it binary sits in the preamble, ahead of the document, and that
  * placement is the fixture's whole job: after a realistic inner PDF the first NUL
@@ -176,10 +175,10 @@ export function buildSignedContainer(inner: Buffer, filler = 32): Buffer {
 }
 
 /**
- * Tag, long-form marker and three length bytes - where a container's own bytes begin.
- * A body under 64 KiB puts a NUL in that length field by arithmetic, so a test asking
- * whether the fixture is binary before the document has to start looking past it or
- * it is reading the fixture's size rather than its shape.
+ * Where a container's own bytes begin: after the tag, the long-form marker and three
+ * length bytes. A body under 64 KiB puts a NUL in that length field by arithmetic, so
+ * a test asking whether the fixture is binary before the document has to start
+ * looking past it or it is reading the fixture's size rather than its shape.
  */
 export const CONTAINER_HEADER_BYTES = 5;
 

@@ -89,9 +89,9 @@ export const SUMMARY: Summary = {
  * The account arm of the same two endpoints, built around the id the request named.
  *
  * The id is a parameter and not a constant because api.ts refuses a body answering
- * about a different account than the one asked for — which is the whole point of the
- * check — so a fixed fixture would be a refusal in every test that loads a second
- * account. `askedFor` in the harness is what reads it off the URL.
+ * about a different account than the one asked for. That refusal is the whole point
+ * of the check, so a fixed fixture would be refused in every test that loads a second
+ * account. `askedFor` in the harness is what reads the id off the URL.
  *
  * byCategory stays empty by default for the reason SUMMARY's does: a non-empty one
  * mounts the donut, and recharts measures a 0x0 box in jsdom.
@@ -244,7 +244,7 @@ export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord =>
 /**
  * GET /api/imports. The default totals are DERIVED from the records, so the whole
  * page is the default case and a short page is something a test says on purpose.
- * Deriving a total from a page is exactly what the client may never do — here it is
+ * Deriving a total from a page is exactly what the client may never do. Here it is
  * what makes a mismatch a statement rather than a typo.
  */
 export const importsResponse = (

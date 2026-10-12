@@ -45,7 +45,7 @@ import { accountFor } from './helpers';
 
 const csvFile = (...rows: string[]): string => ['date,amount,description', ...rows].join('\n');
 
-/** The same row repeated n times - one dedup group, ordinals 1..n. */
+/** The same row repeated n times, so one dedup group with ordinals 1..n. */
 const repeated = (n: number, row: string, tag = ''): string =>
   csvFile(...Array.from({ length: n }, (_, i) => `${row}${tag ? ` ${tag}${i}` : ''}`));
 
@@ -67,7 +67,7 @@ async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> 
   return result.summary;
 }
 
-/** How many rows this import still has waiting - 0 once it is confirmed or discarded. */
+/** How many rows this import still has waiting. */
 async function stagedCount(importId: string): Promise<number> {
   const res = (await dbInstance().execute(
     sql`SELECT COUNT(*) AS n FROM staged_transactions
@@ -76,7 +76,7 @@ async function stagedCount(importId: string): Promise<number> {
   return Number(res.rows[0].n);
 }
 
-/** What the staged rows hold in fee_cents, in file order - raw, so nothing maps it back. */
+/** What the staged rows hold in fee_cents, in file order. Read raw, so nothing maps it back. */
 async function stagedFeeCents(importId: string): Promise<(number | null)[]> {
   const res = (await dbInstance().execute(
     sql`SELECT fee_cents FROM staged_transactions
@@ -221,8 +221,8 @@ describe('discard', () => {
   it('is idempotent, but refuses a committed import', async () => {
     const staged = await upload('Idempotent Discard Bank', csvFile('2026-04-05,-5.00,Gone'));
     expect(await discardImport(staged.importId)).toEqual({ discarded: true });
-    // the requested state already holds - answering with an error about a goal
-    // already achieved would be misreporting the result, not refusing loudly
+    // the requested state already holds. An error about a goal already achieved would
+    // misreport the result, not refuse loudly
     expect(await discardImport(staged.importId)).toEqual({ discarded: true });
 
     const live = await upload('Committed Discard Bank', csvFile('2026-04-06,-6.00,Real'));
@@ -265,9 +265,9 @@ describe('an outstanding import and a second upload of the same bytes', () => {
   /**
    * On a `discarded` row error_detail is what separates the ways it can be reached,
    * and NULL means the person said no. A superseded row left empty would have the
-   * imports screen tell someone they rejected an import they never
-   * saw, and it is also the only place a copy the user displaced can be told apart
-   * from one they refused - which the retention purge will need.
+   * imports screen tell someone they rejected an import they never saw. error_detail
+   * is also the only place where a copy the user displaced can be told apart from one
+   * they refused, and the retention purge will need that.
    */
   it('a superseded import records that the server discarded it, not the user', async () => {
     const csv = csvFile('2026-05-02,-15.00,Reason recorded');
@@ -283,10 +283,10 @@ describe('an outstanding import and a second upload of the same bytes', () => {
   /**
    * The other half of the same race, and the damaging one. `id <> exceptId` is
    * symmetric: A stages, B stages, then A's supersede runs late and matches B while
-   * B's has already taken A - both `discarded`, nothing confirmable, and the file
+   * B's has already taken A. Both end `discarded`, nothing is confirmable, and the file
    * needs a third upload. Reproduced by calling the late supersede by hand, because
-   * PGlite is single-connection and the state is what matters, not the
-   * timing that produces it.
+   * PGlite is single-connection and the state is what matters, not the timing that
+   * produces it.
    */
   it('a late supersede cannot take the import that replaced it', async () => {
     const csv = csvFile('2026-05-04,-17.00,Mutual');
@@ -341,8 +341,8 @@ describe('an outstanding import and a second upload of the same bytes', () => {
       reason: 'file-committed',
       heldBy: first.importId,
     });
-    // the loser is left where it was - the server does not discard on the user's
-    // behalf here - and its rows never landed twice
+    // the server does not discard on the user's behalf here: the loser is left where
+    // it was, and its rows never landed twice
     expect(await importRow(second.id)).toMatchObject({ status: 'awaiting_confirmation' });
     expect(await listTransactions({ accountId: first.accountId })).toHaveLength(1);
     expect(await discardImport(second.id)).toEqual({ discarded: true });
@@ -391,9 +391,9 @@ describe('a discarded import cannot take another import’s rows', () => {
 
 /**
  * The preview counter (`newRows`) is the only number a person reads before pressing
- * Confirm. The dedup key carries an ordinal within its group, so it is right only if
- * the numbering the preview did matches the numbering the confirm does - which is
- * why one function produces both (claimedKeys in db/index.ts).
+ * Confirm. The dedup key carries an ordinal within its group, so the count is right
+ * only if the preview numbers the rows exactly as the confirm does. That is why one
+ * function, claimedKeys in db/index.ts, produces both.
  */
 describe('the preview count is exactly what the confirm inserts', () => {
   const espresso = (n: number, tag: string) => repeated(n, '2026-07-01,-4.25,Latte', tag);
@@ -423,10 +423,11 @@ describe('the preview count is exactly what the confirm inserts', () => {
 
 describe('the confirm refuses what it cannot honestly complete', () => {
   /**
-   * `awaiting_confirmation` means the complete staged set is present. Held first by
-   * stageImport writing the rows and the status in one transaction, and then by this
-   * - without which the invariant would rest on that never being reordered, and its
-   * failure would read as "imported 1 row" under a summary that promised 2.
+   * `awaiting_confirmation` means the complete staged set is present. That is held
+   * first by stageImport writing the rows and the status in one transaction, and then
+   * by the confirm's count check this case drives. Without the check the invariant
+   * would rest on that write never being reordered, and its failure would read as
+   * "imported 1 row" under a summary that promised 2.
    */
   it('a staged set that lost a row is refused, not partially imported', async () => {
     const summary = await upload(
@@ -440,7 +441,7 @@ describe('the confirm refuses what it cannot honestly complete', () => {
     );
 
     await expect(confirmImport(summary.importId)).rejects.toThrow(
-      new RegExp(`import ${summary.importId} was staged with 2 rows and 1 are present`),
+      new RegExp(`import ${summary.importId} was staged with 2 rows but 1 are present`),
     );
     // the whole transaction rolled back: still confirmable, nothing written
     expect(await importRow(summary.importId)).toMatchObject({
@@ -450,15 +451,16 @@ describe('the confirm refuses what it cannot honestly complete', () => {
   });
 
   /**
-   * account_name is nullable because every import from before this step is, and the
-   * confirm checks it without reading it - the create that consumed it went when the
-   * upload stopped taking a name. Dropping the check would make an import from before
-   * this step confirmable, landing rows against an id with no recorded destination.
+   * account_name is nullable because every import from before the confirmation step
+   * is. The confirm checks it without reading it: the create that consumed it went
+   * away when the upload stopped taking a name. Dropping the check would make an
+   * import from before that step confirmable, landing rows against an id with no
+   * recorded destination.
    *
-   * The pair of assertions this used to carry - no account under the staged id, none
-   * under the name - guarded "the confirm did not invent one". That guarantee did not
-   * go away, it moved: upsertAccountOn is not called here any more, and a missing
-   * account is the account-missing refusal below.
+   * This case no longer asserts that no account exists under the staged id or under
+   * the name. Those assertions guarded "the confirm did not invent one", and that
+   * guarantee did not go away, it moved: upsertAccountOn is not called here any more,
+   * and a missing account is the account-missing refusal below.
    */
   it('an import with no recorded account name is refused', async () => {
     const summary = await upload('Nameless Bank', csvFile('2026-08-05,-12.00,Nameless'));
@@ -477,10 +479,10 @@ describe('the confirm refuses what it cannot honestly complete', () => {
   });
 
   /**
-   * The same guard on the column this row added. account_id is nullable because
-   * createImport writes the row before the parse, and a NULL one that reached
-   * `awaiting_confirmation` means the server staged an import without resolving an
-   * account - not something a user can do, so it is a throw and a 5xx.
+   * The same guard on account_id. That column is nullable because createImport writes
+   * the row before the parse, and a NULL one that reached `awaiting_confirmation` means
+   * the server staged an import without resolving an account. No user can do that, so
+   * it is a throw and a 5xx.
    */
   it('an import with no recorded account id is refused', async () => {
     const summary = await upload('Idless Bank', csvFile('2026-08-06,-13.00,Idless'));
@@ -499,11 +501,11 @@ describe('the confirm refuses what it cannot honestly complete', () => {
   });
 
   /**
-   * stageImport takes the rows and the account as independent arguments and there is
-   * no foreign key from transactions.account_id to accounts.id, so a caller whose rows
+   * stageImport takes the rows and the account as independent arguments, and there is
+   * no foreign key from transactions.account_id to accounts.id. A caller whose rows
    * were built for another account would otherwise get an account nobody's rows join,
-   * rows against an account with no row, and the balance of the empty one recomputed -
-   * all answered as confirmed. Today's one caller threads one resolved id into both.
+   * rows against an account with no row, and the balance of the empty one recomputed,
+   * all answered as confirmed.
    */
   it('staged rows built for another account are refused, not written', async () => {
     const summary = await upload('Guard Bank', csvFile('2026-08-10,-11.00,Elsewhere'));
@@ -530,10 +532,10 @@ describe('the confirm refuses what it cannot honestly complete', () => {
 /**
  * The second of the two gates on the account an upload picked. The upload proved the
  * account was there and not removed; the user removed it while the summary sat on screen.
- * Landing the rows now would answer `inserted: 2` for rows VISIBLE_ACCOUNT() keeps out of
- * every list, every summary and the export - a success nothing displays.
+ * Landing the rows now would answer `inserted: 2` for rows that VISIBLE_ACCOUNT() keeps
+ * out of every list, every summary and the export. That is a success nothing displays.
  *
- * The fourth part is what makes the first three evidence. A test asserting only the
+ * The last part is what makes the rest evidence. A test asserting only the
  * refusal passes just as well against an implementation that destroyed the import on
  * its way out, so the same import is confirmed afterwards and the count the summary
  * promised is the count that lands.
@@ -583,14 +585,14 @@ describe('an account removed between the upload and the confirm', () => {
 /**
  * The window: the account is deleted while the upload is still parsing, so the
  * destination was proved before the delete and the staging happens after it. While the
- * confirm could still create an account, its upsert simply created this one again - a
+ * confirm could still create an account, its upsert simply created this one again. A
  * deleted account came back, holding rows, at 200.
  *
  * It cannot be set up through the product API, and that is not a gap in the test:
  * deleteAccount refuses while the account holds staged rows (HOLDS_STAGED_ROWS), and
  * by the time an import is confirmable it does. The DELETE below is what the real
- * window produces, and it works because staged_transactions has no foreign key to
- * accounts - only to imports - so the staged rows outlive the account. Clearing them
+ * window produces, and it works because staged_transactions has a foreign key to
+ * imports but none to accounts, so the staged rows outlive the account. Clearing them
  * too would hit the partial-import throw instead and pass for the wrong reason, which
  * is why the count is asserted before the confirm as well as after it.
  */
@@ -613,8 +615,8 @@ describe('an account deleted between the upload and the confirm', () => {
       reason: 'account-missing',
     });
 
-    // the account did not come back - the whole point - and the rollback took the
-    // insert with it: an import back where it was, with its rows still staged
+    // the point of the case: the account did not come back. The rollback took the
+    // insert with it, so the import is back where it was, with its rows still staged
     expect(await getAccount(id)).toBeUndefined();
     expect(await listAccounts()).not.toContainEqual(expect.objectContaining({ id }));
     expect(await listTransactions({ accountId: id })).toHaveLength(0);
@@ -635,8 +637,8 @@ describe('an account deleted between the upload and the confirm', () => {
 });
 
 /**
- * A throw *after* the stage committed - the supersede, a read, anything between there and
- * the response - leaves a `failed` import. `failed` is neither confirmable nor
+ * Anything that throws *after* the stage committed and before the response, such as the
+ * supersede or a read, leaves a `failed` import. `failed` is neither confirmable nor
  * discardable, so its staged rows would sit unreachable until deleteImport. The sweep is
  * in failImport rather than the caller's catch so that no future caller has to remember
  * it.
@@ -650,16 +652,16 @@ describe('a failed import leaves no staged rows behind', () => {
 
     expect(await stagedCount(summary.importId)).toBe(0);
     expect(await importRow(summary.importId)).toMatchObject({ status: 'failed' });
-    // the document is kept either way - that is what a failed import is retained for
+    // the document is kept either way, because it is what a failed import is retained for
     expect(await blobExists(summary.importId)).toBe(true);
   });
 
   /**
-   * The last cut between a composed refusal and the screen. It was a
-   * bare slice, so what error_detail kept ended wherever 500 characters ran out and
-   * read as a finished sentence - the client renders the whole of it and adds no
-   * cut of its own. Both messages are built from ERROR_DETAIL_MAX and not from a
-   * literal past it: exactly the cap is not a cut and carries no mark.
+   * The last cut between a composed refusal and the screen. A bare slice would end
+   * what error_detail kept wherever the cap ran out, and the client would show it as a
+   * finished sentence, because it renders the whole of it and adds no cut of its own.
+   * Both messages are built from ERROR_DETAIL_MAX and not from a literal past it:
+   * exactly the cap is not a cut and carries no mark.
    */
   it('a message past what error_detail keeps is marked where it was cut', async () => {
     const fits = await upload('Marked Cut Bank', csvFile('2026-08-21,-14.00,Kept whole'));
@@ -678,11 +680,11 @@ describe('a failed import leaves no staged rows behind', () => {
 
 /**
  * A fee the parser read must not be lost between the summary the user accepts and
- * the row the database keeps. The READ side of that is held by
- * `tsc` - stagedToNew returns NewTransaction and fee is required on it - but the
- * write side is not: omitting fee_cents from stageImport's values is legal
- * TypeScript against a nullable column, and the confirmation screen would then show
- * a net the database does not hold. This is what holds that half.
+ * the row the database keeps. `tsc` holds the READ side of that: stagedToNew returns
+ * NewTransaction, and fee is required on it. It does not hold the write side: omitting
+ * fee_cents from stageImport's values is legal TypeScript against a nullable column,
+ * and the confirmation screen would then show a net the database does not hold. This
+ * case holds that half.
  */
 describe('a stated fee survives staging', () => {
   it('reaches staged_transactions, and then the row the confirm writes', async () => {
@@ -708,8 +710,8 @@ describe('a stated fee survives staging', () => {
 
     // the number on the confirmation screen is already the movement, not the column
     expect(summary.totals).toEqual([{ currency: 'EUR', net: -73.62 }]);
-    // and the statement's own running balance says the same, off one series - whose
-    // two rows are one junction, so the run is one the verdict could have failed on
+    // and the statement's own running balance says the same, off one series. Its two
+    // rows make one junction, so the run is one the verdict could have failed on
     expect(summary.balances).toEqual({
       opening: 100,
       closing: 26.38,

@@ -209,11 +209,11 @@ describe('published navigation snapshot', () => {
     act(() => { window.history.go(-1); flush(); });
     if (!backWhileSaving) {
       fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
-      expect(screen.getByText(/browser history position is unverified/)).toBeVisible();
+      expect(screen.getByText(/can't tell where this view is in the browser history/)).toBeVisible();
       fireEvent.click(screen.getByRole('button', { name: 'Create goal' }));
     } else await act(async () => { resolveWrite(ok(saved)); });
     await screen.findByRole('heading', { name: 'Goal saved' });
-    expect(screen.getByText(/browser address update is waiting/)).toBeVisible();
+    expect(screen.getByText(/address bar will update when you go back/)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Create goal' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(index).toBe(0);
@@ -263,7 +263,7 @@ describe('published navigation snapshot', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create chart' }));
     await screen.findByRole('heading', { name: 'Synthetic chart' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByText(/browser address update is waiting/)).toBeVisible();
+    expect(screen.getByText(/address bar will update when you go back/)).toBeVisible();
     await waitFor(() => expect(charts).toHaveLength(1));
     expect(entries).toEqual(before);
     expect(index).toBe(0);
@@ -278,7 +278,7 @@ describe('published navigation snapshot', () => {
     expect(push).toHaveBeenCalledOnce();
     expect(replace).not.toHaveBeenCalled();
     expect(requests().filter((request) => request === 'PUT /api/analytics/charts')).toHaveLength(1);
-    expect(screen.queryByText(/browser address update is waiting/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/address bar will update when you go back/)).not.toBeInTheDocument();
   });
 
   it('keeps every reader and the editor stable during Back, cancellation, and unrelated renders', () => {

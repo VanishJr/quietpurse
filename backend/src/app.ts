@@ -200,10 +200,10 @@ const answer = <R extends JsonRoute>(res: express.Response, route: R, body: Answ
 
 const headersAndLog: express.RequestHandler = (req, res, next) => {
   const startedAt = Date.now();
-  // Nothing may frame this app. There is no sign-in, so a page that gets it into an
-  // iframe can walk the person through their own Delete with their own session -
-  // which is every session, always. On every response and not only on the pages: a
-  // header that is right for some paths is one somebody has to keep right.
+  // Nothing may frame this app. There is no sign-in, so every session is the owner's,
+  // always, and a page that gets the app into an iframe can walk the person through
+  // their own Delete with it. On every response and not only on the pages: a header
+  // that is right for some paths is one somebody has to keep right.
   res.setHeader('X-Frame-Options', 'DENY');
   // Everything this app loads it ships itself; there is no CDN, no analytics and no
   // embed. Nothing reachable today injects markup, so this is the header that keeps
@@ -228,13 +228,13 @@ app.use(headersAndLog);
  *
  * Host closes DNS rebinding. A page at http://evil.example whose name is made to
  * resolve to 127.0.0.1 arrives here same-origin with itself, and the only part of it
- * still under the attacker's control is the NAME in this header - so a name is
- * refused and an address is not. That also leaves QUIETPURSE_HOST=0.0.0.0 working: a phone on
+ * still under the attacker's control is the NAME in this header. So a name is refused
+ * and an address is not. That also leaves QUIETPURSE_HOST=0.0.0.0 working: a phone on
  * the same Wi-Fi reaches this server by its address and never by a name.
  *
  * Origin closes the plain cross-origin write, which needs no rebind at all.
  * multipart/form-data is CORS-safelisted, so any page on the web can POST a
- * statement to /api/imports and the browser will send it - the response is
+ * statement to /api/imports and the browser will send it. The response is
  * unreadable to that page, but the import lands. A POST carries Origin whatever its
  * content type, and an opaque origin arrives as the literal `null`, which is not a
  * URL and is refused with everything else that is not one.
@@ -247,7 +247,7 @@ app.use(headersAndLog);
  * probe that would need it exempt, and an exemption is how the next route gets one.
  */
 const REQUEST_NOT_LOCAL =
-  'this request did not come from Quietpurse on this machine, so nothing was read or changed - open the app at the address the server printed when it started';
+  'this request did not come from Quietpurse on this machine, so nothing was read or changed. Open the app at the address the server printed when it started';
 
 const isLoopbackName = (name: string): boolean =>
   name === 'localhost' || name === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name);
@@ -255,21 +255,22 @@ const isLoopbackName = (name: string): boolean =>
 /**
  * An address literal in either family, checked as one rather than by the presence of a
  * colon: hostPart has already taken the port off, so the only colon that survives is
- * inside brackets - but `[evil:example]` survives that way too, and it is a name.
+ * one that was inside brackets. But `[evil:example]` survives that way too, and it is a
+ * name.
  */
 const isAddressLiteral = (name: string): boolean =>
   /^\d{1,3}(?:\.\d{1,3}){3}$/.test(name) || /^[0-9a-f:]*:[0-9a-f:.]*$/.test(name);
 
 /**
  * Set QUIETPURSE_HOST to anything but a loopback name and the owner opened the port
- * deliberately - README and SECURITY.md both say what that costs. The phone that use
+ * deliberately. README and SECURITY.md both say what that costs. The phone that use
  * case exists for arrives by address, so the widening is exactly "an address as well
  * as a loopback name", and a DNS name stays refused in both configurations. That is
  * the half rebinding needs.
  *
  * Read per request rather than captured at module load: a value captured here would
- * make the widened arm unreachable from a test - the suite runs on the loopback
- * default, so that arm would be held by nothing at all while being the arm that
+ * make the widened arm unreachable from a test. The suite runs on the loopback
+ * default, so that arm would be held by nothing at all, and it is the arm that
  * governs the open configuration.
  */
 const namesThisServer = (name: string): boolean =>
@@ -324,7 +325,7 @@ app.use('/api', originCheck);
 // the ceiling is raised from the default for one caller: a backup restored as JSON
 const MAX_BODY_BYTES = 25 * 1024 * 1024;
 const BODY_TOO_LARGE =
-  `the request body is larger than ${MAX_BODY_BYTES / 1024 / 1024} MB, the ceiling for a JSON body or a backup file - nothing was changed`;
+  `the request body is larger than ${MAX_BODY_BYTES / 1024 / 1024} MB, the ceiling for a JSON body or a backup file. Nothing was changed`;
 
 app.use(express.json({ limit: MAX_BODY_BYTES }));
 
@@ -338,10 +339,10 @@ app.get('/api/health', (_req, res) => {
 });
 
 /**
- * One schema rather than a check per door, because a rename that cannot restore the
- * name an account already has is worse than no bound at all - and zod runs its checks
- * in the order they are added, so a `.max()` written before `.trim()` at one door
- * bounds the untrimmed string while the next door bounds the trimmed one.
+ * One schema rather than a check per door. A rename that cannot restore the name an
+ * account already has is worse than no bound at all, and zod runs its checks in the
+ * order they are added: a `.max()` written before `.trim()` at one door bounds the
+ * untrimmed string while the next door bounds the trimmed one.
  */
 const accountNameSchema = z
   .string({ error: 'account name must be text' })
@@ -361,9 +362,9 @@ const currencyCode = z
   .regex(CURRENCY_CODE, { error: 'currency must be a 3-letter ISO code' });
 
 /**
- * The account doors normalise, in one place covering both - a second .toUpperCase()
- * to remember is a second one to forget, and an account stored as 'usd' lists every
- * one of its own transactions as foreign to it on Overview.
+ * The account doors normalise in one place covering both. A second .toUpperCase() to
+ * remember is a second one to forget, and an account stored as 'usd' lists every one
+ * of its own transactions as foreign to it on Overview.
  */
 const accountCurrency = currencyCode.transform((c) => c.toUpperCase());
 
@@ -387,16 +388,16 @@ const accountPatchSchema = z.strictObject({
  * cascades), which empties it and makes it correctable again.
  */
 const HAS_TRANSACTIONS =
-  'this account holds transactions, and changing its currency would relabel amounts that were never in it - delete the imports behind this account, which empties it, and the currency can be changed again';
+  'this account holds transactions, and changing its currency would relabel amounts that were never in it. Delete the imports behind this account to empty it, and then the currency can be changed';
 
 /**
  * The other half of the same rule, and a different sentence because the advice
  * differs: holding transactions is permanent, an outstanding import is one click.
- * Confirming is not offered - its rows were prepared in the currency being replaced,
+ * Confirming is not offered: its rows were prepared in the currency being replaced,
  * and once they land the account can no longer be corrected at all.
  */
 const STAGED_IMPORT =
-  'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now - discard that import, change the currency, then upload the statement again';
+  'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now. Discard that import, change the currency, then upload the statement again';
 
 /**
  * The same state refusing a different write, and it offers both ways out where the
@@ -404,7 +405,7 @@ const STAGED_IMPORT =
  * deleted is harmless, where for a currency correction it defeats the correction.
  */
 const DELETE_STAGED_IMPORT =
-  'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account';
+  'this account has an import waiting to be confirmed. Confirm it or discard it, then delete the account';
 
 /** The first zod issue as a sentence, unknown keys named rather than counted. */
 const badRequest = (error: z.ZodError): string => {
@@ -415,7 +416,7 @@ const badRequest = (error: z.ZodError): string => {
 };
 
 const NOT_A_JSON_OBJECT =
-  'the request body is not a JSON object - send the fields as a JSON object with Content-Type: application/json';
+  'the request body is not a JSON object. Send the fields as a JSON object with Content-Type: application/json';
 
 /** Answers the refusal itself; a route that gets undefined back returns. */
 const jsonBody = (req: express.Request, res: express.Response): Record<string, unknown> | undefined => {
@@ -431,12 +432,12 @@ const jsonBody = (req: express.Request, res: express.Response): Record<string, u
  * accounts_name_unique refused the write. The holder's STORED name is quoted rather
  * than the string that was sent: the two differ in case exactly when the refusal is
  * most confusing, and the stored one is the one on the user's screen. A hidden holder
- * is named as hidden - otherwise the user is refused on behalf of a row nothing shows.
+ * is named as hidden. Otherwise the user is refused on behalf of a row nothing shows.
  */
 const nameTaken = (taken: Account | undefined, requested: string): string => {
   const name = taken?.name ?? requested;
   return taken?.hidden
-    ? `an account called "${name}" already has that name, and it has been removed from the app - restore it, or pick another name`
+    ? `an account called "${name}" already has that name, and it is hidden. Unhide it, or pick another name`
     : `an account called "${name}" already has that name`;
 };
 
@@ -505,7 +506,7 @@ app.patch('/api/accounts/:id', async (req, res) => {
     case 'name-taken':
       // only a patch that carried a name can meet accounts_name_unique, and
       // narrowing on it here is what keeps the refusal from having to invent a
-      // requested name - the sentence has no arm that quotes an account called ""
+      // requested name: the sentence has no arm that quotes an account called ""
       if (name !== undefined) {
         res.status(409).json({ error: nameTaken(result.taken, name) });
         return;
@@ -529,10 +530,10 @@ app.patch('/api/accounts/:id', async (req, res) => {
 
 /**
  * Distinct from hiding, which is the PATCH above and is reversible. A hidden account
- * is deletable - hiding is what people do before deleting. What is refused is an
+ * is deletable, because hiding is what people do before deleting. What is refused is an
  * import waiting to be confirmed: without that refusal this delete takes the import
  * with it, and the summary card still on the user's screen answers "import not
- * found" when they press Confirm.
+ * found" when they press Confirm import.
  */
 app.delete('/api/accounts/:id', async (req, res) => {
   const result = await deleteAccount(req.params.id);
@@ -661,7 +662,7 @@ app.post('/api/transfer-rules', async (req, res) => {
     if (!result.ok) {
       switch (result.reason) {
         case 'not-found': res.status(404).json({ error: 'transaction not found' }); return;
-        case 'empty': res.status(400).json({ error: 'the transaction has an empty description - there is nothing to hang a rule on' }); return;
+        case 'empty': res.status(400).json({ error: 'the transaction has an empty description, so there is nothing to hang a rule on' }); return;
         case 'changed': res.status(409).json({ error: 'The matching transactions changed. Refresh the preview before applying the rule.' }); return;
       }
     }
@@ -675,7 +676,7 @@ app.post('/api/transfer-rules', async (req, res) => {
     return;
   }
   if (!tx.description) {
-    res.status(400).json({ error: 'the transaction has an empty description - there is nothing to hang a rule on' });
+    res.status(400).json({ error: 'the transaction has an empty description, so there is nothing to hang a rule on' });
     return;
   }
   const rule = await addTransferRule(tx.description, tx.accountId);
@@ -708,16 +709,16 @@ type ScopeResult =
 
 /**
  * Deliberately not q(): it maps both '' and a repeated parameter to undefined, and
- * undefined here means every account in the base currency - so a caller
- * building `?accountId=${account?.id ?? ''}` would be handed every account's money
+ * undefined here means every account in the base currency. A caller building
+ * `?accountId=${account?.id ?? ''}` would then be handed every account's money
  * labelled as one account's. Presence first, then the type, then the trimmed string,
- * and each of the two refusals says its own cause: `?accountId=` was sent exactly
- * once (Express 5's simple parser hands it over as ''), so answering it with the
- * repeated-parameter sentence names something that did not happen.
+ * and each refusal says its own cause: `?accountId=` was sent exactly once (Express
+ * 5's simple parser hands it over as ''), so answering it with the repeated-parameter
+ * sentence names something that did not happen.
  *
  * An unresolvable id is a 404 rather than a 200 of zeroes: a per-account body has to
  * state a currency and there is no currency without an account. A hidden account
- * resolves like any other - the caller named it by id.
+ * resolves like any other, because the caller named it by id.
  */
 async function summaryScope(raw: unknown): Promise<ScopeResult> {
   if (raw === undefined) return { ok: true, scope: { kind: 'all' } };
@@ -886,7 +887,7 @@ const chartsPutSchema = z.strictObject({
         if (seen.has(c.id)) {
           ctx.addIssue({
             code: 'custom',
-            message: `two charts share the id "${c.id}" - the URL names a chart by its id, so it can only name one`,
+            message: `two charts share the id "${c.id}". The URL names a chart by its id, so it can only name one`,
           });
           return;
         }
@@ -896,7 +897,7 @@ const chartsPutSchema = z.strictObject({
 });
 
 export const CHARTS_STALE =
-  'These charts were changed somewhere else after this list was loaded. What you see now is the current version - save again and it will go through.';
+  'These charts were changed somewhere else after this list was loaded. What you see now is the current version. Save again and it will go through.';
 
 app.get('/api/analytics/charts', async (_req, res) => {
   answer(res, 'GET /api/analytics/charts', await listCharts());
@@ -916,7 +917,7 @@ app.put('/api/analytics/charts', async (req, res) => {
   answer(res, 'PUT /api/analytics/charts', { version: result.version, charts: result.charts });
 });
 
-/** Manual income source mark (an id from income_sources); null - back to auto-detection. */
+/** Manual income source mark: an id from income_sources, or null for auto-detection. */
 app.patch('/api/transactions/:id/source', async (req, res) => {
   const body = jsonBody(req, res);
   if (!body) return;
@@ -1346,7 +1347,7 @@ app.get('/api/export.csv', async (req, res) => {
   // every transaction the person has, in one response: res.send sets an ETag and no
   // Cache-Control, which permits heuristic caching of the whole of it
   res.setHeader('Cache-Control', 'no-store');
-  // BOM - so Excel opens UTF-8 with non-latin characters without a fight
+  // a BOM, so Excel opens UTF-8 with non-latin characters without a fight
   res.send('\uFEFF' + [header, ...lines].join('\n'));
 });
 
@@ -1393,7 +1394,7 @@ function uploadError(err: unknown): string {
     case 'LIMIT_PART_COUNT':
       return 'the upload must carry exactly one file field named "file"';
     case 'LIMIT_FIELD_VALUE':
-      return `the "${field}" field is larger than ${mb(UPLOAD_LIMITS.fieldSize)} MB - it carries text, not the statement`;
+      return `the "${field}" field is larger than ${mb(UPLOAD_LIMITS.fieldSize)} MB. It carries text, not the statement`;
     case 'LIMIT_FIELD_COUNT':
       return `the upload carries more than ${UPLOAD_LIMITS.fields} form fields`;
     case 'LIMIT_FIELD_KEY':
@@ -1417,7 +1418,7 @@ const uploadFile: express.RequestHandler = (req, res, next) => {
   });
 };
 
-/** A column name from the file's header. Empty is not a name - it resolves to nothing. */
+/** A column name from the file's header. Empty is not a name: it resolves to nothing. */
 const column = (field: string) =>
   z
     .string({ error: `mapping.${field} must be a string` })
@@ -1432,7 +1433,7 @@ const column = (field: string) =>
  * and answers 200.
  *
  * Tied to CsvMapping at both ends: the shape must name every column of it, and the
- * result must still be one - a field added there cannot quietly go unchecked here.
+ * result must still be one. A field added there cannot quietly go unchecked here.
  */
 const mappingSchema: z.ZodType<Partial<CsvMapping>> = z.strictObject({
   date: column('date').optional(),
@@ -1472,7 +1473,7 @@ const mappingSchema: z.ZodType<Partial<CsvMapping>> = z.strictObject({
             z.string(),
             // the bound carries the sentence itself, as description's does: an
             // accept list with nothing in it filters every row away, and the user
-            // is then told no row could be parsed - their own input, zeroed and
+            // is then told no row could be parsed: their own input, zeroed and
             // reported back as a fault in the file
             z
               .array(z.string())
@@ -1530,7 +1531,7 @@ app.post('/api/imports', uploadFile, async (req, res) => {
   // Checked by hand rather than by a schema: multipart fields carry no type, so
   // nothing above this route can hold a StatementDestination.
   //
-  // The two retired fields are refused rather than ignored - a request carrying
+  // The retired fields are refused rather than ignored. A request carrying
   // accountName states a destination, and dropping it silently is the guess this
   // route exists to refuse. Refused ahead of accountId, so a request carrying only
   // currency reads the sentence about currency rather than one about a field it did
@@ -1538,14 +1539,14 @@ app.post('/api/imports', uploadFile, async (req, res) => {
   if (body.accountName !== undefined) {
     res.status(400).json({
       error:
-        'an upload goes to an account that already exists - create it with POST /api/accounts, then send its accountId',
+        'an upload goes to an account that already exists. Create it with POST /api/accounts, then send its accountId',
     });
     return;
   }
   if (body.currency !== undefined) {
     res.status(400).json({
       error:
-        'an account keeps its own currency - it is set when the account is created (POST /api/accounts) and corrected with PATCH /api/accounts/:id',
+        'an account keeps its own currency. It is set when the account is created (POST /api/accounts) and corrected with PATCH /api/accounts/:id',
     });
     return;
   }
@@ -1554,7 +1555,7 @@ app.post('/api/imports', uploadFile, async (req, res) => {
     return;
   }
   // Presence is "the field arrived", never "the field is a string": multer turns a
-  // repeated field into an array. Refused rather than normalised - taking the first
+  // repeated field into an array. Refused rather than normalised: taking the first
   // or the last picks between two values the caller may not agree on.
   if (typeof body.accountId !== 'string') {
     res.status(400).json({ error: 'accountId must be sent once, as a single value' });
@@ -1609,9 +1610,9 @@ app.post('/api/imports', uploadFile, async (req, res) => {
 const confirmRefusal = (status: ImportStatus): string => {
   switch (status) {
     case 'committed':
-      return 'this import has already been confirmed - its rows are in your data';
+      return 'this import has already been confirmed, and its rows are in your data';
     case 'discarded':
-      return 'this import was discarded - upload the file again to import it';
+      return 'this import was discarded. Upload the file again to import it';
     default:
       return `this import is ${status}, not awaiting confirmation`;
   }
@@ -1636,11 +1637,11 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
     case 'status':
       return confirmRefusal(result.status);
     case 'file-committed':
-      return `these bytes were imported as ${result.heldBy} while this import was waiting - its rows are already in your data`;
+      return `these bytes were imported as ${result.heldBy} while this import was waiting, so its rows are already in your data`;
     case 'account-missing':
       return 'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
     case 'account-hidden':
-      return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
+      return 'nothing was imported: the account these rows go to is hidden. Unhide it, then press Confirm import again';
     case 'date-not-real':
       return `nothing was imported: an earlier version read this file and kept the date "${result.date}", which is not a real day or time. Discard this import and upload the file again, and the upload will name the row to correct`;
     case 'currency-not-a-code':
@@ -1661,11 +1662,11 @@ app.post('/api/imports/:id/confirm', async (req, res) => {
     // A broken invariant, not a bad request, so the status stays 5xx. What changes is
     // the body: the global handler's `internal error` reads as transient on the one
     // screen whose job is saying whether the data landed, so the person presses
-    // Confirm again and gets it again. The real message goes to the log.
+    // Confirm import again and gets it again. The real message goes to the log.
     logImport.error(`import ${req.params.id} cannot be confirmed: ${(e as Error).message}`);
     res.status(500).json({
       error:
-        'this import cannot be confirmed - confirming it again will fail the same way. Discard it and upload the file again',
+        'this import cannot be confirmed, and confirming it again will fail the same way. Discard it and upload the file again',
     });
     return;
   }
@@ -1692,9 +1693,9 @@ app.post('/api/imports/:id/confirm', async (req, res) => {
 });
 
 /**
- * Idempotent - a second discard reports the state that already holds - but a
- * `committed` import is refused: its rows are real data, and DELETE /api/imports/:id
- * is the path that removes those.
+ * Idempotent: a second discard reports the state that already holds. A `committed`
+ * import is refused, though: its rows are real data, and DELETE /api/imports/:id is
+ * the path that removes those.
  */
 app.post('/api/imports/:id/discard', async (req, res) => {
   const result = await discardImport(req.params.id);
@@ -1706,7 +1707,7 @@ app.post('/api/imports/:id/discard', async (req, res) => {
     res.status(409).json({
       error:
         result.status === 'committed'
-          ? 'this import is already part of your data - delete it instead of discarding it'
+          ? 'this import is already part of your data. Delete it instead of discarding it'
           : `this import is ${result.status}, not awaiting confirmation`,
     });
     return;
@@ -1782,7 +1783,7 @@ const cleanName = (name: string): string =>
  * `info` is optional because the row can go between the two reads on the download
  * route; the id-derived fallback is still the honest name. That fallback goes through
  * the same two encodings as the user's string, because the id is not always this
- * server's UUID - a restored backup reproduces ids from a foreign JSON.
+ * server's UUID: a restored backup reproduces ids from a foreign JSON.
  */
 export function attachmentDisposition(importId: string, info?: ImportDocumentInfo): string {
   const derived = info ? `import-${importId}.${info.sourceType}` : `import-${importId}`;
@@ -1807,8 +1808,8 @@ app.get('/api/imports/:id/document', async (req, res) => {
     // A row that claims a document whose file is not here is the ordinary state of a
     // restored backup, so it joins the 404 above rather than reporting a fault: the
     // machine holding the statements is the machine they were uploaded to. Every
-    // other read failure is 500 and not 400 - the user's file is not at fault - and
-    // the whole chain goes to the log. The client gets no path, no errno, no filename
+    // other read failure is 500 and not 400, because the user's file is not at fault.
+    // The whole chain goes to the log, and the client gets no path, no errno, no filename
     if (e instanceof DocumentMissing) {
       logImport.info(`import ${req.params.id} claims a document that is not on this disk`);
       res.status(404).json({ error: DOCUMENT_NOT_READABLE });
@@ -1837,7 +1838,7 @@ app.get('/api/imports/:id/document', async (req, res) => {
 app.delete('/api/imports/:id/document', async (req, res) => {
   // on the ROW, never on the pointer: a row whose pointer is cleared may still have
   // a file, and those are exactly the rows a retention policy has to reach. And it
-  // runs before any disk access - checking afterwards would delete a file for an id
+  // runs before any disk access: checking afterwards would delete a file for an id
   // with no row, then answer "not found"
   const info = await getImportDocumentInfo(req.params.id);
   if (!info) {
@@ -1862,7 +1863,7 @@ app.delete('/api/imports/:id/document', async (req, res) => {
   // unreferenced bank statement on disk while the user has been told it is deleted,
   // and no purge exists to revisit it.
   //
-  // `false` is not a failure - most rows never had a document - and the pointer is
+  // `false` is not a failure, since most rows never had a document. The pointer is
   // cleared either way, or the row goes on claiming a readable one.
   await clearImportDocument(req.params.id);
   logImport.info(`import ${req.params.id} document deleted (bytes removed: ${bytesRemoved})`);
@@ -1896,7 +1897,7 @@ app.post(
     if (Buffer.isBuffer(raw) && raw.subarray(0, 16).equals(Buffer.from('SQLite format 3\0'))) {
       res.status(400).json({
         error:
-          'this is a SQLite database from an old version of Quietpurse, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen',
+          'this is a SQLite database from an old version of Quietpurse, not a backup. Nothing in this version reads one; this route takes the JSON backup from Settings',
       });
       return;
     }
@@ -1928,7 +1929,7 @@ app.post(
       logger.error(`restore failed: ${reasonFirst(e)}`);
       res.status(400).json({
         error:
-          'backup could not be restored: the file was read, but writing it to the database failed - the reason is in the log this server printed',
+          'backup could not be restored: the file was read, but writing it to the database failed. The reason is in the log this server printed',
       });
       return;
     }
@@ -1950,14 +1951,14 @@ app.post(
 export const WEB_DIST = path.join(__dirname, '..', '..', 'web', 'dist');
 
 export const CLIENT_NOT_BUILT =
-  'the web client is not built - run `npm run setup` from the repository root, then start again';
+  'the web client is not built. Run `npm run setup` from the repository root, then start again';
 
 /**
  * RELATIVE to the build, never the absolute path on disk. `filePath.includes('/assets/')`
- * reads the whole path, so a checkout under any directory called `assets` - and a home
- * directory is one somebody can have - served index.html with a year of immutable
- * caching, and the person's browser then never sees a new version of the app at all.
- * Only Vite puts a content hash in a name, and only under that one folder.
+ * reads the whole path, so it served index.html with a year of immutable caching from a
+ * checkout under any directory called `assets`, and somebody's home directory can be
+ * one. The person's browser then never sees a new version of the app at all. Only Vite
+ * puts a content hash in a name, and only under that one folder.
  */
 export function cacheControlFor(dist: string, filePath: string): string {
   const relative = path.relative(dist, filePath);
@@ -1971,7 +1972,7 @@ export function cacheControlFor(dist: string, filePath: string): string {
  * the one that was missing: a request for a FILE that is not there is a 404, never
  * 200 with a page in it. After a rebuild a stale index.html asks for a bundle whose
  * name no longer exists, and answering HTML makes the browser report a syntax error
- * inside a script - which sends the reader to the wrong file entirely.
+ * inside a script, which sends the reader to the wrong file entirely.
  *
  * "File-shaped" is the last segment carrying an extension. It is the only signal
  * available: a <script src> is sent with `Accept: * / *`, which matches text/html, so
@@ -2031,9 +2032,9 @@ const callerFault = (err: unknown): err is { status: number; expose: true; type?
 };
 
 // One handler, and no per-route wrapper: Express 5 catches an async route's rejection
-// itself. A parser's refusal is the caller's and keeps the parser's status; on the 500
-// arm the message goes to the log and not to the client - it tends to carry table
-// names and SQL fragments.
+// itself. A parser's refusal is the caller's and keeps the parser's status. On the 500
+// arm the message goes to the log and not to the client, because it tends to carry
+// table names and SQL fragments.
 export const errorHandler: express.ErrorRequestHandler = (err: unknown, req, res, next) => {
   if (res.headersSent) {
     logHttp.error(err);
@@ -2083,7 +2084,7 @@ export function registeredAnswerKeys(target: express.Express): string[] {
       );
     } else if (!DOOR_MIDDLEWARES.has(layer.handle?.name ?? '')) {
       throw new Error(
-        `a middleware the door does not name is on the app: ${layer.handle?.name || 'anonymous'} - the app's non-route layers are the door's named middlewares and nothing else`,
+        `a middleware the door does not name is on the app: ${layer.handle?.name || 'anonymous'}. The app's non-route layers are the door's named middlewares and nothing else`,
       );
     }
   }

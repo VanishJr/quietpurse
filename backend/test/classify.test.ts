@@ -184,7 +184,6 @@ describe('reclassifyAll: integration on an in-memory database', () => {
         date: '2026-02-27T00:00:00.000Z',
         description: 'LOHN / GEHALT         02/26',
       }),
-      // rent 4 months running - a recurring payment in the housing category
       ...[1, 2, 3, 4].map((m) =>
         tx({
           accountId: 'eb:n26',

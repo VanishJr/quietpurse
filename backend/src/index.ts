@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   await seedDefaults();
 
   // In the background: the recompute fetches exchange rates and must not delay the
-  // start. If nothing was owed, still backfill base_amount - some rows may
+  // start. If nothing was owed, still backfill base_amount, because some rows may
   // have been left without a rate when the provider was unavailable.
   void (async () => {
     const stale = await reclassifyIfStale();
@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   server.on('error', (e: NodeJS.ErrnoException) => {
     logger.error(
       e.code === 'EADDRINUSE'
-        ? `port ${config.port} is taken - stop what holds it, or start with PORT=<another port>`
+        ? `port ${config.port} is taken. Stop what holds it, or start with PORT=<another port>`
         : `could not listen: ${e.message}`,
     );
     void shutdown(1);
@@ -65,8 +65,8 @@ async function main(): Promise<void> {
 }
 
 // reasonFirst and not e.message: drizzle wraps every driver error, so the message is
-// the whole failed statement with every bound value in it, and the reason - the
-// permission, the missing folder, the relation that already exists - is on e.cause.
+// the whole failed statement with every bound value in it. The reason, such as the
+// permission, the missing folder or the relation that already exists, is on e.cause.
 // This is one line on a console and the person reads the front of it.
 void main().catch((e: Error) => {
   logger.error(`startup failed: ${reasonFirst(e)}`);

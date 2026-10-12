@@ -21,7 +21,7 @@ export const logger = pino({
  * reads is the rendered message rather than the structured fields beside it.
  *
  * Log-only: this carries paths and errnos, so it must never be spliced into a message
- * a user sees. The walk is bounded and remembers what it has visited - a wrapper whose
+ * a user sees. The walk is bounded and remembers what it has visited. A wrapper whose
  * cause points back at an ancestor is not exotic, and a log helper that loops is a hang
  * in the failure path.
  *
@@ -46,17 +46,17 @@ export function causeChain(err: unknown, maxDepth = 8): string {
  * console when the app refuses to start.
  *
  * causeChain reports outermost first, which is right for a log entry somebody is
- * reading deliberately and wrong here: drizzle-orm wraps every driver error, so its
- * message is the whole failed statement and every bound value, and the sentence that
- * says what went wrong - the permission, the errno, the relation that already exists
- * - sits behind all of it. Measured on a squashed migration: `Failed query: CREATE
- * TABLE "accounts" (...); params: : relation "accounts" already exists`, where the
- * last five words are the whole of the news.
+ * reading deliberately and wrong here. drizzle-orm wraps every driver error, so its
+ * message is the whole failed statement and every bound value. The sentence that says
+ * what went wrong, such as the permission, the errno or the relation that already
+ * exists, sits behind all of it. A failed migration reads `Failed query: CREATE
+ * TABLE "accounts" (...); params: : relation "accounts" already exists`, and only
+ * its last clause is news.
  *
  * A part already contained in the one that wraps it is dropped rather than printed
- * twice: a thrower that composed its own cause into its own message - which is the
- * house style for a boot check, because the message has to stand alone - would
- * otherwise say the errno at both ends.
+ * twice. A thrower may compose its own cause into its own message, and that is the
+ * house style for a boot check, because the message has to stand alone. Without the
+ * drop, such a thrower would say the errno at both ends.
  */
 export function reasonFirst(err: unknown, maxDepth = 8): string {
   const parts: string[] = [];

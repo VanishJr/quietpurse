@@ -169,23 +169,23 @@ export function AccountFlows({
       <p className="acct-range">{range}</p>
 
       {otherCurrencies.length > 0 && (
-        // an account has one currency, and a statement's own currency column can still
-        // put rows of another into it - printing one code over a sum of two is the
+        // an account has one currency, but a statement's own currency column can still
+        // put rows of another into it. Printing one code over a sum of two is the
         // failure this exists to prevent.
         //
         // The list is all time and the figures beside it are one window, so the two
         // claims below have different strengths and are written as different
         // sentences: the balance is all time too and IS wrong, while a figure on this
-        // screen is wrong only if one of those rows falls in a month it covers - which
-        // nothing here was told. The claim is screen-wide: the donut's total sums the
-        // same unconverted rows, and one sentence said once is worth more than the same
-        // paragraph on every card.
+        // screen is wrong only if one of those rows falls in a month it covers, and
+        // nothing here was told which months those are. The claim is screen-wide: the
+        // donut's total sums the same unconverted rows, and one sentence said once is
+        // worth more than the same paragraph on every card.
         <Notice tone="warning">
           This account holds transactions in {otherCurrencies.join(', ')}, not{' '}
           {account.currency}. The account's balance adds them in as though they were{' '}
-          {account.currency}, so it is wrong. So is any other figure on this screen
-          covering a month one of them falls in — and nothing here knows which months
-          those are.
+          {account.currency}, so it is wrong. So is any other figure on this screen for
+          a month that includes one of them. This screen cannot tell which months those
+          are.
         </Notice>
       )}
 

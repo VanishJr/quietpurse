@@ -23,8 +23,8 @@ import {
 
 /**
  * The window each option names, carried on the entry rather than derived from the key a
- * second time — a label and the window under it cannot then drift apart. `days: null`
- * is unbounded, which is what an arrival with a `focus` opens on.
+ * second time, so a label and the window under it cannot drift apart. `days: null` is
+ * unbounded, which is what an arrival with a `focus` opens on.
  */
 const PERIODS = [
   { key: '7d', label: '7 days', days: 7 },
@@ -164,8 +164,8 @@ export function TransactionsScreen({
 
   /**
    * An arrival with a `focus` asks for all of one account's rows, so the category filter
-   * goes back to every category and the period opens at the widest this screen offers —
-   * landing on whatever period was set would hide most of what the arrival asked for.
+   * goes back to every category and the period opens at the widest this screen offers.
+   * Keeping whatever period was set would hide most of what the arrival asked for.
    */
   useEffect(() => {
     if (!focus) return;
@@ -294,7 +294,7 @@ export function TransactionsScreen({
 
   /**
    * null hands it back to auto-detection. Clicking the category the row already has is
-   * not a no-op — it pins the row against any rule.
+   * not a no-op: it pins the row against any rule.
    */
   const applyCategory = async (tx: Transaction, next: Category | null) => {
     if (busy) return;

@@ -12,7 +12,7 @@ export async function getAppSettings(): Promise<AppSettings> {
       const v = JSON.parse(raw);
       if (Array.isArray(v)) ownerNames = v.map(String).filter(Boolean);
     } catch {
-      // corrupted value - treat it as not set
+      // a corrupted value is treated as not set
     }
   }
   return {

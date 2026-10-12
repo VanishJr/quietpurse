@@ -4,10 +4,10 @@ export const CSV_PARSER_VERSION = 4;
 
 /**
  * The uploaded bytes as text. Two decoders and no charset detection: a BOM is
- * believed, otherwise UTF-8 is tried in fatal mode and a hard failure - which no
- * valid UTF-8 file can produce - falls back to windows-1252, the encoding German
- * bank exports actually use. Guessing by frequency would be worse, and getting it
- * wrong is cosmetic anyway: the description is not part of the dedup key.
+ * believed, and otherwise UTF-8 is tried in fatal mode. No valid UTF-8 file can fail
+ * that, so a failure falls back to windows-1252, the encoding German bank exports
+ * actually use. Guessing by frequency would be worse, and getting it wrong is
+ * cosmetic anyway: the description is not part of the dedup key.
  */
 export function decodeCsv(bytes: Buffer): string {
   if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
@@ -78,23 +78,23 @@ export function detectDelimiter(text: string): string {
 
 /**
  * Mapping: column names from the file's header (case-insensitive).
- * description can be a list - the columns are joined with a space
+ * description can be a list, and its columns are joined with a space
  * (Sparkasse: payee + payment purpose).
  */
 export interface CsvMapping {
   date: string;
   amount: string;
   description: string | string[];
-  /** the row's currency column; if absent, the currency comes from the request */
+  /** the row's currency column; if absent, the currency comes from the account */
   currency?: string;
   /**
    * date format: iso = YYYY-MM-DD[ time], dmy = DD.MM.YYYY or DD.MM.YY,
-   * auto (default) - whichever of the two the value matches
+   * auto (the default) = whichever of the two the value matches
    */
   dateFormat?: 'iso' | 'dmy' | 'auto';
-  /** decimal separator; auto - by the last of . or , in the number */
+  /** decimal separator; auto = whichever of . or , comes last in the number */
   decimal?: ',' | '.' | 'auto';
-  /** column delimiter; auto - from the header */
+  /** column delimiter; absent = detected from the header */
   delimiter?: string;
   /**
    * keep only rows where a column holds one of these values (Revolut:
@@ -187,9 +187,9 @@ export const fold = (s: string): string => s.trim().toLowerCase();
  *
  * Whole-cell equality, never a prefix or a substring: "Дата начала" is when a Revolut
  * transaction *started* and sits two columns from "Дата выполнения", so a matcher that
- * settles for a prefix imports dates that can be days off - and the date is in the
- * dedup key, so re-importing after the mistake is found duplicates the
- * statement rather than recognising it.
+ * settles for a prefix imports dates that can be days off. The date is in the dedup
+ * key, so re-importing after the mistake is found duplicates the statement rather
+ * than recognising it.
  *
  * The candidate list breaks a tie, not the header's order: the list's author knows
  * which name is the true one, where column order is the bank's arbitrary choice.
@@ -211,9 +211,9 @@ export function matchColumn(
  *
  * Deliberately no fee, and it is not an omission to tidy up: the generic mapper runs
  * against banks nobody here has measured, and a guessed fee column that a bank in
- * fact already includes in its amount gets subtracted a second time - on every row of
- * every file from that bank, in silence, with no gate on this path to notice. A fee
- * is declared by a preset whose file a human has read, and nowhere else.
+ * fact already includes in its amount gets subtracted a second time. That happens on
+ * every row of every file from that bank, in silence, with no gate on this path to
+ * notice. A fee is declared by a preset whose file a human has read, and nowhere else.
  */
 const GENERIC_CANDIDATES: Record<'date' | 'amount' | 'description' | 'currency', string[]> = {
   // 'дата выполнения' sits before 'дата' and the position is load-bearing: candidate
@@ -260,8 +260,9 @@ export function parseAmount(raw: string, decimal: CsvMapping['decimal'] = 'auto'
  *
  * The default is 'auto', which matters for the generic preset: it detects the columns
  * but knows nothing about the file's locale, and a German statement (05.01.2026) is at
- * least as likely as an ISO one. The two shapes can't be confused — ISO uses dashes and
- * a 4-digit year first, dmy uses dots — so trying both is safe rather than a guess.
+ * least as likely as an ISO one. The two shapes cannot be confused: ISO puts a 4-digit
+ * year first and uses dashes, while dmy uses dots. So trying both is safe rather than a
+ * guess.
  */
 export function parseCsvDate(raw: string, format: CsvMapping['dateFormat'] = 'auto'): string | null {
   const s = raw.trim();

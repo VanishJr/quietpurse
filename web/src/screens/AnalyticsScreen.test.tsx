@@ -20,19 +20,19 @@ import { AnalyticsScreen } from './AnalyticsScreen';
 import { ScreenShown } from '../screen';
 
 /**
- * The workspace: it starts with nothing on it, the wizard is what puts something there,
- * and what it put there survives a remount — on the SERVER, which is
- * why `seed` below puts a list on a fake charts route rather than into localStorage.
+ * The workspace starts empty, the wizard puts charts on it, and they survive a remount.
+ * They survive on the SERVER, which is why `seed` below puts a list on a fake charts
+ * route rather than into localStorage.
  *
- * Nothing below asserts anything about a plot — not a sector, not a bar, not an axis.
- * recharts measures a 0x0 box in jsdom, so every assertion here is on the card's own
- * text: the title, the figures above the plot, and the table underneath it that carries
+ * Nothing below asserts anything about a plot: no sector, no bar, no axis. recharts
+ * measures a 0x0 box in jsdom, so every assertion here is on the card's own text. That
+ * is the title, the figures above the plot, and the table underneath it that carries
  * the same numbers for a reader who gets no SVG.
  *
  * The months payload is built from the clock rather than pinned, because the window a
- * chart asks for ends at the month the reader is in. A fixture dated 2026-08 would fall
- * outside the range the moment the calendar moved past it and every figure here would
- * quietly become 0 — passing, and about nothing.
+ * chart asks for ends at the month the reader is in. A fixture with a fixed month would
+ * fall outside the range once the calendar moved past it. Every figure here would then
+ * quietly become zero, and the tests would pass while checking nothing.
  */
 
 const thisMonth = (): string => {
@@ -61,10 +61,10 @@ const MONTHS: MonthlySummary = {
  * The charts route as a workspace that actually remembers.
  *
  * The version moves on every accepted write and any other version is refused with the
- * current list, exactly as `replaceCharts` does. A fixture that answered 200 to
- * everything would make every case below about two devices vacuous — and this row's
- * worst defect is two of the reader's OWN clicks colliding, which needs a route that
- * can say no.
+ * current list, exactly as `replaceCharts` does. A fixture that accepted every write
+ * would make every case below about two devices vacuous. The worst defect these cases
+ * guard against is two of the reader's OWN clicks colliding, and catching it needs a
+ * route that can say no.
  */
 let workspace: { version: number; charts: unknown[] } = { version: 0, charts: [] };
 
@@ -100,10 +100,10 @@ const CHART_ROUTES: Routes = {
  * query string, and `askedFor` is what tells the two apart. A body about any OTHER
  * account is refused by api.ts, which is that check working rather than a hole here.
  *
- * The figures are not the workspace's, and `months` is not empty. Both matter: a card
- * drawing 4,000 and 1,200 would pass whichever arm answered it, and the fixture's
- * default of no months at all draws a full axis of zero ticks — which is exactly the
- * shape this row exists to remove.
+ * The figures are not the workspace's, and `months` is not empty. Both matter. A card
+ * drawing the workspace's figures would pass whichever arm answered it. The fixture's
+ * default of no months at all draws a full axis of zero ticks, the very shape these
+ * cases guard against.
  */
 const accountMonthsBody = (url?: string) =>
   accountMonths(askedFor(url), {
@@ -142,9 +142,9 @@ const mountStrict = () =>
   );
 
 /**
- * A workspace the server already holds. The version is above zero because a real one
- * with charts on it has been written to — and because version 0 with an empty list is
- * the migration's trigger, which is a different fixture and has its own cases.
+ * A workspace the server already holds. The version is above zero for two reasons. A
+ * real workspace with charts on it has been written to. And version 0 with an empty
+ * list is the migration's trigger, which is a different fixture with its own cases.
  */
 const seed = (charts: unknown[], version = 3) => {
   workspace = { version, charts };
@@ -170,9 +170,10 @@ const COLUMN_CHART = {
 const chart = (id: string, title: string) => ({ ...COLUMN_CHART, id, title });
 
 /**
- * A period one refund has pushed a category below zero — the state the donut, the
- * figures above it and the table under it all have to agree about. Shopping is negative
- * because the purchase was in an earlier window and only the refund landed in this one.
+ * A period in which one refund has pushed a category below zero. The donut, the figures
+ * above it and the table under it all have to agree about this state. Shopping is
+ * negative because the purchase was in an earlier window and only the refund landed in
+ * this one.
  */
 const REFUNDED: Summary = {
   scope: 'all',
@@ -379,7 +380,6 @@ describe('building a chart', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Column/ }));
 
-    // step two, with every default already answered — so "Create chart" is reachable
     expect(await screen.findByText('What should it compare?')).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByLabelText('Chart name')).toHaveValue('Expenses · 12 months');
@@ -502,8 +502,8 @@ describe('a chart that was already there', () => {
 
     // anchor: the refusal, which exists only once the request came back
     expect(await screen.findByText(/the monthly breakdown is unavailable/)).toBeInTheDocument();
-    // the mirror of the test above — a total from a load that never landed is the
-    // failure this card exists to avoid
+    // the figures the test above found must be absent here: a total from a load that
+    // never landed is the failure this card exists to avoid
     expect(screen.queryByText('Expenses, total')).not.toBeInTheDocument();
     expect(screen.queryByText('1,200 EUR')).not.toBeInTheDocument();
   });
@@ -575,8 +575,8 @@ describe('a chart that was already there', () => {
     await screen.findByRole('heading', { name: 'Rent' });
 
     // the ⋮ is on every tab, not only on the one being read: this is an edit to the
-    // LIST, and the chart on screen has nothing to do with it. Deleting the FIRST is
-    // what tells the two apart — its neighbour is a chart the reader was never on.
+    // LIST, and the chart on screen has nothing to do with it. Deleting the FIRST tells
+    // the two behaviours apart, because its neighbour is a chart the reader was never on.
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -622,9 +622,10 @@ describe('a chart that was already there', () => {
   });
 
   /*
-   * A row this version cannot draw — the shape a newer Quietpurse, or a hand-edited backup,
-   * leaves on a list this one then opens. Dropping it was right while the list was one
-   * browser's, and is a deletion from every device now that the list is the workspace's.
+   * A row this version cannot draw. A newer Quietpurse, or a hand-edited backup, leaves
+   * one on a list this version then opens. Dropping it was right while the list was one
+   * browser's. Now that the list is the workspace's, dropping it deletes it from every
+   * device.
    */
   it('keeps a row it cannot read, says so, and carries it back out untouched', async () => {
     const NEWER = { id: 'c-two', kind: 'sunburst', range: '12m', title: 'Nope' };
@@ -681,9 +682,9 @@ describe('a chart that was already there', () => {
  * A share chart in the one period that can make a card contradict itself: a refund
  * landing on a category whose purchase was in an earlier window leaves it below zero.
  *
- * A donut cannot draw that — a negative sector is not a thing — so the ring drops it,
- * and everything else on the card has to drop it too or the reader is given a total
- * that is a total of nothing on screen.
+ * A donut cannot draw that, because there is no such thing as a negative sector. So the
+ * ring drops it, and everything else on the card has to drop it too. Otherwise the
+ * reader is given a total that is a total of nothing on screen.
  *
  * Every case here and in the ranking describe below waits on a figure rather than on
  * the card's heading: the card prints its name while it is still reading, and it is
@@ -751,13 +752,13 @@ describe('a period one category has gone negative in', () => {
 });
 
 /**
- * The ranking, which is the one kind that KEEPS what the donut drops — it has a baseline
- * and can draw a bar below it.
+ * The ranking is the one kind that KEEPS what the donut drops: it has a baseline and
+ * can draw a bar below it.
  *
- * Which makes its total a different kind of number: a net rather than a whole. The card
- * above it prints "Largest" as a share of that total, and a gross positive over a net is
- * where 1000% comes from — the same failure the donut was fixed for, on the one path the
- * fix did not reach.
+ * That makes its total a different kind of number, a net rather than a whole. Above the
+ * bars the card prints "Largest" as a share of that total, and a gross positive over a
+ * net gives a share many times the whole. It is the same failure the donut was fixed
+ * for, on the one path the fix did not reach.
  */
 describe('the ranking, which draws the bars a donut cannot', () => {
   const RANKING = {
@@ -805,16 +806,16 @@ describe('the ranking, which draws the bars a donut cannot', () => {
     mount();
     await screen.findByText('Total');
 
-    // nothing is below zero, so every bar is part of the 800 and the figure means what
-    // it says — a ranking is not silently a chart without percentages
+    // nothing is below zero, so every bar is part of the total and the share means what
+    // it says. This guards against a ranking silently losing its percentages altogether.
     expect(figure('Total')).toBe('800 EUR');
     expect(figure('Largest, Food')).toBe('500 EUR · 63%');
   });
 });
 
 /**
- * The radar, which is the one kind that asks about two windows — and so the one that
- * has to ask twice, for one account exactly as for the workspace.
+ * The radar is the one kind that asks about two windows. So it is the one that has to
+ * ask twice, for one account exactly as for the workspace.
  *
  * `/api/summary` answers a split of the range it is given. Asked for both periods at
  * once it would add them together, and nothing on this side could take the earlier half
@@ -879,8 +880,8 @@ describe('a comparative chart of one account', () => {
     const { container } = mount();
     await screen.findByText('Total');
 
-    // a negative radius is drawn mirrored through the centre — a self-crossing polygon
-    // reading as a larger value pointing the wrong way. The table stands in for the
+    // a negative radius is drawn mirrored through the centre, as a self-crossing polygon
+    // that reads as a larger value pointing the wrong way. The table stands in for the
     // plot, so what the plot cannot draw is not in it either.
     const table = container.querySelector('table');
     expect(table?.textContent).toContain('Food');
@@ -889,8 +890,8 @@ describe('a comparative chart of one account', () => {
 });
 
 /**
- * A card about one account, which since this row reads the same two endpoints the
- * workspace arm does, with an `accountId` on them.
+ * A card about one account, which reads the same two endpoints the workspace arm does,
+ * with an `accountId` on them.
  *
  * What that changes is the UNIT and the SCOPE, and neither is something a reader can
  * check by looking: an account's own figures under the wrong currency code, and another
@@ -947,10 +948,9 @@ describe('a chart about one account', () => {
   });
 
   /*
-   * A body of the right shape about the wrong account. `scoped` in api.ts throws on it,
-   * which is the one thing between a query-builder edit that drops the `accountId` and
-   * one account's card printing another account's money — and until this case nothing
-   * anywhere looked at that throw.
+   * A body of the right shape about the wrong account. `scoped` in api.ts throws on it.
+   * That throw is the one thing that stops a query-builder edit dropping the `accountId`
+   * from turning into one account's card printing another account's money.
    *
    * A donut and not the radar: one kind, one request, one message, so the assertion
    * cannot become order-dependent through `Promise.all`.
@@ -974,11 +974,11 @@ describe('a chart about one account', () => {
   });
 
   /*
-   * "By source" on one account used to fall through to income by category — one thing
-   * drawn under a title naming another. The endpoint answers it per account,
-   * filtered through `scopeSql` to that account's own rows. The wizard still
-   * does not offer the choice (a product decision — see BREAKDOWNS), so a spec saved
-   * before an account was picked is how the path is reached.
+   * "By source" on one account used to fall through to income by category, so one thing
+   * was drawn under a title naming another. The endpoint answers it per account,
+   * filtered through `scopeSql` to that account's own rows. The wizard still does not
+   * offer the choice, a product decision written at BREAKDOWNS. So the path is reached
+   * through a spec saved before an account was picked.
    */
   it('draws one account’s income by source, and not its income by category', async () => {
     seed([{ ...DONUT, id: 'c-by-source', breakdown: 'income-sources' }]);
@@ -1003,8 +1003,8 @@ describe('a chart about one account', () => {
 
 /**
  * The account list is read once for the whole screen, so a failure there is not one
- * card's problem — it is every per-account card's, at once and for as long as the
- * screen is mounted.
+ * card's problem. It is every per-account card's problem, at once and for as long as
+ * the screen is mounted.
  */
 describe('when the account list cannot be read', () => {
   const PER_ACCOUNT = {
@@ -1040,9 +1040,9 @@ describe('when the account list cannot be read', () => {
 });
 
 /**
- * Where the keyboard is left, which is a question a pointer never asks: the popover
- * unmounts on every action, and an unmounted anchor drops focus on `<body>` — the top of
- * the document, a whole screen away from the strip that was just used.
+ * Where the keyboard is left, which is a question a pointer never asks. The popover
+ * unmounts on every action, and an unmounted anchor drops focus on `<body>`. That is the
+ * top of the document, a whole screen away from the strip that was just used.
  */
 describe('the keyboard, after the popover has acted', () => {
   it('goes back to the ⋮ it came from when that ⋮ is still there', async () => {
@@ -1094,9 +1094,9 @@ describe('the keyboard, after the popover has acted', () => {
 });
 
 /**
- * Where the popover is PUT, which jsdom can be asked about even though it applies no
- * layout: every box it measures is at 0 by 0, which is exactly the geometry the clamp
- * exists for — a ⋮ hard against the left edge of a narrow window.
+ * Where the popover is PUT. jsdom can answer this although it applies no layout: every
+ * box it measures is at 0 by 0. That is the geometry the clamp exists for, a ⋮ hard
+ * against the left edge of a narrow window.
  */
 describe('a popover under a tab at the edge of the screen', () => {
   const WIDE = window.innerWidth;
@@ -1120,8 +1120,8 @@ describe('a popover under a tab at the edge of the screen', () => {
 });
 
 /**
- * The wizard's "Account" question, which is answered from a list a hidden account is
- * deliberately not in — and which one chart is nonetheless about.
+ * The wizard's "Account" question is answered from a list that deliberately leaves out
+ * hidden accounts. One chart is nonetheless about a hidden account.
  */
 describe('a chart pointed at an account that has since been hidden', () => {
   const HIDDEN_ACCOUNT_CHART = {
@@ -1134,13 +1134,13 @@ describe('a chart pointed at an account that has since been hidden', () => {
   /*
    * Hidden is a workspace-level word. `VISIBLE_ACCOUNT()` keeps a hidden account out of
    * the workspace's totals and not out of its own, and `summaryScope` in `app.ts`
-   * resolves one by id like any other — which is where that decision is written, and
-   * where it is held: `backend/test/summary.test.ts`'s "a hidden account answers its
-   * real numbers and contributes none of them to the workspace".
+   * resolves one by id like any other. That is where the decision is written. It is held
+   * by `backend/test/summary.test.ts`'s "a hidden account answers its real numbers and
+   * contributes none of them to the workspace".
    *
-   * In jsdom the server is a route table, so what this case can say is the client half
-   * of it, and that is the half this row changed: the card asks about the account it was
-   * pointed at, by id, and draws the answer instead of special-casing it into zeroes.
+   * In jsdom the server is a route table, so this case can only speak for the client
+   * half: the card asks about the account it was pointed at, by id, and draws the answer
+   * instead of special-casing it into zeroes.
    */
   it('asks about it by id and draws what came back, hidden or not', async () => {
     seed([HIDDEN_ACCOUNT_CHART]);
@@ -1166,8 +1166,8 @@ describe('a chart pointed at an account that has since been hidden', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const dialog = await screen.findByRole('dialog');
 
-    // filtered out of the choices AND out of its own chart's editor, the question was
-    // left with nothing lit at all — under a name box still reading the account's name
+    // when the account was filtered out of its own chart's editor AND out of the
+    // choices, nothing was lit at all, while the name box still read the account's name
     expect(within(dialog).getByRole('button', { name: 'Old DKB (hidden)' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -1236,10 +1236,10 @@ describe('typing a name while the screen behind the dialog is still loading', ()
  * The arrows, which are about a measurement jsdom does not have: it applies no layout,
  * so `.dock-tabs` reports 0 by 0 whatever is inside it and would never overflow.
  *
- * So the measurement is faked and only the DECISIONS made from it are asserted — which
+ * So the measurement is faked, and only the DECISIONS made from it are asserted: which
  * arrows appear, which are dead at which end, and what a press asks the strip to do.
- * Whether five real tabs actually run off a real row is not a question this project can
- * answer; that one was checked in a browser.
+ * Whether real tabs actually run off a real row is not a question these tests can
+ * answer. That stays a manual check in a real browser.
  */
 describe('moving along a strip too long for the row', () => {
   const scrollBy = vi.fn();
@@ -1290,7 +1290,7 @@ describe('moving along a strip too long for the row', () => {
 
     fireEvent.click(next);
 
-    // most of the visible row, not all of it — see NUDGE_FRACTION
+    // most of the visible row and not all of it, as NUDGE_FRACTION sets
     expect(scrollBy).toHaveBeenCalledWith({ left: 240 });
   });
 });
@@ -1299,10 +1299,11 @@ describe('moving along a strip too long for the row', () => {
  * The three states a list that lives on a server has and a list in localStorage never
  * had: it has not arrived, it could not be read, and the last change was not saved.
  *
- * The first two are the Overview's old defect waiting to happen again — it gated
- * its empty state on `length === 0 && !loading` and told the reader their accounts did
- * not exist whenever the load failed. "Nothing plotted yet" is a claim about the
- * reader's workspace, and it may only be made about a list somebody actually read.
+ * The first two are where the Overview's old defect could happen again. The Overview
+ * gated its empty state on `length === 0 && !loading`, and told the reader their
+ * accounts did not exist whenever the load failed. "Nothing plotted yet" is a claim
+ * about the reader's workspace, and it may only be made about a list somebody actually
+ * read.
  */
 describe('a workspace that has not been read yet', () => {
   it('claims nothing about it while the list is still in flight', async () => {
@@ -1369,8 +1370,8 @@ describe('a workspace that has not been read yet', () => {
 });
 
 /**
- * The write path, which is the whole of what keeps two devices — or two of the reader's
- * own clicks — from overwriting each other.
+ * The write path. It alone keeps two devices, or two of the reader's own clicks, from
+ * overwriting each other.
  */
 describe('what is sent, and when', () => {
   const numbered = (n: number) =>
@@ -1413,9 +1414,9 @@ describe('what is sent, and when', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
     await waitFor(() => expect(callsTo('PUT /api/analytics/charts')).toBe(1));
 
-    // the second mutation is made WHILE the first write is out, which is the only
-    // condition under which the version in the write path and the version in React
-    // state differ — two mutations either side of a settled write prove nothing
+    // the second mutation is made WHILE the first write is out. Only then do the version
+    // in the write path and the version in React state differ, so two mutations either
+    // side of a settled write would prove nothing.
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Groceries' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -1658,9 +1659,10 @@ describe('what is sent, and when', () => {
 });
 
 /**
- * A refusal for staleness, which is the one failure where what is on screen is replaced
- * rather than kept. Re-applying the reader's change at the new version would resurrect
- * a chart another device deleted — the exact silent wrongness the version exists for.
+ * A refusal for staleness is the one failure where what is on screen is replaced rather
+ * than kept. Re-applying the reader's change at the new version would resurrect a chart
+ * another device deleted. That silent wrongness is exactly what the version exists to
+ * prevent.
  */
 describe('a list changed on another device', () => {
   it('shows the workspace’s own list and says the change was not saved', async () => {
@@ -1680,10 +1682,12 @@ describe('a list changed on another device', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
 
     expect(
-      await screen.findByText(/changed somewhere else while you were working/),
+      await screen.findByText(
+        /changed somewhere else while you were working, so your last change was not saved\. This is the current list\./,
+      ),
     ).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Rent' })).toBeInTheDocument();
-    // no merge, no re-apply — and no second attempt at the version the refusal carried
+    // no merge and no re-apply, and no second attempt at the version the refusal carried
     expect(screen.queryByRole('button', { name: 'Groceries (copy)' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Groceries' })).not.toBeInTheDocument();
     await waitFor(() => expect(puts).toHaveLength(1));
@@ -1744,9 +1748,9 @@ describe('the browser copy this workspace has never seen', () => {
 
   /*
    * The refusal is the one failure that ends the migration instead of deferring it: the
-   * workspace has a version above zero now, so it cannot be the trigger again. What must
-   * not happen is the browser's copy being thrown away later by a write that never
-   * carried a byte of it — the reader would lose charts that reached no server at all.
+   * workspace has a version above zero now, so it cannot be the trigger again. A later
+   * write that never carried any of the browser's copy must not throw that copy away:
+   * the reader would lose charts that reached no server at all.
    */
   it('keeps the browser copy after a refusal, and a later write does not take it', async () => {
     seedLegacy([{ ...COLUMN_CHART, title: 'x'.repeat(200) }]);
@@ -1881,15 +1885,17 @@ describe('a browser copy the route would refuse', () => {
     // the cap is the one place a chart is lost, and the reader is told
     expect(charts).toHaveLength(100);
     expect((charts[99] as { id: string }).id).toBe('c-99');
-    expect(await screen.findByText(/1 chart could not be saved/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/1 chart could not be saved because this workspace holds at most \d+\./),
+    ).toBeInTheDocument();
   });
 });
 
 /**
- * Two reads of the same list in flight at once, which is not hypothetical: `main.tsx`
+ * Two reads of the same list in flight at once. This is not hypothetical: `main.tsx`
  * wraps the app in `React.StrictMode`, and StrictMode double-invokes every effect in
- * development. Measured in a real browser on a check stack before it was held
- * here — the migration ran twice and the workspace took two writes for one move.
+ * development. Unguarded, a real browser runs the migration twice and the workspace
+ * takes two writes for one move.
  *
  * The cost of the second one is not the extra request. It is that a later answer to an
  * EARLIER read carries the older version: committed, it lowers the version the write
@@ -1912,10 +1918,10 @@ describe('a second read of the same list', () => {
   });
 
   /*
-   * Two reads answering the same version prove nothing about this — the version cannot
-   * be lowered to itself. The condition is a read ISSUED before a write and ANSWERED
-   * after it, which is what the second effect run plus the migration compose all by
-   * themselves, and it is arranged here rather than hoped for.
+   * Two reads answering the same version prove nothing about this, because the version
+   * cannot be lowered to itself. The condition is a read ISSUED before a write and
+   * ANSWERED after it. The second effect run and the migration compose that by
+   * themselves, and here it is arranged rather than hoped for.
    */
   it('does not lower the version a write has already moved on', async () => {
     seedLegacy([COLUMN_CHART]);

@@ -40,7 +40,7 @@ export const accounts = pgTable(
   },
   (t) => [
     /**
-     * Folded in SQL, and every comparison against it must fold the same way - JS
+     * Folded in SQL, and every comparison against it must fold the same way. JS
      * toLowerCase() and lower() disagree (Turkish dotted I among others), and a
      * lookup that misses where the index matches is an insert that collides.
      */
@@ -52,8 +52,8 @@ export const imports = pgTable(
   'imports',
   {
     id: text('id').primaryKey(),
-    // sha256 of the raw uploaded bytes - the file on the user's disk, hashed
-    // before any decoding, sniffing or parsing (see providers/statement.ts)
+    // sha256 of the raw uploaded bytes: the file as it is on the user's disk,
+    // hashed before any decoding, sniffing or parsing (see providers/statement.ts)
     fileHash: text('file_hash').notNull(),
     sourceType: text('source_type', { enum: IMPORT_SOURCE_TYPES }).notNull(),
     originalFilename: text('original_filename'),
@@ -70,7 +70,7 @@ export const imports = pgTable(
     // of the accepted ones were genuinely new is a COUNT over transactions.import_id
     rowsAccepted: integer('rows_accepted').notNull().default(0),
     rowsRejected: integer('rows_rejected').notNull().default(0),
-    // the failure message, truncated; never a stack trace - it lands in the backup
+    // the failure message, truncated. Never a stack trace, because it lands in the backup
     errorDetail: text('error_detail'),
     // whether the row claims a readable file, not whether bytes are on disk: a
     // restore keeps the claim whether or not the file came with it
@@ -78,13 +78,13 @@ export const imports = pgTable(
   },
   (t) => [
     /**
-     * Only `committed` blocks - a failed parse must be retryable with the same
+     * Only `committed` blocks. A failed parse must be retryable with the same
      * bytes, and a `pending` corpse must not answer "already imported" for rows
      * that were never written.
      *
      * The cost: two concurrent uploads of one file no longer serialise on this
-     * index. Accepted - the transactions dedup index still refuses the duplicate
-     * rows, so the worst case is a second imports row owning nothing.
+     * index. That is accepted, because the transactions dedup index still refuses
+     * the duplicate rows, so the worst case is a second imports row owning nothing.
      */
     uniqueIndex('imports_file_hash_unique')
       .on(t.fileHash)
@@ -100,7 +100,7 @@ export const transactions = pgTable(
     // and never changing. Annotations and every future foreign key point at this.
     id: text('id').primaryKey(),
     accountId: text('account_id').notNull(),
-    // "which transaction is this" as the provider sees it - the deduplication key,
+    // the deduplication key: "which transaction is this" as the provider sees it,
     // deliberately separate from the identity above (see insertTransactions)
     dedupKey: text('dedup_key').notNull(),
     provider: text('provider').notNull(),
@@ -119,9 +119,9 @@ export const transactions = pgTable(
     mcc: integer('mcc'),
     // category slug (see categorizer.ts); human-readable names live in the client
     category: text('category').notNull().default('other'),
-    // the user's own answer for this one row: NULL = auto-detection decides. Its own
-    // column so that a recompute cannot erase it - reclassifyAll keeps `category`
-    // current underneath, which is what a later clear falls back to.
+    // the user's own answer for this one row: NULL = auto-detection decides. It has
+    // its own column so that a recompute cannot erase it. reclassifyAll keeps
+    // `category` current underneath, and that is what a later clear falls back to.
     categoryManual: text('category_manual'),
     // transfer between own accounts: neither income nor expense (see classify.ts)
     transfer: boolean('transfer').notNull().default(false),
@@ -132,7 +132,7 @@ export const transactions = pgTable(
     // amount in the base currency at that date's rate, and the rate itself
     baseAmountCents: integer('base_amount_cents'),
     fxRate: doublePrecision('fx_rate'),
-    // income source id (income_sources.id); *_manual - the user's explicit choice
+    // income source id (income_sources.id); *_manual holds the user's explicit choice
     incomeSource: text('income_source'),
     incomeSourceManual: text('income_source_manual'),
     // recurring payment (subscription, rent): detected from history
@@ -480,7 +480,7 @@ const inList = (values: readonly string[]): string => values.map((v) => `'${v}'`
 export const analyticsCharts = pgTable(
   'analytics_charts',
   {
-    // the client's own id, and ?chart= in the URL names it - never minted here
+    // the client's own id, which ?chart= in the URL names. The server never mints it
     id: text('id').primaryKey(),
     sort: integer('sort').notNull(),
     title: text('title').notNull(),

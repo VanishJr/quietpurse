@@ -78,12 +78,12 @@ describe('balanceClaim', () => {
     expect(balanceClaim({ summed: 2, checked: 1 })).toEqual({
       lead: 'Checked against the 2 running balances this statement states, added together: ',
       claim:
-        '1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it.',
+        '1 of them runs unbroken from one to the other. The other states a single row, so nothing could check it.',
     });
     // and more than one of either, which is where both halves have to agree with the
     // arithmetic rather than with the singular case they were written against
     expect(balanceClaim({ summed: 5, checked: 2 }).claim).toBe(
-      '2 of them run unbroken from one to the other; the other 3 state a single row each, so nothing could check them.',
+      '2 of them run unbroken from one to the other. The other 3 state a single row each, so nothing could check them.',
     );
   });
 
@@ -134,7 +134,7 @@ describe('readAsSentence', () => {
         columns: RU,
       }),
     ).toBe(
-      'Read with the "Revolut (Statement CSV)" preset — date from "Дата выполнения", ' +
+      'Read with the "Revolut (Statement CSV)" preset: date from "Дата выполнения", ' +
         'amount from "Сумма", description from "Описание".',
     );
   });
@@ -146,7 +146,7 @@ describe('readAsSentence', () => {
   it('names the generic reader the way the chip does, and says where it looked', () => {
     const sentence = readAsSentence({ kind: 'auto-detected', columns: RU });
     expect(sentence).toBe(
-      `Read by "${GENERIC_PRESET_TITLE}", which found the columns in the file's own header — ` +
+      `Read by "${GENERIC_PRESET_TITLE}" using the file's own column names: ` +
         'date from "Дата выполнения", amount from "Сумма", description from "Описание".',
     );
     expect(sentence).toContain('"Any statement"');
@@ -159,7 +159,7 @@ describe('readAsSentence', () => {
         columns: { date: 'Datum', amount: 'Betrag', description: ['Text'] },
       }),
     ).toBe(
-      'Read with a column mapping sent with this upload — date from "Datum", ' +
+      'Read with a column mapping sent with this upload: date from "Datum", ' +
         'amount from "Betrag", description from "Text".',
     );
   });
@@ -168,11 +168,11 @@ describe('readAsSentence', () => {
   it('names the PDF layout and no column, and points at no control', () => {
     const sentence = readAsSentence({ kind: 'pdf-template', title: 'Revolut' });
     expect(sentence).toBe(
-      'Read as a Revolut PDF statement — a PDF has no column header, so the layout that ' +
-        'matched decides the columns, not a preset.',
+      'Read as a Revolut PDF statement. A PDF has no column header, so the columns come ' +
+        'from the layout that matched, not from a preset.',
     );
-    // "not the preset above" would point at a chip on the one screen that has one, and
-    // at nothing on ImportHistory, which imports this same module
+    // "not from the preset above" would point at a chip on the one screen that has one,
+    // and at nothing on ImportHistory, which imports this same module
     expect(sentence).not.toContain('above');
   });
 
@@ -193,10 +193,10 @@ describe('readAsSentence', () => {
 
   /**
    * The union is the server's declaration by type, so an arm this build does not name
-   * cannot compile here — and a body can still come from a server of another version
-   * than the one this client was built from — `web/dist` is whatever was last built,
-   * the backend runs from source — or through a proxy. There is no error boundary in
-   * this app and Discard lives inside the card this sentence renders in, so a throw
+   * cannot compile here. But a body can still come through a proxy, or from a server of
+   * another version than the one this client was built from: `web/dist` is whatever
+   * was last built, while the backend runs from source. There is no error boundary in
+   * this app, and Discard lives inside the card this sentence renders in. So a throw
    * would leave the staged import neither confirmable nor discardable. It says so
    * instead.
    */
@@ -218,7 +218,7 @@ describe('readAsSentence', () => {
 
   /**
    * The field is required on both sides, so this arrives only from a response the
-   * backend did not build - and `readAs.kind` on it throws BEFORE the default arm can
+   * backend did not build. `readAs.kind` on it throws BEFORE the default arm can
    * answer, taking the card that holds Discard down with it.
    */
   it('says no reader was named rather than throwing on a summary without one', () => {

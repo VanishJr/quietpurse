@@ -74,12 +74,13 @@ describe('a tooltip is never painted in the colour of the ground it is drawn on'
   });
 
   /*
-   * The fill sits a step off its ground on purpose and the border is what makes the box
-   * a box, so the string inequality above is the only other hold on the tightest live
-   * pair. A pin on the measured figures and not a floor: a floor bounds what the design
-   * may become and reds for a reason nobody reading it could connect to a tooltip, where
-   * a pin says the numbers written down are stale — re-measure them. Precision 2, because
-   * a palette step of two hex values moves these by a few hundredths.
+   * The fill sits a step off its ground on purpose, and the border is what makes the box
+   * a box. So the string inequality above is the only other hold on the tightest live
+   * pair. This is a pin on the measured figures, not a floor. A floor bounds what the
+   * design may become, and it fails for a reason nobody reading it could connect to a
+   * tooltip. A pin says the numbers written down are stale and must be measured
+   * again. Precision 2, because a palette step of two hex values moves these by a few
+   * hundredths.
    */
   it('the tightest fill on its ground, and the border between them, are the figures written here', () => {
     const shipped: [string, number, number][] = [
@@ -131,7 +132,7 @@ describe('what a reader is told when they point, which lives only in a JSX attri
     [
       'components/SpendingByCategory.tsx',
       'nameKey="label"',
-      'the Overview ring prints the slug — `food`, not `Food`',
+      'the Overview ring prints the slug, `food` instead of `Food`',
     ],
     [
       'components/ChartPlot.tsx',

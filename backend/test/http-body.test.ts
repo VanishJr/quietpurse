@@ -1,9 +1,9 @@
 /**
  * What the door answers when there is no body to read, and what the last handler
- * answers when a parser refused one. The route files hold each route's own sentences;
- * this file holds the two things every JSON route shares - the helper that refuses a
- * body that is not an object, and the handler that keeps a parser's status instead of
- * calling it the server's fault - plus the check that reads app.ts and refuses a route
+ * answers when a parser refused one. The route files hold each route's own sentences.
+ * This file holds what every JSON route shares: the helper that refuses a body that is
+ * not an object, and the handler that keeps a parser's status instead of calling it
+ * the server's fault. It also holds the check that reads app.ts and refuses a route
  * written past the helper.
  */
 import fs from 'fs';
@@ -16,17 +16,17 @@ import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const NOT_A_JSON_OBJECT =
-  'the request body is not a JSON object - send the fields as a JSON object with Content-Type: application/json';
+  'the request body is not a JSON object. Send the fields as a JSON object with Content-Type: application/json';
 
 const NOT_MULTIPART = 'the upload is not a valid multipart form';
 
 const BODY_TOO_LARGE =
-  'the request body is larger than 25 MB, the ceiling for a JSON body or a backup file - nothing was changed';
+  'the request body is larger than 25 MB, the ceiling for a JSON body or a backup file. Nothing was changed';
 
 /** An independent literal: a pin that imported the constant would move with it. */
 const CEILING = 25 * 1024 * 1024;
 
-/** A settings patch of exactly `size` bytes whose one key that route drops. */
+/** A JSON body of exactly `size` bytes, holding nothing but one padding key. */
 const paddedPatch = (size: number): string => {
   const head = '{"pad":"';
   const tail = '"}';
@@ -130,8 +130,8 @@ describe('a body the JSON parser does not claim', () => {
 describe('what the last handler answers', () => {
   /**
    * On a route that is not the restore, so the pass-through is shown to be the
-   * handler's. Under a moved ceiling this route answers 200 - a no-op patch echoing
-   * the stored settings - and nothing else.
+   * handler's. Under a moved ceiling this route refuses the padded body as a goal it
+   * cannot read, a 400, and never a 413.
    */
   it('one byte over the ceiling on a JSON route is a 413 that names the ceiling', async () => {
     const res = await agent
@@ -157,10 +157,10 @@ describe('what the last handler answers', () => {
 
   /**
    * That phrase carries the caller's own charset back, so the echo is cut at a
-   * bound the door owns; the six-character charset above cannot see the cut. The
-   * length is an independent literal - a pin that imported the bound would move
-   * with it - and the match stops at the phrase: what follows is the caller's
-   * charset, upper-cased by body-parser.
+   * bound the door owns. The short charset above cannot see the cut. The length is
+   * an independent literal, because a pin that imported the bound would move with
+   * it. The match stops at the phrase: what follows is the caller's charset,
+   * upper-cased by body-parser.
    */
   it("a long charset is echoed in the 415 only up to the door's bound", async () => {
     const res = await agent
@@ -208,11 +208,11 @@ describe('what the last handler answers', () => {
  * The rule no type holds: a route may read req.body only through one of the shapes
  * `SHAPES` names, because a bare read of a body no parser claimed is a TypeError
  * answered as the server's fault. Held by reading app.ts as text, so it sees the
- * next route written the old way. The one token it reads is `req.body`; a spelling
- * that does not carry that token - a renamed request parameter,
- * `const { body } = req`, `req['body']`, an alias - and a line whose read sits after
- * a `//` inside a string are not seen, and none is closed here. The failure this
- * exists for is a copied neighbour.
+ * next route written the old way. The only token it reads is `req.body`. It does not
+ * see a read spelled without that token, such as a renamed request parameter,
+ * `const { body } = req`, `req['body']` or an alias, nor a line whose read sits after
+ * a `//` inside a string. None of those gaps is closed here: the failure this exists
+ * for is a copied neighbour.
  */
 describe('no route reads req.body bare', () => {
   const source = fs.readFileSync(path.resolve(process.cwd(), 'src/app.ts'), 'utf8');
@@ -223,9 +223,9 @@ describe('no route reads req.body bare', () => {
   const lines = code.split('\n').map((l) => l.trimEnd());
 
   /**
-   * The nearest line at or above `i` that starts at column 0 with a letter - a route
-   * registration or a top-level declaration - joined with the line after it, because
-   * the restore route writes `app.post(` and its path on two lines.
+   * The nearest line at or above `i` that starts at column 0 with a letter, which is a
+   * route registration or a top-level declaration. It is joined with the line after
+   * it, because the restore route writes `app.post(` and its path on separate lines.
    */
   const ownerOf = (i: number): string => {
     let j = i;
@@ -234,13 +234,13 @@ describe('no route reads req.body bare', () => {
   };
 
   /**
-   * Each shape is a line pattern and an owner pattern, and the reason it is allowed:
-   * zod - the schema narrows undefined to a 400 of its own;
-   * helper - the one read every JSON route goes through, and `unknown` makes a bare
-   *   property read a compile error;
-   * restore - a Buffer or parsed JSON by content type, narrowed by Buffer.isBuffer
-   *   and a try;
-   * upload - what multer populated, behind uploadFile's multipart guard.
+   * Each shape is a line pattern and an owner pattern. Why each is allowed:
+   * zod: the schema narrows undefined to a 400 of its own.
+   * helper: the one read every JSON route goes through, and `unknown` makes a bare
+   *   property read a compile error.
+   * restore: a Buffer or parsed JSON by content type, narrowed by Buffer.isBuffer
+   *   and a try.
+   * upload: what multer populated, behind uploadFile's multipart guard.
    */
   const SHAPES = {
     zod: { line: /\.safeParse\(req\.body\)/, owner: /./ },

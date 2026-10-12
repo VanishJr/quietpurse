@@ -11,7 +11,7 @@ interface Props {
   /** null when the question has no answer; see `percentChange`. Nothing is drawn then. */
   pct: number | null;
   favourable: boolean;
-  /** What it is measured against, e.g. "vs Jul". Not coloured — only the direction is. */
+  /** What it is measured against, e.g. "vs Jul". Only the direction is coloured, not this. */
   note: string;
 }
 
@@ -24,9 +24,9 @@ export function Delta({ pct, favourable, note }: Props) {
         {up ? '↗' : '↘'}
       </span>
       {/*
-        The direction is drawn twice and read once. The arrow is the whole of it for
-        the eye — a shape, so it survives a reader who cannot tell the two colours
-        apart — and it is `aria-hidden`, and the figure is `Math.abs`, so without the
+        The direction is drawn twice and read once. For the eye the arrow carries all
+        of it, and as a shape it works for a reader who cannot tell the two colours
+        apart. But it is `aria-hidden` and the figure is `Math.abs`, so without the
         hidden word a screen reader could not tell a rise from a fall. The word is
         inside the `<strong>` so the two arrive as one phrase rather than as a stray
         syllable before a number.

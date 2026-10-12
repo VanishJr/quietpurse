@@ -42,9 +42,9 @@ type AssignedAfterInsert =
  * database, where the confirmation screen has already shown the corrected net. Every
  * producer must say what the source stated, including that it stated nothing.
  *
- * Every other field a statement does not state - the classifier's flags, the
- * base-currency conversion, the user's marks - is omitted through AssignedAfterInsert,
- * which keeps this type to what insertTransactionsOn reads: a required field added to
+ * Every other field a statement does not state is omitted through AssignedAfterInsert:
+ * the classifier's flags, the base-currency conversion and the user's marks. That keeps
+ * this type to what insertTransactionsOn reads, so a required field added to
  * Transaction is a compile error at stagedToNew unless it is named there.
  */
 export type NewTransaction = Omit<Transaction, 'id' | 'fee' | 'date' | AssignedAfterInsert> & {

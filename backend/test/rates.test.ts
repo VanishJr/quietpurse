@@ -1,8 +1,8 @@
 /**
- * The one network call the backend makes, with the network stubbed: what the Monobank
- * list becomes, how long an answer is kept, and what a caller gets when the call fails.
- * The failure arm is the one the classifier stands on - it pairs a cross-currency
- * transfer with or without a rate - so it is driven end to end here as well.
+ * The Monobank rates call, with the network stubbed: what the Monobank list becomes,
+ * how long an answer is kept, and what a caller gets when the call fails. The
+ * classifier stands on the failure arm: it pairs a cross-currency transfer with a rate,
+ * or without one when the call fails. So that arm is driven end to end here as well.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { REQUEST_TIMEOUT_MS } from '../src/rates';
@@ -66,9 +66,9 @@ describe('getRatesToUAH', () => {
 
   /**
    * `toBeInstanceOf(AbortSignal)` alone is green against a signal that has ALREADY
-   * fired, and against a budget of one millisecond - both of which abort the call
-   * before it leaves, where ratesOrEmpty swallows the throw and every cross-currency
-   * pair is then decided on time alone. So the signal is read for its state, and the
+   * fired, and against a budget of one millisecond. Both abort the call before it
+   * leaves, ratesOrEmpty swallows the throw, and every cross-currency pair is then
+   * decided on time alone. So the signal is read for its state, and the
    * wait is real: AbortSignal.timeout runs on Node's own timer, which vi's fake ones
    * do not reach.
    */

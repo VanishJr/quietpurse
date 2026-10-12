@@ -50,7 +50,7 @@ async function readHolder(lockFile: string): Promise<Holder> {
 
 /**
  * Removes a stale file only under an exclusive marker directory beside it, and only
- * if it still reads as what the caller saw - so two starts that both found a dead pid
+ * if it still reads as what the caller saw. So two starts that both found a dead pid
  * cannot each remove the other's fresh claim. EEXIST on the marker alone means another
  * taker is inside; anything else is a disk that refused and is thrown.
  */
@@ -94,13 +94,13 @@ export async function acquireLock(): Promise<void> {
     // 0 and a negative number are a process group to kill(), never a Quietpurse
     if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && pidAlive(pid)) {
       throw new Error(
-        `another Quietpurse (pid ${pid}) is already running on ${config.home} - stop it first, or delete ${lockFile} if that process is gone`,
+        `another Quietpurse (pid ${pid}) is already running on ${config.home}. Stop it first, or delete ${lockFile} if that process is gone`,
       );
     }
     await takeOver(lockFile, held);
   }
   throw new Error(
-    `could not claim ${lockFile}: another Quietpurse took it while this one was starting - start again, or delete ${markerPath(lockFile)} if it is still there and no Quietpurse is starting`,
+    `could not claim ${lockFile}: another Quietpurse took it while this one was starting. Start again, or delete ${markerPath(lockFile)} if it is still there and no Quietpurse is starting`,
   );
 }
 

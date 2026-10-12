@@ -74,7 +74,7 @@ describe('resolveRate: ECB for its own currencies, NBU for the hryvnia', () => {
     await saveFxRate('2026-03-06', 'PLN', 11.5);
     await saveFxRate('2026-03-06', 'EUR', 48.0);
     expect(await nbuProvider.getRate('2026-03-07', 'PLN', 'EUR')).toBeCloseTo(11.5 / 48, 6);
-    // and Saturday is cached under the requested day - a repeat needs no network
+    // and Saturday is cached under the requested day, so a repeat needs no network
     expect(await getFxRate('2026-03-07', 'PLN')).toBe(11.5);
   });
 });

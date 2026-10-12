@@ -8,8 +8,8 @@
  * and is not. It is the least stable field a parser produces: with the
  * description in the key, an improved parser that extracts "REWE SAGT DANKE
  * 12345" where it used to extract "REWE SAGT DANKE" would turn every affected
- * row into a second transaction across the user's entire history - an
- * improvement that presents as data corruption. Normalising the description
+ * row across the user's entire history into a second transaction, and the
+ * improvement would present as data corruption. Normalising the description
  * instead only hides the problem, since the normalisation is itself
  * parser-dependent. The ordinal covers the one case the description would have
  * earned its place on: two identical coffees on the same day.
@@ -39,9 +39,9 @@ export const dedupGroup = (
 ): string => `${accountId}|${day}|${amountCents}|${currency.toUpperCase()}`;
 
 /**
- * The ordinals in a group must stay dense 1..n, because insertTransactions
- * numbers an incoming batch from 1 and lets the unique index reject the
- * collisions - with a hole, a batch of k rows inserts more than it should.
+ * The ordinals in a group must stay dense 1..n. insertTransactions numbers an
+ * incoming batch from 1 and lets the unique index reject the collisions, so
+ * with a hole, a batch of k rows inserts more than it should.
  * Deleting an import punches holes, so deleteImport renumbers the groups it
  * touched, and the helpers below are how it takes a key apart and puts it back
  * together.
@@ -51,8 +51,8 @@ const computedKeyGroup = (dedupKey: string): string =>
   dedupKey.slice(0, dedupKey.lastIndexOf('|'));
 
 /**
- * The prefix every key in a group shares and no other group's key begins with -
- * the trailing separator is what makes that true. This is the only shape of the
+ * The prefix every key in a group shares and no other group's key begins with.
+ * The trailing separator is what makes that true. This is the only shape of the
  * key that leaves this file: deleteImport hands it to SQL as an opaque string,
  * so the format is still owned here. Only computed keys have a group at all; a
  * provider reference (mono:, eb:) is opaque and is never renumbered, which is

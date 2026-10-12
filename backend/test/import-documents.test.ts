@@ -2,8 +2,8 @@
  * The document routes: downloading the uploaded statement back,
  * and deleting it while the import row, its transactions and its provenance stay.
  *
- * Driven over real HTTP, like upload.test.ts: what these routes are about is the
- * wire - the status, the headers a download goes out under, and the sentence a
+ * Driven over real HTTP, like upload.test.ts, because these routes are about the
+ * wire: the status, the headers a download goes out under, and the sentence a
  * refusal carries.
  */
 import crypto from 'crypto';
@@ -84,7 +84,7 @@ const importRow = async (id: string): Promise<ImportRow | undefined> =>
   (await importRows()).find((i) => i.id === id);
 
 /**
- * Where the file for the upload sits - spelled out, not asked for, because the name in
+ * Where the file for the upload sits, spelled out rather than asked for: the name in
  * the folder is the contract a person reads.
  */
 const blobOf = (importId: string, stem = 'statement'): string =>
@@ -126,8 +126,8 @@ describe('GET /api/imports/:id/document', () => {
   /**
    * One sentence for an absent id and for a row with no readable document: they are
    * one code path, and a sentence per case would make the route an existence oracle.
-   * Asserted by identity - it must keep saying READ rather than "kept", because a
-   * row's claim outlives the disk it was made on.
+   * Asserted by identity. The sentence must keep saying READ rather than "kept",
+   * because a row's claim outlives the disk it was made on.
    */
   it('answers one 404 for an unknown import and for a row with no readable document', async () => {
     const unknown = await agent.get('/api/imports/no-such-import/document');
@@ -196,10 +196,10 @@ describe('GET /api/imports/:id/document', () => {
   /**
    * The other half of the split above, and the half that IS a fault: the file is
    * there and it is not the file the import recorded. The folder is the person's, so
-   * an edit in it is the ordinary way that happens, and the answer must be 500 and
-   * not the 404 an absent file gets - otherwise "restored elsewhere" and "somebody
-   * changed my statement" arrive at the screen as the same sentence. The sentence
-   * carries no path, no errno and no filename - those are the log's.
+   * an edit in it is the ordinary way that happens, so the answer must be 500, not
+   * the 404 an absent file gets. Otherwise "restored elsewhere" and "somebody changed
+   * my statement" arrive at the screen as the same sentence. The sentence carries no
+   * path, no errno and no filename: those belong in the log.
    */
   it('answers 500 when the file under the row is not the one it recorded', async () => {
     const { importId } = await committed('Edited Bank');
@@ -239,8 +239,8 @@ describe('DELETE /api/imports/:id/document', () => {
   /**
    * The second call has nothing to remove and must still answer 200: the 404 is on
    * the ROW, never on the pointer, or a retention policy silently retains every row
-   * whose pointer was already cleared - and those are the rows most likely to still
-   * have a file (restored, or crashed between the put and recordImportDocument).
+   * whose pointer was already cleared. Those are the rows most likely to still have a
+   * file: restored, or crashed between the put and recordImportDocument.
    */
   it('is idempotent, and runs on a row that never claimed a document', async () => {
     const { importId } = await committed('Twice Bank');
@@ -270,10 +270,10 @@ describe('DELETE /api/imports/:id/document', () => {
 
   /**
    * The existence check runs before any disk access. With it after deleteDocument,
-   * an id with no row still unlinks whatever file that id names - the orphan a
-   * restore produces, since it replaces the import rows while the files stay - and
-   * then answers "not found": destroyed, and the answer says nothing happened. The
-   * case above cannot see this, because no file exists for that id.
+   * an id with no row still unlinks whatever file that id names and then answers
+   * "not found": the file is destroyed and the answer says nothing happened. A restore
+   * produces exactly that orphan, since it replaces the import rows while the files
+   * stay. The case above cannot see this, because no file exists for that id.
    */
   it('does not touch the disk for an id no row has', async () => {
     await putDocument(
@@ -394,7 +394,7 @@ describe('DELETE /api/imports/:id/document', () => {
   /**
    * The ordering invariant, and the only thing holding it: the file goes first and
    * the pointer only once it is gone. Swap the two statements and this goes red
-   * while every other case here stays green - the route still answers 500, but the
+   * while every other case here stays green. The route still answers 500, but the
    * row has already stopped claiming a document whose file is still on disk, and
    * nothing would ever revisit it.
    *
@@ -423,9 +423,9 @@ describe('DELETE /api/imports/:id/document', () => {
 /**
  * An account delete is the second path that removes stored documents,
  * and the only one that removes several at once. The file goes for EVERY import it
- * destroys whatever the pointer said - document_stored records whether a document
- * can be READ, never whether a file is on disk, and the rows most likely to still
- * have one are exactly the ones whose pointer is cleared.
+ * destroys, whatever the pointer said. The pointer, document_stored, records whether
+ * a document can be READ, never whether a file is on disk, and the rows most likely
+ * to still have one are exactly the ones whose pointer is cleared.
  */
 describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
   const statement = (amount: string, label: string): Buffer =>
@@ -450,9 +450,8 @@ describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
     const pointerless = await commitInto(account, statement('-22.00', 'blob two'));
     expect(pointerless.accountId).toBe(readable.accountId);
 
-    // the pointer alone, leaving the file where it is: what a restored backup
-    // produces (restoreBackup strips the column), and the row a delete filtered on
-    // the pointer would leave a bank statement on disk for
+    // the pointer alone, leaving the file where it is: the row a delete filtered on the
+    // pointer would leave a bank statement on disk for
     await clearImportDocument(pointerless.importId);
     expect((await importRow(pointerless.importId))!.documentAvailable).toBe(false);
     expect(await blobExists(readable.importId)).toBe(true);
@@ -460,8 +459,8 @@ describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
 
     const res = await agent.delete(`/api/accounts/${readable.accountId}`);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    // two imports destroyed and one document counted - the number the panel showed
-    // the user - while the files go for both
+    // documents counts only the readable one, because that is the number the panel
+    // showed the user. The files go for both imports
     expect(res.body).toEqual({ deleted: true, transactions: 2, imports: 2, documents: 1 });
 
     expect(await blobExists(readable.importId)).toBe(false);
@@ -477,8 +476,8 @@ describe('DELETE /api/accounts/:id takes the stored statements with it', () => {
  * original_filename is a string the user chose and it becomes a header value: a
  * CRLF splits the response, a `"` ends the quoted string early, a `..\` is a path
  * the client would save under, and anything above U+00FF makes setHeader throw.
- * The emitted value is asserted, not the status code - a 200 says nothing about
- * what the header contains.
+ * The emitted value is asserted, not the status code, because a 200 says nothing
+ * about what the header contains.
  */
 describe('the Content-Disposition a user-chosen filename produces', () => {
   const csv = {
@@ -535,9 +534,9 @@ describe('the Content-Disposition a user-chosen filename produces', () => {
   });
 
   /**
-   * The length cap is by code point and an unpaired surrogate never reaches
-   * encodeURIComponent, which throws on one - and a throw here is a 500 from the
-   * global handler on a download that had already read the file.
+   * The length cap is by code point, and an unpaired surrogate never reaches
+   * encodeURIComponent, which throws on one. A throw here is a 500 from the global
+   * handler on a download that had already read the file.
    */
   it('a cap that lands mid-character, and a name a restore made unpaired', () => {
     const a99 = 'a'.repeat(99);
@@ -556,8 +555,8 @@ describe('the Content-Disposition a user-chosen filename produces', () => {
   });
 
   /**
-   * End to end, so Node's own header validation is in the loop rather than assumed -
-   * and the same hostile name is what the file lands under in the folder, where the
+   * End to end, so Node's own header validation is in the loop rather than assumed.
+   * The same hostile name is also what the file lands under in the folder, where the
    * path, the quote and the line break are gone and the Cyrillic is not.
    */
   it('a hostile filename survives the real route, and the folder', async () => {

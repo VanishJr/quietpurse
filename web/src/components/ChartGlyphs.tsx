@@ -1,10 +1,10 @@
 /**
  * `ChartGlyph`'s drawings are not icons and they are not thumbnails. An icon would be a
  * symbol standing for "chart"; a thumbnail would be the reader's own data, which nothing
- * knows before the shape has been chosen. These are the SHAPE — a line-drawing of what
- * the plot will look like — because that is the only thing the first step of the wizard
- * is asking about, and a name plus a sentence is a slow way to say "bars" to somebody
- * who would recognise bars.
+ * knows before the shape has been chosen. These are the SHAPE: a line drawing of what
+ * the plot will look like. That is the only thing the first step of the wizard asks
+ * about, and a name plus a sentence is a slow way to say "bars" to somebody who would
+ * recognise bars.
  *
  * One viewBox for every shape, so they line up in the grid whatever the tile does to its
  * width. Wider than it is tall, because a plot is.
@@ -90,8 +90,8 @@ export const ChartGlyph = ({ kind }: { kind: GlyphName }) => {
 };
 
 /**
- * Deliberately not one of the shapes — the panel it heads is about there being no chart
- * yet, and drawing one of the shapes there would look like a chart that failed to load.
+ * Deliberately not one of the shapes. The panel it heads says there is no chart yet,
+ * and one of the shapes there would look like a chart that failed to load.
  */
 export const BlankPlotGlyph = () => (
   <svg

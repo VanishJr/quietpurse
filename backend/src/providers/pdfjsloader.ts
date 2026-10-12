@@ -4,15 +4,15 @@
  * import is held by source order alone, which `tsc` cannot see and an import sorter
  * reverses without a single check going red. Here the order is a sequence of statements
  * and the only way to reach pdfjs is through the function that runs them, so the
- * invariant cannot be broken by moving a line - only by deleting one.
+ * invariant cannot be broken by moving a line, only by deleting one.
  * test/canvasabsent.ts is what watches that, in a process where @napi-rs/canvas is
  * unresolvable.
  *
  * The stubs throw rather than answer. Nothing on the text path constructs a `Path2D`
- * or calls a `DOMMatrix` method - `SCALE_MATRIX` is read in one place, inside the
- * canvas renderer - so a stub that returned a plausible identity matrix would cost
- * nothing today and would turn the day some path does start rendering into a wrong
- * image rather than a crash.
+ * or calls a `DOMMatrix` method: `SCALE_MATRIX` is read only inside the canvas
+ * renderer. So a stub that returned a plausible identity matrix would cost nothing
+ * today, but on the day some path does start rendering it would produce a wrong image
+ * rather than a crash.
  */
 
 type Pdfjs = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
@@ -74,7 +74,7 @@ let loading: Promise<Pdfjs> | undefined;
  *
  * The stubs go in unconditionally. pdfjs installs canvas's own only when the global
  * is unset (`if (!globalThis.DOMMatrix)`), so these win wherever the package is
- * present too - dev, CI and the image then run the same objects, and "any render path
+ * present too. Dev, CI and the image then run the same objects, and "any render path
  * throws" is live in every test run rather than only where canvas is missing.
  *
  * The failed import is named because it now surfaces as one refused PDF import rather

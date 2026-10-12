@@ -120,7 +120,6 @@ describe('setOneOff', () => {
 
 describe('hiding recurring groups', () => {
   it('ignored is set by the normalized key and can be cleared again', async () => {
-    // three months of "rent" with a changing month in the description - one group
     await insertTransactions(
       [1, 2, 3].map((m) =>
         tx({
@@ -149,7 +148,7 @@ describe('hiding recurring groups', () => {
     const group = before.find((g) => g.description.startsWith('Miete'))!;
     expect(group.ignored).toBe(false);
 
-    // hide by one spelling - the whole group hides (the key is normalized)
+    // hiding one spelling hides the whole group, because the key is normalized
     await setRecurringIgnored('Miete 01/2026', true);
     const hidden = (await listRecurringGroups('2026-01-01T00:00:00.000Z')).find((g) =>
       g.description.startsWith('Miete'),
@@ -167,8 +166,8 @@ describe('hiding recurring groups', () => {
 /**
  * What Postgres itself refused. drizzle re-throws a driver error wrapped in a
  * "Failed query" one whose message names no constraint, so the name is read off the
- * cause - both drivers this suite runs on, PGlite and node-postgres, put it there
- * under the same two fields. A write that is accepted returns a string, which fails
+ * cause. Both drivers this suite runs on, PGlite and node-postgres, put it there under
+ * the same fields. A write that is accepted returns a string, which fails
  * the comparison rather than passing it by absence.
  */
 type DriverError = { cause?: { code?: string; constraint?: string } };
@@ -188,8 +187,8 @@ const violated = async (write: Promise<unknown>): Promise<unknown> => {
  * because sanitizeRow checks a column's name, its type and that a number is finite and
  * never its sign, and restoreBackup inserts what it lets through straight into the
  * table. So the CHECK is the one guard on that path and the last one beneath every
- * producer's own reading. It is declared in schema.ts and emitted by drizzle-kit - a
- * toolchain that stopped emitting it would leave the migration without it, the
+ * producer's own reading. It is declared in schema.ts and emitted by drizzle-kit. A
+ * toolchain that stopped emitting it would leave the migration without it: the
  * guarantee gone, and every other test green.
  *
  * Through the data layer rather than raw SQL, and by the constraint's own name: a
@@ -276,9 +275,9 @@ describe('the chart vocabularies are the column and not only the door', () => {
     expect(await replaceCharts(0, [chart({})])).toMatchObject({ ok: true });
   });
 
-  // iterated rather than listed, so a member added tomorrow is written the day it
-  // appears - which is the drift this case exists for: the door and the type move
-  // with the tuple in src/wire, the applied CHECK only with db:generate
+  // iterated rather than listed, so a member added later is written the day it
+  // appears. That is the drift this case exists for: the door and the type move with
+  // the tuple in src/wire, but the applied CHECK moves only with db:generate
   it('and every member of the three lists is admitted', async () => {
     const replace = async (charts: Chart[]): Promise<ChartsWrite> =>
       replaceCharts((await listCharts()).version, charts);

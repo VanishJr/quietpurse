@@ -1,13 +1,13 @@
 /**
- * The issuer scan, at the seam it is unit-testable on: page-
- * grouped text in, a name or nothing out. No PDF is built here - what a PDF costs this
- * rule is one page boundary, and pdf.test.ts pins that end.
+ * The issuer scan, at the seam it is unit-testable on: page-grouped text in, a name or
+ * nothing out. No PDF is built here. What a PDF costs this rule is one page boundary,
+ * and pdf.test.ts pins that end.
  *
  * Every IBAN below is invented and its check digits worked out by hand. None of them
  * is derived from ISSUERS, which is not tidiness: a fixture composed from the rule's
- * own literal goes on passing under every narrowing of that rule. What
- * the bank identifiers ARE is public routing data - the same eight digits the
- * directory's own source comment prints - and the ten that follow are zeroes.
+ * own literal goes on passing under every narrowing of that rule. The bank identifiers
+ * are public routing data, from the Bundesbank file the directory's comment names. The
+ * account digits after them are zeroes but for the last.
  */
 import { describe, expect, it } from 'vitest';
 import { issuerName } from '../src/providers/issuer';
@@ -37,9 +37,9 @@ describe('issuerName: what appears on every page', () => {
    * The measured shape of the owner's own N26 statement, and the whole of the evidence
    * the ranking rule rests on: the account's IBAN once per page across six pages, a
    * counterparty's twice a page across four. The counterparty is the more frequent by two
-   * to one and it is at a bank this directory also knows, so a rule that ranked by
-   * occurrences would name it - confidently, to someone holding the other bank's
-   * statement.
+   * to one, and it is at a bank this directory also knows. A rule that ranked by
+   * occurrences would name the counterparty's bank, confidently, to someone holding an
+   * N26 statement.
    */
   it("names the account's bank and not the louder counterparty", () => {
     const pages = [1, 2, 3, 4, 5, 6].map((n) =>
@@ -59,10 +59,10 @@ describe('issuerName: what appears on every page', () => {
   });
 
   /**
-   * The third directory entry, which nothing else in this suite reaches. Without it the
-   * key or the name could be retyped wrong and the whole suite would stay green - the
-   * entry would simply never fire, and a Revolut statement whose layout has moved would
-   * fall back to the unnamed sentence with nothing red anywhere.
+   * The Revolut directory entry. Without this case its key or its name could be retyped
+   * wrong and the whole suite would stay green: the entry would simply never fire, and a
+   * Revolut statement whose layout has moved would fall back to the unnamed sentence
+   * with nothing red anywhere.
    */
   it('names the third bank the directory carries', () => {
     expect(issuerName([1, 2].map(() => page(`IBAN: ${REVOLUT}`)))).toBe('Revolut Bank, Berlin');
@@ -93,10 +93,10 @@ describe('issuerName: what appears on every page', () => {
 
 describe('issuerName: what counts as an IBAN', () => {
   /**
-   * The real C24 statement prints `IBAN: DE00…0000` with `BIC: …` on the baseline 12.3
-   * below it - two lines at this parser's grouping - and other banks print the grouped
-   * spelling. All three have to reach the same bank, and the one that would catch a
-   * greedy run replacing the fixed-length slice is the middle one: squashing THAT line
+   * The real C24 statement prints the IBAN after `IBAN:` with `BIC: …` on the baseline
+   * just below it, which this parser groups as two lines. Other banks print the grouped
+   * spelling. All three spellings have to reach the same bank. The one that would catch
+   * a greedy run replacing the fixed-length slice is the middle one: squashing THAT line
    * yields a token running into `BIC`, which fails mod-97 as a whole.
    */
   it('reads the spellings a statement actually prints as the same bank', () => {
@@ -167,9 +167,9 @@ describe('issuerName: where it must not guess', () => {
 
 /**
  * It decides how a refusal is worded and never whether one happens, so a throw here
- * would replace an actionable sentence with a stack trace in error_detail.
- * Totality is by construction - no parse, no BigInt, no unchecked index - and this is
- * what watches the construction.
+ * would replace an actionable sentence with a stack trace in error_detail. It is total
+ * by construction: no parse, no BigInt, no unchecked index. This is what watches the
+ * construction.
  */
 describe('issuerName: it answers on anything', () => {
   it('never throws', () => {

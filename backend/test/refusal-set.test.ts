@@ -9,10 +9,11 @@ import ts from 'typescript';
  * A refusal thrown by the importer and forgotten in refusals() is measured by nobody:
  * it can grow past what error_detail keeps and every check stays green.
  *
- * Nothing structural holds that - the set is literals and builders with different
- * signatures - so this reads the importer as source and requires every name a throw
- * can hand to new Error to appear inside refusals(). It is deliberately syntactic:
- * no Program, no checker, no tsconfig, so the cost is one file and not the src graph.
+ * Nothing structural holds that, because the set is literals and builders with
+ * different signatures. So this reads the importer as source and requires every name
+ * a throw can hand to new Error to appear inside refusals(). It is deliberately
+ * syntactic: no Program, no checker, no tsconfig, so the cost is one file and not the
+ * src graph.
  */
 describe('every refusal the pdf importer throws is composed by refusals()', () => {
   const SOURCE = 'src/providers/pdf.ts';

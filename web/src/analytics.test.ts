@@ -20,9 +20,9 @@ import { AccountMonthTotals, Chart, ChartRange, MonthTotals } from './types';
  * recharts draws into a 0x0 box in jsdom, so what a chart is a picture OF has to be
  * asserted here or nowhere.
  *
- * `today` is an argument to every function under test, which is what makes this file
- * possible at all — a window that ends "at the month we are in" is untestable if the
- * month is read off the clock inside the sum.
+ * `today` is an argument to every function under test, and that is what makes this
+ * file possible at all. A window that ends "at the month we are in" is untestable if
+ * the month is read off the clock inside the sum.
  */
 
 /** 15 August 2026. Local, which the unit project pins to UTC. */
@@ -90,7 +90,7 @@ describe('a series across ticks', () => {
 
     expect(points.map((p) => p.tick)).toEqual(ticks);
     expect(points.map((p) => p.expense)).toEqual([0, 0, 1200]);
-    // a month with nothing in it is part of the answer here — the window is the one the
+    // a month with nothing in it is part of the answer here. The window is the one the
     // reader chose, not one derived from where the data happens to start
     expect(points[0].income).toBe(0);
   });
@@ -125,9 +125,9 @@ describe('a series across ticks', () => {
   });
 
   it('adds in cents, so a column of hundredths does not accumulate a residue', () => {
-    // the residue moved with the arithmetic — months onto a year tick, where it used to
-    // be rows onto a month. Added as the doubles they arrive as, three of these are
-    // 577.3499999999999
+    // the residue moved with the arithmetic: it now arises folding months onto a year
+    // tick, not rows onto a month. Added as the doubles they arrive as, three of these
+    // are 577.3499999999999
     const months = ['2026-01', '2026-02', '2026-03'].map((m) => month(m, 0, 192.45));
     const [point] = seriesFromMonths(months, ['2026'], 'year');
     expect(point.expense).toBe(577.35);
@@ -165,8 +165,8 @@ describe('the name a tick goes on the axis under', () => {
     expect(points.map((p) => p.label)).toEqual(['2025', '2026']);
   });
 
-  /* The hidden table under every plot prints `tick` and not `label` — see `ChartCard` —
-     so the reader who gets no SVG was never given the ambiguous form to begin with. */
+  /* The hidden table `ChartCard` renders under every plot prints `tick`, not `label`.
+     So the reader who gets no SVG was never given the ambiguous form to begin with. */
   it('keeps the tick itself whole, whatever the label does to it', () => {
     expect(labels('12m').length).toBe(12);
     expect(seriesFromMonths([], ticksOf(rangeDef('12m'), AUG), 'month')[0].tick).toBe('2025-09');
@@ -191,8 +191,8 @@ describe('the parts of one period', () => {
     expect(shareFromSummary(summary, 'income-categories')).toEqual([
       { key: 'salary', label: 'Salary', value: 900 },
     ]);
-    // named out of the server's own catalogue rather than a category dictionary — and
-    // answered for one account as readily as for every account together
+    // sources are named from the server's own catalogue, not a category dictionary.
+    // They are answered for one account as readily as for every account together
     expect(shareFromSummary(summary, 'income-sources')).toEqual([
       { key: 'src-1', label: 'Acme GmbH', value: 900 },
     ]);

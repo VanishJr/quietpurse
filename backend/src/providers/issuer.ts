@@ -33,8 +33,8 @@ const COUNTRIES: Readonly<Record<string, Bban>> = {
  * `Kurzbezeichnung` field of the Deutsche Bundesbank Bankleitzahlendatei, read one row
  * at a time.
  *
- * Adding one can never change WHICH candidate wins - the collapse to a single pair
- * happens before this lookup - only whether the winner has a name.
+ * Adding one can never change WHICH candidate wins, only whether the winner has a
+ * name, because the collapse to a single pair happens before this lookup.
  */
 export const ISSUERS: Readonly<Record<string, string>> = {
   'DE 50024024': 'C24 Bank',
@@ -66,15 +66,15 @@ const checks = (iban: string): boolean => {
  * difference between a lost name and a wrong one: dropped, a statement whose OWN IBAN
  * is foreign collapses onto whatever single German counterparty it happens to print on
  * every page, and gets named after it. Kept, it survives the every-page filter like
- * any other token and poisons the collapse - so it silences the name only when it too
+ * any other token and poisons the collapse, so it silences the name only when it too
  * is on every page. Keying it by its first IBAN_MIN characters rather than by the
  * whole run is what makes that survive a document that prints the same foreign IBAN
  * with a BIC glued to it on one page and without on the next.
  *
  * The length is read from the country table rather than matched, so no quantifier is
- * ever applied to document text: the walk is bounded and the slice is fixed, and a
- * token immediately after an IBAN - `IBAN: DE00… BIC: …`, which this parser's line
- * grouping does sometimes join - is simply not inside it.
+ * ever applied to document text: the walk is bounded and the slice is fixed. A token
+ * immediately after an IBAN is simply not inside it, as in `IBAN: DE00… BIC: …`,
+ * which this parser's line grouping does sometimes join.
  */
 const tokens = (lines: readonly string[]): Set<string> => {
   const found = new Set<string>();
@@ -112,8 +112,8 @@ const tokens = (lines: readonly string[]): Set<string> => {
  * derived from the same data it checks, and a four-page PDF whose last two pages carry
  * no text layer would make a counterparty printed on the first two "on every page".
  *
- * Total by construction - no parse, no BigInt, no unchecked index, no throw - because
- * it decides only HOW a refusal is worded and never whether one happens.
+ * Total by construction: no parse, no BigInt, no unchecked index and no throw. That is
+ * because it decides only HOW a refusal is worded and never whether one happens.
  */
 export function issuerName(pages: readonly (readonly string[])[]): string | null {
   if (pages.length < 2) return null;

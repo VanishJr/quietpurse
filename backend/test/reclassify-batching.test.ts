@@ -1,12 +1,12 @@
 /**
  * How the re-tag reaches the database.
  *
- * This used to be one UPDATE per row inside one transaction. That is correct against
- * a connection pool and it is a freeze against the embedded database, which has ONE
- * connection: every other query in the application queues behind the open
- * transaction, and the app answers nothing at all until the re-tag finishes. Neither
- * suite could see it - they run sequentially - and the node-postgres side never had
- * the property, so the change that introduced it was green on both drivers.
+ * One UPDATE per row inside one transaction is correct against a connection pool and
+ * a freeze against the embedded database, which has ONE connection: every other query
+ * in the application queues behind the open transaction, and the app answers nothing
+ * at all until the re-tag finishes. Neither suite can see that, because both run
+ * sequentially, and node-postgres never freezes, so that shape is green on both
+ * drivers.
  *
  * What is held here is therefore the SHAPE and not only the result: the number of
  * statements has to be a function of the batch size and not of the row count, or the

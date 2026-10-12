@@ -1,7 +1,7 @@
 /**
  * Both summary routes over real HTTP: what `?accountId=` does, and what it refuses.
  *
- * Driven through supertest, because everything worth asserting here is the wire -
+ * Driven through supertest, because everything worth asserting here is the wire:
  * the status code, the sentence each refusal composes, and which currency field the
  * body carries. A per-account body that answered `baseCurrency` would render a UAH
  * figure labelled EUR, and nothing below the route can see that.
@@ -39,10 +39,9 @@ const statement = Buffer.from(
 );
 
 /**
- * A currency column, so one row of a UAH account is in EUR - the generic mapping
- * reads it (providers/csv.ts) and rowCurrency prefers it over the account's, which
- * is the reachable path to a mixed account and the only reason otherCurrencies
- * exists.
+ * A currency column, so one row of a UAH account is in EUR. The generic mapping
+ * reads it (providers/csv.ts) and rowCurrency prefers it over the account's. That is
+ * the reachable path to a mixed account, and the only reason otherCurrencies exists.
  */
 const mixedStatement = Buffer.from(
   [
@@ -76,8 +75,8 @@ const importCsv = async (a: Agent, accountId: string, file: Buffer): Promise<voi
 /**
  * Two accounts in one database, so every figure over every account is the sum of
  * both: the wallet's rows, and the one row of the hryvnia account that the file
- * declared in EUR - the hryvnia row itself has no rate and counts nowhere but on
- * its own account's arm.
+ * declared in EUR. The hryvnia row itself has no rate and counts nowhere but on its
+ * own account's arm.
  */
 const ALL_EXPENSE = EXPENSE + FOREIGN_BASE_EXPENSE;
 
@@ -187,8 +186,8 @@ describe('GET /api/summary/months', () => {
 /**
  * `date` is a full ISO stamp, so `to` only means the whole of its day
  * because each route pads it: without that padding every row dated on the last day
- * of the window disappears from all four bodies, and nothing else here notices -
- * every other window in this file ends nine months from the nearest row.
+ * of the window disappears from every body, and nothing else here notices. Every
+ * other window in this file ends months after the nearest row.
  *
  * The narrowest window that can say so, over a row that is already in the fixture.
  */
@@ -207,12 +206,12 @@ describe('the last day of the window is inside it', () => {
 });
 
 /**
- * The only place in this file where a right implementation and a
- * wrong one disagree about these two fields. Every other account here is EUR, which
- * is also BASE_CURRENCY, so a route answering baseCurrency where it promises the
- * account's currency reads identically - and an otherCurrencies hard-coded to []
- * reads identically to one nobody computed. This account is UAH and holds one row
- * the file declared EUR, so both substitutions are visible.
+ * The only place in this file where a right implementation and a wrong one disagree
+ * about these two fields. Every other account here is EUR, which is also
+ * BASE_CURRENCY, so a route answering baseCurrency where it promises the account's
+ * currency reads identically. An otherCurrencies hard-coded to [] also reads the same
+ * as one that was actually computed. This account is UAH and holds one row the file
+ * declared EUR, so both substitutions are visible.
  */
 describe('an account whose currency is not the base currency', () => {
   it.each(ROUTES)('%s: says its own currency, and names the row not in it', async (route) => {
@@ -233,7 +232,7 @@ describe('an account whose currency is not the base currency', () => {
    * Both arms end to end: the account arm sums its own rows whatever currency they
    * are in, and the arm over every account sums the converted ones in the base
    * currency. A row with no rate is a real movement of that account's money and a
-   * number the other arm may not add to euros - so it is in one figure and not the
+   * number the other arm may not add to euros, so it is in one figure and not the
    * other.
    */
   it('counts its unconverted row on its own arm and on no other', async () => {
@@ -257,10 +256,10 @@ describe('an account whose currency is not the base currency', () => {
 
 /**
  * q() maps both '' and a repeated parameter to undefined, and undefined means
- * every account - so a caller building `?accountId=${account?.id ?? ''}` would be
+ * every account. So a caller building `?accountId=${account?.id ?? ''}` would be
  * handed every account's money labelled as one account's. Neither route may route
- * this through q(), and the two causes get their own sentences: `?accountId=` was
- * sent exactly once.
+ * this through q(), and each cause gets its own sentence: `?accountId=` was sent
+ * exactly once.
  */
 describe('a malformed accountId never means every account', () => {
   it.each(ROUTES)('%s: an empty accountId is refused as empty', async (route) => {
@@ -302,9 +301,9 @@ describe('a malformed accountId never means every account', () => {
 });
 
 /**
- * A body about an account has to state a currency, and there is no
- * currency without an account - so an id that resolves to nothing is a refusal and
- * not a 200 of zeroes.
+ * A body about an account has to state a currency, and there is no currency
+ * without an account. So an id that resolves to nothing is a refusal, not a 200 of
+ * zeroes.
  */
 describe('an accountId that resolves to nothing', () => {
   it.each(ROUTES)('%s: an unknown id is 404', async (route) => {
@@ -315,7 +314,7 @@ describe('an accountId that resolves to nothing', () => {
 });
 
 /**
- * Hiding an account keeps it out of the totals over every account - that is
+ * Hiding an account keeps it out of the totals over every account, which is
  * what VISIBLE_ACCOUNT() is for. Asked about by id it answers its real numbers: the
  * caller named it, and a removed account whose figures read as zero is
  * indistinguishable from an empty one.

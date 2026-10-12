@@ -1,8 +1,8 @@
 /**
- * Every kind in one component, because what surrounds a plot — the axis colours, the
- * tooltip, the animation rule, the empty state — is the same whichever kind it is, and
- * a component per kind would be a copy of it per kind, agreeing until one of them was
- * edited. Animation is off on every series. `ChartPlot` holds no state and fetches
+ * Every kind in one component. What surrounds a plot is the same whichever kind it is:
+ * the axis colours, the tooltip, the animation rule, the empty state. A component per
+ * kind would be a copy of it per kind, agreeing until one of them was edited.
+ * Animation is off on every series. `ChartPlot` holds no state and fetches
  * nothing, for the reason `web/src/SPEC.md` gives under *What a chart is, and where its
  * numbers come from*; how a series and a slice are coloured is under *The palette, and
  * what leaves the page*.
@@ -77,7 +77,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
     const top = niceMax(Math.max(0, ...values));
     const lowest = Math.min(0, ...values);
     /*
-     * A floor only when something is actually below zero — Net goes negative in a
+     * A floor only when something is actually below zero. Net goes negative in a
      * month that spent more than it earned, and an axis pinned at 0 would clip the
      * one figure the chart was made to show.
      */
@@ -269,7 +269,7 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
             />
             <Tooltip {...tooltip} />
             {/* a refund can push a row negative, and the ranking keeps it where the
-                donut and the radar drop it — the zero line is what makes it readable */}
+                donut and the radar drop it. The zero line is what makes it readable */}
             <ReferenceLine x={0} stroke={ink.muted} strokeWidth={1} />
             {/* named because a series with no `name` is announced in the tooltip by its
                 `dataKey`, and `value` is a field of this file's own vocabulary put in
@@ -305,8 +305,8 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
       {/*
        * The ring's key, and the one place on screen that names every sector: the figures
        * above name the largest and the table below is not on screen, so without this a
-       * donut is a circle of colours with a total in it — and the tooltip that would
-       * otherwise answer "which wedge is Transport" needs a hover a phone has not got.
+       * donut is a circle of colours with a total in it. The tooltip that would
+       * otherwise answer "which wedge is Transport" needs a hover, and a phone has none.
        *
        * Every sector, not the top few: the category list and the reader's own income
        * sources are closed sets, so there is no tail to fold away. Discs rather than the
@@ -355,8 +355,8 @@ export function ChartPlot({ spec, data, height, ground }: Props) {
 /**
  * Always a sentence and never an empty axis: axes with no marks on them read as a chart
  * that failed, where "this month was quiet" and "you have not said what to draw" are
- * both ordinary answers — and the three are not the same thing to somebody deciding
- * whether to trust the screen.
+ * both ordinary answers. To somebody deciding whether to trust the screen, the three
+ * are not the same thing.
  */
 const PlotEmpty = ({ text = 'Nothing in this period.' }: { text?: string }) => (
   <p className="empty chart-empty">{text}</p>

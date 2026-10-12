@@ -105,10 +105,10 @@ describe('the control table the comparator is held by', () => {
 });
 
 /**
- * The two rows that catch a wrong build in the silent direction. Every row above
- * catches one that shouts — a correct sweep called broken, a round spent arguing.
- * These catch a comparator that is green over a deleted `await`, which is the only
- * failure of this instrument that can certify a sweep which changed behaviour.
+ * The rows that catch a wrong build in the silent direction. Every row above catches
+ * one that shouts: a correct sweep called broken and then argued over. These catch a
+ * comparator that is green over a deleted `await`, which is the only failure of this
+ * instrument that can certify a sweep which changed behaviour.
  */
 describe('the tokens a walk over child NODES never visits', () => {
   it('sees a keyword hanging off an expression node its parent visits: await removed', () => {
@@ -231,7 +231,7 @@ describe('the comment list the census folds over', () => {
    * comment: once as the text's own leading range, once as the trailing range of the
    * brace before it. Either way it is what tokensOf calls a JsxText token. The third
    * shape puts the closing tag on a line of its own, so the range a scanner mints there
-   * carries no `</` — a filter reading the text for one keeps it, and only a filter
+   * carries no `</`. A filter reading the text for one keeps it, and only a filter
    * reading the node's span drops it. The case after this one is the other half of
    * that pair.
    */
@@ -269,9 +269,10 @@ describe('the comment list the census folds over', () => {
 
 /**
  * The parser is error-tolerant, so nothing throws on its own and there is no "did it
- * parse" boolean in the public API — `parseDiagnostics` is read off the object through
- * a local type. The pair is what keeps that read from going vacuous: a `typescript`
- * upgrade that drops the field reds the first of these rather than passing forever.
+ * parse" boolean in the public API, so `parseDiagnostics` is read off the object
+ * through a local type. The pair is what keeps that read from going vacuous: a
+ * `typescript` upgrade that drops the field reds the first of these rather than
+ * passing forever.
  */
 describe('a file that did not parse', () => {
   const GARBLED = 'export function f() { return 1;';
@@ -298,8 +299,8 @@ describe('a file that did not parse', () => {
 /**
  * comment-tokens.ts is the half a test may import; comment-check.ts reads argv, the
  * filesystem and `git show`, and no test imports it. The check reads both because the
- * predicate has to demonstrate it can tell them apart — a purity check that has only
- * ever seen a pure file is a check that could be returning true.
+ * predicate has to demonstrate it can tell them apart. A purity check that has only
+ * ever seen a pure file could be returning true no matter what.
  */
 describe('comment-tokens.ts starts nothing when a test imports it', () => {
   const CORE = 'scripts/comment-tokens.ts';

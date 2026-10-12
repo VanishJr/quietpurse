@@ -82,8 +82,8 @@ export function Shell() {
   };
 
   const navigate = (e: React.MouseEvent, run: () => void) => {
-    // a modified click asked the browser for something — the address in a new page, or
-    // downloaded — and is left to it
+    // a modified click asks the browser for the address in a new page or as a download,
+    // so it is left to the browser
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
     run();

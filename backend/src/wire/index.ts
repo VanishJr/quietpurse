@@ -30,8 +30,8 @@ export const IMPORT_STATUSES = [
 export const INCOME_SOURCE_KINDS = ['own', 'external'] as const;
 /**
  * Why no opening/closing pair is shown for a file that DOES state a running balance.
- * Absent together with `balances` means the format states none, and the two must not
- * spell the same: a third state exists - a preset declared a balance column, it
+ * Absent together with `balances` means the format states none. The two must not
+ * spell the same, because a third state exists: a preset declared a balance column, it
  * resolved, and the check could not be completed.
  */
 export const BALANCES_NOT_SHOWN = [
@@ -226,7 +226,10 @@ export const incomeSourceTotalSchema = z.strictObject({
 });
 export type IncomeSourceTotal = z.infer<typeof incomeSourceTotalSchema>;
 
-/** The currencies among this account's rows that are not its own - all time, not the window. */
+/**
+ * The currencies among this account's rows that are not its own, over all time rather
+ * than the window.
+ */
 const otherCurrenciesSchema = z.array(currencySchema);
 
 export const summarySchema = z.strictObject({
@@ -272,7 +275,7 @@ export type MonthTotals = z.infer<typeof monthTotalsSchema>;
  * A row in another currency is summed in as it is, and `otherCurrencies` on the body
  * names every such currency.
  *
- * `net` is every row of the month summed, transfers included - the rule
+ * `net` is every row of the month summed, transfers included. That is the rule
  * recalcAccountBalanceFromTransactions computes a balance by, and the only reason the
  * months can be added up and compared with the balance printed beside them. That
  * comparison holds over a window covering the account's whole history: the balance has
@@ -315,7 +318,7 @@ export type AccountMonthlySummary = z.infer<typeof accountMonthlySummarySchema>;
 /**
  * One saved chart, as both routes carry it: the dock's order is array position, so `sort`
  * is not on this type. It IS in a downloaded backup, which selects the columns rather than
- * this shape - say "not on the charts API", never "never leaves".
+ * this shape. So say "not on the charts API", never "never leaves".
  */
 export const chartSchema = z.strictObject({
   id: z.string(),
@@ -455,14 +458,17 @@ export const importSummarySchema = z.strictObject({
   accepted: z.number(),
   /** dropped rows, the sum of the three below, and what imports.rows_rejected stores */
   skipped: z.number(),
-  /** of those, the ones this importer failed on - an unreadable fee, or no date or amount */
+  /** of those, the ones this importer failed on: an unreadable fee, or no date or amount */
   unreadable: z.number(),
   /** read fine, and dropped by a rule: the statement's own status column says so */
   filtered: z.number(),
-  /** read fine, and moving no money once the fee is taken - nothing to insert */
+  /** read fine, but moving no money once the fee is taken, so there is nothing to insert */
   noMovement: z.number(),
   problems: z.array(z.string()),
-  /** Of `accepted`, how many are not already in the database - the number the user reads before deciding. */
+  /**
+   * Of `accepted`, how many are not already in the database. The user reads this number
+   * before deciding.
+   */
   newRows: z.number(),
   alreadyPresent: z.number(),
   from: calendarDaySchema,

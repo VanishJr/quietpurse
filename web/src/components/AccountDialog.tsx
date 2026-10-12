@@ -198,8 +198,9 @@ export function AccountDialog({
       {(kind === 'add' || kind === 'rename') && (
         <form id={formId} onSubmit={submitName} className="acct-name-form">
           {kind === 'add' && <p className="body-text">
-            A name is all it needs. Import a statement into it whenever you have one — or
-            create it from the import screen while you upload the first one.
+            A name is all it needs. Import a statement into it whenever you have one. You
+            can also create an account from the import screen while you upload its first
+            statement.
           </p>}
           <Field control="input" id={kind === 'add' ? 'acct-new-name' : 'acct-name'} label="Name"
             help={kind === 'add' ? `It will hold amounts in ${baseCurrency}, your base currency.` : undefined}
@@ -233,8 +234,8 @@ export function AccountDialog({
           start counting in the totals and the charts again.
         </> : <>
           <strong>{account.name}</strong> leaves the tabs, the totals and the charts.
-          Its transactions stay in the database exactly as they are — nothing is
-          deleted, nothing is exported differently, and you can bring it back from{' '}
+          Its transactions stay in the database exactly as they are. Nothing is
+          deleted, a backup still includes it, and you can bring it back from{' '}
           <em>Show hidden</em> under the tabs at any time.
         </>}
       </p>}
@@ -257,16 +258,15 @@ export function AccountDialog({
           <li><strong>{preview.truncated ? `at least ${preview.transactions} transactions`
             : preview.transactions === 1 ? '1 transaction' : `${preview.transactions} transactions`}</strong>{' '}
             {preview.countedFrom === 'rows' ? 'in this account'
-              : 'across its imports — this account is hidden, so its rows cannot be counted directly'}</li>
+              : "across its imports, because a hidden account's rows cannot be counted directly"}</li>
           <li><strong>{preview.imports === 1 ? '1 import' : `${preview.imports} imports`}</strong>{' '}
             and the record of what each one read</li>
           <li><strong>{preview.files === 1 ? '1 uploaded file' : `${preview.files} uploaded files`}</strong>{' '}
             still stored on this server</li>
         </ul>}
         {preview?.truncated && <Notice tone="warning">
-          That count came back exactly at the limit this dialog asks for, so it is the
-          limit and not the answer. There are at least that many, and how many more is
-          not something this screen can find out.
+          The count reached the limit this dialog asks for, so there are at least that
+          many transactions. This screen cannot tell how many more there are.
         </Notice>}
         {!preview && !previewError && <Notice role="status">Counting what would go…</Notice>}
         {preview && <Field control="input" id="acct-delete-confirm"

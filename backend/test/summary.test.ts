@@ -39,7 +39,7 @@ const TO = '2026-12-31T23:59:59.999Z';
 // these, never a figure read back out of the code.
 const MAIN_EXPENSE = 100;
 const MAIN_INCOME = 500;
-/** in UAH, so base_amount_cents is NULL - the state a real import is in before backfillBaseAmounts */
+/** in UAH, so base_amount_cents is NULL, as on a real import before backfillBaseAmounts runs */
 const UAH_EXPENSE = 30;
 const UAH_INCOME = 40;
 const TRANSFER_OUT = 20;
@@ -241,9 +241,9 @@ describe('the account arm and the all-accounts arm answer different questions', 
 
   /**
    * A row whose rate has not been fetched has no base_amount_cents, so the
-   * all-accounts arm leaves it out rather than adding hryvnias to euros - and the
-   * account arm must count it, because it is a real movement of that account's own
-   * money and the balance beside these figures already includes it.
+   * all-accounts arm leaves it out rather than adding hryvnias to euros. The account
+   * arm must count it, because it is a real movement of that account's own money and
+   * the balance beside these figures already includes it.
    */
   it.each(QUERIES)(
     '$name: an unconverted row counts on the account arm and not on the all-accounts arm',
@@ -297,9 +297,10 @@ describe('the account arm and the all-accounts arm answer different questions', 
 
 describe('an account’s months', () => {
   /**
-   * The months are only readable next to the balance if they are computed by
-   * the same rule, so `net` sums every row of the month - transfers and unconverted
-   * rows included - exactly as recalcAccountBalanceFromTransactions does.
+   * The months are only readable next to the balance if they are computed by the
+   * same rule, so `net` sums every row of the month, exactly as
+   * recalcAccountBalanceFromTransactions does. That includes transfers and
+   * unconverted rows.
    */
   it('add up to the balance, both sides computed', async () => {
     await recalcAccountBalanceFromTransactions(main.id);
@@ -376,9 +377,9 @@ describe('an account with no rows in the window', () => {
 });
 
 /**
- * The clause list is a convention - SQL is a string, and there is no type that can
- * refuse a new summary query written with the all-accounts arm's filters. The cases
- * above cover the ones that exist; this one covers the one nobody has written yet.
+ * The clause list is a convention. SQL is a string, and no type can refuse a new
+ * summary query written with the all-accounts arm's filters. The cases above cover the
+ * ones that exist; this one covers the one nobody has written yet.
  *
  * It reads source, so it asserts nothing at all if its anchors move: the first case is
  * the guard that the slice is really the summary block.
@@ -412,10 +413,10 @@ describe('nothing but scopeSql picks the filters', () => {
 
   /**
    * A count rather than a span. Excising "the helper" as everything between
-   * `const scopeSql` and the next `export` leaves a window a new fragment written
-   * beside the helper falls into unseen - which is exactly where someone adding one
-   * would put it. Each token is named once in the block today, inside scopeSql, so
-   * a second occurrence anywhere is the thing to look at.
+   * `const scopeSql` and the next `export` leaves a window: a new fragment written
+   * beside the helper falls into it unseen, and beside the helper is exactly where
+   * someone adding one would put it. Each token is named once in the block, inside
+   * scopeSql, so a second occurrence anywhere is the thing to look at.
    */
   it.each(['CONVERTED', 'VISIBLE_ACCOUNT', 'base_amount_cents'])(
     '%s is named once, and it is the helper naming it',

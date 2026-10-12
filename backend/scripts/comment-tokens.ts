@@ -68,7 +68,7 @@ export function tokensOf(fileName: string, text: string): Token[] {
       /**
        * Dropped rather than normalised: deleting a bare JSX comment merges the
        * JsxText either side into one, so two normalised tokens face one and the
-       * streams differ in length. The newline-free case is not dropped — it is a
+       * streams differ in length. The newline-free case is not dropped: it is a
        * rendered space between two children, and its loss must read DIFFERENT.
        */
       if (raw.trim() === '' && raw.includes('\n')) return;
@@ -130,8 +130,8 @@ export function commentsOf(fileName: string, text: string): Comment[] {
   };
   walk(source);
   /**
-   * Started inside rendered text, a scanner reads a `//` there as a comment - as the
-   * text's own leading range or as the trailing range of the brace before it - where
+   * Started inside rendered text, a scanner reads a `//` there as a comment, either as
+   * the text's own leading range or as the trailing range of the brace before it.
    * tokensOf reads the same characters as the JsxText they are.
    */
   const inJsxText = (c: Comment): boolean =>
@@ -144,8 +144,8 @@ export function commentsOf(fileName: string, text: string): Comment[] {
 /**
  * A comment line is a source line any part of a comment range occupies; the answer is
  * the distinct such lines, the file's non-blank lines and the distinct ranges. The
- * share those make is not a partition — a line carrying code and a trailing comment
- * is in both numerator and denominator — so it is a floor on lines touched by a
+ * share those make is not a partition, because a line carrying code and a trailing
+ * comment is in both numerator and denominator. So it is a floor on lines touched by a
  * comment and never the fraction of a file that is prose.
  */
 export function censusOf(fileName: string, text: string): Census {

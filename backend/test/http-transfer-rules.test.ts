@@ -1,9 +1,8 @@
 /**
- * The three transfer-rule routes over real HTTP. What is worth asserting is the wire -
- * the status, the sentence, the count in the body - and what the rows look like
- * afterwards through the same route the Transactions screen reads them from, because
- * a rule that does not re-tag changes the spending figure with nothing on screen
- * saying so.
+ * The transfer-rule routes over real HTTP. The wire is worth asserting: the status, the
+ * sentence and the count in the body. So is what the rows look like afterwards through
+ * the same route the Transactions screen reads them from, because a rule that does not
+ * re-tag changes the spending figure with nothing on screen saying so.
  */
 import crypto from 'crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -89,7 +88,7 @@ describe('POST /api/transfer-rules', () => {
     const res = await postRule({ txId: blank!.id });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({
-      error: 'the transaction has an empty description - there is nothing to hang a rule on',
+      error: 'the transaction has an empty description, so there is nothing to hang a rule on',
     });
     expect(await listRules()).toEqual([]);
   });

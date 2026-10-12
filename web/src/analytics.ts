@@ -62,7 +62,7 @@ export const KIND_DEFS = {
   area: {
     name: 'Area',
     shape: 'series',
-    blurb: 'The line with the ground filled in — volume rather than direction.',
+    blurb: 'A line with the area below it filled in, to show volume rather than direction.',
   },
   donut: {
     name: 'Donut',
@@ -72,7 +72,7 @@ export const KIND_DEFS = {
   ranking: {
     name: 'Ranking',
     shape: 'share',
-    blurb: 'The same parts as bars, biggest first — the easiest to read exactly.',
+    blurb: 'The same parts as bars, biggest first, so exact values are easiest to read.',
   },
   radar: {
     name: 'Radar',
@@ -112,10 +112,10 @@ export interface BreakdownDef {
   /**
    * Whether the wizard offers it for one account. Not a limit of the API: `/api/summary`
    * takes an `accountId` and answers that account's own income by source, off the same
-   * `scopeSql` every other figure is filtered through. This is a product decision left
-   * open — whether a split by income source is a question worth asking of one account —
-   * and until it is answered the wizard drops the choice when an account is picked rather
-   * than offering what nobody has ruled on.
+   * `scopeSql` every other figure is filtered through. Whether a split by income source
+   * is worth asking of one account is a product decision left open. Until it is answered,
+   * the wizard drops the choice when an account is picked rather than offering what
+   * nobody has ruled on.
    */
   allAccountsOnly?: true;
 }
@@ -151,7 +151,7 @@ export const rangeDef = (key: ChartRange): RangeDef =>
   RANGES.find((r) => r.key === key) ?? RANGES[2];
 
 /**
- * The ticks a range asks for, oldest first — `YYYY-MM` on a month grain, `YYYY` on a
+ * The ticks a range asks for, oldest first: `YYYY-MM` on a month grain, `YYYY` on a
  * year one.
  *
  * They end at the tick `today` is in and not at the newest tick with data in it,
@@ -177,19 +177,18 @@ export function ticksOf(range: RangeDef, today: Date): string[] {
 
 /**
  * A property of the WINDOW and not of any tick in it, which is why the whole list is
- * the argument — see `tickLabel`. Year ticks carry their year already and answer true
+ * the argument (see `tickLabel`). Year ticks carry their year already and answer true
  * here harmlessly.
  */
 const spansYears = (ticks: string[]): boolean =>
   new Set(ticks.map((t) => t.slice(0, 4))).size > 1;
 
 /**
- * "Aug" for a month, "2026" for a year — and "Aug 25" for a month in a window that
- * crosses one. A 24-month window holds every month name twice, and nearly every
- * 12-month one crosses a year — only one ending in December does not — so labelled by
- * the name alone the axis either repeats a word or does not say which year a month is
- * in, and the tooltip, where recharts echoes whatever `XAxis dataKey` names, does the
- * same.
+ * "Aug" for a month and "2026" for a year, but "Aug 25" for a month in a window that
+ * crosses a year. A 24-month window holds every month name twice, and a 12-month one
+ * crosses a year unless it ends in December. Labelled by the name alone, the axis
+ * either repeats a word or does not say which year a month is in. So does the tooltip,
+ * where recharts echoes whatever `XAxis dataKey` names.
  *
  * Two digits of year and not four: the form that fits one of twelve ticks, and read as
  * a column of them in date order the suffix cannot be anything but a year. The hidden
@@ -211,7 +210,7 @@ export interface Bounds {
   to: CalendarDay;
 }
 
-/** The calendar days the range covers, inclusive — what the endpoints take. */
+/** The calendar days the range covers, inclusive, in the form the endpoints take. */
 export function boundsOf(range: RangeDef, today: Date): Bounds {
   if (range.grain === 'year') {
     const last = today.getFullYear();
@@ -229,9 +228,10 @@ export function boundsOf(range: RangeDef, today: Date): Bounds {
 }
 
 /**
- * The same length of window immediately before it — what a comparative kind is drawn
- * against. Built by moving `today` back a whole range and asking `boundsOf` again, so
- * the two windows are the same shape by construction rather than by two sums agreeing.
+ * The window of the same length immediately before it, which a comparative kind is
+ * drawn against. Built by moving `today` back a whole range and asking `boundsOf`
+ * again, so the two windows are the same shape by construction rather than by two sums
+ * agreeing.
  */
 export function priorBoundsOf(range: RangeDef, today: Date): Bounds {
   const shifted =
@@ -270,10 +270,10 @@ const point = (
 });
 
 /**
- * Deliberately not `MonthTotals`, and deliberately without `net`: only the account
+ * Deliberately not `MonthTotals`, and deliberately without `net`. Only the account
  * arm's month shape carries one, and it is every row of the month summed, transfers
- * included — not this chart's net — and this type is what stops it being read, because
- * the field is not in scope inside the function.
+ * included, which is not this chart's net. This type is what stops it being read,
+ * because the field is not in scope inside the function.
  */
 export interface MonthFlows {
   month: string;
@@ -283,7 +283,7 @@ export interface MonthFlows {
 
 /**
  * Folded onto the ticks, whichever arm answered. A month the endpoint did not answer is
- * a tick at zero, which is the true statement here — see `ticksOf`.
+ * a tick at zero, which is the true statement here (see `ticksOf`).
  */
 export function seriesFromMonths(
   months: MonthFlows[],
@@ -308,8 +308,8 @@ export interface SharePoint {
 }
 
 /**
- * A refund can push a category negative — the purchase was in an earlier period, the
- * refund landed in this one — and that is the honest figure. Kept out of the shares a
+ * A refund can push a category negative when the purchase was in an earlier period and
+ * the refund landed in this one. That is the honest figure. Kept out of the shares a
  * donut or a radar draws, because a negative sector is not a thing; the ranking prints
  * it, because a bar chart has a baseline and can.
  */
@@ -329,9 +329,9 @@ const fromCategories = (rows: { category: string; total: number }[]): SharePoint
     .sort((a, b) => b.value - a.value);
 
 /**
- * The three splits both summary bodies answer, and the only ones a share chart reads —
- * a minimum both arms meet rather than either body's own type: every account together
- * in the base currency and one account in its own are the same arithmetic here.
+ * The splits both summary bodies answer, and the only ones a share chart reads. It is a
+ * minimum both arms meet rather than either body's own type: every account together in
+ * the base currency and one account in its own are the same arithmetic here.
  */
 export interface SummarySplits {
   byCategory: CategorySummary[];
@@ -353,8 +353,8 @@ export function shareFromSummary(summary: SummarySplits, breakdown: ChartBreakdo
 /**
  * The two periods on one axis, for a comparative kind.
  *
- * Every slice either side gets a row — a category that exists only in the prior period
- * is exactly what the chart is being asked about — and the order is the CURRENT
+ * Every slice on either side gets a row, because a category that exists only in the
+ * prior period is exactly what the chart is being asked about. The order is the CURRENT
  * period's, biggest first, so the polygon the reader came for is the one the axis is
  * arranged around.
  */
@@ -386,9 +386,9 @@ const breakdownLabel = (b: ChartBreakdown): string =>
   BREAKDOWNS.find((d) => d.key === b)?.label ?? b;
 
 /**
- * A ranking has no single `metric` — it is one breakdown's rows — so the word comes
- * from the breakdown, out of the same `METRICS` vocabulary every other series here is
- * named from. Without a name recharts prints the series' `dataKey` instead.
+ * A ranking is one breakdown's rows and has no single `metric`, so the word comes from
+ * the breakdown, out of the same `METRICS` vocabulary every other series here is named
+ * from. Without a name recharts prints the series' `dataKey` instead.
  */
 export const rankingSeriesName = (b: ChartBreakdown): string =>
   metricLabel(b === 'expense-categories' ? 'expense' : 'income');
@@ -400,7 +400,7 @@ export function joinWords(words: string[]): string {
 
 /**
  * A suggestion and not a binding: the wizard puts it in the name box, the reader is
- * free to type over it, and nothing recomputes it afterwards — a title that rewrote
+ * free to type over it, and nothing recomputes it afterwards. A title that rewrote
  * itself when the range changed would take away the one part of the tab strip the
  * reader owns. Which account a chart is about goes into the name, and it is the name
  * and not the id that is handed in: this module knows nothing about the account list.
@@ -437,7 +437,7 @@ const RANGE_KEYS = new Set<string>(RANGES.map((r) => r.key));
  * One stored object, checked field by field, or null. Nothing that arrives here can be
  * trusted into a `Chart` on the strength of having parsed, and a throw would take the
  * whole screen down on first paint, so a shape this version does not recognise answers
- * null — and `chartEntry` below decides what happens to it, which is not "it is dropped".
+ * null. `chartEntry` below decides what happens to it, and that is not "it is dropped".
  */
 function parseChart(raw: unknown): Chart | null {
   if (typeof raw !== 'object' || raw === null) return null;
@@ -478,8 +478,9 @@ function parseChart(raw: unknown): Chart | null {
 }
 
 /**
- * A chart this client can draw, or one it cannot — kept and sent back verbatim rather
- * than dropped, which would delete it from every device the next time anything is saved.
+ * A chart this client can draw, or one it cannot. One it cannot draw is kept and sent
+ * back verbatim, because dropping it would delete it from every device the next time
+ * anything is saved.
  */
 export type ChartEntry = { known: true; spec: Chart } | { known: false; raw: unknown };
 
@@ -497,7 +498,7 @@ const ID_SHAPE = new RegExp(CHART_ID_SHAPE_SOURCE);
 
 export interface Normalised {
   entries: ChartEntry[];
-  /** Not sent at all — the one place a chart is lost. */
+  /** Not sent at all: the one place a chart is lost. */
   droppedOverCap: number;
   titlesShortened: number;
   idsReminted: number;
@@ -512,7 +513,7 @@ const rawId = (raw: unknown): string | null => {
 /**
  * Every save goes through this and not only the migration: a row a restore let in past
  * the route's bounds would otherwise refuse the reader's WHOLE list on the way back
- * out, for ever, and cutting it is the smaller harm — which is why the caller says out
+ * out, for ever. Cutting it is the smaller harm, and that is why the caller says out
  * loud what was cut.
  *
  * Nothing is dropped except past the cap. An id that is illegal, over-long or repeated

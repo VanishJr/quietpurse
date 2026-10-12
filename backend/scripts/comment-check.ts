@@ -157,7 +157,7 @@ function compare(options: Options): number {
     );
   }
   console.log(
-    `\n${files.length} file(s): ${identical} IDENTICAL, ${findings} not — ${tokens} leaf tokens across the identical ones`,
+    `\n${files.length} file(s): ${identical} IDENTICAL, ${findings} not; ${tokens} leaf tokens across the identical ones`,
   );
   console.log(`base ${options.base}   work ${options.head ?? 'working tree'}`);
   return findings === 0 ? 0 : 1;

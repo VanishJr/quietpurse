@@ -3,7 +3,7 @@
  * decides what the file is from its bytes.
  *
  * Driven through supertest, because the parts worth testing only exist in the
- * middleware chain - what the multipart parser refuses, and that a file the app
+ * middleware chain: what the multipart parser refuses, and that a file the app
  * cannot read is refused with something the user can act on rather than a generic
  * 400.
  */
@@ -46,7 +46,7 @@ const imports = async (): Promise<
   }[]
 > => (await agent.get('/api/imports')).body.imports;
 
-/** An upload only stages - this is what makes its rows the person's data. */
+/** An upload only stages its rows. The confirm is what makes them the person's data. */
 const confirm = (importId: string) => agent.post(`/api/imports/${importId}/confirm`);
 
 /**
@@ -82,7 +82,7 @@ describe('POST /api/imports', () => {
       ['date,amount,description', '2026-03-01,-10.00,Ordinary row', `${cell},-4.00,Impossible row`].join('\n'),
       'utf8',
     );
-    const refusal = `row 3: the date cell reads "${cell}", ${why} - nothing was imported, correct the date in the file and upload it again`;
+    const refusal = `row 3: the date cell reads "${cell}", ${why}. Nothing was imported: correct the date in the file, and upload it again`;
 
     const res = await agent.post('/api/imports').field('accountId', accountId).field('preset', 'generic').attach('file', file, 'impossible.csv');
 
@@ -288,8 +288,8 @@ describe('POST /api/imports', () => {
 
     const confirmed = await confirm(res.body.summary.importId);
     expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
-    // the confirm lands in the account the summary named, which is what the id
-    // recorded on the import is for - neither end derives it from the name
+    // the confirm lands in the account the summary named. That is what the id recorded
+    // on the import is for: neither end derives the account from its name
     expect(confirmed.body).toMatchObject({
       accountId: res.body.summary.accountId,
       accountIds: [res.body.summary.accountId],
@@ -301,10 +301,10 @@ describe('POST /api/imports', () => {
 
   /**
    * The filename is the one part of a multipart request that arrives as bytes with
-   * no charset of its own. multer read them as latin1, so this name was stored as
-   * "Ð²Ñ‹Ð¿Ð¸ÑÐºÐ°.xlsx" - 19 characters, one per byte - and nothing failed. The
-   * assertion reads the column back out of the database rather than a header the
-   * route composed from this test's own string, which would agree with itself.
+   * no charset of its own. multer read them as latin1, one character per byte, so this
+   * name was stored as "Ð²Ñ‹Ð¿Ð¸ÑÐºÐ°.xlsx" and nothing failed. The assertion reads the
+   * column back out of the database rather than a header the route composed from this
+   * test's own string, which would agree with itself.
    */
   it('stores a non-ASCII filename as the browser sent it', async () => {
     const res = await agent
@@ -344,8 +344,8 @@ describe('POST /api/imports', () => {
   /**
    * The response body is the wire contract, and toMatchObject would not notice a key
    * added to it. A sheet the parser never read reaches the client in `problems` and
-   * nowhere else - the same sentence sent twice under two names is the contract
-   * drifting, which is the thing a mobile client cannot follow.
+   * nowhere else. The same sentence sent twice under two names is the contract
+   * drifting, and a mobile client cannot follow that.
    */
   it('a skipped sheet reaches the client in problems, and adds no field to the body', async () => {
     const res = await agent
@@ -448,12 +448,12 @@ describe('POST /api/imports', () => {
   });
 
   /**
-   * The PDF path opens the file now, so this moved bands: the same
-   * bytes that used to be refused by the sniffer with no `imports` row are a
-   * `pdf` import that failed, and the row and its stored document are what make
-   * the miss diagnosable. What stays pinned is that the message says what to do -
-   * the byte cap, which is still decidable without opening anything, holds the
-   * no-row half of the rule from the other side (pdf.test.ts).
+   * The PDF path opens the file now, so this moved bands: the same bytes that used to
+   * be refused by the sniffer with no `imports` row are a `pdf` import that failed, and
+   * the row and its stored document are what make the miss diagnosable. What stays
+   * pinned here is that the message says what to do. The byte cap, which is still
+   * decidable without opening anything, holds the no-row half of the rule from the
+   * other side (pdf.test.ts).
    */
   it('a file that says %PDF and is not one fails as a pdf import, not as a CSV', async () => {
     const before = (await imports()).length;
@@ -475,11 +475,11 @@ describe('POST /api/imports', () => {
   });
 
   /**
-   * A band change asserted rather than discovered: these bytes used
-   * to be refused inside `sniff`, before createImport, so they left no import row and
-   * no stored document. A container is a PDF now, so the file is opened, the document
-   * is kept, and the miss is a `failed` import someone can download - which is what
-   * the third PDF template was built from.
+   * A band change asserted rather than discovered: these bytes used to be refused
+   * inside `sniff`, before createImport, so they left no import row and no stored
+   * document. A container is a PDF now, so the file is opened and the document is
+   * kept. The miss is a `failed` import someone can download, and such a download is
+   * what a new PDF template is built from.
    */
   it('a statement inside a signed container fails as a pdf import, naming the layout', async () => {
     const before = (await imports()).length;
@@ -518,11 +518,11 @@ describe('POST /api/imports', () => {
 
   /**
    * What the container rule has to keep out of: a DER SEQUENCE opens 0x30, which is
-   * ASCII `0`, and this file's leading index column starts with one. What this case
-   * pins is that such a CSV imports, and nothing about which half of the rule parted
-   * it from a container - the file carries no `%PDF-` anywhere, so the header search
-   * refuses it on its own. The second byte is held by pdf.test.ts's lead-byte loop,
-   * which is where a classifier boundary belongs.
+   * ASCII `0`, and this file's leading index column starts with one. This case pins
+   * only that such a CSV imports, not which half of the rule parted it from a
+   * container. The file carries no `%PDF-` anywhere, so the header search refuses it on
+   * its own. The second byte is held by pdf.test.ts's lead-byte loop, which is where a
+   * classifier boundary belongs.
    */
   it('a CSV whose first byte is the zero a container tag shares still imports', async () => {
     const csv = Buffer.from(
@@ -574,7 +574,7 @@ describe('POST /api/imports', () => {
     const binary = await send(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x1a, 0x0a]), 'chart.png');
     expect(binary.status).toBe(400);
     expect(binary.body.error).toBe(
-      'this file is not a CSV, Excel (.xlsx) or PDF statement - export the statement in one of those from your online banking and upload that',
+      'this file is not a CSV, Excel (.xlsx) or PDF statement. Export the statement in one of those formats from your online banking and upload that',
     );
   });
 
@@ -636,9 +636,9 @@ describe('POST /api/imports', () => {
       'mapping.description must be a column name or a list of column names',
     );
 
-    // accept nothing filters every row away, and the answer would then be "no row
-    // could be parsed" - the caller's own input, zeroed and reported back as a fault
-    // in the file. tsc cannot see this bound: without .min(1) the suite stays green
+    // an empty `equals` accepts nothing and filters every row away. The answer would
+    // then be "no row could be parsed", which reports the caller's own input back as a
+    // fault in the file. tsc cannot see this bound: without .min(1) the suite stays green
     const noAcceptedValues = await send(
       'Empty Accept List Bank',
       '{"date":"d","amount":"a","description":"x","onlyWhen":{"column":"State","equals":[]}}',
@@ -678,11 +678,11 @@ describe('POST /api/imports', () => {
 
 /**
  * The wire half of a destination that has one member. Multipart fields carry no type, so
- * the `never` keys on StatementDestination hold nothing here - these nine cases are what
- * a mobile client and curl meet, and the REST API is the contract the picker is only one
- * client of. Two of them are the retired fields, refused rather than ignored so that a
- * caller still sending them is told where an account comes from instead of having half
- * its request dropped.
+ * the `never` keys on StatementDestination hold nothing here. These cases are what a
+ * mobile client and curl meet, and the REST API is the contract: the picker is only one
+ * of its clients. The retired fields are refused rather than ignored, so that a caller
+ * still sending them is told where an account comes from instead of having half its
+ * request dropped.
  */
 describe('POST /api/imports picks an account by id', () => {
   /**
@@ -714,11 +714,10 @@ describe('POST /api/imports picks an account by id', () => {
   });
 
   /**
-   * accountName is refused rather than ignored. Ignoring it would drop one
-   * of the two destinations a request stated, silently, which is the guess the old
-   * exclusivity refusal existed to prevent - and the sentence has to say where an
-   * account comes from now, because a caller sending this field believes an upload
-   * still makes one.
+   * accountName is refused rather than ignored. Ignoring it would silently drop one of
+   * the two destinations a request stated, which is the guess the old exclusivity
+   * refusal existed to prevent. The sentence has to say where an account comes from
+   * now, because a caller sending this field believes an upload still makes one.
    */
   it('refuses accountName, and names the door that creates an account', async () => {
     const id = await makeAccount('Retired Name Arm');
@@ -747,9 +746,9 @@ describe('POST /api/imports picks an account by id', () => {
   });
 
   /**
-   * An existing account owns its currency. Accepting one here and
-   * then reading the account's instead is a field the caller believes in and nothing
-   * uses - which is how "Savings" stayed EUR through a USD statement and reported it.
+   * An existing account owns its currency. Accepting one here and then reading the
+   * account's instead makes it a field the caller believes in and nothing uses. That is
+   * how "Savings" stayed EUR through a USD statement and reported it.
    *
    * Refused ahead of the accountId check, so a request carrying only this field reads
    * the sentence about currency rather than one about a field it did not send.
@@ -790,12 +789,12 @@ describe('POST /api/imports picks an account by id', () => {
     const res = await uploadWith('removed by id', { accountId: id });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe(ACCOUNT_REMOVED);
-    expect(res.body.error).toMatch(/restore it/);
+    expect(res.body.error).toMatch(/Unhide it/);
     expect(await imports()).toHaveLength(before);
   });
 
   /**
-   * Refused, not normalised - picking the first or the last of two values the caller
+   * Refused, not normalised. Picking the first or the last of two values the caller
    * may not agree on is a guess about where a statement goes. The sentence names the
    * field, because "accountId field required" is false of a request that sent one
    * twice.
@@ -870,15 +869,15 @@ describe('POST /api/imports/:id/confirm and /discard', () => {
     expect((await confirm(live.importId)).status).toBe(200);
     const refused = await agent.post(`/api/imports/${live.importId}/discard`);
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/delete it instead of discarding it/);
+    expect(refused.body.error).toMatch(/Delete it instead of discarding it/);
   });
 
   /**
-   * The confirm's guards refuse a broken invariant, which is nothing the user did -
-   * so the status stays 5xx, or the operator's alerting would read a failure the
-   * server caused as one the file caused. What must not stay is the
-   * body: `internal error` on the one screen whose job is saying whether the data
-   * landed reads as transient, so the person presses Confirm again forever.
+   * The confirm's guards refuse a broken invariant, which is nothing the user did. So
+   * the status stays 5xx, or the operator's alerting would read a failure the server
+   * caused as one the file caused. What must not stay is the body: `internal error` on
+   * the one screen whose job is saying whether the data landed reads as transient, so
+   * the person presses Confirm again forever.
    */
   it('a guard inside the confirm answers with the way out, not "internal error"', async () => {
     const { importId } = await stage('Broken Invariant Bank', 'staged then broken');
@@ -929,7 +928,7 @@ describe('the routes around it', () => {
  * than at the data layer for one reason: they cross JSON.stringify. SUM() over
  * bigint is numeric and both drivers hand numeric over as a string, so an
  * unconverted total is the number 7 on PGlite and the string "7" in the Postgres CI
- * job - which the client's `=== 1` plural tests would silently stop matching. The
+ * job. The client's `=== 1` plural tests would silently stop matching the string. The
  * toEqual against numeric literals below is what makes the two jobs disagree loudly.
  */
 describe('GET /api/imports: the filter and the totals', () => {
@@ -949,7 +948,7 @@ describe('GET /api/imports: the filter and the totals', () => {
     );
   };
 
-  /** An upload into `accountId`, confirmed - so its rows and its import are real data. */
+  /** An upload into `accountId`, confirmed so that its rows and its import are real data. */
   const importInto = async (accountId: string, label: string, n: number): Promise<string> => {
     const res = await agent
       .post('/api/imports')
@@ -993,11 +992,11 @@ describe('GET /api/imports: the filter and the totals', () => {
   /**
    * The page is built by a hand-written alias list handed to rowsOf<T>, which
    * asserts the shape rather than deriving it: a dropped alias typechecks, and the
-   * field it filled becomes undefined. This is the only layer where that is visible
-   * - rowToImport builds an object literal, so the key survives an undefined value
+   * field it filled becomes undefined. This is the only layer where that is visible:
+   * rowToImport builds an object literal, so the key survives an undefined value
    * everywhere until JSON.stringify drops it here.
    */
-  it('sends all fifteen fields of an import, none of them lost on the way out', async () => {
+  it('sends every field of an import, none of them lost on the way out', async () => {
     const mine = await makeAccount('Totals Fields');
     await importInto(mine, 'totals-fields', 2);
 
@@ -1041,8 +1040,8 @@ describe('GET /api/imports: the filter and the totals', () => {
   });
 
   /**
-   * Recorded, not endorsed. Express 5's DEFAULT `simple` query parser - which is what
-   * a bare express() gets, and app.ts sets no other - puts the brackets in the KEY, so
+   * Recorded, not endorsed. A bare express() gets Express 5's DEFAULT `simple` query
+   * parser, and app.ts sets no other. That parser puts the brackets in the KEY, so
    * nothing called `accountId` arrives and this reads as every account. Switching to
    * the `extended` parser turns `accountId[]=x` into an array, and this test goes red
    * instead of the filter silently widening to every import there is.
@@ -1082,7 +1081,8 @@ function multipartBody(fields: Record<string, string>, filename: string, bytes: 
 /**
  * One request over a real socket, with the body written in `pieces` writes and the
  * event loop turning between them. supertest hands its body to the socket in one
- * go, so it cannot express this - and this is the only variable that matters here.
+ * go, so it cannot express this, and the number of writes is the only variable that
+ * matters here.
  */
 async function sendInPieces(
   path: string,
@@ -1129,14 +1129,14 @@ async function sendInPieces(
 /**
  * A body that arrives in more than one socket read.
  *
- * A browser streams a multipart body, so this is every real upload, and supertest's
- * fixtures fit one read - which is how a parser mounted so that it lost its request
- * context on the second read once shipped green. The context is gone with the
- * tenancy; the delivery is still the one the suite would otherwise never drive.
+ * A browser streams a multipart body, so every real upload arrives this way, while
+ * supertest's fixtures fit one read. That is how a parser mounted so that it lost its
+ * request context on the second read once shipped green. The context went away with
+ * the tenancy, but this delivery is still one the suite would otherwise never drive.
  *
- * The trigger is the number of reads, not the size of the body: 60 bytes in three
- * writes reproduces it and 58 KB in one write does not. The primary case below
- * therefore drives the delivery itself rather than betting that this machine's
+ * The trigger is the number of reads, not the size of the body: a small body written
+ * in pieces reproduces it and a large one written once does not. The primary case
+ * below therefore drives the delivery itself rather than betting that this machine's
  * receive buffer is smaller than some fixture.
  */
 describe('a body that spans socket reads still imports', () => {
@@ -1161,16 +1161,16 @@ describe('a body that spans socket reads still imports', () => {
     const summary = res.body.summary as { importId: string; accountId: string; total: number };
     expect(summary).toMatchObject({ total: 1 });
     expect((await confirm(summary.importId)).body.inserted).toBe(1);
-    // the answer alone is not enough - the row has to be there
+    // the row has to be there, not only the answer
     const rows = (await agent.get('/api/transactions?limit=200')).body as { description: string }[];
     expect(rows.filter((t) => /chunked groceries/.test(t.description))).toHaveLength(1);
   });
 
   /**
    * The delivery the user actually hit: one .attach() large enough that supertest's
-   * own write does not reach the server in a single read. Cheaper to read and weaker
-   * to trust - the size at which it trips belongs to the operating system - so it
-   * stands beside the case above, never instead of it.
+   * own write does not reach the server in a single read. It is cheaper to read and
+   * weaker to trust, because the size at which it trips belongs to the operating
+   * system. So it stands beside the case above, never instead of it.
    */
   it('a 256 KB upload through supertest still imports', async () => {
     const padded = Buffer.from(
@@ -1199,8 +1199,8 @@ describe('a body that spans socket reads still imports', () => {
    * case above fails, and they are not redundant: body-parser hands next() a plain
    * callback exactly as multer does, and the only reason it survives is that raw-body
    * binds that callback through AsyncResource itself. That is a property of a
-   * transitive dependency, not of this app. These two exist to fail the day it stops
-   * being true - and that is the only day they will look worth their keep.
+   * transitive dependency, not of this app. They exist to fail the day it stops being
+   * true, which is the only day they will look worth their keep.
    *
    * The backup carries no tables, so it restores nothing and leaves the rows above
    * alone: what is under test is the context restoreBackup runs in, not the restore.

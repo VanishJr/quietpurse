@@ -1,8 +1,8 @@
 /**
- * Transaction ids are surrogate UUIDs assigned on insert, so a test
- * can no longer choose one and use it afterwards. It inserts rows and looks the
- * id back up by whatever actually distinguishes the row - which is closer to how
- * the app works anyway: the client gets its ids from a list endpoint too.
+ * Transaction ids are surrogate UUIDs assigned on insert, so a test cannot choose
+ * one and use it afterwards. It inserts rows and looks the id back up by whatever
+ * actually distinguishes the row. That is how the app works too: the client gets its
+ * ids from a list endpoint.
  */
 import { sql } from 'drizzle-orm';
 import {
@@ -60,11 +60,10 @@ export interface ImportedStatement {
 
 /**
  * The account an upload's rows go into, created if there is not one of that name
- * yet. It stands exactly where resolveUploadAccountId's branch (a) stood: the cases
- * that reach it are about parsing, deduplication, provenance and documents and
- * merely need AN account - and several of them upload twice under one name and
- * expect one account, which a lookup-then-create reproduces and a bare create does
- * not. The HTTP tests go through POST /api/accounts instead, because the door is
+ * yet. The cases that reach it are about parsing, deduplication, provenance and
+ * documents, and merely need AN account. Several of them upload twice under one name
+ * and expect one account, which a lookup-then-create reproduces and a bare create
+ * does not. The HTTP tests go through POST /api/accounts instead, because the door is
  * what they are about.
  */
 export async function accountFor(name: string, currency = 'EUR'): Promise<string> {
@@ -94,10 +93,10 @@ export async function rejectionOf(attempt: Promise<unknown>): Promise<Error> {
 
 /**
  * Upload and confirm in one call, answering in the shape the upload had before the
- * confirmation step existed. It is here so that the cases about
- * parsing, deduplication and provenance keep asserting exactly what they asserted
- * before - a test rewritten around the new response is no longer evidence that the
- * old guarantee still holds.
+ * confirmation step existed. It is here so that the cases about parsing,
+ * deduplication and provenance keep asserting exactly what they asserted before. A
+ * test rewritten around the new response is no longer evidence that the old
+ * guarantee still holds.
  *
  * The confirmation step itself is deliberately NOT tested through this: see
  * confirmation.test.ts, which drives importStatement and confirmImport apart.

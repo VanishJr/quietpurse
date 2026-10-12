@@ -11,11 +11,11 @@
  * Offline by construction, so setup.ts's rejecting fetch is never reached: UAH is
  * not an ECB currency, so resolveRate falls to the NBU provider, whose UAH leg is
  * the constant 1 and whose EUR leg reads fx_rates under the bare 'EUR' key. One
- * saveFxRate per day therefore fixes k with no network at all - and a day left
- * unseeded is how the fetch failure is provoked.
+ * saveFxRate per day therefore fixes k with no network at all. A day left unseeded
+ * is how the fetch failure is provoked.
  */
 import { sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   applyBaseRate,
   createAccount,
@@ -32,7 +32,7 @@ import { backfillBaseAmounts } from '../src/fxrates';
 import { toCents } from '../src/money';
 import { NewTransaction } from '../src/types';
 
-/** Hryvnia per euro. Fractional on purpose - see the header. */
+/** Hryvnia per euro. Fractional on purpose, for the reason in the header. */
 const UAH_PER_EUR = 51.0334;
 /** What resolveRate answers for UAH -> EUR: euros per hryvnia. */
 const K = 1 / UAH_PER_EUR;
@@ -52,7 +52,7 @@ const AFTER_OVERFLOW_DAY = '2026-05-07';
 const UNSEEDED_DAY = '2026-05-08';
 /** After UNSEEDED_DAY, so listUnconvertedDays' ORDER BY day reaches the broken one first. */
 const SEEDED_DAY = '2026-05-09';
-/** Two currencies on this one date - two rates and one day. */
+/** Two currencies on this one date, so two rates and one day. */
 const TWO_RATE_DAY = '2026-05-10';
 const ACCOUNT_NUMBER = 'PL61109010140000071219812874';
 const ACCOUNT_NUMBER_DAY = '2026-04-01';
@@ -90,7 +90,7 @@ interface StoredRow {
 /**
  * The stored columns, not the domain type: Transaction carries base_amount as a
  * decimal and no fx_rate at all, and both of those are what this file is about.
- * Plain columns rather than an aggregate - COUNT comes back as a string on
+ * Plain columns rather than an aggregate, because COUNT comes back as a string on
  * node-postgres and a number on PGlite.
  */
 async function rowOf(description: string): Promise<StoredRow> {
@@ -119,17 +119,10 @@ async function clearWorkspaceRows(): Promise<void> {
 /**
  * Each case owns the whole unconverted set: a row a previous case deliberately left
  * NULL would otherwise be re-listed here and add lines to somebody else's log
- * assertions. freshTestDb() is the wrong tool - it truncates organization too.
+ * assertions. freshTestDb() is the wrong tool: it truncates every table, the account
+ * these cases write into among them.
  */
 beforeEach(clearWorkspaceRows);
-
-/**
- * And this file cleans up after itself where its neighbours don't: setup.ts truncates
- * once for the whole run, and these cases end holding rows in the one state the
- * conversion path keys on - base_amount_cents IS NULL - which every later file that
- * drives an import would otherwise walk through backfillBaseAmounts.
- */
-afterAll(clearWorkspaceRows);
 
 describe('backfillBaseAmounts', () => {
   it('a resolved fractional rate reaches the rows, and the base-currency rows keep their own cents', async () => {
@@ -168,7 +161,7 @@ describe('backfillBaseAmounts', () => {
 
   it('rounds half away from zero, on an expense as well as on income', async () => {
     // k = 1/2 exactly, so five cents times it is exactly half a cent: ROUND(numeric)
-    // gives 3, ROUND(double precision) gives 2 - which is what ::float8 would buy.
+    // gives 3 and ROUND(double precision) gives 2, which is what ::float8 would buy.
     await saveFxRate(HALF_CENT_DAY, 'EUR', 2);
     await insertTransactions([
       tx({ amount: -0.05, date: `${HALF_CENT_DAY}T09:00:00.000Z`, description: 'half cent out' }),

@@ -47,7 +47,7 @@ const orderingLine = (list: ImportList): string | null => {
   const n = list.totals.imports - list.imports.length;
   if (n <= 0) return null;
   const older = n === 1 ? 'One older import is' : `${n} older imports are`;
-  return `Newest first — the most recent ${list.imports.length} of ${list.totals.imports}. ${older} not listed.`;
+  return `Showing the ${list.imports.length} most recent of ${list.totals.imports}, newest first. ${older} not listed.`;
 };
 
 export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) {
@@ -200,9 +200,9 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
       const { transactions } = await api.deleteImport(recordId);
       focusAfter.current = { id: recordId, removed: true, owner: recordNode(recordId) ?? heading.current };
       await load();
-      const removed = transactions === 1 ? '1 transaction' : `${transactions} transactions`;
-      setNotice(transactions === 0 ? 'Import deleted — no transactions were removed.'
-        : `Import deleted — ${removed} removed.`);
+      const removed = transactions === 1 ? '1 transaction was' : `${transactions} transactions were`;
+      setNotice(transactions === 0 ? 'Import deleted. No transactions were removed.'
+        : `Import deleted. ${removed} removed.`);
       onChanged();
     } catch (e) {
       setRowError({ id: recordId, message: (e as Error).message });
@@ -286,8 +286,8 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
           <p className="history-confirm-file">{titleOf(selected)}</p>
           <p className="history-confirm-context">{selected.accountName ?? 'no account recorded'}</p>
           {confirm?.kind === 'document' ? <p>Delete the stored copy of this statement? The import and its transactions stay; only the file goes.</p>
-            : selected.transactions === 0 ? <p>Delete this import? No transactions belong to it, so nothing leaves your data. Its stored file is removed too. The account stays.</p>
-            : <p>Delete this import and the {ownedClause(selected.transactions)} to it? Rows this file shared with an earlier import stay — they belong to that one. Rows a later import's file also contained go with these, and re-uploading that file will not bring them back. Its stored file is removed too. The account stays too.</p>}
+            : selected.transactions === 0 ? <p>Delete this import? No transactions belong to it, so nothing leaves your data. Its stored file is removed too, but the account stays.</p>
+            : <p>Delete this import and the {ownedClause(selected.transactions)} to it? Rows this file shared with an earlier import belong to that import and stay. Rows that a later import's file also contained are deleted with these, and re-uploading that later file will not bring them back. Its stored file is removed too, but the account stays.</p>}
           {rowError?.id === selected.id && <Notice tone="error" role="alert">Error: {rowError.message}</Notice>}
         </>}
       </Sheet>

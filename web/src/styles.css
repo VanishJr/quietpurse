@@ -2335,9 +2335,9 @@ textarea {
 
 /*
  * What moves the row. They exist because the scrollbar does not: this strip hides its
- * own, and a mouse with one wheel cannot scroll sideways — so past four or five charts
- * the rest of them were reachable by touch, by a trackpad and by the Tab key, and by no
- * other means at all.
+ * own, and a mouse with one wheel cannot scroll sideways. Without them, the charts past
+ * the edge were reachable by touch, by a trackpad and by the Tab key, and by no other
+ * means at all.
  *
  * Rendered only when there is something off the end, and disabled at each end, which is
  * the pair of rules `.rail-arrow` already follows on the account rail above.
@@ -2369,9 +2369,9 @@ textarea {
 /*
  * The rectangle is the wrapper, and the two controls inside it share it: the name,
  * which switches to the chart, and the ⋮, which acts on it. Two buttons rather than
- * one with a second inside it, which is not a thing HTML allows — and they are separate
- * questions anyway, so a keyboard reaching the menu without going through the tab is
- * the right behaviour rather than a compromise.
+ * one with a second inside it, which HTML does not allow. They are separate questions
+ * anyway, so a keyboard reaching the menu without going through the tab is the right
+ * behaviour rather than a compromise.
  */
 .dock-tab {
   display: inline-flex;
@@ -2396,11 +2396,11 @@ textarea {
 
 /*
  * The current one is a FILLED tab and not a coloured word: a fill survives a reader
- * who gets no colour at all, which is the same argument the navigation's pill makes
- * two files up. The weight is the second marker and the shape's own is the third.
+ * who gets no colour at all, which is the same argument the navigation's pill makes.
+ * The weight is the second marker and the shape's own is the third.
  *
- * A class on the wrapper rather than the `aria-current` this used to key on — the
- * attribute belongs on the button that navigates, which is now a child.
+ * A class on the wrapper rather than the `aria-current` this used to key on, because
+ * the attribute belongs on the button that navigates, which is now a child.
  */
 .dock-tab.is-current {
   background: var(--ink-brand);
@@ -2470,9 +2470,9 @@ textarea {
  * `fixed`, and measured off the ⋮ in JS.
  *
  * The strip it belongs to is `overflow-x: auto`, which clips an absolutely positioned
- * child — and giving up that scroll to keep a popover would cost the tenth chart its
- * place on the row. Nothing in this element's ancestry sets `transform`, `filter` or
- * `contain`, so `fixed` really is the viewport here and the two numbers hold.
+ * child, and giving up that scroll to keep a popover would cost the charts past the
+ * edge their place on the row. Nothing in this element's ancestry sets `transform`,
+ * `filter` or `contain`, so `fixed` really is the viewport here and the two numbers hold.
  */
 .dock-menu {
   position: fixed;
@@ -2554,9 +2554,9 @@ textarea {
   box-shadow: inset 0 0 0 1px var(--ink-accent);
 }
 
-/* the drawing takes the tile it is in, up to a cap. It was a fixed 62px, set when a
-   paragraph underneath was doing the explaining and the glyph was a marker beside it —
-   with the words gone the picture is the whole tile's content and has to look like it */
+/* the drawing takes the tile it is in, up to a cap. A fixed size suited a glyph that sat
+   beside an explaining paragraph. With the words gone, the picture is the whole tile's
+   content and has to look like it */
 .kind-shape {
   display: block;
   width: 100%;

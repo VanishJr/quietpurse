@@ -73,7 +73,7 @@ const seed = async (lockFile: string, content: string): Promise<void> => {
   await fs.writeFile(lockFile, content);
 };
 
-/** A process that was alive and is now exited - never a number guessed to be unused. */
+/** A pid whose process was alive and has exited, never a number guessed to be unused. */
 const deadPid = (): number => {
   const pid = spawnSync(process.execPath, ['-e', '']).pid;
   expect(pidAlive(pid), `pid ${pid} was handed out again before the case could seed it`).toBe(
@@ -83,7 +83,7 @@ const deadPid = (): number => {
 };
 
 const refusalNaming = (pid: number, home: string): RegExp =>
-  new RegExp(`^another Quietpurse \\(pid ${pid}\\) is already running on ${home.replace(/[.\\]/g, '\\$&')} `);
+  new RegExp(`^another Quietpurse \\(pid ${pid}\\) is already running on ${home.replace(/[.\\]/g, '\\$&')}\\.`);
 
 interface Outcome {
   won: boolean;
@@ -226,7 +226,7 @@ describe('two starts on one folder', () => {
       try {
         expect(outcomes.filter((o) => o.won), JSON.stringify(outcomes)).toHaveLength(0);
         for (const o of outcomes) {
-          expect(o.message).toContain('start again');
+          expect(o.message).toContain('Start again');
           expect(o.message).toContain(marker);
         }
       } finally {
@@ -333,7 +333,7 @@ describe('a file already there', () => {
         () => new Error('resolved'),
         (err: Error) => err,
       );
-      expect(e.message).toContain('another Quietpurse took it while this one was starting - start again');
+      expect(e.message).toContain('another Quietpurse took it while this one was starting. Start again');
       expect(e.message).toContain(marker);
       expect(await fs.readFile(lockFile, 'utf8')).toBe(String(dead));
       expect(await exists(marker)).toBe(true);

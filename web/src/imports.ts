@@ -14,9 +14,9 @@ export const importStatusLabel = (status: string): string =>
 /**
  * The line under a row that the label and the counts cannot carry on their own.
  *
- * `committed` and `failed` get none: for a committed import the counts say it all,
- * and for a failed one a note would have to describe what happened to the rows —
- * which is exactly what no status is allowed to imply.
+ * `committed` and `failed` get none. For a committed import the counts say it all. For
+ * a failed one, a note would have to describe what happened to the rows, which is
+ * exactly what no status is allowed to imply.
  */
 export function importStatusNote(status: string, errorDetail: string | null): string | null {
   switch (status) {
@@ -27,9 +27,9 @@ export function importStatusNote(status: string, errorDetail: string | null): st
       // the summary those numbers would be confirmed against
       return 'The file was read and nothing was imported. Upload the same file again to bring its summary back.';
     case 'discarded':
-      // on a discarded row NULL means the user declined it and anything else
-      // means the server did — in which case errorDetail is its own explanation
-      return errorDetail === null ? 'You discarded this import — nothing was imported.' : null;
+      // on a discarded row NULL means the user declined it. Anything else means the
+      // server did, and then errorDetail is its own explanation
+      return errorDetail === null ? 'You discarded this import. Nothing was imported.' : null;
     default:
       return null;
   }
@@ -62,11 +62,11 @@ const columnClause = (columns: ReadColumns): string =>
  * and what was actually verified about them.
  *
  * One function for both halves because they are one claim. The lead-in says where the
- * pair came from and the claim says what the check could have caught, and a lead-in
- * that outran its claim — "Checked against" over a pair nothing checked — is the
- * completeness claim the sheet gate removed, re-acquired through the front of the sentence.
+ * pair came from and the claim says what the check could have caught. A lead-in that
+ * outran its claim, such as "Checked against" over a pair nothing checked, would bring
+ * back the completeness claim the sheet gate removed, through the front of the sentence.
  *
- * Four arms:
+ * The arms:
  *
  * - no counts at all: the document printed the pair, and every row between them adds
  *   up to it. That is the PDF, and the gate's blindness to a row lost from either end
@@ -115,18 +115,18 @@ export function balanceClaim(series: SeriesCounts | undefined): { lead: string; 
   const unchecked = summed - checked;
   const others =
     unchecked === 1
-      ? 'the other states a single row'
-      : `the other ${unchecked} state a single row each`;
+      ? 'The other states a single row'
+      : `The other ${unchecked} state a single row each`;
   return {
     lead,
-    claim: `${checked} of them run${checked === 1 ? 's' : ''} unbroken from one to the other; ${others}, so nothing could check ${unchecked === 1 ? 'it' : 'them'}.`,
+    claim: `${checked} of them run${checked === 1 ? 's' : ''} unbroken from one to the other. ${others}, so nothing could check ${unchecked === 1 ? 'it' : 'them'}.`,
   };
 }
 
 /**
- * Which reader produced the numbers on the confirmation card — the one thing the counts
- * cannot say, and a generic reader can produce every headline figure a bank's export
- * was expected to have without one correct reason.
+ * Which reader produced the numbers on the confirmation card. The counts cannot say
+ * it, and a generic reader can produce every headline figure a bank's export was
+ * expected to have without one correct reason.
  *
  * Total over `kind` with a `never`, not IMPORT_STATUS_LABELS' Record-with-a-fallback:
  * a status arrives from an old database row and may legitimately be unknown, where an
@@ -137,8 +137,8 @@ export function balanceClaim(series: SeriesCounts | undefined): { lead: string; 
  */
 export function readAsSentence(readAs: ReadAs): string {
   // Ahead of the switch, because `readAs.kind` on an absent field throws before the
-  // default arm below is ever reached — the same card takedown that arm exists to
-  // prevent. The one condition also catches a kind that is no name at all, which the
+  // default arm below is ever reached. That is the same card takedown the arm exists
+  // to prevent. The one condition also catches a kind that is no name at all, which the
   // arm would otherwise quote back as an empty string.
   const named: unknown = (readAs as { kind?: unknown } | undefined)?.kind;
   if (typeof named !== 'string' || named === '') {
@@ -146,17 +146,17 @@ export function readAsSentence(readAs: ReadAs): string {
   }
   switch (readAs.kind) {
     case 'preset':
-      return `Read with the "${readAs.title}" preset — ${columnClause(readAs.columns)}.`;
+      return `Read with the "${readAs.title}" preset: ${columnClause(readAs.columns)}.`;
     case 'auto-detected':
-      return `Read by "${GENERIC_PRESET_TITLE}", which found the columns in the file's own header — ${columnClause(readAs.columns)}.`;
+      return `Read by "${GENERIC_PRESET_TITLE}" using the file's own column names: ${columnClause(readAs.columns)}.`;
     case 'request-mapping':
       // "a column mapping", never "the": the request may have named one slot of three,
       // and the names that follow would then read as three columns the caller chose
-      return `Read with a column mapping sent with this upload — ${columnClause(readAs.columns)}.`;
+      return `Read with a column mapping sent with this upload: ${columnClause(readAs.columns)}.`;
     case 'pdf-template':
-      // "not a preset" and not "not the preset above": nothing keeps the sentence on a
-      // screen with a chip on it
-      return `Read as a ${readAs.title} PDF statement — a PDF has no column header, so the layout that matched decides the columns, not a preset.`;
+      // "not from a preset" and not "not from the preset above": nothing keeps the
+      // sentence on a screen with a chip on it
+      return `Read as a ${readAs.title} PDF statement. A PDF has no column header, so the columns come from the layout that matched, not from a preset.`;
     default: {
       const unhandled: never = readAs;
       const kind = String((unhandled as { kind?: unknown }).kind);

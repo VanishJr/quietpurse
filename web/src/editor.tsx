@@ -104,7 +104,7 @@ export function useEditorSession({
     <div className="editor-guard">
       <h3>Discard unsaved changes?</h3>
       <p className="body-text">Your changes have not been saved.</p>
-      {untracked && <p className="body-text">This browser cannot restore the untracked history address automatically. Keep editing retains your draft here; use browser history to return to its address, or discard to continue.</p>}
+      {untracked && <p className="body-text">This browser can't return to this draft's address on its own. Keep editing to stay on your draft, then use the browser's Back or Forward button to get back to its address. Or discard the changes to continue.</p>}
       <div className="editor-guard-actions">
         <Button type="button" variant="primary" size="standard" data-sheet-focus onClick={keepEditing}>Keep editing</Button>
         <Button type="button" variant="destructive-secondary" size="standard" onClick={() => {

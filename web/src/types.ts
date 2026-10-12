@@ -90,12 +90,12 @@ export type {
 } from '../../backend/src/wire';
 
 /**
- * The nonce is what makes it an event rather than a setting: the screens all stay
- * mounted and keep their own filters, so a second click on the same account would
- * otherwise carry the same value and change nothing — after the user had narrowed the
- * filter by hand in between, which is exactly when they would click it again. Here
- * rather than beside the shell that renders it, so the screen reading it does not
- * import that module.
+ * The nonce is what makes it an event rather than a setting. The screens all stay
+ * mounted and keep their own filters, so without it a second click on the same account
+ * would carry the same value and change nothing, even after the user had narrowed the
+ * filter by hand in between. That is exactly when they would click it again.
+ * It lives here rather than beside the shell that renders it, so the screen reading it
+ * does not import that module.
  */
 export interface TxFocus {
   accountId: string;

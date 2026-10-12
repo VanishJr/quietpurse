@@ -55,7 +55,7 @@ describe('the cache rule on the built client', () => {
 
 /**
  * `send` checks every segment of a path it is handed whole, and refuses one that starts
- * with a dot - so a page sent by its absolute path is a 404 from any checkout under such
+ * with a dot. So a page sent by its absolute path is a 404 from any checkout under such
  * a directory. The builds here differ by that dot and by the marker that names each;
  * merged into one, or with the dot dropped, they stay green over exactly that regression.
  */
@@ -208,9 +208,9 @@ describe('the headers every answer carries', () => {
   });
 
   /**
-   * Both of these are the whole database in one response, and res.send sets an ETag
-   * and no Cache-Control - which permits a cache to keep a copy the person did not
-   * ask anybody to keep. The document download already said so; these two did not.
+   * Both of these are the whole database in one response. res.send sets an ETag and
+   * no Cache-Control, which permits a cache to keep a copy the person did not ask
+   * anybody to keep.
    */
   it.each(['/api/backup', '/api/export.csv'])('sends %s with nothing allowed to keep it', async (route) => {
     const res = await agent.get(route);

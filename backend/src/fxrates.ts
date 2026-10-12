@@ -20,8 +20,9 @@ import {
 import { logFx } from './logger';
 
 /**
- * No rate, and every answer that said so is a fresh miss - read now or recorded now - so nothing
- * is asked for it again before MISS_AGE_MS has passed. null stays "no rate" for every other reason.
+ * No rate, and every answer that said so is a fresh miss, whether read now or recorded now. So
+ * nothing is asked for it again before MISS_AGE_MS has passed. null stays "no rate" for every
+ * other reason.
  */
 export const REMEMBERED_NONE = Symbol('no rate, remembered');
 
@@ -57,8 +58,8 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Hardcoded because the resolver has to answer "can I do this" synchronously and offline.
- * The hryvnia is not in it, which is why the NBU provider exists - though `supports` below
- * refuses every pair carrying a code outside this set, not the hryvnia's alone.
+ * The hryvnia is not in it, which is why the NBU provider exists. But `supports` below refuses
+ * every pair carrying a code outside this set, not only the hryvnia's.
  */
 const ECB_CURRENCIES = new Set([
   'AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP', 'HKD',
@@ -169,7 +170,7 @@ async function fetchNbuRate(currency: string, day: string): Promise<number | typ
   return typeof rate === 'number' && rate > 0 ? rate : null;
 }
 
-/** Throws on a network error - the caller decides what to do. */
+/** Throws on a network error, and the caller decides what to do. */
 export async function rateToUah(currency: string, day: string): Promise<Rate> {
   if (sameCurrency(currency, 'UAH')) return 1;
   let everyProbeMissed = true;
@@ -200,8 +201,8 @@ export async function rateToUah(currency: string, day: string): Promise<Rate> {
 export const nbuProvider: RateProvider = {
   name: 'nbu',
   // cross-rate through UAH: whether the NBU publishes both legs is not known in advance,
-  // so any two codes count - and getRate answers no rate if not. Codes only: each one goes
-  // into a request
+  // so any two codes count, and getRate answers no rate when it does not. Codes only,
+  // because each one goes into a request
   supports: (from, to) => ISO_CURRENCIES.has(from) && ISO_CURRENCIES.has(to),
   async getRate(day, from, to) {
     const rFrom = await rateToUah(from, day);
@@ -248,7 +249,7 @@ export async function resolveRate(day: string, fromCode: string, toCode: string)
 
 /**
  * drizzle wraps every driver error in one whose message is the SQL and the bound
- * parameters, with the reason one `cause` deeper - so the outer message reads like a
+ * parameters, with the reason one `cause` deeper. So the outer message reads like a
  * diagnosis and is not one. Not causeChain() from logger.ts: the whole chain leads with
  * that statement and every bound value, which is the noise this exists to drop.
  */
@@ -266,8 +267,9 @@ export const baseAmountsConverting = (): boolean => running > 0;
 /**
  * Neither a network error nor a failed write fails the call: those rows stay NULL and
  * are picked up on the next recompute. The fetch and the write are caught apart so that
- * the wording of one can never describe the other - a whole account went unconverted for
- * months behind a line that said the rate had not been fetched.
+ * the wording of one can never describe the other. A failed write logged as a rate that
+ * was not fetched can leave a whole account unconverted behind a line that names the
+ * wrong cause.
  * @returns how many rows got a base_amount
  */
 export async function backfillBaseAmounts(
@@ -314,7 +316,7 @@ async function fillBaseAmounts(log: (s: string) => void): Promise<number> {
       k = await resolveRate(day, currency, base);
     } catch (e) {
       log(`rate ${currency} on ${day} not fetched: ${sqlReason(e)}`);
-      // a network error is almost certainly global - don't bother the providers with the rest
+      // a network error is almost certainly global, so don't bother the providers with the rest
       log(`stopping: ${keys.length - attempted} of ${keys.length} rates were not tried this run`);
       break;
     }

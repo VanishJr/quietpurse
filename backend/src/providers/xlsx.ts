@@ -37,7 +37,7 @@ const UNUSED_LIST_MAX = 150;
  * What an error cell's own text may spend, cut here rather than trusted.
  * CellErrorValue['error'] is seven string literals at compile time and the loader
  * never checks the file it read against them, so String(v.error) is whatever the
- * bytes say - a workbook no spreadsheet wrote is still a workbook this parser opens.
+ * bytes say. A workbook no spreadsheet wrote is still a workbook this parser opens.
  * The note errorNote composes is `contains ` plus this, 33, against the 131 an xlsx
  * note may spend (derived above statement.ts's CELL_QUOTE_MAX), and THIS CUT is what
  * holds that number: neither the union nor the two `as ExcelJS.CellErrorValue` casts
@@ -49,13 +49,14 @@ const ERROR_TEXT_MAX = 24;
 /**
  * What the whole notice may spend. noRowsParsed appends it behind the row's own
  * reason whole or not at all, so a notice past this costs the too-large clause as
- * well as the unused one - and that clause reached the user before this one existed.
+ * well as the unused one, and the too-large clause reached the user before this one
+ * existed.
  * What ERROR_DETAIL_MAX leaves after the longest reason the parser composes from
- * fixed prose, the 3 characters that join the two, and 8 of margin. That reason is
- * 199 - MAX_DATA_ROWS skipped, plus the 159 derived in full above statement.ts's
- * CELL_QUOTE_MAX, which is the one place that number is now written whole. 298 is
- * therefore the exact bound; the margin is there because this number has been got
- * wrong before.
+ * fixed prose, the 2 characters that join the two, and 8 of margin. That reason is
+ * 199: noRowsParsed's head at MAX_DATA_ROWS skipped, plus the 159 derived in full
+ * above statement.ts's CELL_QUOTE_MAX, the one place that number is written whole.
+ * 299 is therefore the exact bound. The margin is there because this number has been
+ * got wrong before.
  *
  * Both premises this comment used to state were among those wrongs, and they cancelled:
  * the row label cannot reach Excel's own ceiling (MAX_SHEET_ROWS above stops it at
@@ -63,13 +64,13 @@ const ERROR_TEXT_MAX = 24;
  * derivation there, not here. The too-large list is not bounded by this number and
  * predates it, so when the two together do not fit it is the unused clause that yields.
  */
-const NOTICE_MAX = ERROR_DETAIL_MAX - 210;
+const NOTICE_MAX = ERROR_DETAIL_MAX - 209;
 
 const UNCACHED_FORMULA =
-  'is a formula with no stored result - open the file in Excel, re-save it, and upload again';
+  'is a formula with no stored result. Open the file in Excel, re-save it, then upload again';
 
 const NOT_A_WORKBOOK =
-  'this is a zip archive but not an Excel workbook (.xlsx) - .ods and .numbers are not supported; export the statement as .xlsx or CSV';
+  'this is a zip archive but not an Excel workbook (.xlsx). .ods and .numbers files are not supported; export the statement as .xlsx or CSV';
 
 interface Normalised {
   value: Cell;
@@ -102,8 +103,8 @@ interface Oversized {
 /**
  * The one definition of a sheet this importer can see: the selection loop's skip and
  * the notice's list both read it, so the two cannot disagree about which sheets a
- * workbook has. Positive rather than `!== 'hidden'` - a state exceljs has yet to
- * learn would otherwise read as a statement.
+ * workbook has. Positive rather than `!== 'hidden'`, so that a state exceljs has yet
+ * to learn does not read as a statement.
  */
 const isVisible = (ws: ExcelJS.Worksheet): boolean => ws.state === 'visible';
 
@@ -119,8 +120,8 @@ export async function readXlsx(
   } catch {
     throw new Error(NOT_A_WORKBOOK);
   }
-  // a .zip holding anything else loads clean and empty rather than throwing above:
-  // the same file, so the same answer - it has no sheet to be told to unhide
+  // a .zip holding anything else loads clean and empty rather than throwing above.
+  // It is the same file, so it gets the same answer: it has no sheet to be told to unhide
   const sheets = workbook.worksheets;
   if (sheets.length === 0) throw new Error(NOT_A_WORKBOOK);
   const date1904 = workbook.properties?.date1904 === true;
@@ -135,8 +136,8 @@ export async function readXlsx(
     tried.push(worksheet.name);
     // an implausible sheet is disqualified the way a hidden one is, not the
     // workbook with it: a cover sheet formatted to the bottom must not refuse the
-    // statement sitting behind it. Before readRows - never walking such a sheet is
-    // the whole point of the early-out.
+    // statement sitting behind it. This comes before readRows, because never walking
+    // such a sheet is the whole point of the early-out.
     if (worksheet.rowCount > MAX_SHEET_ROWS) {
       tooLarge.push({ id: worksheet.id, name: worksheet.name, rowCount: worksheet.rowCount });
       continue;
@@ -189,16 +190,16 @@ function sheetNotice(
     tooLarge.length === 0
       ? ''
       : tooLarge.length === 1
-        ? `sheet ${names} was too large to read and was skipped - `
-        : `sheets ${names} were too large to read and were skipped - `;
+        ? `sheet ${names} was too large to read and was skipped; `
+        : `sheets ${names} were too large to read and were skipped; `;
   const base = `${skipped}these rows come from "${used.name}"`;
   if (!unused.length) return base;
 
   const tail =
     unused.length === 1
-      ? ' was not imported - save it as a separate file to import it'
-      : ' were not imported - save them as separate files to import them';
-  const clause = (listed: string): string => ` - ${listed}${tail}`;
+      ? ' was not imported. Save it as a separate file to import it'
+      : ' were not imported. Save them as separate files to import them';
+  const clause = (listed: string): string => `; ${listed}${tail}`;
   // what the too-large list left, and never less than joinBounded's last resort
   // costs: a clause that cannot afford even a count is dropped whole, because half a
   // sheet name is a sheet the workbook has not got
@@ -210,21 +211,22 @@ function sheetNotice(
 /**
  * Why the workbook yielded nothing, composed to the length error_detail keeps: past
  * that, failImport's own cut takes the tail, and the tail is where the clauses are.
- * The fixed prose is never shortened - only the sheet lists and the closest-row
- * clause, in that order of preference. A sheet that was never read is a refusal
- * cause with no other channel; the closest row only refines a sentence that is
- * already true, so it yields first. The preference is the only thing standing
- * between a clause and the reader: what yields here is gone, not further down.
+ * The fixed prose is never shortened. Only the sheet lists and the closest-row clause
+ * are, and the lists are kept in preference to the clause. A sheet that was never
+ * read is a refusal cause with no other channel; the closest row only refines a
+ * sentence that is already true, so it yields first. The preference is the only
+ * thing standing between a clause and the reader: what yields here is gone, not
+ * further down.
  */
 function notFound(tried: string[], tooLarge: Oversized[], closest: Candidate | null): string {
   // no sheet was ever eligible to have columns, so naming them is a false diagnosis
   // and the list they would be named beside is empty
   if (tried.length === 0) {
-    return 'this workbook has no visible sheet - unhide the sheet holding the statement, or export the statement again';
+    return 'this workbook has no visible sheet. Unhide the sheet holding the statement, or export the statement again';
   }
   const head = 'could not find a header row in any sheet of the workbook (looked at: ';
-  const tail = ') - the columns must include a date, an amount and a description, or pick a preset';
-  const largeHead = ' - skipped as too large to read: ';
+  const tail = '). The columns must include a date, an amount and a description, or pick a preset';
+  const largeHead = '; too large to read and skipped: ';
 
   let left = ERROR_DETAIL_MAX - head.length - tail.length - (tooLarge.length ? largeHead.length : 0);
   const listed = tooLarge.map((s) => `${s.name} (${s.rowCount} rows)`);
@@ -261,14 +263,14 @@ function joinBounded(names: string[], budget: number): string {
 /**
  * The count string in one place: notFound reserves exactly what joinBounded's last
  * resort will spend, so a plural fixed in one and not the other leaks a character
- * off the budget at one sheet - which is the arm no test with several can see.
+ * off the budget at one sheet. No test with several sheets can see that arm.
  */
 const sheetCount = (n: number): string => `${n} sheet${n === 1 ? '' : 's'}`;
 
 /**
  * The longest prefix of `text` that fits `budget` and stops where a reader cannot be
- * misled, marked - or null, when there is no such prefix and the caller has to drop
- * what it was about to say.
+ * misled, with the cut marked. Null when there is no such prefix, and the caller has
+ * to drop what it was about to say.
  *
  * joinBounded above composes its own list and so never has to ask whether a comma
  * separates two entries or sits inside one; this is handed a sentence somebody else
@@ -300,24 +302,24 @@ function cutBounded(text: string, budget: number): string | null {
 
 /**
  * Why the nearest thing to a header was not one. Without it a mismatched preset
- * reads as "pick a preset", which is what the user just did - the CSV of the same
- * statement names the missing column, and this is where that sentence went.
+ * reads as "pick a preset", which is what the user just did. The CSV of the same
+ * statement names the missing column, and this clause is where that sentence went.
  *
  * Both halves of the budget are measured rather than guessed at. The prose in front
- * of the reason is fixed and its WIDTH is not - the sheet name is the user's and the
- * row label is up to six digits - so what the reason may spend is what composing that
- * prose leaves, and a clause whose own prose no longer fits is dropped before a
- * reason is cut to go in it. That `room <= 0` reads as redundant and is not:
+ * of the reason is fixed but its WIDTH is not, because the sheet name is the user's
+ * and the row label grows with the row number. So what the reason may spend is what
+ * composing that prose leaves, and a clause whose own prose no longer fits is dropped
+ * before a reason is cut to go in it. That `room <= 0` reads as redundant and is not:
  * cutBounded answers null for the same inputs, so deleting it would leave this
  * clause's own precondition resting on another function's null semantics. Then
- * cutBounded answers a whole unit of that reason or nothing: ` - the closest row
- * (sheet "Umsä` names a sheet the workbook has not got and `does not match: no `
- * carries none of the reason it promised, and neither of those is a number of
- * characters that a constant could have stood for.
+ * cutBounded answers a whole unit of that reason or nothing. A clause cut to
+ * `; the closest row (sheet "Umsä` names a sheet the workbook has not got, and one cut
+ * to `does not match: no ` carries none of the reason it promised. Neither of those
+ * is a number of characters that a constant could have stood for.
  */
 function closestClause(candidate: Candidate | null, budget: number): string {
   if (!candidate) return '';
-  const prefix = ` - the closest row (sheet "${candidate.sheet}", row ${candidate.sheetRow}) does not match: `;
+  const prefix = `; the closest row (sheet "${candidate.sheet}", row ${candidate.sheetRow}) does not match: `;
   const room = Math.min(CLOSEST_CLAUSE_MAX, budget) - prefix.length;
   if (room <= 0) return '';
   const reason = cutBounded(candidate.error, room);
@@ -366,7 +368,7 @@ function normalise(cell: ExcelJS.Cell): Normalised {
   }
 }
 
-/** A formula's cached result carries no cell type of its own - go by its shape. */
+/** A formula's cached result carries no cell type of its own, so go by its shape. */
 function fromResult(result: unknown): Normalised {
   if (result === null || result === undefined) return { value: null, note: UNCACHED_FORMULA };
   if (result instanceof Date) return { value: result };

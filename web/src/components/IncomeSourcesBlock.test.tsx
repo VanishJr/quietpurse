@@ -255,8 +255,8 @@ describe('IncomeSourcesBlock', () => {
     fireEvent.click(save);
     expect(requests().filter((request) => request === 'POST /api/income-sources')).toHaveLength(1);
     // held without `disabled`: a browser takes focus off a control disabled under it, and
-    // in a modal that leaves the Tab trap nothing to hold - jsdom never does, so the
-    // attribute is what is asserted
+    // in a modal that leaves the Tab trap nothing to hold. jsdom never takes focus off,
+    // so the attribute is what is asserted
     const saving = screen.getByRole('button', { name: 'Save' });
     expect(saving).toHaveAttribute('data-pending', 'true');
     expect(screen.getByRole('status')).toHaveTextContent('Saving source…');

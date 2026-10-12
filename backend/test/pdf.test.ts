@@ -71,8 +71,8 @@ const header = (y: number, date = 'Дата'): PlacedText[] => [
 ];
 
 /**
- * The statement's own balance summary - the one line the reconciliation gate checks the
- * rows against.
+ * The statement's own balance summary, which is the one line the reconciliation gate
+ * checks the rows against.
  *
  * Every gross pair below is arithmetic done on the fixture's OWN literal amounts, and
  * never read off the parser: a box computed from what the reader produced agrees with the
@@ -80,8 +80,8 @@ const header = (y: number, date = 'Дата'): PlacedText[] => [
  *
  * `BOX_SIZE` is a fixture artefact, not a fact about the layout. This fixture's font
  * advances far more per character than the real document's, and pdfjs joins two runs that
- * meet into ONE item at the left one's x - so at the default size the opening cell picks
- * up the first digit of the cell beside it.
+ * meet into ONE item at the left one's x. So at the default size the opening cell picks up
+ * the first digit of the cell beside it.
  */
 const BOX_SIZE = 4;
 
@@ -139,14 +139,14 @@ const CARDS = ['Карта: 400000******0000', 'Карта: 555500******0001'] a
 
 /**
  * One line of the deposit-insurance footer the real document prints at the bottom of
- * every page: the description column, every other cell empty - a continuation's exact
- * shape - on the page of the transaction it would attach to, so the page test cannot see
- * it. It carries no label, which is what keeps it out.
+ * every page. It has a continuation's exact shape, text in the description column and
+ * every other cell empty, and it sits on the page of the transaction it would attach to,
+ * so the page test cannot see it. It carries no label, which is what keeps it out.
  *
  * `FOOTER_SIZE` is a budget rather than a preference, and it is the one every other size
  * constant in this file refers to. pdfjs splits a placed run at every space and assigns
  * each fragment to a column by its own left edge, and this fixture's font advances far
- * more per character than the real document's - so spend the headroom and the line writes
+ * more per character than the real document's. Spend the headroom and the line writes
  * into the debit column, `blank()` stops calling it a continuation, and the case below
  * passes having exercised nothing. That is the silent direction: a KEPT line that stops
  * being a candidate turns its own case red, a dropped one does not.
@@ -365,7 +365,7 @@ describe('pdf: bytes to rows', () => {
     expect(staged.summary).toMatchObject({ total: 6, accepted: 2, skipped: 4 });
     expect(staged.summary.problems).toEqual([
       'row 2: the amount cell is empty in both the "Списания" and "Пополнения" columns',
-      'row 3: the amount cell holds "1,00€" and "2,00€" - a line carries a debit or a credit, not both',
+      'row 3: the amount cell holds "1,00€" and "2,00€". A line carries a debit or a credit, not both',
       'row 4: the amount cell reads "5,68 EUR", where this template reads an amount like "1 234,56€"',
       'row 5: the date cell reads "32 июл. 2026г.", which this template cannot read as a date',
     ]);
@@ -596,7 +596,7 @@ describe('pdf: the fee on a continuation line', () => {
       ),
     ).rejects.toThrow(
       `this Revolut statement prints more than one "${label()}" line under one transaction,` +
-        ' where this template reads one fee per transaction - export the same statement as CSV' +
+        ' where this template reads one fee per transaction. Export the same statement as CSV' +
         ' or Excel (.xlsx) from your online banking and upload that',
     );
 
@@ -612,7 +612,7 @@ describe('pdf: the fee on a continuation line', () => {
       importPdf('Revolut Fee Unreadable', feeStatement('fee unreadable', '0,44 EUR')),
     ).rejects.toThrow(
       `this Revolut statement's "${label()}" line reads "0,44 EUR" after its label, where this` +
-        ' template reads an amount like "1 234,56€" - export the same statement as CSV or Excel' +
+        ' template reads an amount like "1 234,56€". Export the same statement as CSV or Excel' +
         ' (.xlsx) from your online banking and upload that',
     );
 
@@ -720,8 +720,8 @@ describe('pdf: the reconciliation gate', () => {
     await expect(importPdf('Revolut One Cent', statement('one cent', '59,77€'))).rejects.toThrow(
       'this Revolut statement does not add up: its opening balance of 1200.00 EUR plus the ' +
         "3 transaction lines read comes to 59.76 EUR, where the statement's own closing " +
-        'balance is 59.77 EUR - a difference of 0.01 EUR, so an operation is probably missing ' +
-        '- export the same statement as CSV or Excel (.xlsx) from your online banking and upload that',
+        'balance is 59.77 EUR, a difference of 0.01 EUR, so an operation is probably missing' +
+        '. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that',
     );
 
     const failed = await lastFailure(before);
@@ -747,7 +747,7 @@ describe('pdf: the reconciliation gate', () => {
       "this Revolut statement's opening and closing balance agree, but its two halves do not:" +
         ' it states -1340.24 EUR out and 200.00 EUR in, where the 3 transaction lines read come' +
         ' to -1240.24 EUR out and 100.00 EUR in, so an operation out and an operation in of the' +
-        ' same size are probably both missing - export the same statement as CSV or Excel' +
+        ' same size are probably both missing. Export the same statement as CSV or Excel' +
         ' (.xlsx) from your online banking and upload that',
     );
 
@@ -773,7 +773,7 @@ describe('pdf: the reconciliation gate', () => {
       ]),
     ).rejects.toThrow(
       'its opening balance of 100.00 EUR plus the 1 transaction line read comes to 94.32 EUR, ' +
-        "where the statement's own closing balance is 90.00 EUR - a difference of 4.32 EUR, " +
+        "where the statement's own closing balance is 90.00 EUR, a difference of 4.32 EUR, " +
         'and the 4 transaction lines this importer could not read are probably where it went',
     );
   });
@@ -914,7 +914,7 @@ describe('pdf: the reconciliation gate', () => {
         reconcile(parsed('EUR'), [tx('EUR', 10), tx('PLN', 20)], 0, NO_BALANCES),
       ).toThrow(
         'this Revolut statement states its balances in EUR, but the lines read are in EUR, PLN' +
-          ' - this importer cannot check a statement that mixes currencies',
+          '. This importer cannot check a statement that mixes currencies',
       );
     });
 
@@ -963,9 +963,9 @@ const n26Row = (
 
 /**
  * A line under a transaction: the description column, both other cells empty. `size` is
- * a fixture artefact for the reason FOOTER_SIZE states - at the default this font would
- * spill the line's last word past the description column's right edge and into the date
- * column, which no real statement's does.
+ * a fixture artefact for the reason FOOTER_SIZE states. At the default size this font
+ * would spill the line's last word past the description column's right edge and into the
+ * date column, which no real statement's line does.
  */
 const n26Detail = (y: number, text: string, size?: number): PlacedText[] => [
   { x: N.description, y, text, size },
@@ -1230,7 +1230,7 @@ describe('pdf: the second layout', () => {
       readPdf(twinDoc('+10,00€', '+9,00£', '-1,00€', '+0,00€'), LIMITS, [twoSymbols]),
     ).rejects.toThrow(
       'this Two Symbols statement\'s opening balance ("Anfang") is stated in' +
-        ' EUR and its closing balance ("Ende") in GBP - this importer cannot check a statement' +
+        ' EUR and its closing balance ("Ende") in GBP. This importer cannot check a statement' +
         ' that mixes currencies',
     );
 
@@ -1309,7 +1309,7 @@ const UA_HEADING_SIZE = 0.4;
  * two directions.
  *
  * A cell that carries a SPACE is split by pdfjs at every space and each fragment is
- * assigned to a column by its own left edge - so a label has to END inside its column,
+ * assigned to a column by its own left edge. So a label has to END inside its column,
  * not merely start there. The longest of the balance labels is what sets this, and the
  * English ones need a smaller size than the Ukrainian.
  *
@@ -1330,9 +1330,9 @@ const UA_SIZE = 2;
  *
  * - `coffee` and `topUp` answer where the description answers `other`, so they are the
  *   row's whole categorisation;
- * - `ukPharmacy` DISAGREES with its description - "Аптека" reads health by keyword and
- *   5411 reads food - which is the one shape that can tell "the MCC was consulted" from
- *   "the description happened to agree";
+ * - `ukPharmacy` DISAGREES with its description, since "Аптека" reads health by keyword
+ *   and 5411 reads food. That is the one shape that can tell "the MCC was consulted"
+ *   from "the description happened to agree";
  * - `enPharmacy` agrees with its description, and is the control for that;
  * - `enCoffee` and `enPharmacy` differ from the Ukrainian file's codes on the same two
  *   rows, so a reader answering out of the fixture's own head rather than the document
@@ -1361,9 +1361,9 @@ const ukHeading = (y: number): PlacedText[] => [
  * The English file's heading block, and the one genuinely marginal thing in it: the
  * header line is three baselines further apart than TOLERANCE, merged into one line only
  * because readLines seeds a line at the first item's y and never re-centres it. So the
- * middle baseline has to be emitted first - which is what the real generator does - and
- * reordering the header items below the other two splits this header into three lines
- * that match no table. That merge is what gives this locale's header its fourth cell.
+ * middle baseline has to be emitted first, as the real generator does. Reordering the
+ * header items below the other two splits this header into three lines that match no
+ * table. That merge is what gives this locale's header its fourth cell.
  */
 const enHeading = (y: number): PlacedText[] => [
   { x: EN.dateHeading, y, text: 'Date and time', size: UA_HEADING_SIZE },
@@ -1378,10 +1378,11 @@ const enHeading = (y: number): PlacedText[] => [
 ];
 
 /**
- * `mcc` is REQUIRED and its "none" is null, so every call site states a code on purpose -
- * this used to hard-code '4789' on every row, and a reader answering 4789 for everything
- * passed. No two rows of one locale share a code, and two rows differ between the locales:
- * a reader off by a line reddens on the first, one that ignores the document on the second.
+ * `mcc` is REQUIRED and its "none" is null, so every call site states a code on purpose.
+ * One code hard-coded on every row would let a reader that answers that code for
+ * everything pass. No two rows of one locale share a code, and two rows differ between
+ * the locales: a reader off by a line reddens on the first, one that ignores the document
+ * on the second.
  */
 const uaRow = (
   L: typeof UK | typeof EN,
@@ -1566,10 +1567,10 @@ describe('pdf: the third layout', () => {
   /**
    * The only holder of this that a template added tomorrow inherits. An overlapping
    * description/MCC pair would put a bank's own identifier into the column the categoriser,
-   * the transfer detector and the export all read - the account-number defect, arriving
-   * from a data literal instead of from a drop list.
+   * the transfer detector and the export all read. That is the account-number defect,
+   * arriving from a data literal instead of from a drop list.
    *
-   * The three counts under it are the non-vacuity literals, canvasabsent's idiom: a
+   * The counts under it are the non-vacuity literals, canvasabsent's idiom: a
    * refactor that empties the iteration reddens them rather than passing over nothing.
    */
   it('every column window a template declares is disjoint from every other of its own', () => {
@@ -1598,22 +1599,27 @@ describe('pdf: the third layout', () => {
   });
 
   /**
-   * The stance's other half. tsc holds that every continuation template states one;
-   * what it cannot see is the stance agreeing with the list `wanted` actually reads,
-   * because that is two fields of one literal. Where a clause claims coverage - every
-   * line under a declared label decided by the list - the match is `wanted`'s own and
-   * runs one way: a list entry that is a prefix of the declared label, or the label
-   * itself. Matched in either direction, an entry that merely extends the label is
-   * green here while `wanted` decides only the lines that start with the longer entry.
+   * The stance's other half. tsc holds that every continuation template states one.
+   * What it cannot see is the stance agreeing with the list `wanted` actually reads,
+   * because that is two fields of one literal.
+   *
+   * Where a clause claims coverage, meaning every line under a declared label is decided
+   * by the list, the match is `wanted`'s own and runs one way: a list entry that is a
+   * prefix of the declared label, or the label itself. Matched in either direction, an
+   * entry that merely extends the label is green here while `wanted` decides only the
+   * lines that start with the longer entry.
+   *
    * Where a clause claims the lists do not meet, any overlap in either direction is the
-   * contradiction: matched by equality, a `keep` naming a prefix of a dropped label is
-   * green here and appends the line there; matched one way, the clause passes a `keep`
+   * contradiction. Matched by equality, a `keep` naming a prefix of a dropped label is
+   * green here and appends the line there. Matched one way, the clause passes a `keep`
    * extending a dropped label, which admits a subset of the lines the stance declares
-   * dropped. The last clause is cross-template, for the way templates are written here
-   * - by cloning - so a `drop: ['IBAN:']` copied under a `not-printed` stance is a
-   * contradiction the per-template clauses cannot see; its label set is a literal rather
-   * than the union of the stances, or the one template declaring a label could drop the
-   * declaration and take the label out of the set with it.
+   * dropped.
+   *
+   * The last clause is cross-template, because templates here are written by cloning: a
+   * `drop: ['IBAN:']` copied under a `not-printed` stance is a contradiction the
+   * per-template clauses cannot see. Its label set is a literal rather than the union of
+   * the stances, or the one template declaring a label could drop the declaration and
+   * take the label out of the set with it.
    *
    * The counts under it are the non-vacuity literals, as above.
    */
@@ -1745,7 +1751,7 @@ describe('pdf: the third layout', () => {
   });
 
   /**
-   * Imported and confirmed, then read back off the transactions table - not off the sheet.
+   * Imported and confirmed, then read back off the transactions table, not off the sheet.
    * The MCC crosses parse, stage and confirm to reach a column, and a case reading the
    * sheet would be green with any one of those three severed.
    *
@@ -1853,9 +1859,9 @@ describe('pdf: the third layout', () => {
     const pages = withMcc(ukStatement('zero mcc'), (t) => ({ ...t, text: '0000' }));
     const rows = await uaImported('Universal Mcc Zero', pages);
     // undefined and never 0: 0 is a code no network assigned, and a reader storing it
-    // costs a fact column its meaning where nothing downstream can see the loss - the
-    // categories below are the descriptions' own answers either way, because categorize
-    // skips a falsy code
+    // costs a fact column its meaning where nothing downstream can see the loss. The
+    // categories below cannot show it: they are the descriptions' own answers either
+    // way, because categorize skips a falsy code
     expect(rows.map((r) => r.mcc)).toEqual([undefined, undefined, undefined]);
     expect(rows.map((r) => r.category)).toEqual(['other', 'other', 'health']);
   });
@@ -1914,9 +1920,9 @@ const C = {
  * or two smaller and the two MERGE into one item at the sign's x, so the cell reads a
  * number with no currency after it.
  *
- * The longest description fails the other way - at the default size its second fragment
- * lands outside the description column and the line stops being a continuation at all,
- * which is the silent direction: the case would pass having exercised nothing.
+ * The longest description fails the other way. At the default size its second fragment
+ * lands outside the description column and the line stops being a continuation at all.
+ * That is the silent direction: the case would pass having exercised nothing.
  */
 const C24_SIZE = 3;
 
@@ -2011,11 +2017,11 @@ const c24StatementPage = (
 ): PlacedText[] => [
   ...c24Frame(),
   ...c24Section(648.575, 'Kontoauszug 06/2026', period),
-    // the third place this document states its closing balance, on the title's own
-    // baseline. Drawn smaller than C24_SIZE for a fixture reason with a real consequence:
-    // the document draws it as ONE run outside the amount span, and at C24_SIZE this font
-    // would fragment it and drop the number inside that span - so the fixture would print
-    // an amount cell the document does not print
+    // the closing balance stated once more, on the title's own baseline. Drawn smaller
+    // than C24_SIZE for a fixture reason with a real consequence: the document draws it
+    // as ONE run outside the amount span, and at C24_SIZE this font would fragment it and
+    // drop the number inside that span. The fixture would then print an amount cell the
+    // document does not print
   { x: C.kontostand, y: 648.575, text: 'Kontostand 84,22 €', size: 1 },
   { x: C.margin, y: 601.5, text: 'Transaktionsübersicht', size: C24_SIZE },
   ...c24Table(579.344),
@@ -2288,7 +2294,7 @@ describe('pdf: the fourth layout', () => {
     const gone = c24Statement('no period');
     gone[0] = gone[0].filter((t) => t.text !== C24_PERIOD);
     await expect(importPdf('C24 No Period', gone)).rejects.toThrow(
-      /reads the year off the period the statement covers - and it expects exactly one such line and found 0/,
+      /reads the year off the period the statement covers. It expects exactly one such line and found 0/,
     );
 
     const two = c24Statement('two periods');
@@ -2539,17 +2545,17 @@ describe('pdf: the refusals', () => {
     [
       'a password-protected PDF',
       () => buildPdf([[{ x: 50, y: 700, text: 'secret' }]], { encrypted: true }),
-      'this PDF is password-protected - open it with its password and save an unprotected copy, or download the statement again from your online banking',
+      'this PDF is password-protected. Open it with its password and save an unprotected copy, or download the statement again from your online banking',
     ],
     [
       'a file that starts with %PDF and is not one',
       () => Buffer.from('%PDF-1.4\n1 0 obj\n<< >>\n', 'utf8'),
-      'this file looks like a PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
+      'this file looks like a PDF but could not be opened as one. Download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
     ],
     [
       'a scan',
       () => buildImagePdf(),
-      'this looks like a scan - this importer reads the text layer of a PDF and this one has none; download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
+      'this looks like a scan: this importer reads the text layer of a PDF, and this one has none. Download the statement again from your online banking, or export it as CSV or Excel (.xlsx)',
     ],
     [
       'a statement in a layout nobody has written a template for',
@@ -2563,17 +2569,17 @@ describe('pdf: the refusals', () => {
             ...row(680, '02.07.2026', 'REWE SAGT DANKE', { debit: '-5,68' }),
           ],
         ]),
-      "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today",
+      "this statement's layout is not one this importer recognises yet. Export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that. Those import today",
     ],
     [
       'a statement in a layout nobody has written a template for, from a bank it can name',
       () => buildPdf(unknownLayout(2, () => [`IBAN: ${IBANS.c24}`, 'BIC: DEFFDEFFXXX'])),
-      'this looks like a statement from C24 Bank, and its layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today',
+      'this looks like a statement from C24 Bank, and its layout is not one this importer recognises yet. Export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that. Those import today',
     ],
     [
       'a statement in a known layout with no transaction lines in it',
       () => buildPdf([[ISSUER, ...header(700)]]),
-      'this Revolut statement has no transaction lines in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking',
+      'this Revolut statement has no transaction lines in it. If the statement is really empty, nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking',
     ],
   ];
 
@@ -2610,7 +2616,7 @@ describe('pdf: a refusal that names the bank', () => {
       ),
     );
     expect(message).toBe(
-      'this looks like a statement from N26 Bank Berlin, and its layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today',
+      'this looks like a statement from N26 Bank Berlin, and its layout is not one this importer recognises yet. Export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that. Those import today',
     );
     expect(message).not.toContain('C24');
   });
@@ -2619,7 +2625,7 @@ describe('pdf: a refusal that names the bank', () => {
     const printed = unknownLayout(2, () => [`IBAN: ${IBANS.c24}`]);
     expect(await refusalOfPdf(buildPdf(printed))).toContain('from C24 Bank');
     expect(await refusalOfPdf(buildPdf([...printed, []]))).toBe(
-      "this statement's layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today",
+      "this statement's layout is not one this importer recognises yet. Export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that. Those import today",
     );
   });
 
@@ -2644,7 +2650,7 @@ describe('pdf: a refusal that names the bank', () => {
 
 describe('pdf: a statement inside a signed container', () => {
   const REFUSED =
-    'this file is not a CSV, Excel (.xlsx) or PDF statement - export the statement in one of those from your online banking and upload that';
+    'this file is not a CSV, Excel (.xlsx) or PDF statement. Export the statement in one of those formats from your online banking and upload that';
 
   const binaryInsideTheScan = (bytes: Buffer, from = 0): Buffer => {
     const at = bytes.indexOf(0, from);
@@ -2726,7 +2732,7 @@ describe('pdf: a statement inside a signed container', () => {
  * A clock that moves only when it is read, so expiry lands on a known check rather than on
  * how fast this machine is. It reads deterministically because pdfjs never calls this clock
  * during a parse: every reading below is one of the parser's own. Re-check that on a pdfjs
- * bump - nothing else in the tree would notice.
+ * bump, because nothing else in the tree would notice.
  *
  * Restored in a finally because vitest runs one process with isolation off, so a leaked spy
  * on a global would poison every later file and the symptom would appear nowhere near here.
@@ -2911,7 +2917,7 @@ describe('the diagnostic budget', () => {
 
     const notes = [st.sheet.note!(1, 0), st.sheet.note!(1, 1)];
     expect(notes[0]).toMatch(/^reads "2 ы+…", which this template cannot read as a date$/);
-    expect(notes[1]).toMatch(/^holds "ы+…" and "1,00€" - a line carries a debit or a credit/);
+    expect(notes[1]).toMatch(/^holds "ы+…" and "1,00€". A line carries a debit or a credit/);
     for (const note of notes) expect(note!.length).toBeLessThanOrEqual(NOTE_MAX);
     expect(`row 50000: the amount cell ${'x'.repeat(NOTE_MAX)}`.length).toBeLessThanOrEqual(159);
   });
@@ -2997,7 +3003,7 @@ describe('the diagnostic budget', () => {
   it("the parser's own refusals fit what error_detail keeps, at every template's extreme", () => {
     const all = refusals();
     for (const sentence of all) expect(sentence.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
-    expect(Math.max(...all.map((s) => s.length))).toBe(313);
+    expect(Math.max(...all.map((s) => s.length))).toBe(312);
     expect(new Set(all).size).toBe(all.length);
   });
 });

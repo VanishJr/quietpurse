@@ -65,14 +65,14 @@ describe('meaningful editor dismissal', () => {
       window.dispatchEvent(new PopStateEvent('popstate', { state: 'foreign-state' }));
     });
     expect(screen.getByTestId('place')).toHaveTextContent('overview');
-    expect(screen.getByText(/cannot restore the untracked history address automatically/)).toBeVisible();
+    expect(screen.getByText(/can't return to this draft's address on its own/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(screen.getByRole('textbox')).toHaveValue('Grant');
     expect(window.location.search).toBe('?screen=settings');
     act(() => window.history.back());
     await waitFor(() => expect(window.location.search).toBe(''));
     expect(screen.getByRole('textbox')).toHaveValue('Grant');
-    expect(screen.queryByText(/browser history position is unverified/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't tell where this view is in the browser history/)).not.toBeInTheDocument();
   });
 
   it('protects full-document traversal or reload only while an active session has unsaved work', () => {

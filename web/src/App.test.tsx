@@ -5,38 +5,36 @@ import { ACCOUNTS, importsResponse, PRESETS, txDate } from './test/fixtures';
 import { FIRST_PAINT_ROUTES, mockFetch, ok, requests } from './test/harness';
 
 /**
- * The shell: the five always-mounted screens and the navigation.
+ * The shell: the always-mounted screens and the navigation.
  *
- * The navigation is one element in two shapes - the design's top bar on a wide window,
- * the bottom bar of the phone app on a narrow one - and which of the two is painted is
- * a media query. Nothing here can tell them apart, and nothing here should: what this
- * file is about is that the five screens are reachable, which is the same fact in both.
+ * The navigation is one element in two shapes: the design's top bar on a wide window,
+ * and the bottom bar of the phone app on a narrow one. Which of the two is painted is a
+ * media query. Nothing here can tell them apart, and nothing here should: what this file
+ * is about is that every screen is reachable, which is the same fact in both.
  *
  * jsdom applies no stylesheet, so the `hidden` attribute is the only visibility fact
- * available here - nothing below may depend on styles.css.
+ * available here, and nothing below may depend on styles.css.
  */
 
 /**
- * The budget every test in this file gets, and it is here rather than in the config
- * because it exists for `appMounted` below - the two are a pair and neither is worth
- * reading without the other.
+ * The budget every test in this file gets. It is here rather than in the config because
+ * it exists for `appMounted` below: the two are a pair and neither is worth reading
+ * without the other.
  *
- * A wait of 5s under vitest's own 5s `testTimeout` can never reach its own limit: the
- * test is killed first, and what the run reports is a timeout of the test rather than
- * of the thing it was waiting on. That is what a cold run did here - 6.2s against the
- * 5s default, on the one test that happened to mount the app first - while the same
- * file warm, or run alone, passed. So the budget has to clear the wait plus whatever
- * the test does after it, and this is the only file that waits anywhere near that long.
+ * A wait as long as vitest's default `testTimeout` can never reach its own limit: the
+ * test is killed first, and the run reports a timeout of the test rather than of the
+ * thing it was waiting on. A cold run does that here, while the same file warm, or run
+ * alone, passes. So the budget has to clear the wait plus whatever the test does after
+ * it.
  */
 vi.setConfig({ testTimeout: 15_000 });
 
 /**
  * The Overview's heading, and the anchor for "the app shell really painted".
  *
- * Its own helper for the timeout. The whole module graph - five screens and recharts -
- * is transformed the first time anything imports this file, and a cold run has been
- * measured landing within a few milliseconds of the 1000ms default. Nothing here is
- * waiting on the app.
+ * Its own helper for the timeout. The whole module graph, every screen and recharts, is
+ * transformed the first time anything imports this file, and a cold run can land right
+ * at the default `findBy` timeout. Nothing here is waiting on the app.
  */
 const appMounted = () => screen.findByRole('heading', { name: 'Overview' }, { timeout: 5_000 });
 
@@ -58,7 +56,7 @@ describe('the shell', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Keep editing' }));
     fireEvent.click(screen.getByRole('button', { name: /^Create$/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    const notice = screen.getByText(/browser address update is waiting/);
+    const notice = screen.getByText(/address bar will update when you go back/);
     expect(notice).toBeVisible();
     expect(notice.closest('.navigation-notice')?.parentElement).toHaveClass('screen');
     expect(window.location.search).toBe('?screen=settings&foreign=older');
@@ -69,7 +67,7 @@ describe('the shell', () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('account')).toBe(created.id));
     expect(new URLSearchParams(window.location.search).get('ref')).toBe('source');
     expect(window.location.hash).toBe('#source');
-    expect(screen.queryByText(/browser address update is waiting/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/address bar will update when you go back/)).not.toBeInTheDocument();
     expect(requests().filter((request) => request === 'POST /api/accounts')).toHaveLength(1);
   });
 
@@ -81,7 +79,7 @@ describe('the shell', () => {
     expect(await appMounted()).toBeVisible();
 
     // `hidden: true` is required: getByRole excludes a [hidden] subtree from itself,
-    // so without it these would throw - and queryByRole(...) === null would pass
+    // so without it these would throw. And queryByRole(...) === null would pass
     // just as well against a screen that was never mounted at all.
     // 'Settings' is in the list because a screen mounted but named by nothing is
     // asserted about by nothing, and the suite stays green while saying so.
@@ -167,7 +165,7 @@ describe('the shell', () => {
 
   it('does not answer with a panel the reader walked away from', async () => {
     // the screens stay mounted, so a panel left open is still open when the reader
-    // comes back — and what they asked for by clicking Overview is the dashboard
+    // comes back. But a click on Overview asks for the dashboard
     mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) });
     render(<App />);
     expect(await appMounted()).toBeVisible();
@@ -184,7 +182,7 @@ describe('the shell', () => {
   });
 
   it('writes no history entry for a click on the section already showing', async () => {
-    // the app opens on `/`, where Overview is current without being named — so this
+    // the app opens on `/`, where Overview is current without being named. So this
     // click has a URL it could legally write, and writing it would put an entry under
     // Back that paints the identical window. A Back that visibly does nothing is the
     // bug this whole parameter exists to fix, not one to introduce on the way.
@@ -227,7 +225,7 @@ describe('the shell', () => {
   });
 
   it('opens on Overview for a URL naming a screen this app does not have', async () => {
-    // an old link, or a typed one - `?screen=account` is one now. A blank window under
+    // an old link, or a typed one: `?screen=account` is one now. A blank window under
     // a bar with nothing marked on it is the one answer that helps nobody
     window.history.replaceState(null, '', '/?screen=account');
     mockFetch(FIRST_PAINT_ROUTES);
@@ -256,8 +254,8 @@ describe('the shell', () => {
 
   it('leaves the import panel on Back rather than only by its own way out', async () => {
     // Import is a panel of the Overview, so it is the one destination in the bar whose
-    // Back is not a screen change at all — and it is the one a reader is most likely to
-    // press, having opened a full-window page they did not mean to
+    // Back is not a screen change at all. It is also where a reader is most likely to
+    // press Back, having opened a full-window page they did not mean to
     mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) });
     render(<App />);
     expect(await appMounted()).toBeVisible();
@@ -453,10 +451,10 @@ describe('the shell', () => {
   });
 
   it('hands a modified click back to the browser instead of answering it', async () => {
-    // Cmd/Ctrl-click is "open this somewhere else", and the browser is the only thing
-    // that can do it. Answering it here would move THIS window — the one outcome a
-    // reader holding a modifier explicitly did not ask for — and the new tab would
-    // never open.
+    // Cmd/Ctrl-click is "open this somewhere else", and only the browser can do it.
+    // Answering it here would move THIS window, and the new tab would never open.
+    // Moving this window is the one outcome a reader holding a modifier explicitly
+    // did not ask for.
     mockFetch(FIRST_PAINT_ROUTES);
     render(<App />);
     expect(await appMounted()).toBeVisible();

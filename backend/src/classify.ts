@@ -19,20 +19,19 @@ import { categoryPatternMatches, makeTransferRuleMatcher } from './transaction-d
 import type { CategoryRule } from './wire';
 
 /**
- * Window for a same-currency pair: the amounts have to match to the cent, so there is
- * no need to hurry — and a statement's date often carries a calendar day and no time,
+ * Window for a same-currency pair. The amounts have to match to the cent, so there is
+ * no need to hurry. A statement's date also often carries a calendar day and no time,
  * so two legs booked a minute apart can sit 24 hours apart in the data. Hence a floor
  * above a day. 36 hours rather than 4 days: on round amounts (20/50/100 EUR) a wide
- * window kept gluing unrelated transactions together (a -20 EUR merchant payment and
- * an unrelated +77 EUR incoming transfer were the confirmed victims).
+ * window kept gluing unrelated transactions together.
  */
 const SAME_CURRENCY_WINDOW_MS = 36 * 3600_000;
 
 /**
  * An expense identified as a merchant purchase or a cash withdrawal cannot be the
- * other leg of a transfer — that is exactly what stops a -20 EUR merchant payment
- * being glued to a +20 EUR incoming card transfer. Income categorized as
- * salary/cashback is excluded symmetrically.
+ * other leg of a transfer. That is what stops a -20 EUR merchant payment being glued
+ * to a +20 EUR incoming card transfer. Income categorized as salary/cashback is
+ * excluded symmetrically.
  */
 const PAIRABLE_CATEGORIES = new Set(['transfers', 'other']);
 
@@ -82,7 +81,7 @@ async function loadRun(): Promise<RunLoad> {
 
 /**
  * Matched word by word rather than as a substring: statements write a name in any
- * order. Names below two words are dropped — one word hits a random merchant.
+ * order. Names below two words are dropped, because one word hits a random merchant.
  */
 function makeOwnerMatcher(ownerNames: string[]): (description: string) => boolean {
   const names = ownerNames
@@ -163,7 +162,7 @@ function detectRecurring(
   return recurring;
 }
 
-/** Amount in hryvnia — the common denominator for checking a cross-currency pair. */
+/** Amount in hryvnia, the common denominator for checking a cross-currency pair. */
 function toUAH(amount: number, currency: string, rates: Record<string, number>): number | null {
   const rate = rates[currencyKey(currency)];
   return rate ? Math.abs(amount) * rate : null;
@@ -176,12 +175,11 @@ function fxPlausible(
 ): boolean {
   const a = toUAH(expense.amount, expense.currency, rates);
   const b = toUAH(income.amount, income.currency, rates);
-  // no rate available — trust the time match, which is narrow anyway
+  // with no rate available, trust the time match: it is narrow anyway
   if (a === null || b === null || a === 0 || b === 0) return true;
   return Math.abs(a - b) / Math.max(a, b) <= FX_TOLERANCE;
 }
 
-/** Exported so the pair rules can be exercised without a database. */
 /**
  * The gap canPair's windows are held against. A time that does not read counts as midnight
  * of its day: a restore keeps the 25:99 an earlier version stored, and the day is still the
@@ -198,6 +196,7 @@ export function pairingGap(expense: Transaction, income: Transaction): number {
   return Math.abs(dayOrTime(incomeAt, income.date) - dayOrTime(expenseAt, expense.date));
 }
 
+/** Exported so the pair rules can be exercised without a database. */
 export function canPair(
   expense: Transaction,
   income: Transaction,
@@ -217,7 +216,7 @@ export function canPair(
 
 /**
  * Rates are only needed for cross-currency pairs, and those are still bounded by the
- * narrow time window — so an unreachable provider classifies without them.
+ * narrow time window. So an unreachable provider classifies without them.
  */
 async function ratesOrEmpty(): Promise<Record<string, number>> {
   try {
@@ -319,7 +318,8 @@ async function reclassifyWith({ rules, owed }: RunLoad): Promise<number> {
 
 /**
  * A source's kind is deliberately outside it: kind moves summaries, not tags. It reads
- * nothing, on purpose — a read taken after the writes can name a rule the rows never got.
+ * nothing on purpose, because a read taken after the writes can name a rule the rows
+ * never got.
  */
 function rulesSignature(rules: TaggingRules): string {
   const transferRules = rules.transferRules

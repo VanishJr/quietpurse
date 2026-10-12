@@ -50,7 +50,7 @@ import type {
 } from './types';
 
 /**
- * Two rules about `types.ts` that no type holds, and the premise the pins in
+ * Rules about `types.ts` that no type holds, and the premise the pins in
  * `analytics.ts` and `api.ts` stand on.
  *
  * The wire is reached by type only: a value import of `backend/src/wire` compiles, is
@@ -58,8 +58,8 @@ import type {
  * both suites green. And it is reached through one door: `types.ts` is the only file
  * that names the backend path, so a rename on the server is one edit here and a `tsc`
  * error everywhere else. Both are read off the program the compiler builds from
- * `web/tsconfig.json` - every file it compiles outside `node_modules` and `backend/`,
- * not a directory - over every form the compiler resolves (the list
+ * `web/tsconfig.json`: every file it compiles outside `node_modules` and `backend/`,
+ * not a directory. The walk covers every import form the compiler resolves (the list
  * `backend/test/wire.test.ts` walks), and each specifier is resolved the way the
  * compiler resolves it, so what is tested is the file it lands on and not what the
  * text looks like.
@@ -67,15 +67,15 @@ import type {
  * The pins are `satisfies typeof` the wire's exports and a record keyed by each of its
  * unions, and both assume the export carries a literal type: a wire constant widened
  * to `number`, or a tuple that lost its `as const`, makes every pin silent. The last
- * block holds that premise, and `tsc` is what reds it - at run time it is a no-op.
+ * block holds that premise. `tsc` is what reds it, and at run time it is a no-op.
  *
  * WEB resolves from import.meta.url for the reason copy.test.ts states: the root of
  * this walk IS the package this file sits in.
  *
- * The third block walks the same program narrowed to product files - not the tests,
- * not the harness, not the config - for what reaches browser storage, and holds the
- * ruling `web/src/SPEC.md` states: the theme is the one deliberate exception, one
- * legacy read is on its way out, and every operation each file may use is named.
+ * The third block walks the same program narrowed to product files (no tests, harness
+ * or config) for what reaches browser storage. It holds the ruling `web/src/SPEC.md`
+ * states: the theme is the one deliberate exception, one legacy read is on its way
+ * out, and every operation each file may use is named.
  */
 const WEB = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKEND = resolve(WEB, '..', 'backend');
@@ -311,14 +311,14 @@ const PRODUCT = SOURCES.filter(
 const STORAGE = ['localStorage', 'sessionStorage', 'indexedDB'];
 
 /**
- * Each hit as the operation it feeds - `localStorage.getItem` - or the bare name when it
- * feeds none, which nothing in the allowlist is. `window.localStorage.getItem` and the
- * bare form both land on the identifier, so the walk reads through one enclosing
- * access to reach the operation.
+ * Each hit as the operation it feeds, such as `localStorage.getItem`, or the bare name
+ * when it feeds none, which nothing in the allowlist is. `window.localStorage.getItem`
+ * and the bare form both land on the identifier, so the walk reads through one
+ * enclosing access to reach the operation.
  */
 const storageUsesOf = (source: ts.SourceFile): string[] => {
   const found = new Set<string>();
-  // the program's files carry no parent pointers - the binder sets those - so the walk hands them down
+  // the program's files carry no parent pointers (the binder sets those), so the walk hands them down
   const operationOf = (id: ts.Identifier, parent: ts.Node, grand: ts.Node | undefined): string => {
     if (ts.isPropertyAccessExpression(parent) && parent.expression === id) {
       return `${id.text}.${parent.name.text}`;

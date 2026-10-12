@@ -68,11 +68,11 @@ const chipKey = (id: string): string => `id:${id}`;
 
 /**
  * The upload's body. Outside the component deliberately: the account name is not a
- * binding here, so a client that sends one does not compile. The
- * backend refuses `accountName` and `currency` outright — an account is created by its
- * own request and never by an upload — so what this shape buys is that the refusal
- * is never reached: there is no state of this component from which a request the
- * server would reject can be composed.
+ * binding here, so a client that sends one does not compile. The backend refuses
+ * `accountName` and `currency` outright, because an account is created by its own
+ * request and never by an upload. What this shape buys is that the refusal is never
+ * reached: there is no state of this component from which a request the server would
+ * reject can be composed.
  */
 const uploadForm = (account: Account, preset: string, file: File): FormData => {
   const form = new FormData();
@@ -105,9 +105,9 @@ interface Props {
   /** Leaves the panel. Required: a mount with no way back strands the user here. */
   onBack: () => void;
   /**
-   * Called once rows have actually landed, so the caller can refresh its data —
-   * which is after Confirm, not after the upload: an upload stages the rows and imports
-   * none of them.
+   * Called once rows have actually landed, so the caller can refresh its data. That is
+   * after Confirm, not after the upload: an upload stages the rows and imports none of
+   * them.
    */
   onImported: () => void;
   /**
@@ -117,10 +117,10 @@ interface Props {
    */
   onAccountCreated: () => void;
   /**
-   * What a new account will be created in — printed, not sent, since the server
-   * defaults it to the same setting this came from. `null` when that setting could
-   * not be read: the sentence is left out, and nothing here is disabled over it —
-   * a cosmetic fetch must not block an import.
+   * The currency a new account will be created in. It is printed, not sent, since the
+   * server defaults it to the same setting this came from. `null` when that setting
+   * could not be read: the sentence is left out and nothing here is disabled over it,
+   * because a cosmetic fetch must not block an import.
    */
   baseCurrency: string | null;
 }
@@ -129,9 +129,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [presets, setPresets] = useState(FALLBACK_PRESETS);
   const [preset, setPreset] = useState('generic');
   /**
-   * `null` means never loaded — never "you have none". A failed load that fell through
-   * to "create a new one" would manufacture a second account for a bank the user
-   * already has, and pressing Import is what writes it.
+   * `null` means never loaded. It never means "you have none". A failed load that fell
+   * through to "create a new one" would manufacture a second account for a bank the
+   * user already has, and pressing Import is what writes it.
    */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
@@ -147,14 +147,14 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const [csvText, setCsvText] = useState('');
   /** the chosen file itself: a workbook is bytes, and only the backend can read it */
   const [file, setFile] = useState<File | null>(null);
-  /** row count for the preview — null for a file we can't count lines in */
+  /** row count for the preview, or null for a file we can't count lines in */
   const [fileRows, setFileRows] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorArea, setErrorArea] = useState<'setup' | 'result'>('setup');
   const [result, setResult] = useState<StatementImportResult | null>(null);
-  /** what landed once the summary was accepted — the backend's counts, not the preview's */
+  /** what landed once the summary was accepted, in the backend's counts and not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
   const [confirmationUncertain, setConfirmationUncertain] = useState(false);
   const [confirmRefused, setConfirmRefused] = useState(false);
@@ -166,7 +166,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const fileInput = useRef<HTMLInputElement>(null);
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const resultHeading = useRef<HTMLHeadingElement>(null);
-  /** which input a pending read belongs to — a slow one must not label a newer one */
+  /** which input a pending read belongs to, so a slow read cannot label a newer input */
   const pickSeq = useRef(0);
 
   // the preset list lives on the backend; keeping a second copy here would drift
@@ -195,7 +195,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     void loadAccounts();
   }, []);
 
-  /** The picked account itself, derived — a second copy could come to disagree. */
+  /** The picked account, derived rather than stored: a second copy could come to disagree. */
   const picked = accounts?.find((a) => chipKey(a.id) === pickedKey) ?? null;
   /**
    * With no accounts at all the create arm is the only state there is, so it renders
@@ -251,8 +251,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * The create arm's account, made before the file is uploaded. Every state write lands
    * before the caller awaits the upload, so a rejected upload finds the component
    * already on the picker arm: a second press then uploads into this account instead
-   * of asking the server to create a name it created one press ago — which answers
-   * 409 and refuses the user on behalf of an account this screen made for them.
+   * of asking the server to create a name it created one press ago. That would be
+   * answered 409, refusing the user on behalf of an account this screen made for them.
    *
    * The list as well as the key, because `picked` is the key looked up in the list:
    * a key with no row renders a picker with nothing pressed and Import disabled.
@@ -283,7 +283,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       const account = picked ?? (await createDestination());
       // the paste fallback goes through the same endpoint: it is a file too
       const body = file ?? new File([csvText], 'pasted.csv', { type: 'text/csv' });
-      // this reads the file and answers with what it found — it imports nothing, so
+      // this reads the file and answers with what it found. It imports nothing, so
       // onImported() stays out of here and fires when Confirm comes back
       setResult(await api.importStatement(uploadForm(account, preset, body)));
     } catch (e) {
@@ -303,15 +303,15 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setError(null);
       const answer = await api.confirmImport(summary.importId);
       setConfirmed(answer);
-      // rows are in it now, so it is no longer an account standing on nothing — and
-      // the subject is cleared rather than the sentence gated on `confirmed`, which
+      // rows are in it now, so it is no longer an account standing on nothing. The
+      // subject is cleared rather than the sentence gated on `confirmed`, which
       // newInput() resets on the next file chosen in this same mount.
       //
       // Only when the rows landed in THIS account: confirming into one the user
       // picked instead leaves the created one standing empty, which is the case the
-      // sentence exists for. One slot is an accepted limit and not an oversight — a
+      // sentence exists for. One slot is an accepted limit and not an oversight. A
       // second create overwrites the first, so an account made two presses ago is
-      // announced nowhere; a list of them is a different screen's problem.
+      // announced nowhere. A list of them is a different screen's problem.
       if (answer.inserted > 0 && created?.id === summary.accountId) setCreated(null);
       onImported();
       // a refresh of a list another tab may have moved; the account this screen
@@ -406,6 +406,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    */
   const balances = summary?.balances ?? null;
   const balanceLine = balances ? balanceClaim(balances.series) : null;
+  const emptyFile = file !== null && (file.size === 0 || fileRows === 0);
+
   /**
    * One sentence per reason that dropped a row, and the sentence is built after the
    * filter rather than inside the literal: a server older than these fields sends
@@ -415,8 +417,6 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * The filtered rows are missing from here on purpose, for the reason `web/src/SPEC.md`
    * gives under *The sentences a person reads*.
    */
-  const emptyFile = file !== null && (file.size === 0 || fileRows === 0);
-
   const drops = summary
     ? [
         {
@@ -425,8 +425,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
           // the one bucket the advice is true for: nothing to pick for a row a rule
           // filtered, and nothing wrong with one that moved no money
           say: (n: number) =>
-            `${rowCount(n)} couldn't be read. If it's the whole file, the column layout is` +
-            ` probably wrong — discard this and try your bank's optional preset in setup.`,
+            `${rowCount(n)} couldn't be read. If that's the whole file, the column layout is` +
+            ` probably wrong. Discard this and try your bank's optional preset in setup.`,
         },
         {
           key: 'noMovement',
@@ -535,7 +535,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                   <p>
                     Your accounts couldn't be loaded: {accountsError}.
                     {accounts === null &&
-                      ' Nothing can be imported until the list is there — reload the page and try again.'}
+                      ' Reload the page and try again. Nothing can be imported until the list loads.'}
                   </p>
                 </Notice>
               )}
@@ -554,7 +554,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 />
               )}
               {accounts !== null && (
-                <p className="import-help">Hidden accounts aren't listed here — unhide one first.</p>
+                <p className="import-help">Hidden accounts aren't listed here. To import into one, unhide it first.</p>
               )}
               {creating && (
                 <Field
@@ -623,7 +623,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             {discarded && (
               <section className="card import-outcome import-discarded" aria-labelledby={`${id}-discarded-heading`}>
                 <h2 id={`${id}-discarded-heading`} className="import-outcome-heading" ref={resultHeading} tabIndex={-1}>
-                  Discarded — nothing was imported.
+                  Discarded. Nothing was imported.
                 </h2>
                 {sourceContext}
                 <p>The file is untouched. Start another import to change the preset or destination and read it again.</p>
@@ -714,15 +714,15 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                   )}
                   {summary.alreadyPresent > 0 && (
                     <p>
-                      {summary.newRows} of them are new; {summary.alreadyPresent} are already in the
-                      database — this export overlaps one you imported before. Nothing will be
-                      duplicated.
+                      {summary.newRows} of them are new. This export overlaps one you imported
+                      before, so {summary.alreadyPresent} are already in your data and won't be
+                      added again.
                     </p>
                   )}
                   {summary.supersededImportId && (
                     <p>
-                      An earlier upload of this same file was still waiting to be confirmed. It has
-                      been dropped in favour of this one — it had imported nothing.
+                      An earlier upload of this same file was still waiting to be confirmed. It had
+                      imported nothing, and this one replaces it.
                     </p>
                   )}
                 </div>
@@ -736,9 +736,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                 )}
                 {confirmationUncertain ? (
                   <Notice tone="warning">
-                    The confirmation could not be verified. It may have committed despite the error.
-                    Back to accounts leaves this review without claiming a discard; check Import history
-                    or Transactions before trying again.
+                    The confirmation could not be verified. The import may have gone through despite
+                    the error. Check Import history or Transactions before you try again. Back to
+                    accounts leaves this review without discarding it.
                   </Notice>
                 ) : (
                   <p className="import-help">To change the source or destination, discard this review first. Back to accounts leaves it waiting.</p>
@@ -775,12 +775,12 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                   <p>{rowCount(confirmed.skipped)} didn't import.</p>
                 )}
                 {alreadyPresent > 0 && (
-                  <p>{alreadyPresent} were already in the database — this export overlaps one you
-                    imported before. Nothing was duplicated.</p>
+                  <p>This export overlaps one you imported before, so {alreadyPresent} were already
+                    in your data and weren't added again.</p>
                 )}
                 {shortfall > 0 && (
                   <p>{shortfall} of the rows this summary called new were written by another import
-                    while it waited here. They're in your data — under that import, not this one.</p>
+                    while it waited here. They're in your data, under that import rather than this one.</p>
                 )}
               </section>
             )}
@@ -800,8 +800,8 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             <Notice title="Account created" role="status">
               <p>
                 The account "{created.name}" was created when you pressed Import, before the file
-                was read — it exists whether or not these rows land. Remove it from Overview if
-                you didn't want it.
+                was read. It stays whether or not these rows are imported. Remove it from Overview
+                if you didn't want it.
               </p>
             </Notice>
           </aside>

@@ -31,7 +31,7 @@ import { Account, Chart } from '../types';
  * that cannot return their edit is worse than telling them nothing.
  */
 const CHANGED_ELSEWHERE =
-  'These charts were changed somewhere else while you were working — what you see now is the current list, and the change you just made was not saved.';
+  'These charts were changed somewhere else while you were working, so your last change was not saved. This is the current list.';
 
 type ChartsState =
   | { phase: 'loading' }
@@ -55,7 +55,7 @@ function editsSentence(cleaned: Normalised): string | null {
   const were = (n: number) => (n === 1 ? 'was' : 'were');
   if (cleaned.droppedOverCap > 0)
     said.push(
-      `${charts(cleaned.droppedOverCap)} could not be saved — this workspace holds at most ${CHARTS_MAX}.`,
+      `${charts(cleaned.droppedOverCap)} could not be saved because this workspace holds at most ${CHARTS_MAX}.`,
     );
   if (cleaned.titlesShortened > 0)
     said.push(
@@ -78,7 +78,7 @@ export function AnalyticsScreen({
   accountsRevision?: number;
 }) {
   const [charts, setCharts] = useState<ChartsState>({ phase: 'loading' });
-  /** null while the list is in flight — `useChartData` needs the two apart. */
+  /** null while the list is in flight: `useChartData` needs the two apart. */
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [accountsError, setAccountsError] = useState<string | null>(null);
   /** open, and on what: a spec to edit, or null to build a new one. */
@@ -95,7 +95,7 @@ export function AnalyticsScreen({
    *
    * A ref because a click handler cannot read the state it set a moment ago, and the
    * write path has to know the version it is at rather than the version of the render
-   * it was created in — which is the difference between two mutations producing
+   * it was created in. That is the difference between two mutations producing
    * ascending versions and producing the same one twice.
    */
   const list = useRef<ChartList | null>(null);
@@ -142,8 +142,8 @@ export function AnalyticsScreen({
           }
           /*
            * The reader acted again while this was out, so their newer list wins over
-           * the server's echo of the older one — under the version the server has just
-           * answered with, which is the only version the next PUT may carry. It does
+           * the server's echo of the older one. It goes under the version the server has
+           * just answered with, which is the only version the next PUT may carry. It does
            * mean a narrowing the server made is invisible on this path where the quiet
            * one shows it.
            */
@@ -159,9 +159,9 @@ export function AnalyticsScreen({
             pending.current = null;
             /*
              * And the migration, if this was it, is over: the version is no longer 0,
-             * so `migrate` cannot fire again — left set, this flag would have some
-             * later write, carrying nothing of this browser's, delete the only copy of
-             * charts that were never saved anywhere.
+             * so `migrate` cannot fire again. Left set, this flag would let some later
+             * write, carrying nothing of this browser's, delete the only copy of charts
+             * that were never saved anywhere.
              */
             migrating.current = false;
             commit(e.current);
@@ -188,8 +188,8 @@ export function AnalyticsScreen({
 
   /**
    * Optimistic because a failed save must not take work off the screen that the reader
-   * can see and did not undo. Unreachable before the list has loaded — a mutation over
-   * a list nobody read is a save at version 0 over whatever list the server holds.
+   * can see and did not undo. Unreachable before the list has loaded, because a mutation
+   * over a list nobody read is a save at version 0 over whatever list the server holds.
    */
   const save = useCallback(
     (next: ChartEntry[]) => {
@@ -215,7 +215,7 @@ export function AnalyticsScreen({
    * migration rather than deferring it: the list was written by another tab or device
    * while this PUT was out, its version is no longer 0, and both halves of the
    * condition above are needed. The browser's copy is left where it is, unread from
-   * here while the list is above version 0 — the alternative is re-applying it over a
+   * here while the list is above version 0. The alternative is re-applying it over a
    * list another device wrote, which resurrects charts that were deliberately deleted.
    */
   const migrate = useCallback(
@@ -239,9 +239,9 @@ export function AnalyticsScreen({
       .then((loaded) => {
         /*
          * Only into a screen that is holding nothing. Two reads can be in flight at
-         * once — StrictMode double-invokes this effect in development, and Try again
-         * is a second call by hand — and a later answer to an earlier read carries an
-         * OLDER version. Committing it would lower the version the write path is
+         * once: StrictMode double-invokes this effect in development, and Try again is
+         * a second call by hand. A later answer to an earlier read carries an OLDER
+         * version. Committing it would lower the version the write path is
          * holding, and the next save is then refused for staleness against a list
          * nobody else touched. It would also run the migration twice.
          */
@@ -327,7 +327,7 @@ export function AnalyticsScreen({
     setWizard(null);
     /*
      * Only a chart that did not exist a moment ago. Every tab carries its own ⋮, so an
-     * edit is as often a change to the LIST as to the chart on screen — and the reader
+     * edit is as often a change to the LIST as to the chart on screen, and the reader
      * who renamed one tab while reading another did not ask to be moved to it.
      *
      * Nothing is needed for the case where the edited chart IS the one showing. It is
@@ -367,14 +367,14 @@ export function AnalyticsScreen({
     save(next);
     /*
      * Only when what went was what was showing. Every tab carries its own ⋮, so a
-     * delete is as often an edit to the LIST as it is to the chart on screen — and
-     * moving the reader then would take them off the chart they are reading and put
-     * them beside the one they just deleted, which is the single place they did not
-     * ask to be.
+     * delete is as often an edit to the LIST as it is to the chart on screen. Moving
+     * the reader then would take them off the chart they are reading and put them
+     * beside the one they just deleted, which is the single place they did not ask to
+     * be.
      */
     if (id !== activeId) return;
     /*
-     * The neighbour, and `replace`: deleting a chart is not a place to come Back to —
+     * The neighbour, and `replace`: deleting a chart is not a place to come Back to.
      * Back would land on the URL naming the chart that no longer exists, and the
      * fallback above would put the reader on the first chart with no way to tell that
      * anything had happened.
@@ -468,8 +468,8 @@ export function AnalyticsScreen({
 }
 
 /**
- * No instructions — what a shape is, what the wizard will ask next, where the charts
- * are kept — because every one of those questions is answered by pressing the button.
+ * No instructions about what a shape is, what the wizard will ask next or where the
+ * charts are kept, because pressing the button answers every one of those questions.
  * The one thing this has to say is that the emptiness is the starting state and not a
  * failure to load, which is what the mark says: a bare axis, and deliberately not one
  * of the chart shapes, because a drawn chart here would read as a chart that did not

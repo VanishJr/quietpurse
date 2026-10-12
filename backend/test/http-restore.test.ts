@@ -12,15 +12,15 @@ import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
 const SQLITE_REFUSAL =
-  'this is a SQLite database from an old version of Quietpurse, not a backup - nothing in this version reads one, and what this route takes is the JSON backup from the Overview screen';
+  'this is a SQLite database from an old version of Quietpurse, not a backup. Nothing in this version reads one; this route takes the JSON backup from Settings';
 
 const NOT_A_BACKUP =
   'backup could not be restored: not a Quietpurse backup file (expected JSON with format: "quietpurse-backup")';
 
 /**
  * Recognised by its first 16 bytes; the rest is filler. A string and not a Buffer,
- * because supertest serialises a Buffer as JSON under a JSON content type - every
- * character here is below 0x80, so the bytes on the wire are these, under either type.
+ * because supertest serialises a Buffer as JSON under a JSON content type. Every
+ * character here is below 0x80, so the bytes on the wire are these under either type.
  */
 const SQLITE_FILE = `SQLite format 3\0${'\u0007'.repeat(240)}`;
 
@@ -30,7 +30,7 @@ const emptyBackup = { format: 'quietpurse-backup', version: 1, tables: {} };
 const CEILING = 25 * 1024 * 1024;
 
 const BODY_TOO_LARGE =
-  'the request body is larger than 25 MB, the ceiling for a JSON body or a backup file - nothing was changed';
+  'the request body is larger than 25 MB, the ceiling for a JSON body or a backup file. Nothing was changed';
 
 /** A backup that restores nothing, padded to exactly `size` bytes in a key the envelope drops. */
 const paddedBackup = (size: number): string => {
@@ -86,8 +86,8 @@ describe('what the door refuses', () => {
    * one. The same bytes under application/json meet the JSON parser first, which cannot
    * read them, so the sentence that names SQLite never fires on this path: what the
    * person gets is the parser's own refusal behind the door's prefix. The prefix is
-   * pinned and the rest is not - the words after it are the JSON engine's, they quote
-   * the first bytes of the body, and they differ between Node versions.
+   * pinned and the rest is not, because the words after it are the JSON engine's: they
+   * quote the first bytes of the body, and they differ between Node versions.
    */
   it('the same bytes as application/json are refused by the JSON parser as a 400 that names JSON, not by the SQLite sentence', async () => {
     expect(Buffer.from(SQLITE_FILE, 'utf8').equals(Buffer.from(SQLITE_FILE, 'latin1'))).toBe(true);
@@ -220,14 +220,14 @@ describe('what the door refuses', () => {
     expect(res.status).toBe(400);
     expect(res.body).toEqual({
       error:
-        'backup could not be restored: the file was read, but writing it to the database failed - the reason is in the log this server printed',
+        'backup could not be restored: the file was read, but writing it to the database failed. The reason is in the log this server printed',
     });
     expect((await agent.get('/api/accounts')).body).toContainEqual(expect.objectContaining({ id: created.body.id }));
   });
 
   /**
-   * Neither parser claims the body, so the route sees none - and a real backup sent
-   * under the wrong content type is refused as if it were not one.
+   * Neither parser claims the body, so the route sees none. A real backup sent under
+   * the wrong content type is therefore refused as if it were not one.
    */
   it('a content type that is neither leaves the body unread, and a real backup under it is refused', async () => {
     const res = await restore('text/plain', JSON.stringify(emptyBackup));

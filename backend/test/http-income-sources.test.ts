@@ -1,12 +1,10 @@
 /**
- * The four /api/income-sources routes over real HTTP - the first test any of them
- * has had.
+ * The /api/income-sources routes over real HTTP.
  *
- * Driven through supertest, because what is worth asserting here
- * is the wire: the status codes, the sentence each refusal composes, and the id the
- * route mints from a label the client never sees. Before Settings had a control for
- * them nothing in web/src called three of these four routes, so every refusal below was
- * unreachable and therefore unwritten; that control is what makes them a door.
+ * Driven through supertest, because what is worth asserting here is the wire: the
+ * status codes, the sentence each refusal composes, and the id the route mints from a
+ * label the client never sees. The Settings control for income sources is what makes
+ * these routes a door, so every refusal below is one a person can reach.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../src/app';
@@ -55,10 +53,10 @@ beforeAll(async () => {
 
 describe('GET /api/income-sources', () => {
   /**
-   * The seeded catalog a first start produces. Both halves are literals: the id is
-   * data that reaches transactions.income_source and does not move, the label is the
-   * only part of this row anybody reads, and the patterns are FAMILY_NAMES as
-   * test/setup.ts sets it - the environment seeds, the row owns.
+   * The seeded catalog a first start produces. The id and the label are both literals:
+   * the id is data that reaches transactions.income_source and does not move, and the
+   * label is the only part of this row anybody reads. The patterns are FAMILY_NAMES as
+   * test/setup.ts sets it. The environment only seeds them, and the row owns them.
    */
   it('seeds a neutral external source with the family names from the environment', async () => {
     const family = (await list()).find((s) => s.id === 'family')!;
@@ -89,9 +87,8 @@ describe('POST /api/income-sources', () => {
   });
 
   /**
-   * The collision loop, which until now was reachable only through the data layer.
-   * Two sources may share a label - the id is derived and the user never types it -
-   * so the second one gets a suffix rather than a refusal.
+   * The collision loop. Two sources may share a label, because the user never types
+   * the id: it is derived. So the second one gets a suffix rather than a refusal.
    */
   it('gives a second source of the same label an id of its own', async () => {
     const first = await created({ label: 'Grant', kind: 'external' });
@@ -152,8 +149,8 @@ describe('the income source label bound is one number at both doors that write o
 
   /**
    * A label accepted on create that its own edit door would refuse is reachable only
-   * if the two doors bound different strings - which one schema, trimming before it
-   * bounds, is what prevents.
+   * if the two doors bound different strings. One schema that trims before it bounds
+   * is what prevents that.
    */
   it('and a label accepted on create can be sent back to the edit door', async () => {
     const atTheBound = 'z'.repeat(INCOME_SOURCE_LABEL_MAX);
@@ -188,10 +185,10 @@ describe('PUT /api/income-sources/:id', () => {
 
   /**
    * A patch touches only the fields it names, and that claim takes two cases rather
-   * than one. A PUT naming the label alone cannot see the label fallback at all -
+   * than one. A PUT naming the label alone cannot see the label fallback at all:
    * `parsed.data.label` is present, so the `??` short-circuits and a constant on its
-   * right is invisible - so a single label-only case holds two arms of three and
-   * reads as holding all three.
+   * right is invisible. A single label-only case holds the kind and patterns arms,
+   * not the label's, and reads as holding all three.
    */
   it('leaves the kind and the patterns alone when only the label is named', async () => {
     const source = await created({
@@ -230,7 +227,7 @@ describe('PUT /api/income-sources/:id', () => {
   /**
    * The owner renaming theirs, over the wire. The conflict clause in
    * upsertIncomeSource does not set `builtin`, so a rename cannot turn a seeded
-   * source into a deletable one - which is what makes editing one safe.
+   * source into a deletable one. That is what makes editing a builtin safe.
    */
   it('renames a builtin and leaves it a builtin', async () => {
     const res = await agent.put(`${SOURCES}/family`).send({ label: 'Family support' });

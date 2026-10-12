@@ -45,8 +45,8 @@ export function useDismiss(
       if (current.current.onFocusDeparture && !(target instanceof Element && current.current.inside(target))
         && available()) current.current.onFocusDeparture();
     };
-    // Focus on the document, or on an ancestor of what was pressed, is where the browser puts a
-    // press on something it does not focus — the group's own text — and not a place the reader went.
+    // A press on something the browser does not focus, such as the group's own text, leaves focus
+    // on the document or on an ancestor of what was pressed. That is not a place the reader went.
     const departedFromCurrent = () => {
       const focused = document.activeElement;
       if (!focused || focused === document.body || (pressed && focused.contains(pressed))) return;

@@ -32,9 +32,9 @@ const PREVIEW_HEIGHT = 190;
 /**
  * A series chart with no measure ticked.
  *
- * There is no minimum enforced by the chips — a reader clearing the last one is doing
- * something perfectly ordinary on the way to picking a different one, and a control
- * that refuses to switch off is a control that has to be fought. What is refused is
+ * The chips enforce no minimum. A reader clearing the last one is doing something
+ * perfectly ordinary on the way to picking a different one, and a control that
+ * refuses to switch off is a control that has to be fought. What is refused is
  * SAVING it: the state is reachable, it is named in red under the chips, and "Create
  * chart" stays disabled until it is out of it.
  */
@@ -70,15 +70,15 @@ export function ChartWizard({
   const [step, setStep] = useState<'kind' | 'detail'>('kind');
   /**
    * Whether the reader has typed a name of their own. Until they have, the box
-   * follows the spec — pick a donut of income over six months and the name says so —
-   * and the moment they type, it stops moving under them.
+   * follows the spec: pick a donut of income over six months and the name says so.
+   * The moment they type, it stops moving under them.
    */
   const [named, setNamed] = useState(false);
 
   /*
    * OPENING is what resets the draft, not rendering: the dialog is mounted for as long
    * as the screen is, and the spec it is editing is an element of the screen's chart
-   * array — a new object identity every time that array is rewritten. Keyed on the
+   * array, a new object every time that array is rewritten. Keyed on the
    * object, a save-in-progress elsewhere on the screen would throw away what the reader
    * had typed. So the key is which chart, plus whether the dialog is up, and nothing
    * about the identity of anything.
@@ -93,7 +93,7 @@ export function ChartWizard({
     // `editing` deliberately absent: `key` stands in for it
   }, [key]);
 
-  /* The suggested title names the account a chart is about — see `suggestedTitle`. */
+  /* The suggested title names the account a chart is about (see `suggestedTitle`). */
   const nameOf = (id: string | null): string | null =>
     id ? (accounts?.find((a) => a.id === id)?.name ?? null) : null;
 
@@ -133,10 +133,10 @@ export function ChartWizard({
       if (!d) return d;
       const next = { ...d, ...change };
       /*
-       * A title is re-suggested only from a draft that could actually be saved. Clear
-       * every measure and `suggestedTitle` has nothing to name the chart after — the
-       * box would read " · 12 months" — so the last good suggestion is what stays in
-       * it while the reader works out which measure they meant.
+       * A title is re-suggested only from a draft that could actually be saved. With
+       * every measure cleared, `suggestedTitle` has nothing to name the chart after and
+       * the box would read " · 12 months". So the last good suggestion stays in it
+       * while the reader works out which measure they meant.
        */
       const keep = named || incomplete(next);
       return keep ? next : { ...next, title: suggest(next) };
@@ -202,8 +202,8 @@ function KindStep({
       <h3 className="sheet-title">{editing ? 'Change the shape' : 'What shape?'}</h3>
 
       {/* The drawing IS the description. A sentence per tile explaining what a line
-          chart is for answers a question the picture has already answered — the blurbs
-          are `CHART_KINDS`' still, for a `title`. */}
+          chart is for answers a question the picture has already answered. The blurbs
+          stay in `CHART_KINDS`, for a `title`. */}
       <div className="kind-grid" role="group" aria-label="Chart shapes">
         {CHART_KINDS.map((k) => (
           <button
@@ -246,11 +246,11 @@ function DetailStep({
    * The accounts on offer, plus the one this chart is already about however it is
    * marked.
    *
-   * Hidden accounts are kept out of the CHOICES — that is what hiding one is for. But the
-   * chart's own subject stays: filtered out of its own editor, a chart built on a hidden
-   * account opens with "Account" lit on nothing at all — "All accounts" is not on either
-   * — under a name box still reading that account's name, and every chip in front of the
-   * reader retargets the chart with none leading back.
+   * Hidden accounts are kept out of the CHOICES, because that is what hiding one is for.
+   * But the chart's own subject stays. Filtered out of its own editor, a chart built on
+   * a hidden account would open with no chip lit under "Account", not even "All
+   * accounts", under a name box still reading that account's name. Every chip in front
+   * of the reader would then retarget the chart, and none would lead back.
    */
   const visible = (accounts ?? []).filter((a) => !a.hidden || a.id === draft.accountId);
   const accountName = draft.accountId
@@ -258,7 +258,7 @@ function DetailStep({
     : null;
 
   /**
-   * Every measure is free to be turned off, the last one included — see `incomplete`.
+   * Every measure can be turned off, the last one included (see `incomplete`).
    * Adding one walks `METRICS` rather than appending, so the series keep the palette's
    * order however they were clicked: Income is always the green one and always first.
    */

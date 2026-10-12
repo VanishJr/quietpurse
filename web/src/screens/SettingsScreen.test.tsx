@@ -15,9 +15,9 @@ import { SettingsScreen } from './SettingsScreen';
  */
 
 /**
- * The two reads that came here with the settings blocks. They were the Overview's
- * before, and both were already on the app's first paint - what moved is which screen
- * asks, not how many requests the app makes when it starts.
+ * The reads that came here with the settings blocks. They were the Overview's before,
+ * and both were already on the app's first paint. What moved is which screen asks, not
+ * how many requests the app makes when it starts.
  */
 const BASE: Routes = {
   'GET /api/recurring': () => ok(RECURRING),
@@ -34,8 +34,8 @@ const cardFor = (name: string) =>
 describe('the screen itself', () => {
   it('asks for the global settings reads and nothing else', async () => {
     // It is always mounted behind `hidden`, so a load here is a load on the app's first
-    // paint. Both of these already were one - they were the Overview's - so what moved
-    // is which screen asks, not how many requests the app makes when it starts. The
+    // paint. Both of these already were, as the Overview's, so what moved is which
+    // screen asks, not how many requests the app makes when it starts. The
     // assertion is the whole set, because a third read added here is a third read on
     // every visit to the app, whatever screen it lands on.
     mockFetch(BASE);
@@ -386,7 +386,9 @@ describe('financial setup', () => {
 
     fireEvent.change(owners(), { target: { value: 'Ana Lee' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('server stored something else (owner names Yurii Kalvenko)');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'server stored something else (owner names Yurii Kalvenko). Your edits are still here. Review them before you save again.',
+    );
     expect(screen.getByRole('button', { name: 'Remove owner name Ana Lee' })).toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled();
     expect(recurringReads()).toBe(1);
@@ -887,9 +889,9 @@ describe('the import history across every account', () => {
 
   /**
    * The takeover is a place the reader can BE, so it lives in the URL like every other
-   * one. It was a useState, and Shell keeps every screen mounted under `hidden` - so
-   * the state outlived the screen, and leaving Settings and coming back answered with
-   * the history instead of the settings that were asked for.
+   * one. It was a useState, and Shell keeps every screen mounted under `hidden`, so the
+   * state outlived the screen. Leaving Settings and coming back answered with the
+   * history instead of the settings that were asked for.
    *
    * The second half is the defect and is asserted WITHOUT a click: `{ screen:
    * 'settings', panel: null }` is exactly what Shell writes on every move between

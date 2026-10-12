@@ -74,13 +74,13 @@ const SIZE_CAP: Record<ImportSourceType, SizeCap | null> = {
   xlsx: {
     max: 10 * MB,
     tooLarge: (mb) =>
-      `the workbook is larger than ${mb} MB - export a narrower date range, or save it as CSV`,
+      `the workbook is larger than ${mb} MB. Export a narrower date range, or save it as CSV`,
   },
   /** pdfjs holds the document whole, exactly as exceljs holds the workbook. */
   pdf: {
     max: 10 * MB,
     tooLarge: (mb) =>
-      `the PDF is larger than ${mb} MB - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`,
+      `the PDF is larger than ${mb} MB. Export a narrower date range, or export the statement as CSV or Excel (.xlsx)`,
   },
 };
 
@@ -91,7 +91,7 @@ const FORMAT_NAME: Record<ImportSourceType, string> = {
 };
 
 const FORMAT_NAMES = Object.values(FORMAT_NAME);
-/** "CSV, Excel (.xlsx) or PDF" - the list a refusal names, derived and never typed out. */
+/** The list a refusal names, derived and never typed out. */
 const FORMATS = `${FORMAT_NAMES.slice(0, -1).join(', ')} or ${FORMAT_NAMES[FORMAT_NAMES.length - 1]}`;
 
 /**
@@ -109,9 +109,10 @@ const MAX_PDF_PAGES = 200;
  *
  * What it does not bound. The check runs between pdfjs calls and cannot interrupt one, and
  * a document may put everything on a single page; what a compressed stream expands to is
- * bounded by neither cap. Opening the document is outside it the same way - charged to the
- * budget, not interruptible by it. So this bounds accidental pathology and not someone who
- * is trying. Sustained load across many uploads is a rate limit and not this.
+ * bounded by neither cap. Opening the document is outside it the same way: it is charged
+ * to the budget but cannot be interrupted by it. So this bounds accidental pathology and
+ * not someone who is trying. Sustained load across many uploads is a rate limit and not
+ * this.
  */
 const PDF_LIMITS: PdfLimits = { maxPages: MAX_PDF_PAGES, deadlineMs: 20_000 };
 
@@ -132,21 +133,22 @@ const FEE_QUOTE_MAX = 24;
 const SERIES_QUOTE_MAX = 24;
 
 /**
- * What one cell describeRow quotes back at the user may spend - and the one place
- * the 199 that NOTICE_MAX (xlsx.ts) and NOTE_MAX (pdf.ts) are both derived against
- * is written whole. Three files each carried half of that derivation, each half was
- * locally checkable, and nobody owned the sum: which is how BOTH premises of the
- * sentence in xlsx.ts came to be false while its number stayed right.
+ * What one cell describeRow quotes back at the user may spend. This is also the one
+ * place where the 199 that NOTICE_MAX (xlsx.ts) and NOTE_MAX (pdf.ts) are both
+ * derived against is written whole. Three files each carried half of that
+ * derivation, each half was locally checkable, and nobody owned the sum: which is
+ * how BOTH premises of the sentence in xlsx.ts came to be false while its number
+ * stayed right.
  *
  * 199 = noRowsParsed's head at MAX_DATA_ROWS skipped, 40, plus the longest reason
  * describeRow composes, 159. NOTICE_MAX is what ERROR_DETAIL_MAX leaves after those
- * two, the 3 characters that join them, and 8 of margin.
+ * two, the 2 characters that join them, and 8 of margin.
  *
  * The 159, at the extreme of every number it carries. The lead is `row `, the label
  * and `: `, and the label is whatever the path's rowLabel emits:
  *   xlsx   kept[i].sheetRow, and never past MAX_SHEET_ROWS = 500000, because a
- *          worksheet with more rows than that is skipped before readRows walks it -
- *          so Excel's own 1048576 is NOT reachable, however the file was written
+ *          worksheet with more rows than that is skipped before readRows walks it.
+ *          So Excel's own 1048576 is NOT reachable, however the file was written
  *   csv    i + 1, so MAX_DATA_ROWS + 1
  *   pdf    i, so MAX_DATA_ROWS
  * against the arms:
@@ -156,8 +158,8 @@ const SERIES_QUOTE_MAX = 24;
  *                  instead of only at the six the xlsx gate happens to allow: 158
  *                  under a six-digit label, 159 at Excel's unreachable one
  *   a note         the wider of the two arms that quote one spends 22 of fixed prose
- *                  (`the amount cell `; the date one is 20), so what a note MAY spend
- *                  - the budget a producer is writing against - is what 159 leaves
+ *                  (`the amount cell `; the date one is 20). What a note MAY spend,
+ *                  the budget a producer is writing against, is what 159 leaves
  *                  after that and the label: 131 under xlsx's six digits, 132 under
  *                  the five pdf and csv can reach. The two cannot be traded: a
  *                  132-character note at a six-digit label composes 160, so 131 is
@@ -169,7 +171,7 @@ const SERIES_QUOTE_MAX = 24;
  *                  the cut it composes past the budget and evicts noRowsParsed's
  *                  notice about a different part of the file whole.
  *                  NOT held: that a note producer added later respects its path's
- *                  budget. Nothing checks it, and a blanket bounded() here cannot -
+ *                  budget. Nothing checks it, and a blanket bounded() here cannot:
  *                  it would have to cut at 131, which is under what pdf already
  *                  spends.
  *   no movement    the on-top arm quotes two cells at this bound: 159 under a
@@ -196,11 +198,12 @@ const COLUMN_NAME_MAX = 40;
  * POST /api/accounts and nothing else.
  *
  * The absent keys stay, carried as optional `never`. They no longer hold
- * exclusivity - there is nothing left to be exclusive with - they hold `src/`:
- * app.ts annotates `let destination: StatementDestination`, so a product call site
- * that built a name arm fails tsc, including one that builds the object in a
- * variable first, where an excess-property check would not run. They hold NOTHING
- * under test/, which this tsconfig does not compile.
+ * exclusivity, since there is nothing left to be exclusive with. What they hold is
+ * every typed call site: app.ts annotates `const destination: StatementDestination`,
+ * so a product call site that built a name arm fails tsc, including one that builds
+ * the object in a variable first, where an excess-property check would not run. A
+ * direct call under test/ fails the same way, in the tsconfig that checks test/. They
+ * hold NOTHING over the wire, because a multipart field carries no type.
  */
 export type StatementDestination = { accountId: string; accountName?: never; currency?: never };
 
@@ -212,9 +215,9 @@ export type StatementImportRequest = StatementDestination & {
 };
 
 export const ACCOUNT_NOT_FOUND =
-  'no such account - pick one of your accounts, or create a new one';
+  'no such account. Pick one of your accounts, or create a new one';
 export const ACCOUNT_REMOVED =
-  'this account has been removed from the app - restore it, then upload the file again';
+  'this account is hidden. Unhide it, then upload the file again';
 
 export type { BalancesNotShown, ReadAs, ReadColumns, SeriesCounts } from '../wire';
 
@@ -253,11 +256,11 @@ export function sniff(bytes: Buffer): ImportSourceType {
   if (starts(0x25, 0x50, 0x44, 0x46)) return 'pdf';
   if (starts(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1)) {
     throw new Error(
-      'this is the older Excel format (.xls) - open it and save as .xlsx, or export the statement as CSV',
+      'this is the older Excel format (.xls). Open it and save as .xlsx, or export the statement as CSV',
     );
   }
   if (starts(0x1f, 0x8b)) {
-    throw new Error('this file is compressed - unpack it and upload the statement itself');
+    throw new Error('this file is compressed. Unpack it and upload the statement itself');
   }
   // UTF-16 ahead of the NUL scan below, which every UTF-16 file would otherwise
   // trip: Excel's own "Unicode Text" export is UTF-16LE with a BOM, and decodeCsv
@@ -269,31 +272,31 @@ export function sniff(bytes: Buffer): ImportSourceType {
   while (i < bytes.length && blank.has(bytes[i])) i++;
   if (bytes[i] === 0x3c) {
     throw new Error(
-      `this looks like XML or HTML, not a ${FORMATS} statement - CAMT.053 and MT940 are not supported yet`,
+      `this looks like XML or HTML, not a ${FORMATS} statement. CAMT.053 and MT940 are not supported yet`,
     );
   }
-      // A bank's own export can be a signed container: the whole statement inside a CMS
-      // envelope, with `%PDF-` at an offset rather than at 0. Answered on the header being
-      // FOUND and never on the lead-in - "it starts like an ASN.1 SEQUENCE" is not evidence
-      // a statement is in there. 0x30 is also ASCII `0`, so a CSV whose first cell is a
-      // dotted date reaches this line; the second byte is what parts them, and only because
-      // 0x80-0x84 are UTF-8 continuation bytes, which cannot follow an ASCII digit in a text
-      // file. Short form says the whole value is at most 127 bytes and cannot hold a
-      // document; 0x80 is BER indefinite length, which a signer that streams emits. A rule
-      // narrowed to the one length byte the documents in hand happen to carry would pass
-      // every test written from them and refuse the same bank's next file.
-      //
-      // Searched whole rather than within a window: readPdf gets this same buffer, and
-      // pdfjs finds the header at any offset - past its own find() window it reconstructs
-      // the xref - so a window here would make the classifier stricter than the reader it
-      // feeds and refuse a file this product can read. Only a file that already matched the
-      // lead-in gets this far, so no CSV pays for the search.
+  // A bank's own export can be a signed container: the whole statement inside a CMS
+  // envelope, with `%PDF-` at an offset rather than at 0. Answered on the header being
+  // FOUND and never on the lead-in, because "it starts like an ASN.1 SEQUENCE" is not
+  // evidence that a statement is in there. 0x30 is also ASCII `0`, so a CSV whose first
+  // cell is a dotted date reaches this line; the second byte is what parts them, and only
+  // because 0x80-0x84 are UTF-8 continuation bytes, which cannot follow an ASCII digit in
+  // a text file. Short form says the whole value is at most 127 bytes and cannot hold a
+  // document; 0x80 is BER indefinite length, which a signer that streams emits. A rule
+  // narrowed to the one length byte the documents in hand happen to carry would pass
+  // every test written from them and refuse the same bank's next file.
+  //
+  // Searched whole rather than within a window: readPdf gets this same buffer, and pdfjs
+  // finds the header at any offset, because past its own find() window it reconstructs
+  // the xref. So a window here would make the classifier stricter than the reader it
+  // feeds, and refuse a file this product can read. Only a file that already matched the
+  // lead-in gets this far, so no CSV pays for the search.
   if (bytes[0] === 0x30 && bytes[1] >= 0x80 && bytes[1] <= 0x84 && bytes.includes(PDF_HEADER)) {
     return 'pdf';
   }
   if (bytes.subarray(0, NUL_SCAN_BYTES).includes(0)) {
     throw new Error(
-      `this file is not a ${FORMATS} statement - export the statement in one of those from your online banking and upload that`,
+      `this file is not a ${FORMATS} statement. Export the statement in one of those formats from your online banking and upload that`,
     );
   }
   return 'csv';
@@ -306,8 +309,8 @@ export async function importStatement(
 
   const already = await findCommittedImportByHash(fileHash);
   if (already) {
-    // the account this upload asked for is not necessarily where the rows are - the
-    // file was imported into whatever account it was given the first time
+    // the account this upload asked for is not necessarily where the rows are: the
+    // file went into whatever account it was given the first time
     const accountIds = await listImportAccountIds(already.id);
     return {
       outcome: 'duplicate',
@@ -327,10 +330,10 @@ export async function importStatement(
   // committed file resolves nothing and mints nothing.
   //
   // Above `sniff` is a choice and not a necessity. The destination refusal is true
-  // whatever the file turns out to be, and it is the only one of the three the user
-  // cannot discover by looking at the file - so a .docx dropped into a removed
+  // whatever the file turns out to be, and unlike the format and size refusals, the
+  // user cannot discover it by looking at the file. So a .docx dropped into a removed
   // account is told the account is gone rather than told the format is unreadable.
-  // Both are true; this one is the one worth saying first. Moved below the size cap
+  // Both are true; this one is the one worth saying first. Moved below createImport
   // it would also leave an `imports` row for an upload that was never going to land.
   const account = await uploadDestination(req);
 
@@ -348,15 +351,15 @@ export async function importStatement(
   try {
     // The file itself, before the parse and inside the same catch.
     // Before, because the imports that FAILED are precisely the ones support needs
-    // the input for - so a failed import keeps its document, and so does a `pending`
+    // the input for. So a failed import keeps its document, and so does a `pending`
     // one left by a process that died between here and the parse.
     //
     // If it cannot be stored the import is refused rather than committed with a
     // warning: committing would claim the file hash forever, and the same bytes
     // would then answer "already imported" on every retry, so the one artefact that
     // cannot be recovered later could never be captured for that file at all. The
-    // throw lands in the catch below - a `failed` row with no transactions, and
-    // bytes that stay re-uploadable because only `committed` blocks.
+    // throw lands in the catch below, which leaves a `failed` row with no transactions
+    // and bytes that stay re-uploadable, because only `committed` blocks.
     await putDocument(
       { importId: record.id, originalFilename: record.originalFilename, sourceType },
       req.bytes,
@@ -405,8 +408,8 @@ function presetMapping(preset: string | undefined): NamedPreset | null {
   if (!preset || preset === 'generic') return null;
   // hasOwn and not CSV_PRESETS[preset]: the record is a plain object literal, so
   // `toString` and every other Object.prototype member reads as a truthy entry whose
-  // .mapping is undefined - which reaches readSheet as a preset and dies there on
-  // `preset.mapping.delimiter`, an internal TypeError in error_detail.
+  // .mapping is undefined. That entry reaches readSheet as a preset and dies there on
+  // `preset.mapping.delimiter`, with an internal TypeError in error_detail.
   const known = Object.hasOwn(CSV_PRESETS, preset) ? CSV_PRESETS[preset] : undefined;
   if (!known) throw new Error(`unknown preset: ${preset}`);
   return { key: preset, ...known };
@@ -459,7 +462,7 @@ export async function readSheet(
       const parsed = await readPdf(req.bytes, PDF_LIMITS);
       // A PDF's columns come from the template that matched, and from nothing the
       // request said. `preset` names header text and `mapping` names columns, and a
-      // PDF has neither for them to name - so a chip the user may not remember
+      // PDF has neither for them to name. So a chip the user may not remember
       // picking must not decide whether their statement imports.
       return {
         kind: 'pdf',
@@ -546,7 +549,7 @@ function resolvePreset(
 /**
  * The fee column, or -1. Resolved from the preset here rather than in resolvePreset,
  * and through neither match() nor colIndex: both record an Unresolved, and a single
- * unresolved slot refuses the whole file - where a Revolut export whose header has no
+ * unresolved slot refuses the whole file, while a Revolut export whose header has no
  * fee column has to import. resolveColumns is also the XLSX header scan's predicate,
  * so a slot that can fail would move which row the scan settles on and every data row
  * would then be read against the wrong columns. There is no header for which this
@@ -565,7 +568,7 @@ function feeColumn(header: string[], preset: CsvPresetMapping | null): number {
  * header has no Balance column imports today, and a slot that could refuse a header
  * would also move which row the XLSX header scan settles on.
  *
- * The series column is a refinement and never a precondition - a file that states one
+ * The series column is a refinement and never a precondition: a file that states one
  * running balance and does not say so has one series, which is the correct reading.
  */
 function balanceColumns(
@@ -597,7 +600,7 @@ function resolveColumns(
     if (!mapping && !override?.date) {
       return {
         ok: false,
-        error: `could not find date/amount/description columns in the header: ${header.join(', ')} - set a mapping or pick a preset`,
+        error: `could not find date/amount/description columns in the header: ${header.join(', ')}. Set a mapping or pick a preset`,
       };
     }
   }
@@ -620,7 +623,7 @@ function resolveColumns(
 
   // From `effective` and never from header[dateCol]: the descriptor is built above the
   // unresolved check below, colIndex answers -1 for a slot the header has not got, and
-  // this function is also the XLSX header scan's predicate - so header[-1] would make
+  // this function is also the XLSX header scan's predicate. So header[-1] would make
   // bounded() throw on the first non-header row of every workbook. Bounded here, at the
   // one construction site, so an unbounded ReadColumns never exists as a value.
   const readColumns: ReadColumns = {
@@ -680,18 +683,18 @@ const acceptedValues = (equals: string | string[]): ReadonlySet<string> =>
  * Why the columns could not be filled. Every unresolved slot, not the first: with a
  * list of accepted names per column a header in a language nobody has listed misses
  * four slots at once, and naming one invites the user to fix one name and upload
- * into the same refusal - against a file they cannot edit.
+ * into the same refusal, against a file they cannot edit.
  *
  * The slots and what was tried come first and the header dump last, because the dump
  * is unbounded and error_detail's cap cuts the tail: what the user acts on is the
- * names, not their own header read back to them. Appended whole or not at all - a
- * truncated dump names columns the file has not got.
+ * names, not their own header read back to them. Appended whole or not at all, since
+ * a truncated dump names columns the file has not got.
  */
 function noColumnMatched(unresolved: Unresolved[], header: string[]): string {
   const slots = unresolved
     .map((u) => `${u.slot} (tried ${u.tried.map((n) => `"${n}"`).join(', ')})`)
     .join(', ');
-  const head = `no column matched for ${slots} - pick a different preset or set a mapping`;
+  const head = `no column matched for ${slots}. Pick a different preset or set a mapping`;
   const dump = `; the header reads: ${header.join(', ')}`;
   return head.length + dump.length <= ERROR_DETAIL_MAX ? head + dump : head;
 }
@@ -749,10 +752,9 @@ declare const refused: unique symbol;
 
 /**
  * WHY a row was not imported, decided where it is known and carried to the sentence
- * whole. Until this row the mapper computed the reason, threw it away, and handed
- * describeRow two nullables out of which "the movement was zero" is not expressible -
- * so every zero-movement row was told that neither of its cells could be read, about
- * cells that had both parsed.
+ * whole. Two nullables handed to describeRow instead cannot express "the movement was
+ * zero": every zero-movement row would be told that neither of its cells could be
+ * read, about cells that had both parsed.
  */
 export type RowRefusal =
   | ({ kind: 'unread'; date: string | null; amount: number | null } & {
@@ -762,10 +764,10 @@ export type RowRefusal =
 
 /**
  * And the arm that is not a refusal, which carries the two values out non-null. The
- * guard this replaced decided the row AND narrowed date and amount for everything
- * below it; a verdict that answered only the refusals would have thrown the narrowing
- * away and needed a second test to get it back - a predicate written twice, which is
- * the shape of defect this row exists to remove one level up.
+ * verdict decides the row AND narrows date and amount for everything below it. One
+ * that answered only the refusals would throw the narrowing away and need a second
+ * test to get it back: a predicate written twice, which is the shape of defect
+ * RowRefusal removes one level up.
  */
 export type RowVerdict =
   | RowRefusal
@@ -776,20 +778,20 @@ const refuse = <T>(value: T): T & { readonly [refused]: true } =>
   value as T & { readonly [refused]: true };
 
 /**
- * Whether a row imports and, when it does not, WHY - decided once, where both are
- * known, and carried to the sentence whole.
+ * Whether a row imports and, when it does not, WHY. Both are decided once, where both
+ * are known, and carried to the sentence whole.
  *
- * The brand is what makes the ordering below a rule rather than a convention: no
+ * The brand is what makes the ordering below a rule rather than a convention. No
  * other file can build a RowVerdict at all, so no caller can claim `no-movement` for
- * a row whose date or amount never parsed - the nullness test comes first here, once,
+ * a row whose date or amount never parsed: the nullness test comes first here, once,
  * and the zero arm is reachable only past it. It stops an accident, not a determined
  * caller: `as unknown as RowRefusal` still compiles, which is all `check` claims
  * either.
  *
- * `amount` is the MOVEMENT, after applyFee, where describeRow used to be handed the
- * cell. Safe because amount === null iff rawAmount === null at the call site: applyFee
- * returns a number on every arm, so the only null is the caller's own rawAmount guard.
- * That equivalence is obvious for exactly as long as applyFee has no fourth arm.
+ * `amount` is the MOVEMENT, after applyFee, and not the cell. Safe because
+ * amount === null iff rawAmount === null at the call site: applyFee returns a number
+ * on every arm, so the only null is the caller's own rawAmount guard. That equivalence
+ * is obvious for exactly as long as applyFee gains no new arm.
  */
 export function rowVerdict(
   date: string | null,
@@ -817,9 +819,9 @@ export type StatedBalances =
        * The series and currency of every row the status filter dropped that stated a
        * balance anyway. The gate covers exactly the rows `onlyWhen` accepts, and that
        * alignment holds only while "has a running balance" and "is accepted" are the
-       * same predicate - measured true of the real export, where all three pending
-       * rows leave the cell empty. This is the detector for the day a bank diverges
-       * from it, and it is carried per row rather than as a count because a dropped
+       * same predicate. That was measured true of the real export, whose pending rows
+       * leave the cell empty. This is the detector for the day a bank diverges from
+       * it, and it is carried per row rather than as a count because a dropped
        * row punches its hole in ONE running balance: which one it names decides
        * whether a break somewhere else in the file is explained by it or not.
        */
@@ -832,10 +834,10 @@ export interface StatedRow {
   series: string;
   /**
    * And the same cell as the file spelled it, for the refusal to quote. Folding is
-   * only for deciding which rows belong to the same running balance - `Current` and
-   * `current` are one series and must not become two - so it may not reach a sentence
-   * a person reads beside their own statement (the status values are quoted the same
-   * way, and for the same reason).
+   * only for deciding which rows belong to the same running balance, where `Current`
+   * and `current` are one series and must not become two. So a folded value may not
+   * reach a sentence a person reads beside their own statement. The status values are
+   * quoted as the file spelled them too, for the same reason.
    */
   label: string;
   /** the balance stated after this row, in cents; null = empty or unreadable */
@@ -855,17 +857,17 @@ function readBalance(c: Cell | undefined, decimal: CsvMapping['decimal']): numbe
 }
 
 /**
- * What the file stated for one row's fee. null is "it stated nothing" - an empty
- * cell - and never a zero this importer invented; the empty test is on the text and
- * comes first, exactly as the currency column's does, because parseAmount('') answers
- * null and so does a cell full of rubbish.
+ * What the file stated for one row's fee. null is "it stated nothing", meaning an
+ * empty cell, and never a zero this importer invented. The empty test is on the text
+ * and comes first, exactly as the currency column's does, because parseAmount('')
+ * answers null and so does a cell full of rubbish.
  *
  * A cell that is there and unreadable refuses the row rather than the file, and a
  * negative one with it: subtracted, it would INCREASE the movement, and no source in
  * this tree states such a thing. Refusing the file instead would leave the user one
- * route - the generic preset, which resolves no fee column at all and would import
- * every row of that statement pre-fee, silently. That is the defect this reader
- * exists to remove, so the louder refusal is the one that costs more.
+ * route: the generic preset, which resolves no fee column at all and would silently
+ * import every row of that statement pre-fee. That is the defect this reader exists
+ * to remove, so the louder refusal is the one that costs more.
  */
 function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
   const text = cellText(c).trim();
@@ -877,7 +879,7 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
 /**
  * What the file stated for one row's merchant category code. undefined is "it stated
  * nothing this parser will use", and a cell that is not exactly four digits gets the
- * same answer as an empty one - deliberately, and with nothing refused, noted or
+ * same answer as an empty one. That is deliberate, and nothing is refused, noted or
  * counted.
  *
  * An MCC is a categorisation hint whose fallback is exactly today's behaviour,
@@ -886,8 +888,8 @@ function readFee(c: Cell | undefined, decimal: CsvMapping['decimal']): FeeCell {
  * corrupts the movement and no gate can see it. Nothing about an MCC can corrupt money.
  *
  * The rule lives here and not in pdf.ts because "an MCC is four digits" is a fact about
- * MCCs and not about a layout - the day a preset names an MCC column it is this function
- * reading a different one. Going through cellText for the same reason: an XLSX column
+ * MCCs and not about a layout. The day a preset names an MCC column, it is this function
+ * that reads that column too. Going through cellText for the same reason: an XLSX column
  * hands over the number 5411 where a CSV hands over '5411', and both are the same input.
  *
  * 0000 is excluded because 0 is not an MCC and a fact column must not carry one this
@@ -943,11 +945,12 @@ function statedFeeOf(
 type DropKind = 'unreadable' | 'filtered' | 'noMovement';
 
 /**
- * Where each refusal lands. A fourth RowRefusal kind does not compile until it names
- * a bucket - but the failure this table is really guarding is the WRONG mapping, not
+ * Where each refusal lands. A new RowRefusal kind does not compile until it names a
+ * bucket. But the failure this table really guards against is the WRONG mapping, not
  * the missing one. `unread: 'noMovement'` type-checks, keeps `skipped` exact, and
  * empties the clause balanceBreaks composes about the lines this importer could not
- * read - the one sentence that tells a user where their missing money went.
+ * read. That clause is the one sentence that tells a user where their missing money
+ * went.
  */
 const DROP_OF: Record<RowRefusal['kind'], DropKind> = {
   unread: 'unreadable',
@@ -987,7 +990,7 @@ async function mapAndStore(
   // a descriptor built from the request would state, in the one place the user is asked
   // to trust, something the parser did not do.
   //
-  // And resolveColumns HAS answered a SheetReadAs here even on the pdf path - readSheet
+  // And resolveColumns HAS answered a SheetReadAs here, even on the pdf path: readSheet
   // hands the mapper a synthetic pdf:date/pdf:amount/pdf:description header, which comes
   // out as request-mapping. That value is dropped by this switch on purpose: those three
   // strings are this importer's own invented words, not the document's. Deleting the
@@ -1028,9 +1031,10 @@ async function mapAndStore(
   const statedFeeCol = feeSource.kind === 'none' ? -1 : feeSource.col;
 
   // Which cell states a merchant category code, feeSource's shape and for its reason.
-  // The sheet arm is 'none' because no preset declares an MCC column yet: both of this
-  // bank's CSV exports do print one, and neither is importable at all today - a
-  // CsvPresetMapping.mcc built here would be a field with no preset to read it.
+  // The sheet arm is 'none' because no preset declares an MCC column yet. The bank whose
+  // PDF template reads an MCC prints one in its CSV exports too, but none of them is
+  // importable at all today. So a CsvPresetMapping.mcc built here would be a field with
+  // no preset to read it.
   const mccSource: PdfMcc = ((): PdfMcc => {
     switch (parsed.kind) {
       case 'pdf':
@@ -1047,7 +1051,7 @@ async function mapAndStore(
   const total = sheet.rows.length - 1;
   if (total > MAX_DATA_ROWS) {
     throw new Error(
-      `the statement has ${total} data rows, more than the ${MAX_DATA_ROWS} this importer reads in one file - split it and upload the parts`,
+      `the statement has ${total} data rows, more than the ${MAX_DATA_ROWS} this importer reads in one file. Split it and upload the parts`,
     );
   }
 
@@ -1055,10 +1059,10 @@ async function mapAndStore(
   // checks and what the file stated beside it are read in one loop and cannot come
   // apart by an index.
   const accepted: { tx: NewTransaction; day: CalendarDay; stated: StatedRow }[] = [];
-    // a notice is a fact about the file, not a rejected row: it goes in front of the
-    // row problems and touches no count. The two
-  // are kept apart so that neither has to be recovered from the other by index -
-  // an extra notice would silently make problems[0] the wrong kind of sentence
+  // a notice is a fact about the file, not a rejected row: it goes in front of the
+  // row problems and touches no count. The two are kept apart so that neither has to
+  // be recovered from the other by index: an extra notice would silently make
+  // problems[0] the wrong kind of sentence
   const notices = sheet.notices ?? [];
   const rowProblems: string[] = [];
   // what the status filter dropped, by the value the file wrote: a half-recognised
@@ -1086,12 +1090,13 @@ async function mapAndStore(
   for (let i = 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i];
     // first in the loop and it must stay there: the rows this drops are the ones the
-    // bank has not finished, and their date cell is empty - filtered later, each of
-    // them spends a MAX_PROBLEMS slot on a date it was never going to have.
+    // bank has not finished, and their date cell is empty. Filtered later, each of
+    // them would spend a MAX_PROBLEMS slot on a date it was never going to have.
     //
-    // A row is kept only if its folded value IS in the accepted set. Inverted - skip
-    // the known-pending ones - it would import every reverted, declined and pending
-    // row shipped in a language nobody has listed yet, as money that never moved.
+    // A row is kept only if its folded value IS in the accepted set. The inverted
+    // rule, skipping the known-pending values, would import every reverted, declined
+    // and pending row shipped in a language nobody has listed yet, as money that
+    // never moved.
     if (onlyWhen) {
       const value = cellText(row[onlyWhen.col]).trim();
       if (!onlyWhen.accepted.has(fold(value))) {
@@ -1127,7 +1132,7 @@ async function mapAndStore(
     }
     // The amount is the movement of the account: what the statement's own running
     // balance moves by, fees included. That is what it means for CSV, XLSX and PDF
-    // alike - and the two paths reach it from opposite directions, which is why the
+    // alike. The two paths reach it from opposite directions, which is why the
     // arithmetic is applyFee's and not written out here. A sheet states the fee on top
     // and the movement is the cell minus it; a PDF prints the movement already and the
     // fee is a second reading of the same charge. One call, both outputs, so no site
@@ -1163,8 +1168,7 @@ async function mapAndStore(
     // One local, two uses, in one edit. The column and the argument to categorize have
     // to be the same value: reclassifyAll recomputes the category from the stored mcc
     // on every production path, so a row stored with a category no rule produces is one
-    // two sites disagree about - including for a caller of mapAndStore that does not
-    // reclassify, of which the test helper is already one.
+    // that two sites disagree about, even on a path that never reclassifies.
     const mcc = mccSource.kind === 'none' ? undefined : readMcc(row[mccSource.col]);
 
     accepted.push({
@@ -1193,9 +1197,9 @@ async function mapAndStore(
   // the day it is declared, where a three-term sum would compile and leave it out
   const skipped = Object.values(dropped).reduce((a, b) => a + b, 0);
   // The last hole `drop` cannot close: a continue added later that counts nothing at
-  // all. It can fire only on a bug in this file - never on a cell of the user's - and
-  // it is what makes the card's own "Read N of M rows" true rather than merely
-  // consistent with the three counts printed under it.
+  // all. It can fire only on a bug in this file, never on a cell of the user's, and it
+  // is what makes the card's own "Read N of M rows" true rather than merely consistent
+  // with the counts printed under it.
   if (txs.length + skipped !== total) {
     throw new Error(
       `internal: ${total} rows read as ${txs.length} accepted and ${skipped} dropped`,
@@ -1211,9 +1215,9 @@ async function mapAndStore(
   }
 
   // Ahead of the staging, so a statement that will be refused stages nothing. And
-  // here rather than at confirm: confirm inserts a subset - an overlapping
-  // statement's rows are already present and are skipped - so a gate re-run there
-  // would refuse every legitimate overlapping import, which is the common case.
+  // here rather than at confirm, because confirm inserts a subset: an overlapping
+  // statement's rows are already present and are skipped. A gate re-run there would
+  // refuse every legitimate overlapping import, which is the common case.
   const reconciled = reconcile(
     parsed,
     txs,
@@ -1235,8 +1239,8 @@ async function mapAndStore(
   await stageImport(importId, txs, skipped, account);
   // Last, and after the staging rather than before it: a failure anywhere above must
   // not have taken the outstanding import the user is still looking at with it. The
-  // reverse order is the one that costs something - two staged copies of one file
-  // coexist safely, where a discarded original and no replacement is a summary the
+  // reverse order is the one that costs something. Two staged copies of one file
+  // coexist safely, while a discarded original and no replacement is a summary the
   // user lost.
   //
   // "Safely" is load-bearing and it is not free: it holds because the supersede is
@@ -1260,11 +1264,11 @@ async function mapAndStore(
       // spread, not three transcribed fields: the tally and the wire cannot come apart,
       // and a fourth kind reaches the response rather than being dropped in silence
       ...dropped,
-    // the aggregate sits ahead of the row problems and inside the few the client
-    // renders: a further per-row reason refines a picture the user already has, where
-    // "some of your rows were dropped, and these are the values that did it" is the
-    // only line saying the import is partial at all. The cut cannot reach a notice -
-    // one is the most any sheet produces
+      // the status aggregate sits ahead of the row problems and inside the few the
+      // client renders. A further per-row reason refines a picture the user already
+      // has, while the aggregate, which says rows were dropped and names the values
+      // that did it, is the only line saying the import is partial at all. The cut
+      // cannot reach a notice, because no sheet produces more than one
       problems: [
         ...notices,
         ...(status ? [`${rowCount(status.skipped)} skipped: ${statusReason('the', status)}`] : []),
@@ -1325,21 +1329,21 @@ const doesNotAddUp = (
   const cause = skipped
     ? `, and the ${lineCount(skipped)} this importer could not read are probably where it went`
     : ', so an operation is probably missing';
-  return `this ${title} statement does not add up: its opening balance of ${money(openingCents, currency)} plus the ${lineCount(accepted)} read comes to ${money(openingCents + net, currency)}, where the statement's own closing balance is ${money(closingCents, currency)} - a difference of ${money(Math.abs(openingCents + net - closingCents), currency)}${cause} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  return `this ${title} statement does not add up: its opening balance of ${money(openingCents, currency)} plus the ${lineCount(accepted)} read comes to ${money(openingCents + net, currency)}, where the statement's own closing balance is ${money(closingCents, currency)}, a difference of ${money(Math.abs(openingCents + net - closingCents), currency)}${cause}. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 };
 
 /**
  * It fires only when the ends match and the halves do not, and the wording leads with
  * that: a single dropped row fails both checks, and the net one runs first because it
  * names the missing amount where this one names a discrepancy in a subtotal. So the
- * only thing left for this sentence is the compensating pair - money out and money in
+ * only thing left for this sentence is the compensating pair: money out and money in
  * that the parser never saw, cancelling into a clean net.
  *
  * All four figures, signed, rather than the two differences: which side to look at in
  * the document is what the person holding it needs, and a magnitudes-only sentence
  * under a backwards `signs` declaration would print the same number twice and read as
  * a refusal naming two identical figures. "of the same size" is exact rather than a
- * hedge - the net matched, so the two shortfalls are equal by arithmetic.
+ * hedge. The net matched, so the two shortfalls are equal by arithmetic.
  */
 const sidesDoNotAddUp = (
   title: string,
@@ -1353,11 +1357,11 @@ const sidesDoNotAddUp = (
   const cause = skipped
     ? `, and the ${lineCount(skipped)} this importer could not read are probably where they went`
     : ', so an operation out and an operation in of the same size are probably both missing';
-  return `this ${title} statement's opening and closing balance agree, but its two halves do not: it states ${money(printed.outgoingCents, currency)} out and ${money(printed.incomingCents, currency)} in, where the ${lineCount(accepted)} read come to ${money(outCents, currency)} out and ${money(inCents, currency)} in${cause} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  return `this ${title} statement's opening and closing balance agree, but its two halves do not: it states ${money(printed.outgoingCents, currency)} out and ${money(printed.incomingCents, currency)} in, where the ${lineCount(accepted)} read come to ${money(outCents, currency)} out and ${money(inCents, currency)} in${cause}. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 };
 
 const mixedCurrencies = (title: string, currency: string, found: string[]): string =>
-  `this ${title} statement states its balances in ${bounded(currency, CURRENCY_CODE_MAX)}, but the lines read are in ${currencyList(found)} - this importer cannot check a statement that mixes currencies - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement states its balances in ${bounded(currency, CURRENCY_CODE_MAX)}, but the lines read are in ${currencyList(found)}. This importer cannot check a statement that mixes currencies. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 /**
  * One accepted row as an edge of the running balance it belongs to: the balance the
@@ -1400,8 +1404,8 @@ type Verdict =
  * complete series has every link in one connected component, exactly one value with
  * one more link leaving it than entering (the opening) and exactly one with one more
  * entering than leaving (the closing). Degrees and components are multiset facts, so
- * a permutation of the file's rows - a bank exporting newest-first - gives the same
- * verdict and the same pair.
+ * a permutation of the file's rows, such as a bank exporting newest-first, gives the
+ * same verdict and the same pair.
  *
  * Removing an interior row splits the run in two, which shows up as a second
  * component and as a second value with an excess. That is the whole content of the
@@ -1409,16 +1413,16 @@ type Verdict =
  * from these same rows that is an identity and holds however many rows are missing.
  *
  * It is blind at the ENDS, and the blindness is structural: losing the first or last
- * row of a run does not break it, it moves where it starts or stops - which is why
- * the confirmation screen may claim the run and may not claim the statement is
- * complete.
+ * row of a run does not break it but moves where it starts or stops. That is why the
+ * confirmation screen may claim the run and may not claim the statement is complete.
  *
  * Connectivity is load-bearing rather than decoration: 100->110, 110->130 plus a
- * detached 500->600, 600->500 has balanced degrees at every value and is two runs.
+ * detached 500->600, 600->500 has exactly the degrees of one unbroken run and is two
+ * runs.
  *
  * A row whose movement rounds to zero cents needs no special case and gets none: its
  * pre equals its post, so it is a self-loop, which changes no degree and joins no two
- * values. Dropping it - as the `amount === 0` guard does - leaves the run intact.
+ * values. Dropping it, as the `amount === 0` guard does, leaves the run intact.
  */
 function runsAsOne(links: readonly Link[]): Verdict {
   const out = new Map<number, number>();
@@ -1466,7 +1470,7 @@ function runsAsOne(links: readonly Link[]): Verdict {
  *
  * The verdict above is order-independent and this is not, deliberately: what a person
  * holding the statement needs is two lines they can find. Reached only for a run the
- * verdict already called broken, and one always exists there - a run whose every
+ * verdict already called broken, and a break always exists there: a run whose every
  * adjacent pair links is a single walk, and a walk is an Eulerian path or a circuit,
  * neither of which is broken. The undefined arm is what stops that argument being
  * load-bearing at runtime; balanceBreaks below composes a true sentence without it.
@@ -1491,9 +1495,9 @@ export const balanceBreaks = (
     ? `, and the ${lineCount(unreadable)} this importer could not read are probably where it went`
     : ', so an operation is probably missing';
   const head = at
-    ? `this statement's own running balance breaks:${where} the line stating ${money(at.after.postCents, currency)} does not follow the one stating ${money(at.before.postCents, currency)} - ${money(Math.abs(at.after.preCents - at.before.postCents), currency)} is unaccounted for between them`
+    ? `this statement's own running balance breaks:${where} the line stating ${money(at.after.postCents, currency)} does not follow the one stating ${money(at.before.postCents, currency)}, and ${money(Math.abs(at.after.preCents - at.before.postCents), currency)} is unaccounted for between them`
     : `this statement's own running balance breaks: the lines read${where} do not form one unbroken run`;
-  return `${head}${cause} - export the same statement again from your online banking and upload it`;
+  return `${head}${cause}. Export the same statement again from your online banking and upload it`;
 };
 
 /**
@@ -1507,9 +1511,9 @@ export const balanceBreaks = (
  * status filter dropped is a step of that series the gate never sees. What is left of
  * either run breaks, and the break is ours rather than the file's. A locale whose
  * balances this `decimal` setting misreads, and a bank that prints a running balance on
- * its pending rows, are the two files that live there - both import today, both must
- * keep importing, and neither may cost a refusal on the one path with nowhere further
- * to fall back to.
+ * its pending rows, are the files that live there. Both import today and must keep
+ * importing, and neither may cost a refusal on the one path with nowhere further to
+ * fall back to.
  *
  * Everything past the loop is only whether a pair can honestly be shown.
  */
@@ -1517,7 +1521,7 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   if (stated.kind === 'none') return { kind: 'none' };
   const coveredRuns = new Set(stated.coveredButSkipped.map((c) => runKey(c.series, c.currency)));
   // a dropped row naming a running balance that no accepted row belongs to has no run
-  // to disarm - and "has a balance" and "is accepted" have still come apart, which is
+  // to disarm. But "has a balance" and "is accepted" have still come apart, and that is
   // the fact the discriminator exists to carry
   let covered = [...coveredRuns].some((key) => !running.has(key));
 
@@ -1559,8 +1563,8 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
   const currencies = new Set(pairs.map((p) => p.currency));
   if (currencies.size !== 1) return { kind: 'unusable', reason: 'more-than-one-currency' };
   // Both counts are defined here and at no other exit, which is what makes them agree
-  // about their denominator. Every exit above is a whole-file one - one incomplete,
-  // covered or endpointless run takes the entire file to `unusable` - so by the time
+  // about their denominator. Every exit above is a whole-file one: one incomplete,
+  // covered or endpointless run takes the entire file to `unusable`. So by the time
   // this returns, every run produced exactly one pair and every pair is a path. A
   // circuit is in neither number because a circuit never reaches here at all.
   return {
@@ -1575,9 +1579,9 @@ function checkSheet(running: Map<string, RunningBalance>, stated: StatedBalances
 /**
  * The states a sheet's balances can be in, and there is no other:
  * "this file states no running balance" and "it stated one and it could not be used"
- * are different variants, so collapsing the second into the first cannot happen by
- * omission - it would have to be written out - and the exhaustive switch below makes
- * a state added here a `tsc` error rather than a review finding.
+ * are different variants. Collapsing the second into the first cannot happen by
+ * omission, only by being written out, and the exhaustive switch below makes a state
+ * added here a `tsc` error rather than a review finding.
  */
 type SheetBalances =
   | { kind: 'none' }
@@ -1591,22 +1595,22 @@ type SheetBalances =
   | { kind: 'unusable'; reason: BalancesNotShown };
 
 /**
- * The net movement of the file per currency, and - for a format that states its own
- * balances - the check that the rows actually run from the opening one to the
+ * The net movement of the file per currency. For a format that states its own
+ * balances, also the check that the rows actually run from the opening one to the
  * closing one, and that each half of them comes to what the document printed for it.
  *
  * Summed in minor units rather than decimals for the reason money.ts gives, and here
  * it is not theoretical: a real statement's amounts summed as decimals miss its
  * closing balance by a fraction of a cent, and an exact comparison refuses that.
- * Exactly, with no tolerance anywhere - one cent of slack hides a systematically
+ * Exactly, with no tolerance anywhere: one cent of slack hides a systematically
  * dropped fee on a small statement and lets a drifted template import plausible
  * numbers, which is the one outcome worse than refusing.
  *
  * `stated` is required and not optional at the call site: an optional
  * one forgotten at a sheet caller reads as "this format states no balances", which is
  * exactly the collapse SheetBalances exists to prevent. The pdf path passes
- * `{ kind: 'none' }`, which is true of it - the sheet mapper stated nothing for a PDF
- * - and the pdf arm never looks at it.
+ * `{ kind: 'none' }`, which is true of it because the sheet mapper stated nothing for
+ * a PDF, and the pdf arm never looks at it.
  *
  * Exported for the test, like readSheet and noRowsParsed and for the same reason:
  * every template declares one currency, so the mixed-currency arm is unreachable
@@ -1629,8 +1633,8 @@ export function reconcile(
   const cents = new Map<string, number>();
   // the file's own two halves, out of the same loop as the net for the reason above.
   // Currency-blind, which is safe only because the pdf arm below refuses unless there
-  // is exactly one currency and it is the balances' - said here rather than there
-  // because this is where the fact is relied on.
+  // is exactly one currency and it is the balances'. That is said here rather than
+  // there because this is where the fact is relied on.
   //
   // Two branches and not three: a row whose amount is 0 is skipped before it ever
   // becomes a transaction, and an amount that rounded to zero cents would land on the
@@ -1702,6 +1706,7 @@ export function reconcile(
       if (balances.openingCents + net !== balances.closingCents) {
         throw new Error(doesNotAddUp(title, balances, net, txs.length, skipped));
       }
+      // Second, and never first: a single dropped row fails both, and the sentence
       // above names the missing amount where this one names a discrepancy in a
       // subtotal. Reordering these hands the common case the weaker diagnostic.
       if (balances.gross.kind === 'printed') {
@@ -1754,7 +1759,7 @@ function statusReason(lead: string, status: StatusSkips): string {
   const entries = [...status.counts.entries()]
     .sort(([, a], [, b]) => b - a)
     .map(([value, n]) => `"${bounded(value, STATUS_QUOTE_MAX)}" (${n})`);
-  return `${lead} "${bounded(status.column, STATUS_QUOTE_MAX)}" value is not one of the accepted ones - ${statusList(entries)}`;
+  return `${lead} "${bounded(status.column, STATUS_QUOTE_MAX)}" value is not an accepted one. Found: ${statusList(entries)}`;
 }
 
 function statusList(entries: string[]): string {
@@ -1779,7 +1784,8 @@ export function noRowsParsed(
   const reason =
     status && status.skipped === skipped ? statusReason("every row's", status) : rowProblems[0];
   const head = `no row could be parsed (${skipped} skipped)${reason ? ': ' + reason : ''}`;
-  const notice = notices.length ? ` - ${notices.join(' - ')}` : '';
+  const sentences = notices.map((n) => n.charAt(0).toUpperCase() + n.slice(1));
+  const notice = notices.length ? `. ${sentences.join('. ')}` : '';
   return head.length + notice.length <= ERROR_DETAIL_MAX ? head + notice : head;
 }
 
@@ -1789,8 +1795,8 @@ export function noRowsParsed(
  * lengths this composes are bounded by an assertion rather than by a type, so that
  * assertion has to be able to reach every arm. Not API surface anyone asked for.
  *
- * `feeCol` is the column statedFeeOf actually read, not resolveColumns's - on the PDF
- * path the latter is the synthetic header's and quoting it would name a column the
+ * `feeCol` is the column statedFeeOf actually read, not resolveColumns's. On the PDF
+ * path the latter is the synthetic header's, and quoting it would name a column the
  * document has not got.
  */
 export function describeRow(
@@ -1809,7 +1815,7 @@ export function describeRow(
         const note = sheet.note?.(i, dateCol);
         if (note) return `row ${label}: the date cell ${note}`;
         if (typeof row[dateCol] === 'number') {
-          return `row ${label}: the date cell holds the number ${bounded(String(row[dateCol]), CELL_QUOTE_MAX)}, which this parser will not read as a date - format that column as a date and upload again`;
+          return `row ${label}: the date cell holds the number ${bounded(String(row[dateCol]), CELL_QUOTE_MAX)}, which this parser will not read as a date. Format that column as a date, and upload again`;
         }
       }
       if (refusal.amount === null) {
@@ -1819,19 +1825,19 @@ export function describeRow(
       return `row ${label}: could not parse the date ${quote(row[dateCol])} or the amount ${quote(row[amountCol])}`;
     }
     case 'no-movement': {
-      // keyed to the convention rather than flattened into this switch, so a fourth
+      // keyed to the convention rather than flattened into this switch, so a new
       // StatedFee arm is a compile error here and not a row told about somebody
-      // else's convention - applyFee's guarantee, extended to the sentence
+      // else's convention. This is applyFee's guarantee, extended to the sentence
       switch (refusal.stated.kind) {
         case 'not-stated':
-          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and no fee is stated - the row is skipped rather than imported as a zero`;
+          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and no fee is stated. The row is skipped, rather than imported as a zero`;
         case 'on-top':
           // the direction of the subtraction, not "they cancel": a fee cell reading
           // 0.00 states a zero and cancels nothing, and the sign is what the guard is
-          // for - a -5.00 row with a 5.00 fee is a -10.00 movement
-          return `row ${label}: the amount cell ${quote(row[amountCol])} less the fee cell ${quote(row[feeCol])} is zero - the row is skipped rather than imported as a zero`;
+          // for. A -5.00 row with a 5.00 fee is a -10.00 movement
+          return `row ${label}: the amount cell ${quote(row[amountCol])} less the fee cell ${quote(row[feeCol])} is zero. The row is skipped, rather than imported as a zero`;
         case 'included':
-          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and it already carries the fee - the row is skipped rather than imported as a zero`;
+          return `row ${label}: the amount cell reads ${quote(row[amountCol])} and it already carries the fee. The row is skipped, rather than imported as a zero`;
         default: {
           const unreachable: never = refusal.stated;
           throw new Error(`unhandled fee convention: ${String(unreachable)}`);
@@ -1849,10 +1855,10 @@ const NO_TRANSACTIONS =
   'this file has no transactions in it. Export the statement again from your online banking for a period with transactions, and upload the new file';
 
 const notADate = (sheet: Sheet, i: number, cell: Cell | undefined, wrong: 'day' | 'time'): string =>
-  `row ${sheet.rowLabel(i)}: the date cell reads ${quote(cell)}, ${wrong === 'day' ? 'which is not a day on the calendar' : 'whose time of day does not exist'} - nothing was imported, correct the date in the file and upload it again`;
+  `row ${sheet.rowLabel(i)}: the date cell reads ${quote(cell)}, ${wrong === 'day' ? 'which is not a day on the calendar' : 'whose time of day does not exist'}. Nothing was imported: correct the date in the file, and upload it again`;
 
 export const notACurrency = (sheet: Sheet, i: number, cell: Cell | undefined): string =>
   `row ${sheet.rowLabel(i)}: the currency is ${quote(cell)}, but it must be a three-letter code such as EUR or USD. Nothing was imported. Correct the currency in the file and upload it again`;
 
 export const feeRefused = (sheet: Sheet, i: number, text: string): string =>
-  `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee - the row is skipped rather than imported without it`;
+  `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee. The row is skipped, rather than imported without it`;

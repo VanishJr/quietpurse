@@ -1,7 +1,7 @@
 /**
- * Shared test environment: a migrated Postgres (embedded PGlite by default, a real
- * server when TEST_DATABASE_URL is set - see ./pglite.ts) and deterministic .env
- * values.
+ * Shared test environment: a migrated Postgres and deterministic .env values. The
+ * database is an embedded PGlite by default, or a real server when TEST_DATABASE_URL
+ * is set (see ./pglite.ts).
  *
  * The env vars are set BEFORE src/config is imported, so the real backend/.env has
  * no effect on the tests. That is why the db modules are loaded with dynamic
@@ -20,7 +20,7 @@ process.env.LOG_LEVEL = 'silent';
 process.env.LOG_PRETTY = '0';
 // Nothing a test does may reach the person's own ~/Quietpurse: the home, and with it the
 // statements folder, go to a per-RUN directory under the OS temp dir. Keyed on the pid
-// because vitest.config.ts runs one process with isolate:false - src/config is read
+// because vitest.config.ts runs one process with isolate:false. src/config is read
 // once per module registry, so a value that differed per file would simply be ignored.
 const home = path.join(os.tmpdir(), 'quietpurse-test-home', String(process.pid));
 process.env.QUIETPURSE_HOME = home;
@@ -34,13 +34,13 @@ globalThis.fetch = offline;
 
 import { freshTestDb } from './pglite';
 
-// The disk counterpart of freshTestDb()'s truncate, three lines from it so the two
-// resets are visibly paired: without it an empty database would sit beside the
-// previous file's documents, and xlsx.test.ts's 10 MB fixture would linger for the
-// rest of the run. Nothing validates the path first because there is nothing to
-// validate - documentRoot is built from os.tmpdir() above rather than read back
-// from the environment. The day it does come from outside, it needs the check
-// assertTestDatabase gives the database URL.
+// The disk counterpart of freshTestDb()'s truncate, kept beside it so the two resets
+// are visibly paired. Without it an empty database would sit beside the previous
+// file's documents, and a large upload fixture would linger for the rest of the run.
+// Nothing validates the path first because there is nothing to validate: documentRoot
+// is built from os.tmpdir() above rather than read back from the environment. The day
+// it does come from outside, it needs the check assertTestDatabase gives the database
+// URL.
 await fs.rm(documentRoot, { recursive: true, force: true });
 
 const db = await freshTestDb();

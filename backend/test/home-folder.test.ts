@@ -1,15 +1,15 @@
 /**
  * The folder on the person's own disk.
  *
- * Two things nothing else holds. A folder that cannot be written to has to say so in
- * words a person can act on, and for the database that means saying it BEFORE the
- * migration runs - drizzle wraps every driver error, so a failure that reaches the
- * migration is reported as the SQL it was running with every bound value in it, and
- * the permission that actually stopped it is two levels down on `cause`.
+ * A folder that cannot be written to has to say so in words a person can act on. For
+ * the database that means saying it BEFORE the migration runs: drizzle wraps every
+ * driver error, so a failure that reaches the migration is reported as the SQL it was
+ * running with every bound value in it, and the permission that actually stopped it is
+ * buried in `cause`.
  *
- * And the sealing under a server key went with the hosted product, so the mode on the
- * folder is now the whole of what stands between a bank statement and a second account
- * on the machine. It is asserted on the disk, because a mode passed to mkdir on a directory
+ * And a stored statement is plain, with no server key sealing it, so the mode on the
+ * folder is the whole of what stands between a bank statement and a second account on
+ * the machine. It is asserted on the disk, because a mode passed to mkdir on a directory
  * that already exists does nothing and would look identical in the source.
  */
 import fs from 'fs/promises';
@@ -70,9 +70,9 @@ describe('the folder Quietpurse keeps everything in', () => {
 
   /**
    * The arm the case above cannot reach. mkdir's mode applies to what it CREATES, so
-   * a folder made by an earlier build - or by a person - keeps whatever it had, and
-   * every install predating the mode carried it forward. The repair is on the boot
-   * path rather than on an install step because there is no install step.
+   * a folder made by an earlier build or by a person keeps whatever mode it had. The
+   * repair is on the boot path rather than on an install step because there is no
+   * install step.
    */
   ownerOnly('narrows a statements folder that already existed readable by others', async () => {
     const root = path.join(storageRoot(), 'mode-repair');

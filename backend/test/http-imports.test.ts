@@ -1,10 +1,9 @@
 /**
- * Deleting an import over HTTP. The data layer's delete - the rows,
- * the ordinals, the stored file - is held in imports.test.ts; what this route adds is
- * the count in the answer and the recompute after the delete, because transfer
- * pairing changes when the other leg disappears: a surviving leg still tagged as a
- * transfer is out of every spending figure the person reads, silently, after a delete
- * that answered 200.
+ * Deleting an import over HTTP. The data layer's delete, with its rows, ordinals and
+ * stored file, is held in imports.test.ts. What this route adds is the count in the
+ * answer and the recompute after the delete, because transfer pairing changes when the
+ * other leg disappears. A surviving leg still tagged as a transfer is silently out of
+ * every spending figure the person reads, after a delete that answered 200.
  */
 import crypto from 'crypto';
 import fs from 'fs/promises';

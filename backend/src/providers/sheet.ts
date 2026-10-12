@@ -32,9 +32,9 @@ const serialToDate = (serial: number, date1904 = false): Date =>
   new Date(Math.round((serial - 25569 + (date1904 ? 1462 : 0)) * 86400000));
 
 /**
- * Serials a date column can plausibly hold: 1954 to 2119. A number outside it is a
- * number the user meant as one - a statement writing the date as 20260105 must not
- * be read as the year 57424.
+ * Serials a date column can plausibly hold: 1954 to 2119. A number outside it is one
+ * the user meant as a number: a statement writing the date as 20260105 must not be
+ * read as the year 57424.
  */
 const SERIAL_MIN = 20000;
 const SERIAL_MAX = 80000;
@@ -43,8 +43,8 @@ const SERIAL_MAX = 80000;
  * Row date -> ISO 8601. null = the cell holds no date this parser can read.
  *
  * UTC throughout: local-time getters shift the calendar day by one for half the
- * world's timezones, and the shifted day goes into the dedup key - so the same
- * statement re-imported from another machine would duplicate every row.
+ * world's timezones, and the shifted day goes into the dedup key. The same statement
+ * re-imported from another machine would then duplicate every row.
  */
 export function cellDate(
   c: Cell | undefined,

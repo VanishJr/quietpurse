@@ -109,8 +109,8 @@ describe('api.accounts()', () => {
 
 describe('api.deleteAccount()', () => {
   /**
-   * The id is a path segment, and an account id is not guaranteed to be url-safe —
-   * an unencoded one would address a route that does not exist, or a different one.
+   * The id is a path segment, and an account id is not guaranteed to be url-safe. An
+   * unencoded one would address a route that does not exist, or a different one.
    */
   it('sends DELETE to the account, with the id encoded', async () => {
     const fetchMock = vi.fn(

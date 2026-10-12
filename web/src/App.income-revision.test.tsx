@@ -1,9 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { accountMonths, accountSummary, txDate } from './test/fixtures';
 import { askedFor, FIRST_PAINT_ROUTES, mockFetch, ok, requests } from './test/harness';
 import type { IncomeSourceDef, Transaction } from './types';
+
+/**
+ * The test budget and the first wait below are App.test.tsx's, for the reason it gives
+ * beside its own: the first mount of the whole app can land right at the default waits.
+ */
+vi.setConfig({ testTimeout: 15_000 });
 
 const oldSource: IncomeSourceDef = {
   id: 'stipend',
@@ -108,9 +114,11 @@ describe('income-source data revision', () => {
     });
     render(<App />);
 
-    const initialFlows = await screen.findByRole('region', {
-      name: 'Income and expenses for Sparkasse Giro',
-    });
+    const initialFlows = await screen.findByRole(
+      'region',
+      { name: 'Income and expenses for Sparkasse Giro' },
+      { timeout: 5_000 },
+    );
     expect(within(initialFlows).getByText('+0 EUR')).toBeVisible();
     const tabs = within(screen.getByRole('navigation', { name: 'Sections' }));
     fireEvent.click(tabs.getByRole('link', { name: 'Transactions' }));

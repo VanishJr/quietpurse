@@ -8,13 +8,14 @@ import { Account, BalancesNotShown } from '../types';
 import { CsvImport } from './CsvImport';
 
 /**
- * The import lifecycle, and with it the confirm/discard semantics:
- * an upload writes nothing, Confirm is what makes the rows data, and Discard must
- * leave the caller's data alone.
+ * The import lifecycle, and with it the confirm/discard semantics: an upload writes
+ * nothing, Confirm is what makes the rows data, and Discard must leave the caller's
+ * data alone.
  *
- * No rendered date is asserted anywhere here but the duplicate card's, which is computed with
- * fmtInstant and never written - the summary carries fmtDay(from) and the duplicate card
- * fmtInstant(uploadedAt), and how a date is rendered is the copy's to change.
+ * No rendered date is asserted anywhere here except the duplicate card's, and that one
+ * is computed with fmtInstant rather than written out. The summary carries
+ * fmtDay(from) and the duplicate card fmtInstant(uploadedAt), and how a date is
+ * rendered is the copy's to change.
  */
 
 /**
@@ -28,18 +29,14 @@ const createdAccount = (init?: RequestInit): Response => {
 };
 
 /**
- * The account list is EMPTY here, and that costs something worth writing down: with
- * no accounts the picker does not render at all and every test mounting through
- * `BASE` runs the *create* arm. So none of them covers the picker — its coverage is
- * the last two describes in this file, both of which serve a populated list in part
- * (four of the seven cases in the last one), plus the confirm case that lands rows
- * in an account this screen did not create.
+ * The account list is EMPTY here, and that has a cost: with no accounts the picker
+ * does not render at all, so every test mounting through `BASE` runs the *create* arm
+ * and none of them covers the picker. Only a test that serves a populated list does.
  *
- * Which is also why the create route is here and not in the tests that are about it:
- * since the upload stopped taking a name the create arm WRITES - it makes the account
- * over `POST /api/accounts` and uploads into it - so every one of these makes two
- * requests where it used to make one, and `acc-9` is the id the summary fixture already
- * names.
+ * That is also why the create route is here and not only in the tests about it. The
+ * upload no longer takes a name, so the create arm WRITES: it makes the account over
+ * `POST /api/accounts` and then uploads into it. Every one of these tests makes both
+ * requests, and `acc-9` is the id the summary fixture already names.
  */
 const BASE: Routes = {
   'GET /api/imports/presets': () => ok(PRESETS),
@@ -91,11 +88,11 @@ const chooseFile = (container: HTMLElement, name = 'statement.csv'): void => {
 };
 
 /**
- * Pick a file, name the account, press Import. The name is typed rather than left to
- * the file: the prefill that used to fill it in is gone (it is how a database
- * acquired an account called "account-statement_2026-07-01…_ru_a1b2c3 — копия").
+ * Pick a file, name the account, press Import. The name is typed because nothing fills
+ * it in from the file any more. That prefill was removed after it gave a real database
+ * an account named after a copied statement file.
  *
- * On `BASE` this creates the account as well as uploading — one press, two requests.
+ * On `BASE` the one press creates the account and then uploads: two requests.
  */
 async function upload(container: HTMLElement): Promise<void> {
   chooseFile(container);
@@ -194,7 +191,7 @@ describe('the setup steps', () => {
     expect(within(steps[0]).getByText('…or paste the contents instead')).toBeInTheDocument();
     expect(within(steps[1]).getByRole('group', { name: 'Account for this import' })).toBeInTheDocument();
     expect(within(steps[1]).getByText("Choose where this statement's transactions belong.")).toBeInTheDocument();
-    expect(within(steps[1]).getByText("Hidden accounts aren't listed here — unhide one first."))
+    expect(within(steps[1]).getByText("Hidden accounts aren't listed here. To import into one, unhide it first."))
       .toBeInTheDocument();
     expect(screen.getByText('No transactions are added until you review and confirm.')).toBeInTheDocument();
     const disclosure = screen.getByText('Statement preset (optional)').closest('details')!;
@@ -463,7 +460,7 @@ describe('the summary panel', () => {
     // the name arm is retired, on the wire as well as here
     expect(screen.getByText(/your existing "statement"/)).toBeInTheDocument();
 
-    expect(screen.queryByText(/are already in the database/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/are already in your data/)).not.toBeInTheDocument();
     expect(screen.queryByText(/rows couldn't be read/)).not.toBeInTheDocument();
     expect(screen.queryByText(/An earlier upload of this same file/)).not.toBeInTheDocument();
   });
@@ -486,7 +483,7 @@ describe('the summary panel', () => {
     await upload(container);
 
     expect(await screen.findByText(/Read 12 of 14 rows/)).toBeInTheDocument();
-    expect(screen.getByText(/are already in the database/)).toBeInTheDocument();
+    expect(screen.getByText(/are already in your data/)).toBeInTheDocument();
     expect(screen.getByText(/rows couldn't be read/)).toBeInTheDocument();
     expect(screen.getByText(/An earlier upload of this same file/)).toBeInTheDocument();
   });
@@ -516,7 +513,7 @@ describe('the summary panel', () => {
             balances: { opening: 1200, closing: 59.76, currency: 'EUR' },
             supersededImportId: 'imp-0',
             problems: [
-              '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+              '3 rows skipped: the "State" value is not an accepted one. Found: "В ОБРАБОТКЕ" (3)',
             ],
           }),
         ),
@@ -527,14 +524,14 @@ describe('the summary panel', () => {
     const card = (await screen.findByText(/Read 8 of 14 rows/)).closest('.import-review') as HTMLElement;
     expect([...card.querySelectorAll('.import-review-reader, .import-review-details p, .import-review-warnings p')]
       .map((p) => p.textContent)).toEqual([
-      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
+      'Read by "Any statement" using the file\'s own column names: date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
       'They\'ll join your existing "statement".',
       "Checked against the statement's own balances: 1,200 EUR at the start, 59.76 EUR at the end. The rows add up.",
-      '6 of them are new; 2 are already in the database — this export overlaps one you imported before. Nothing will be duplicated.',
-      'An earlier upload of this same file was still waiting to be confirmed. It has been dropped in favour of this one — it had imported nothing.',
-      "2 rows couldn't be read. If it's the whole file, the column layout is probably wrong — discard this and try your bank's optional preset in setup.",
+      "6 of them are new. This export overlaps one you imported before, so 2 are already in your data and won't be added again.",
+      'An earlier upload of this same file was still waiting to be confirmed. It had imported nothing, and this one replaces it.',
+      "2 rows couldn't be read. If that's the whole file, the column layout is probably wrong. Discard this and try your bank's optional preset in setup.",
       '1 row moved no money, so there was nothing to import.',
-      '3 rows skipped: the "State" value is not one of the accepted ones - "В ОБРАБОТКЕ" (3)',
+      '3 rows skipped: the "State" value is not an accepted one. Found: "В ОБРАБОТКЕ" (3)',
     ]);
     expect([...card.querySelectorAll('.import-review-metric-label')].map((m) => m.textContent))
       .toEqual(['Rows', 'New rows', 'Already present', 'Omitted', 'Period', 'Net', 'Statement balance']);
@@ -609,8 +606,8 @@ describe('the summary panel', () => {
 
     const line = await screen.findByText(/Read with the "Revolut \(Statement CSV\)" preset/);
     expect(line).toHaveTextContent(/date from "Дата выполнения"/);
-    // the chip's own label and the summary's title are one string, off one backend
-    // list — a second dictionary in this package is what the field exists to avoid
+    // the chip's label and the summary's title are one string from one backend list.
+    // The field exists so that this package needs no second dictionary of titles
     expect(line).toHaveTextContent(presetButton.textContent!);
     // directly beneath the heading, before even the first metric
     const card = line.closest('.import-review') as HTMLElement;
@@ -628,17 +625,17 @@ describe('the summary panel', () => {
     const second = mount();
     await upload(second.container);
     expect(await screen.findByText(/Read as a Revolut PDF statement/)).toHaveTextContent(
-      /a PDF has no column header/,
+      /A PDF has no column header/,
     );
     // no column is named for a document that has no header to name one from
     expect(screen.queryByText(/date from "/)).not.toBeInTheDocument();
   });
 
   /**
-   * The reconciliation line, and the half that matters more: a file that states no
-   * balance of any kind gets no sentence at all — neither a pair nor a reason. The
-   * summary fixture carries neither field, and the first case above is where the
-   * pair's absence is asserted.
+   * The reconciliation line. The half that matters more: a file that states no
+   * balance of any kind gets no sentence at all, neither a pair nor a reason. The
+   * summary fixture carries neither field. The first case above is where the pair's
+   * absence is asserted.
    */
   it('names the balances it was checked against, and only when there are any', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
@@ -654,7 +651,7 @@ describe('the summary panel', () => {
       .toEqual(['Rows', 'New rows', 'Already present', 'Omitted', 'Period', 'Net']);
     expect([...card.querySelectorAll('.import-review-reader, .import-review-details p')]
       .map((p) => p.textContent)).toEqual([
-      'Read by "Any statement", which found the columns in the file\'s own header — date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
+      'Read by "Any statement" using the file\'s own column names: date from "Datum", amount from "Betrag", description from "Verwendungszweck".',
       'They\'ll join your existing "statement".',
     ]);
     unmount();
@@ -679,13 +676,12 @@ describe('the summary panel', () => {
   });
 
   /**
-   * A pair derived from the file's own running balances is a different sentence, and
-   * it has to be: on the real two-product export neither number appears in any cell,
-   * so a card saying "the statement's own balances: 387.40" sends the user to compare
-   * it against a column that reads 134.85. And the closing claim shrinks — both ends
-   * come out of these same rows, so a row lost from either END moves an end rather
-   * than breaking the run, and "the rows add up" would be a completeness claim the
-   * check cannot make.
+   * A pair derived from the file's own running balances needs a different sentence.
+   * On the real two-product export neither number appears in any cell, so a card
+   * saying "the statement's own balances: 387.40" sends the user to compare it with a
+   * column that reads 134.85. The closing claim shrinks too. Both ends come out of
+   * these same rows, so a row lost from either END moves that end instead of breaking
+   * the run. "The rows add up" would then claim a completeness the check cannot prove.
    */
   it('says how many running balances a derived pair was summed from', async () => {
     mockFetch({
@@ -739,11 +735,10 @@ describe('the summary panel', () => {
   });
 
   /**
-   * The reason the count above was half the truth: a running balance of a
-   * single row is one link, and one link cannot break. The pair is still shown — it is
-   * true, and the closing of a one-row run is a cell the user can find — and the claim
-   * shrinks to the runs the check could have failed on. On the owner's real export
-   * that is one of two, and the unchecked one is four fifths of both numbers here.
+   * Why the count above was half the truth: a running balance of a single row is one
+   * link, and one link cannot break. The pair is still shown, because it is true and
+   * the closing of a one-row run is a cell the user can find. But the claim shrinks to
+   * the runs the check could have failed on.
    */
   it('names the part of a derived pair that nothing could check', async () => {
     mockFetch({
@@ -763,7 +758,7 @@ describe('the summary panel', () => {
     const { container } = mount();
     await upload(container);
     expect((await details()).getByText(/2 running balances/)).toHaveTextContent(
-      /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other; the other states a single row, so nothing could check it\./,
+      /added together: 387\.40 EUR at the start, 579\.85 EUR at the end\. 1 of them runs unbroken from one to the other\. The other states a single row, so nothing could check it\./,
     );
     const metric = screen.getByText('Statement balance').closest('.import-review-metric')!;
     expect(metric).toHaveTextContent(/Combined from 2 running balances in the file\. 387\.40 EUR → 579\.85 EUR/);
@@ -774,10 +769,10 @@ describe('the summary panel', () => {
   });
 
   /**
-   * And where every run is a single row, nothing ran: the lead-in gives way with the
-   * claim, because "Checked against" in front of a pair nothing checked re-acquires
-   * the completeness claim through the front of the sentence while the back of it
-   * disclaims it. The numbers stay — they are what the file states.
+   * Where every run is a single row, nothing was checked, so the lead-in goes along
+   * with the claim. "Checked against" in front of a pair nothing checked would bring
+   * the completeness claim back at the start of the sentence while its end disclaims
+   * it. The numbers stay, because they are what the file states.
    */
   it('claims no run at all for a statement whose every run is one row', async () => {
     mockFetch({
@@ -889,8 +884,8 @@ describe('the summary panel', () => {
 
 describe('confirm', () => {
   /**
-   * The server's refusal when the account was deleted while this summary sat here — the
-   * headline failure of an upload that picks an account, and the one whose advice is a
+   * The server's refusal when the account was deleted while this summary sat here.
+   * It is the main way an upload that picks an account fails, and its advice is a
    * button on this card.
    */
   const ACCOUNT_MISSING =
@@ -958,9 +953,9 @@ describe('confirm', () => {
   });
 
   /**
-   * This panel reads imports.rows_rejected, which is the three reasons added up and
-   * nothing else — so it may count the rows and may not say why. The advice it used to
-   * carry was doubly dead: the import is committed and there is no Discard here.
+   * This panel reads imports.rows_rejected, which only adds up the rejection reasons.
+   * So it may count the rows but may not say why. It gives no advice either: the
+   * import is committed and there is no Discard here.
    */
   it('counts the rows that did not import after the confirm, and claims no cause', async () => {
     mockFetch({
@@ -982,8 +977,8 @@ describe('confirm', () => {
    * The created-account sentence goes when rows land in it, and stays gone. Gating it
    * on `confirmed` instead of clearing `created` passes the assertion above and fails
    * here: newInput() clears `confirmed` for the next file, and the sentence comes back
-   * saying an account that now holds the rows the user imported "exists whether or not
-   * these rows land". A gate bound to a value that moves.
+   * saying an account that now holds the rows the user imported "stays whether or not
+   * these rows are imported". A gate bound to a value that moves.
    */
   it('does not resurrect the created-account notice when a second file is chosen', async () => {
     mockFetch({
@@ -1010,8 +1005,9 @@ describe('confirm', () => {
    * survive the confirm that has nothing to do with it.
    *
    * The second upload answers a summary for `acc-1` on purpose. With the fixture's
-   * default id this confirms into the created account, takes the gate's true branch,
-   * and passes with the gate deleted — the vacuum this suite could not otherwise see.
+   * default id this confirms into the created account and takes the gate's true
+   * branch, so the test would pass with the gate deleted. Nothing else in this suite
+   * would see that.
    */
   it('keeps the created-account notice when the rows land in a different account', async () => {
     let uploads = 0;
@@ -1041,16 +1037,13 @@ describe('confirm', () => {
   });
 
   /**
-   * A confirm that is refused, which until now no test in this package made happen —
-   * every other one here answers 200. Two things are held, and neither by anything
-   * else: the server's sentence arrives whole, and the control it tells the user to
-   * press is still under it.
+   * A refused confirm. Two things are held here: the server's sentence arrives whole,
+   * and the control it tells the user to press is still under it.
    *
    * Both are one edit away from silence. Replace runConfirm's catch with a no-op and
-   * the refusal reaches nobody; clear `result` in it and the card goes with the
-   * error, taking the only Discard on the screen — and on this refusal there is no
-   * second attempt to fall back on, since the account is not coming back and every
-   * retry answers the same 409.
+   * the refusal reaches nobody. Clear `result` in it and the card goes with the error,
+   * taking the only Discard on the screen. This refusal has no second attempt to fall
+   * back on either: the account is not coming back, and every retry gets the same 409.
    */
   it('prints a refused confirm whole and leaves Discard standing beneath it', async () => {
     mockFetch({
@@ -1073,7 +1066,7 @@ describe('confirm', () => {
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
     // a 409 is an answer and not a lost one, so nothing may doubt what its sentence says
     expect(screen.getByRole('heading', { name: /confirmation refused/ })).toBeInTheDocument();
-    expect(screen.queryByText(/It may have committed despite the error/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/The import may have gone through despite the error/)).not.toBeInTheDocument();
     // nothing landed, so nothing may tell the caller it did
     expect(onImported).not.toHaveBeenCalled();
     expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
@@ -1096,7 +1089,7 @@ describe('confirm', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm import' }));
     expect(await screen.findByRole('heading', { name: /confirmation not verified/ })).toBeInTheDocument();
     expect(screen.queryByText(/nothing imported yet/)).not.toBeInTheDocument();
-    expect(screen.getByText(/It may have committed despite the error/)).toBeInTheDocument();
+    expect(screen.getByText(/The import may have gone through despite the error/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
     await screen.findByText('this import has already been confirmed');
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
@@ -1127,8 +1120,8 @@ describe('confirm', () => {
     expect(card).not.toHaveClass('import-outcome-success');
     expect([...card.querySelectorAll('p')].map((p) => p.textContent)).toEqual([
       "2 rows didn't import.",
-      '8 were already in the database — this export overlaps one you imported before. Nothing was duplicated.',
-      "2 of the rows this summary called new were written by another import while it waited here. They're in your data — under that import, not this one.",
+      "This export overlaps one you imported before, so 8 were already in your data and weren't added again.",
+      "2 of the rows this summary called new were written by another import while it waited here. They're in your data, under that import rather than this one.",
     ]);
     expect(screen.getByText(/"statement" was created when you pressed Import/)).toBeInTheDocument();
     await returnToSetup();
@@ -1152,7 +1145,7 @@ describe('discard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Discard' }));
 
     // anchor: the discarded notice, which exists only once the discard came back
-    const heading = await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' });
+    const heading = await screen.findByRole('heading', { name: 'Discarded. Nothing was imported.' });
     expect(heading).toHaveFocus();
     expect(heading).toHaveAttribute('tabindex', '-1');
     expect(heading.closest('.import-discarded')).toHaveTextContent(
@@ -1198,7 +1191,7 @@ describe('discard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm import' }));
     expect(countOf('POST /api/imports/imp-1/confirm')).toBe(0);
     await act(async () => answer(ok({ discarded: true, importId: 'imp-1' })));
-    expect(await screen.findByRole('heading', { name: 'Discarded — nothing was imported.' }))
+    expect(await screen.findByRole('heading', { name: 'Discarded. Nothing was imported.' }))
       .toHaveFocus();
     expect(countOf('POST /api/imports/imp-1/discard')).toBe(1);
   });
@@ -1221,7 +1214,7 @@ describe('discard', () => {
     expect(screen.getByRole('heading', { name: /nothing imported yet/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm import' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
-    expect(screen.queryByRole('heading', { name: /Discarded —/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^Discarded\./ })).not.toBeInTheDocument();
   });
 });
 
@@ -1320,7 +1313,7 @@ describe('the account picker', () => {
     expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'false');
     // and the way out of the list, for a bank that has no account yet
     expect(screen.getByRole('button', { name: '+ New account' })).toBeInTheDocument();
-    expect(screen.getByText("Hidden accounts aren't listed here — unhide one first."))
+    expect(screen.getByText("Hidden accounts aren't listed here. To import into one, unhide it first."))
       .toBeInTheDocument();
     // the create arm stays shut until it is asked for: an account chosen by the
     // screen rather than by the person is how rows land in the wrong one
@@ -1387,12 +1380,12 @@ describe('the account picker', () => {
   });
 
   /**
-   * The list is how a user reaches an account that already exists. A screen that
-   * quietly offered only "create a new one" when it failed to load would manufacture
-   * a second account for a bank the user already has — and pressing Import is
-   * what writes it, so the duplicate would be real before the file was
-   * read. The failure blocks the import instead of falling through to the create arm,
-   * held by `accounts === null` and not by a boolean a handler could reset.
+   * The list is how a user reaches an account that already exists. If the list failed
+   * to load and the screen quietly offered only "create a new one", the user would get
+   * a second account for a bank they already have. Pressing Import is what writes it,
+   * so the duplicate would be real before the file was read. So the failure blocks the
+   * import instead of falling through to the create arm. `accounts === null` holds
+   * that, not a boolean a handler could reset.
    */
   it('blocks the import when the accounts could not be loaded, and says so', async () => {
     mockFetch({ ...BASE, 'GET /api/accounts': () => fail(500) });
@@ -1400,7 +1393,7 @@ describe('the account picker', () => {
     chooseFile(container);
 
     const error = await screen.findByText(/Your accounts couldn't be loaded/);
-    expect(error).toHaveTextContent('Nothing can be imported until the list is there');
+    expect(error).toHaveTextContent('Reload the page and try again. Nothing can be imported until the list loads.');
     expect(error.closest('.import-step')).toContainElement(
       screen.getByRole('heading', { level: 3, name: 'Account' }),
     );
@@ -1427,7 +1420,7 @@ describe('the account picker', () => {
 
     await returnToSetup();
     const error = await screen.findByText(/Your accounts couldn't be loaded/);
-    expect(error).not.toHaveTextContent('Nothing can be imported until the list is there');
+    expect(error).not.toHaveTextContent('Nothing can be imported until the list loads');
     expect(screen.getByRole('button', { name: 'N26' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
     expect(reads).toBe(2);
@@ -1435,24 +1428,24 @@ describe('the account picker', () => {
 
   /**
    * With no visible accounts the endpoint answers `[]`, so the picker is gone and
-   * the create arm is the only state — and this sentence is then the one thing on
-   * screen saying why a hidden bank is missing. It renders on any loaded list,
-   * empty included, which is why it is not inside the picker.
+   * only the create arm is shown. This sentence is then the one thing on screen that
+   * says why a hidden bank is missing. It renders on any loaded list, empty included,
+   * which is why it is not inside the picker.
    */
   it("says hidden accounts aren't listed even when the list is empty", async () => {
     mockFetch(BASE);
     mount();
 
-    expect(await screen.findByText("Hidden accounts aren't listed here — unhide one first.")).toBeInTheDocument();
+    expect(await screen.findByText("Hidden accounts aren't listed here. To import into one, unhide it first.")).toBeInTheDocument();
     expect(screen.getByLabelText('Account name')).toHaveValue('');
     // the empty-list state, not the populated one: there is no picker above it
     expect(screen.queryByRole('button', { name: '+ New account' })).not.toBeInTheDocument();
   });
 
   /**
-   * The prefill is gone: it is how a real database acquired an
-   * account called `account-statement_2026-07-01_2026-07-31_ru_a1b2c3 — копия`.
-   * Naming an account is a deliberate act, and on the id arm no name is typed at all.
+   * The name is not prefilled from the file. That prefill is how a real database ended
+   * up with an account named after a copied statement file. Naming an account is a
+   * deliberate act, and on the id arm no name is typed at all.
    */
   it('leaves the account name empty when a file is chosen', async () => {
     mockFetch(BASE);
@@ -1467,19 +1460,19 @@ describe('the account picker', () => {
 });
 
 /**
- * The create arm creates. POST /api/accounts is the only way this
- * product makes an account, and every upload this client builds carries an id — so
- * the account exists before the file is read, and a file the backend refuses leaves
- * one standing. What that costs is covered here: the write is announced, it happens
- * once however many times Import is pressed, and a refused create never uploads.
+ * The create arm creates. POST /api/accounts is the only way this product makes an
+ * account, and every upload this client builds carries an id. So the account exists
+ * before the file is read, and a file the backend refuses leaves one standing. What
+ * that costs is covered here: the write is announced, it happens once however many
+ * times Import is pressed, and a refused create never uploads.
  *
  * jsdom cannot say which account the rows reached, so the subject of most of these is
  * the request stream: what was posted, in what order, and how many times.
  */
 describe('the account the create arm makes', () => {
-  /** The hidden holder's refusal — the one a user cannot explain from the picker. */
+  /** The refusal when a hidden account holds the name: one the picker cannot explain. */
   const HIDDEN_HOLDER =
-    'an account called "Old DKB" already has that name, and it has been removed from the app - restore it, or pick another name';
+    'an account called "Old DKB" already has that name, and it is hidden. Unhide it, or pick another name';
 
   /** Both bodies this press sends: the create's JSON and the upload's FormData. */
   const captureBoth = (table: Routes) => {
@@ -1509,8 +1502,8 @@ describe('the account the create arm makes', () => {
     // currency in one assertion, which is all this client sees of the currency default
     expect(captured.created).toEqual({ name: 'Third Bank' });
     expect(captured.sent!.get('accountId')).toBe('acc-9');
-    // uploadForm lives outside the component, so neither of these is a binding it
-    // could reach — this is the assertion that says the compile-time fact is true
+    // uploadForm lives outside the component, so neither field is a binding it could
+    // reach. These assertions are what show the compile-time fact is true
     expect(captured.sent!.get('accountName')).toBeNull();
     expect(captured.sent!.get('currency')).toBeNull();
   });
@@ -1534,11 +1527,11 @@ describe('the account the create arm makes', () => {
   });
 
   /**
-   * The hazard this ordering exists for: create, upload fails on the file, the user
-   * fixes the file and presses Import again — and a second POST /api/accounts with
-   * the same name is a 409, the app refusing the user on behalf of an account it
-   * created for them one press ago. Held by writing the account into state before the
-   * upload is awaited, so the second press is already on the picker arm.
+   * The hazard this ordering exists for: the create succeeds, the upload fails on the
+   * file, and the user fixes the file and presses Import again. A second POST
+   * /api/accounts with the same name would be a 409: the app refusing the user because
+   * of an account it created for them one press ago. The account is written into state
+   * before the upload is awaited, so the second press is already on the picker arm.
    */
   it('creates the account once across a failed upload and the press that follows it', async () => {
     let uploads = 0;
@@ -1595,8 +1588,8 @@ describe('the account the create arm makes', () => {
     expect(onAccountCreated).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('complementary', { name: 'Account created' }))
       .toHaveTextContent('The account "statement" was created when you pressed Import');
-    // in the LIST the picker is derived from, not only in the key that is pressed —
-    // a key with no row renders a picker with nothing selected and Import disabled
+    // in the LIST the picker is derived from, not only in the pressed key. A key with
+    // no row renders a picker with nothing selected and Import disabled
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     await returnToSetup();
     expect(screen.getByRole('button', { name: 'statement' })).toHaveAttribute(
@@ -1618,8 +1611,9 @@ describe('the account the create arm makes', () => {
 
   /**
    * The base currency comes from a fetch whose failure Overview swallows, so it can be
-   * null on a working screen. The sentence goes rather than rendering "amounts in ." —
-   * and nothing is disabled over it: this is the only way data enters the product.
+   * null on a working screen. The sentence is then left out rather than rendering
+   * "amounts in .". Nothing is disabled over it, because this is the only way data
+   * enters the product.
    */
   it('leaves the currency sentence out when there is no base currency, and imports anyway', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok(summaryResult()) });
@@ -1747,7 +1741,7 @@ describe('phase recovery and source preservation', () => {
     expect(screen.queryByRole('heading', { name: /^Imported/ })).not.toBeInTheDocument();
     await act(async () => answer(ok({ ...CONFIRMED, inserted: 4, total: 14, skipped: 2 })));
     expect(screen.getByRole('heading', { name: 'Imported 4 of 14 rows' })).toHaveFocus();
-    expect(screen.getByText(/^5 were already in the database/)).toBeInTheDocument();
+    expect(screen.getByText(/so 5 were already in your data/)).toBeInTheDocument();
     expect(screen.getByText(/^3 of the rows this summary called new/)).toBeInTheDocument();
     expect(onImported).toHaveBeenCalledOnce();
     expect(countOf('POST /api/imports')).toBe(1);

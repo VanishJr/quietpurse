@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * The client cannot know which rate source converted a given amount. The resolver
  * asks its providers in order (backend/src/fxrates.ts) and nothing about which one
  * answered survives the write into fx_rates, so a screen naming one prints a guess
- * as a fact - which the Analytics caption did, for every user.
+ * as a fact. The Analytics caption once did, for every user.
  *
  * Delete this file when the summary carries per-pair rate provenance and the client
  * renders what actually answered. Until then it is the only thing in this package

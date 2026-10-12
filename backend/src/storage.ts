@@ -11,11 +11,12 @@ import { causeChain, logger } from './logger';
  * removal.
  *
  * The three classes differ, and the middle one is the widest: `.`, `)` and ` ` are
- * legal inside a segment and `)` closes one, but none of the three OPENS one. That
- * asymmetry is why SEGMENT_START is exported - documentStem cuts a user's filename to
- * it rather than to a second copy of the class, so a name this file refuses cannot be
- * a name that file produces. The agreement is held by documents.test.ts's property
- * case over the stem's whole character set, not by the two comments matching.
+ * legal inside a segment and `)` closes one, but none of the three OPENS one.
+ * SEGMENT_START is exported because of that asymmetry. documentStem cuts a user's
+ * filename to it rather than to a second copy of the class, so a name this file
+ * refuses cannot be a name that file produces. The agreement is held by
+ * documents.test.ts's property case over the stem's whole character set, not by the
+ * two comments matching.
  */
 const START = '\\p{L}\\p{M}\\p{N}_(-';
 const MIDDLE = '\\p{L}\\p{M}\\p{N}_.() -';
@@ -41,9 +42,9 @@ function resolveKey(key: string): string {
 
 /**
  * Nobody but this user. The statements are bank statements and the database beside
- * them is every transaction in them, and the sealing under a server key went with the
+ * them is every transaction in them. The sealing under a server key went with the
  * hosted product, because on a personal machine that key would have sat beside the
- * files it guarded - so the only thing left between them and a second account on the
+ * files it guarded. So the only thing left between them and a second account on the
  * machine is the mode: set where a file is created, and re-checked on every boot for a
  * folder that was not.
  *
@@ -61,10 +62,10 @@ export const OWNER_ONLY_DIR = 0o700;
 export const OWNER_ONLY_FILE = 0o600;
 
 /**
- * The directory exists AND can be written to. mkdir alone is not the check - it
- * succeeds on an existing directory whatever its permissions, and a folder that
- * cannot be written to would otherwise be discovered by the first upload that is
- * refused, or by a migration that reports the SQL it failed on.
+ * The directory exists AND can be written to. mkdir alone is not the check, because
+ * it succeeds on an existing directory whatever its permissions. A folder that cannot
+ * be written to would otherwise be discovered by the first upload that is refused, or
+ * by a migration that reports the SQL it failed on.
  *
  * The probe's name starts with a dot, so it is outside KEY by construction and no get
  * can address it. The resolved path belongs in this message: it is a boot failure on
@@ -94,8 +95,8 @@ export async function assertWritableDir(dir: string, what: string): Promise<void
  * Writes under a temp name in the DESTINATION directory and renames into place:
  * rename is atomic within a filesystem, a copy across one is not, and a crash
  * mid-write must never leave a truncated file under a name a row already points
- * at. The temp name is unique per write - two concurrent puts under different keys
- * would otherwise collide on it - and starts with a dot, which puts it outside KEY
+ * at. The temp name is unique per write, because two concurrent puts under different
+ * keys would otherwise collide on it. It starts with a dot, which puts it outside KEY
  * so no get can resolve it.
  *
  * An existing object is overwritten silently: the only route to a collision is a
@@ -104,8 +105,8 @@ export async function assertWritableDir(dir: string, what: string): Promise<void
  *
  * No fsync. A power loss that leaves a zero-length or partial file is caught loudly
  * by the hash check on read; the failure mode is a refusal, not plausible bytes. A
- * crash between the write and the rename leaves the temp file behind - unreachable
- * by any key, and no sweeper is in scope.
+ * crash between the write and the rename leaves the temp file behind. No key can
+ * reach it, and no sweeper is in scope.
  */
 export async function putObject(key: string, bytes: Buffer): Promise<void> {
   const target = resolveKey(key);

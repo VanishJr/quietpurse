@@ -6,7 +6,7 @@ import { IMPORT_SOURCE_TYPES } from './wire';
 /**
  * What names a stored statement on disk. Every field is on the import row and none
  * of them changes after the row is written, so the name can be derived again at read
- * and delete time rather than stored - a stored name is a path a crafted backup gets
+ * and delete time rather than stored. A stored name is a path a crafted backup gets
  * to choose.
  */
 export interface DocumentLocator {
@@ -26,9 +26,9 @@ export const STEM_MAX = 60;
 const STEM_CHAR = /[\p{L}\p{M}\p{N}_.()\- ]/u;
 
 /**
- * The stem cut to the edges storage.ts will accept. The tail rule is the filesystem's
- * - no name ends in a dot or a space - and the head rule is SEGMENT_START's, read off
- * storage.ts rather than copied: `.`, ` ` and `)` are all legal INSIDE a key segment
+ * The stem cut to the edges storage.ts will accept. The tail rule is the filesystem's:
+ * no name ends in a dot or a space. The head rule is SEGMENT_START's, read off
+ * storage.ts rather than copied. `.`, ` ` and `)` are all legal INSIDE a key segment
  * and none of the three opens one, so a stem beginning with any of them builds a key
  * resolveKey throws on, and the upload is refused for the wrong reason forever.
  */
@@ -41,7 +41,7 @@ const trimEdges = (s: string): string => {
 
 /**
  * Windows resolves a name whose part before the first dot is one of these to the
- * device, whatever follows - `con.txt` is CON. The superscript digits are in the
+ * device, whatever follows, so `con.txt` is CON. The superscript digits are in the
  * list because Windows is.
  */
 const WINDOWS_DEVICE = /^(?:CON|PRN|AUX|NUL|COM[0-9\u00b9\u00b2\u00b3]|LPT[0-9\u00b9\u00b2\u00b3]) *$/i;
@@ -88,8 +88,8 @@ export function documentStem(originalFilename: string | null): string {
  * spells a digest, so two different ids never share a segment.
  *
  * Nothing is given up. Every id this server mints is a crypto.randomUUID(), which is
- * lowercase hex and dashes, so no key this code has ever produced changes - and an id
- * that fails the shape still names a file, by the hash arm below.
+ * lowercase hex and dashes, so no key this code has ever produced changes. An id that
+ * fails the shape still names a file, by the hash arm below.
  */
 const ID_SHAPE = /^(?![0-9a-f]{32}$)[a-z0-9-]{1,64}$/;
 
@@ -118,16 +118,17 @@ export const documentKey = (doc: DocumentLocator): string => {
  * A constant, so the sentence is asserted by equality: a regex over paths and errnos
  * passes a message somebody has "improved" to splice in a cause chain that happens to
  * carry no drive letter, and that is how a filesystem path reaches a screen. It is
- * actionable in the only way this failure is - the bytes are still the user's to
- * re-upload - because committing without the document would claim the file hash forever.
+ * actionable in the only way this failure is: the bytes are still the user's to
+ * re-upload. That holds because the import is refused, and committing without the
+ * document would claim the file hash forever.
  */
 export const DOCUMENT_STORE_REFUSED =
-  "could not store the uploaded file, so the import was refused - nothing was written, and the same file can be uploaded again once the statements folder is writable";
+  "could not store the uploaded file, so the import was refused. Nothing was written, and the same file can be uploaded again once the statements folder is writable";
 
 /**
  * Says READ, never "kept": the row's claim survives a restore, and the file it names
- * is on the disk it was uploaded to and on no other. This is the answer for both -
- * a row that never had a document, and a restored row whose file is elsewhere.
+ * is on the disk it was uploaded to and on no other. This is the answer for both a row
+ * that never had a document and a restored row whose file is elsewhere.
  */
 export const DOCUMENT_NOT_READABLE = 'this import has no file this app can read';
 
@@ -144,10 +145,10 @@ export class DocumentMissing extends Error {}
  * is which way the state went, so nobody is told a statement is gone while it is held.
  */
 export const DOCUMENT_READ_REFUSED =
-  "the stored copy of this file could not be read, so nothing was sent - your imported data is unaffected, and the log names the reason";
+  "the stored copy of this file could not be read, so nothing was sent. Your imported data is unaffected, and the log names the reason";
 
 export const DOCUMENT_DELETE_REFUSED =
-  "the stored copy of this file could not be removed, so nothing was changed - it is still held, and the log names the reason";
+  "the stored copy of this file could not be removed, so nothing was changed. It is still held, and the log names the reason";
 
 /** The cause goes to the log whole; the user gets a sentence with no path, no errno and no filename in it. */
 export async function putDocument(doc: DocumentLocator, bytes: Buffer): Promise<void> {

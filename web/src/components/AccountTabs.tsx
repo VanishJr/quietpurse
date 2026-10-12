@@ -46,9 +46,9 @@ export function AccountTabs({
   const [page, setPage] = useState(0);
 
   /**
-   * The strip follows a NEW selection onto its page — an account just added has to be
-   * visible wherever the order put it — and it follows the SAME selection when the list
-   * has moved it to a different page. Paging by hand is neither, and is left alone.
+   * The strip follows a NEW selection onto its page, because an account just added has
+   * to be visible wherever the order put it. It also follows the SAME selection when the
+   * list has moved it to a different page. Paging by hand is neither, and is left alone.
    *
    * The ref is what tells the three apart, and it has to remember the page as well as
    * the id. Keyed on nothing, this effect re-runs on every render the parent causes and

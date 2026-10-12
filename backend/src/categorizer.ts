@@ -3,9 +3,9 @@
  * descriptions, so the Ukrainian, Russian and German ones must not be "translated".
  * Ukrainian banks emit statements in both Ukrainian and Russian.
  *
- * The rules depend on the sign of the amount: income has its own set, and a refund is
- * the exception — it arrives positive and is categorized by merchant, so that it
- * subtracts from spending in that category instead of counting as income.
+ * The rules depend on the sign of the amount: income has its own set. A refund is the
+ * exception. It arrives positive and is categorized by merchant, so that it subtracts
+ * from spending in that category instead of counting as income.
  */
 
 /** Bump on any change to the rule lists below, or the recompute has nothing to notice. */
@@ -65,14 +65,14 @@ addMcc('cash', [6010, 6011]);
 addMcc('transfers', [4829, 6012, 6536, 6537, 6538, 6540]);
 
 /**
- * A keyword matches only at the start of a word — the character before it may not be a
+ * A keyword matches only at the start of a word. The character before it may not be a
  * letter or a digit in any script. "word" bounds the right-hand side as well, which is
  * what lets a short generic word ("bar", which would otherwise fire inside "Barcelona")
  * be a rule at all.
  *
  * \b cannot express this: it is defined over [A-Za-z0-9_], so /\bкафе/u reports a
  * boundary between the Latin "x" and the Cyrillic "к" of "xкафе" and matches. It also
- * counts "_" as a word character and this rule does not — "ab_bar" is food.
+ * counts "_" as a word character and this rule does not, so "ab_bar" is food.
  */
 type KeywordRule = [keyword: string, category: Category, bound?: 'word'];
 
@@ -113,7 +113,7 @@ export const KEYWORD_RULES: KeywordRule[] = [
   ['n26 business', 'subscriptions'],
   ['colab', 'subscriptions'],
   ['whoop', 'subscriptions'],
-  // "Uber *one Membership" — before the general "uber" (that one is in transport)
+  // "Uber *one Membership" must match before the general "uber", which is transport
   ['one membership', 'subscriptions'],
   // before the general "bolt", which is transport
   ['bolt food', 'food'],
@@ -129,7 +129,7 @@ export const KEYWORD_RULES: KeywordRule[] = [
   ['кава', 'food'],
   ['ресторан', 'food'],
   ['restaurant', 'food'],
-  // "BAR A MARQUESA", "Lido Bar" — whole word, or it fires inside "Barcelona"
+  // matches "BAR A MARQUESA" and "Lido Bar" as a whole word, never inside "Barcelona"
   ['bar', 'food', 'word'],
   ['baeckerei', 'food'],
   ['bäckerei', 'food'],
@@ -160,7 +160,7 @@ export const KEYWORD_RULES: KeywordRule[] = [
   ['kaufland', 'food'],
   ['grocer', 'food'],
   ['supermarket', 'food'],
-  ['riverty', 'transport'], // "Www.riverty.com*bvg" — BVG tickets
+  ['riverty', 'transport'], // "Www.riverty.com*bvg" is a BVG ticket
   ['bvg', 'transport'],
   ['db vertrieb', 'transport'],
   ['uber', 'transport'],
@@ -214,7 +214,7 @@ export const KEYWORD_RULES: KeywordRule[] = [
   ['atm', 'cash'],
   ['cash withdrawal', 'cash'],
   ['снятие наличных', 'cash'],
-  ['cash at', 'cash'], // "Cash at Vrb Musterbank eG" — an ATM withdrawal
+  ['cash at', 'cash'], // "Cash at Vrb Musterbank eG" is an ATM withdrawal
   ['переказ', 'transfers'],
   ['перевод', 'transfers'],
   ['transfer', 'transfers'],

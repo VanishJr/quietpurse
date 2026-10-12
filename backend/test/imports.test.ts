@@ -38,7 +38,7 @@ import { NewTransaction } from '../src/types';
 const csvFile = (...rows: string[]): string =>
   ['date,amount,description', ...rows].join('\n');
 
-/** The same row repeated n times - one dedup group, ordinals 1..n. */
+/** The same row n times, which makes one dedup group with ordinals 1..n. */
 const repeated = (n: number, row: string): string =>
   csvFile(...Array.from({ length: n }, () => row));
 
@@ -101,7 +101,7 @@ describe('imports: the file layer', () => {
   /**
    * A committed import that owns nothing: its rows were all written by an
    * earlier one, so the dedup key sent every insert away. The empty accountIds
-   * is the honest answer - it says where this import's rows are, and there are
+   * is the honest answer. It says where this import's rows are, and there are
    * none, which is not the same as nothing having been imported.
    *
    * `accountId` is empty for the same reason and not for want of a better guess.
@@ -139,15 +139,15 @@ describe('imports: the file layer', () => {
     expect(await countFor(await accountFor('Retry Bank'))).toBe(0);
     // and the row records no account: createImport writes before the parse, so there
     // is nothing to record yet. Asserted on the COLUMN, because the mapper is what
-    // would be changed alongside a writer that started filling it in - and an account
-    // id on a row that never parsed is a client-visible field on the history screen
+    // would be changed alongside a writer that started filling it in. An account id
+    // on a row that never parsed is a client-visible field on the history screen
     const staged = (await dbInstance().execute(
       sql`SELECT account_id FROM imports
           WHERE id = ${failed[0].id}`,
     )) as unknown as { rows: { account_id: string | null }[] };
     expect(staged.rows[0].account_id).toBeNull();
 
-    // a failed import does not claim the file - only a committed one does
+    // only a committed import claims the file, never a failed one
     const retried = await importAndConfirm({
       accountId: await accountFor('Retry Bank'),
       bytes: Buffer.from(csv, 'utf8'),
@@ -228,9 +228,9 @@ describe('imports: the file layer', () => {
    * The rows are already gone when the blob delete runs, so its failure is logged
    * and swallowed: raising would send the user to press a button whose import no
    * longer exists, and the second press answers "not found". Nothing but this test
-   * holds that - the catch is reachable from user data, not only from a broken disk
-   * (a restored `imports.id` outside the key charset makes the key refuse before any
-   * disk access), and removing it 500s the route AFTER the delete has happened.
+   * holds that. The catch is reachable from user data, not only from a broken disk: a
+   * restored `imports.id` outside the key charset makes the key refuse before any
+   * disk access. Removing the catch 500s the route AFTER the delete has happened.
    *
    * The failure is forced with a non-empty directory where the blob belongs, so the
    * unlink fails with something that is not ENOENT on every platform this runs on.
@@ -259,9 +259,9 @@ describe('imports: the file layer', () => {
    * answer "already imported" on every retry and the one artefact that cannot be
    * recovered later could never be captured for that file at all.
    *
-   * The failure is forced by pointing the store at a plain FILE for the duration -
-   * no chmod, identical on Windows and Linux - and never by touching the folder the
-   * other cases' documents are in.
+   * The failure is forced by pointing the store at a plain FILE for the duration,
+   * never by touching the folder the other cases' documents are in. That needs no
+   * chmod and behaves the same on Windows and Linux.
    */
   it('an import whose document cannot be stored is refused, and the bytes stay re-uploadable', async () => {
     const csv = csvFile('2026-06-03,-14.00,Refused');
@@ -418,10 +418,10 @@ describe('imports: the file layer', () => {
  * `limit` of it, so a panel can say how many are not listed instead of counting what
  * it was sent.
  *
- * Every case starts with nothing imported and this describe is the last in the file.
- * The setup file truncates before each FILE, so what 101 imports left behind would
- * reach is the rest of THIS one - and the truncate is inside each case rather than at
- * the end of the describe, where a failing case would skip it.
+ * Every case starts with nothing imported, and this describe is the last in the file.
+ * The setup file truncates before each FILE, so what the cap case's imports leave
+ * behind can reach only the rest of THIS one. The truncate is inside each case rather
+ * than at the end of the describe, where a failing case would skip it.
  */
 describe('listImports: the filter and the totals', () => {
   let seq = 0;
@@ -440,9 +440,9 @@ describe('listImports: the filter and the totals', () => {
     }));
 
   /**
-   * A committed import attributed to an account, owning `n` transactions - the two
-   * calls the product path makes, so nothing here fabricates a state an upload
-   * cannot produce.
+   * A committed import attributed to an account, owning `n` transactions. It is
+   * built from the calls the product path makes, so nothing here fabricates a state
+   * an upload cannot produce.
    */
   async function importInto(accountId: string, name: string, n: number): Promise<string> {
     seq += 1;
@@ -496,7 +496,7 @@ describe('listImports: the filter and the totals', () => {
       expect(totals.imports).toBe(2);
       expect(totals.documents).toBe(1);
       // literal, not expect.anything(): SUM() over bigint is numeric, and both
-      // drivers hand numeric over as a string - "7" fails here and must
+      // drivers hand numeric over as a string. The string "7" must fail here
       expect(totals.transactions).toBe(7);
 
       // the page is whole, so each total is an identity over what it carries
@@ -512,7 +512,7 @@ describe('listImports: the filter and the totals', () => {
 
   /**
    * The combination the delete panel actually meets: an account with more imports
-   * than the page returns. It is a different mistake from the cap case below - a
+   * than the page returns. It catches a different mistake from the cap case below: a
    * COUNT(*) OVER () written outside the filtered set passes that one and fails this.
    */
   it('a filtered page shorter than its filtered set still counts the whole of it', async () => {
@@ -552,8 +552,8 @@ describe('listImports: the filter and the totals', () => {
 
   /**
    * COUNT(*) OVER () returns no ROW when the filtered set is empty, so the zeroes
-   * come from an absent row rather than from a page of length 0 - and an id that
-   * matches nothing is not an error.
+   * come from an absent row rather than from a page of length 0. An id that matches
+   * nothing is not an error.
    */
   it('an accountId that matches nothing is an empty page and three zeroes', async () => {
     await startingEmpty(async () => {
@@ -573,8 +573,8 @@ describe('listImports: the filter and the totals', () => {
    * asserts the shape rather than deriving it, so a dropped or misspelled alias
    * typechecks and leaves that field undefined. On the VALUES rather than on the
    * keys, because rowToImport builds an object literal: the key is there whatever
-   * the row held. null is legitimate and stays legal - undefined is the symptom,
-   * and a column added later inherits this without anyone extending a list.
+   * the row held. null is legitimate and stays legal. The symptom is undefined, and
+   * a column added later inherits this check without anyone extending a list.
    */
   it('no field of a listed import is undefined - every alias reached the mapper', async () => {
     await startingEmpty(async () => {

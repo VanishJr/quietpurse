@@ -2,11 +2,11 @@
  * The saved chart list over real HTTP: what a PUT stores, what it answers, and what
  * it refuses.
  *
- * Driven through supertest, because everything worth asserting
- * here is the wire - the status code, the sentence each refusal composes, and the
- * fact that a 200 body is the list read back out of the table rather than the
- * request echoed. A route that answers with what it was sent reports a write that
- * did not happen as a success, and nothing below the route can see that.
+ * Driven through supertest, because everything worth asserting here is the wire: the
+ * status code, the sentence each refusal composes, and the fact that a 200 body is the
+ * list read back out of the table rather than the request echoed. A route that
+ * answers with what it was sent reports a write that did not happen as a success,
+ * and nothing below the route can see that.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { CHARTS_STALE, app } from '../src/app';
@@ -65,7 +65,7 @@ const read = async (a: Agent): Promise<{ version: number; charts: ChartBody[] }>
   return res.body;
 };
 
-/** A save from the version the server last answered - never from a literal. */
+/** A save at the version the server last answered, never at a literal one. */
 const save = async (a: Agent, charts: ChartBody[]): Promise<Response> => {
   const { version } = await read(a);
   return a.put(CHARTS).send({ version, charts });
@@ -107,7 +107,7 @@ describe('PUT /api/analytics/charts', () => {
       // rather than substituting one, and refusing it here would refuse a whole list on
       // the client's first migration
       chart({ id: 'czz1', title: 'Third alphabetically, first in the dock', metrics: [] }),
-      // an empty title is legal too - the dock falls back to a suggestion
+      // an empty title is legal too: the dock falls back to a suggested one
       chart({ id: 'cmm2', title: '', accountId: walletId }),
       chart({
         id: 'caa3',
@@ -131,8 +131,8 @@ describe('PUT /api/analytics/charts', () => {
 
   /**
    * Reordering the dock is the same whole-list write as any other, and the `sort`
-   * column is rewritten from the new positions rather than kept from the old ones -
-   * a replace that reused them would answer the previous arrangement for ever.
+   * column is rewritten from the new positions rather than kept from the old ones. A
+   * replace that reused them would answer the previous arrangement for ever.
    */
   it('a list saved in another order comes back in that order', async () => {
     const before = await read(agent);
@@ -148,8 +148,8 @@ describe('PUT /api/analytics/charts', () => {
   /**
    * The case the version exists for, and it is written as its own because the stale
    * case below passes for the wrong reason when everything is stale: it asks for a
-   * 409 and gets one. Its version comes out of the previous response's body - a
-   * literal here would be the same tautology one level down.
+   * 409 and gets one. Its version comes out of the previous response's body, because
+   * a literal here would be the same tautology one level down.
    */
   it('accepts a second save at the version the first save answered', async () => {
     const first = await save(agent, [chart({ id: 'cver1', title: 'Before' })]);
@@ -257,7 +257,7 @@ describe('what the door refuses', () => {
 
   it('two charts with one id, named - the URL could only ever name one of them', async () => {
     expect(await refused(put([chart({ id: 'ctwice1' }), chart({ id: 'ctwice1' })]))).toBe(
-      'two charts share the id "ctwice1" - the URL names a chart by its id, so it can only name one',
+      'two charts share the id "ctwice1". The URL names a chart by its id, so it can only name one',
     );
   });
 

@@ -1,8 +1,8 @@
 /**
- * The half of the month arithmetic the server deliberately does not do — it answers
- * only the months that HAVE rows, so the anchoring, the window and the interior gaps
- * are the caller's, and the whole of that rule is the docblock above `windowMonths` —
- * and the cents rule that goes with it.
+ * The half of the month arithmetic the server deliberately does not do, and the cents
+ * rule that goes with it. The server answers only the months that HAVE rows, so the
+ * anchoring, the window and the interior gaps are the caller's. The whole of that rule
+ * is the docblock above `windowMonths`.
  */
 import { AccountMonthTotals } from './types';
 
@@ -32,12 +32,12 @@ export function shiftMonth(month: string, delta: number): string {
 }
 
 /**
- * The last calendar day of a YYYY-MM, as YYYY-MM-DD — in UTC from the month key and
- * never `new Date(y, m, 0)` with local getters, which is a day out for half the planet.
+ * The last calendar day of a YYYY-MM, as YYYY-MM-DD. Computed in UTC from the month key,
+ * never with `new Date(y, m, 0)` and local getters, which is a day out for half the planet.
  */
 export function monthEnd(month: string): string {
   const year = Number(month.slice(0, 4));
-  // 1-based, so this is next month's 0-based index — day 0 of it is this month's last
+  // 1-based, so this is next month's 0-based index, and its day 0 is this month's last
   const next = Number(month.slice(5, 7));
   return new Date(Date.UTC(year, next, 0)).toISOString().slice(0, 10);
 }
@@ -57,7 +57,7 @@ export function monthRange(first: string, last: string): string[] {
  * The window the chart draws, oldest first: the account's months as the server
  * answered them, anchored, cut to `window`, and with the holes filled in.
  *
- * The server answers only the months that have rows, so all four rules below are the
+ * The server answers only the months that have rows, so every rule below is the
  * client's alone:
  *
  *  - The newest bucket is the newest month WITH DATA, not the current month. Anchoring
@@ -67,13 +67,13 @@ export function monthRange(first: string, last: string): string[] {
  *    one month of history answers one bucket for every window. It is not padded with
  *    zeroes at the far end: a bar for a month that predates the first statement is a
  *    claim that nothing happened then, and nothing here knows that.
- *  - Gaps INSIDE the range are materialised as 0/0/0, because those are real — a month
- *    between two months of statements with nothing in it is a month with nothing in it.
+ *  - Gaps INSIDE the range are materialised as 0/0/0, because those are real: a month
+ *    with nothing in it between two months of statements really had nothing in it.
  *    This is also what makes `priorMonth` adjacency: without it, "vs Jul" on an account
  *    with a quiet June silently becomes a comparison against May.
  *  - A month holding only transfers is a month with data. It totals 0/0 and the bar is
- *    flat, but it is in the array the server sent — `net` carries no transfer filter —
- *    and dropping it would move the anchor and quietly reshape the window.
+ *    flat, but it is in the array the server sent, because `net` carries no transfer
+ *    filter. Dropping it would move the anchor and quietly reshape the window.
  */
 export function windowMonths(
   months: AccountMonthTotals[],
@@ -102,8 +102,8 @@ export const latestMonth = (months: AccountMonthTotals[]): AccountMonthTotals | 
 
 /**
  * The month before it, which is what a "from last month" figure compares against.
- * null when the account has only ever had one month — and then no comparison is
- * shown at all, rather than one against a zero nobody recorded.
+ * null when the account has only ever had one month. Then no comparison is shown at
+ * all, rather than one against a zero nobody recorded.
  *
  * Adjacency in the FILLED array and never "the previous element of the server's
  * answer": the server skips a month with no rows, so reading its array directly makes
@@ -116,9 +116,9 @@ export const priorMonth = (months: AccountMonthTotals[]): AccountMonthTotals | n
  * A base of zero is the null case and not "infinity" or "100%": going from nothing to
  * something is not a percentage, and the caller renders no comparison at all rather
  * than a meaningless one. Both arguments are rounded to cents before anything is
- * decided, which is what makes "a base of zero" a test that can be passed — without
- * it a base that is zero to the last cent is some tiny residue instead, and the null
- * branch is unreachable exactly where it is needed.
+ * decided, which is what makes "a base of zero" a test that can be passed. Without the
+ * rounding, a base that is zero to the last cent is some tiny residue instead, and the
+ * null branch is unreachable exactly where it is needed.
  */
 export function percentChange(now: number, before: number): number | null {
   const base = toCents(before);

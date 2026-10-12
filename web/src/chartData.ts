@@ -1,6 +1,6 @@
 /**
  * A `Chart` turned into requests, and the answers turned into something drawable: the
- * one seam between a chart's numbers and the server, with two arms — every account
+ * one seam between a chart's numbers and the server. It has two arms: every account
  * together, or one account.
  *
  * What differs between the two arms is the UNIT, and a card must print the one it was
@@ -49,13 +49,14 @@ export interface ChartLoad {
 }
 
 /**
- * Not the whole spec: renaming a chart, and switching which measures a series draws,
- * change nothing about the request — every measure arrives in one payload — and keying
- * the effect on the spec object would refetch on every keystroke in the wizard's name
- * box. And the SHAPE rather than the kind: a line, an area and a column are one payload
- * under three names, so keying on the name makes changing the shape a round trip
- * between charts made of numbers already in hand. What a kind adds beyond its shape is
- * whether it wants the window before this one, and that is the other half of the key.
+ * Not the whole spec. Renaming a chart changes nothing about the request, and neither
+ * does switching which measures a series draws, since every measure arrives in one
+ * payload. Keying the effect on the spec object would refetch on every keystroke in the
+ * wizard's name box. And the SHAPE rather than the kind: a line, an area and a column
+ * are one payload under three names, so keying on the name makes changing the shape a
+ * round trip between charts made of numbers already in hand. What a kind adds beyond
+ * its shape is whether it wants the window before this one, and that is the other half
+ * of the key.
  */
 const fetchKey = (spec: Chart): string => {
   const kind = chartKind(spec.kind);
@@ -129,9 +130,9 @@ async function loadShare(
       /*
        * `positiveShares` on both sides, and `slices` above left whole: a comparative
        * kind is built out of radii, and a category a refund pushed negative is a
-       * negative radius, plotted mirrored through the centre — a self-crossing polygon
-       * reading as a LARGER value pointing the wrong way. The ranking still gets the
-       * honest figure off `slices`.
+       * negative radius, plotted mirrored through the centre. That draws a self-crossing
+       * polygon that reads as a LARGER value pointing the wrong way. The ranking still
+       * gets the honest figure off `slices`.
        */
       compared: before
         ? compareShares(
@@ -184,7 +185,7 @@ export function useChartData(
 
   const key = fetchKey(spec);
   /*
-   * The account object, resolved out here for the refusal below — the loaders read no
+   * The account object, resolved out here for the refusal below. The loaders read no
    * field of it and are handed the id alone. So what the effect depends on is WHETHER it
    * resolved, and not on an array identity that changes every time the screen reloads
    * the list.
@@ -196,7 +197,7 @@ export function useChartData(
    * Only a per-account chart waits for the list: gating a chart of every account on
    * `accounts === null` would fetch once on mount and again the moment the list landed,
    * for every such card on the screen. And it waits only while the list may still
-   * arrive — an `accountsError` ends the wait.
+   * arrive: an `accountsError` ends the wait.
    */
   const waiting = spec.accountId !== null && accounts === null && accountsError === null;
 
@@ -209,8 +210,8 @@ export function useChartData(
 
     /*
      * The list did not arrive, so which account this is cannot be known. In the card's
-     * own words rather than as a fall-through to the refusal below: that one names a
-     * cause — the account was deleted — and this is not it.
+     * own words rather than as a fall-through to the refusal below, which says the
+     * account was deleted, and that is not the cause here.
      */
     if (spec.accountId && accountsError) {
       setState({
@@ -253,7 +254,7 @@ export function useChartData(
     return () => {
       live = false;
     };
-    // `spec` itself is deliberately not a dependency — see `fetchKey` above; every
+    // `spec` itself is deliberately not a dependency (see `fetchKey` above). Every
     // field the loaders read is either inside `key` or listed here in its own right.
   }, [key, spec.accountId, known, waiting, accountsError, dataRevision]);
 

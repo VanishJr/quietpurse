@@ -1,10 +1,10 @@
 /**
- * Two rules about src/wire that no type holds. The module may name no dependency but
- * zod, because the client's own tsc will compile it once the client derives its types
- * from it, and pulls in whatever it imports - a drizzle-orm reached through
- * db/schema.ts would drag the data layer into that typecheck. And every declared JSON
- * body is strict all the way down: a plain z.object strips the keys it does not know
- * and certifies a body it never saw.
+ * Rules about src/wire that no type holds. The module may name no dependency but zod,
+ * because the client's own tsc will compile it once the client derives its types from
+ * it, and pulls in whatever it imports. A drizzle-orm reached through db/schema.ts
+ * would drag the data layer into that typecheck. And every declared JSON body is
+ * strict all the way down: a plain z.object strips the keys it does not know and
+ * certifies a body it never saw.
  */
 import fs from 'fs';
 import path from 'path';
@@ -44,9 +44,9 @@ const literal = (node: ts.Node | undefined): string =>
 
 /**
  * Every way a module can name another, over the whole tree: an import, a re-export,
- * `import x = require()`, a require or import() call anywhere - inside an object
- * literal included - a `typeof import('x')` in a type position, which the client's
- * tsc follows like any other, and a triple-slash directive.
+ * `import x = require()`, a triple-slash directive, a require or import() call
+ * anywhere, even inside an object literal, and a `typeof import('x')` in a type
+ * position, which the client's tsc follows like any other.
  */
 export const specifiersOf = (source: ts.SourceFile): string[] => {
   const found: string[] = [

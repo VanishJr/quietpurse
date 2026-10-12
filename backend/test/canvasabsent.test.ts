@@ -1,21 +1,21 @@
 /**
- * The one thing the suite can hold about the optional canvas: that the parser still parses
- * where `@napi-rs/canvas` is not installed. pdfjs-dist lists it as optional, so npm
- * skips it on any machine no prebuilt binary matches - which this one may or may not
- * be, so the child below makes the package unresolvable rather than asking.
+ * What the suite can hold about the optional canvas: that the parser still parses where
+ * `@napi-rs/canvas` is not installed. pdfjs-dist lists it as optional, so npm skips it
+ * on any machine no prebuilt binary matches. This machine may or may not be one, so the
+ * child below makes the package unresolvable rather than asking.
  *
  * It has to be a child process. vitest runs one process with one module cache
  * (vitest.config.ts: `isolate: false`), so a hook installed in a test file would only
- * take effect if that file happened to be collected before pdf.test.ts - which is the
+ * take effect if that file happened to be collected before pdf.test.ts. That is the
  * file-ordering version of the import-ordering defect the stubs' placement exists to
  * remove.
  *
- * Two assertions, and the second is the one nothing else in the tree can make: the
- * parse is unchanged, and pdfjs printed the ONE warning it prints when the package is
- * missing and the globals are already in place. A second line - `Cannot polyfill
- * DOMMatrix` - would mean the stubs landed after pdf.mjs evaluated, which type-checks,
- * passes every other test, and ships a build that cannot read a PDF on exactly those
- * machines.
+ * It asserts that the parse is unchanged, and that pdfjs printed the ONE warning it
+ * prints when the package is missing and the globals are already in place. The warning
+ * is the one assertion nothing else in the tree can make. A second line,
+ * `Cannot polyfill DOMMatrix`, would mean the stubs landed after pdf.mjs evaluated.
+ * That type-checks, passes every other test, and ships a build that cannot read a PDF
+ * on exactly those machines.
  */
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

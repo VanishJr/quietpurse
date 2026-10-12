@@ -108,7 +108,7 @@ describe('POST /api/accounts', () => {
     const res = await agent.post('/api/accounts').send({ name: 'gone', currency: 'EUR' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe(
-      'an account called "Gone" already has that name, and it has been removed from the app - restore it, or pick another name',
+      'an account called "Gone" already has that name, and it is hidden. Unhide it, or pick another name',
     );
   });
 
@@ -174,9 +174,9 @@ describe('the account name bound is one number at both doors that write one', ()
 
   /**
    * The failure: a name an account already has that its own rename endpoint would refuse.
-   * It is reachable only if the doors bound different strings, which is what one schema -
-   * trimming before it bounds - prevents. The upload was the third door before it stopped
-   * taking a name; the two that remain are the two that write a name.
+   * It is reachable only if the doors bound different strings, and one schema that trims
+   * before it bounds prevents that. The upload was a door too until it stopped taking a
+   * name; what remains is create and rename, the doors that write a name.
    */
   it('and a name accepted on create can be sent back to the rename endpoint', async () => {
     // its own filler, because the case above already holds `longest`
@@ -252,9 +252,9 @@ describe('PATCH /api/accounts/:id', () => {
 
 /**
  * The correction on the wire. The currency an account was created in can be
- * corrected, and only while the account holds no rows of its own - balance_cents is
+ * corrected, but only while the account holds no rows of its own. Its balance_cents is
  * the plain sum of amount_cents whatever each row says, so re-denominating a
- * populated account relabels a total that was never in the new unit and nothing
+ * populated account relabels a total that was never in the new unit, and nothing
  * afterwards can tell that it happened.
  *
  * Both halves of that guard answer here, and with different sentences: a committed
@@ -263,9 +263,9 @@ describe('PATCH /api/accounts/:id', () => {
  */
 describe('PATCH /api/accounts/:id {currency}', () => {
   const HELD =
-    'this account holds transactions, and changing its currency would relabel amounts that were never in it - delete the imports behind this account, which empties it, and the currency can be changed again';
+    'this account holds transactions, and changing its currency would relabel amounts that were never in it. Delete the imports behind this account to empty it, and then the currency can be changed';
   const STAGED =
-    'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now - discard that import, change the currency, then upload the statement again';
+    'this account has an import waiting to be confirmed, and its rows were already prepared in the currency it has now. Discard that import, change the currency, then upload the statement again';
 
   const create = async (name: string) => {
     const res = await agent.post('/api/accounts').send({ name });
@@ -306,7 +306,7 @@ describe('PATCH /api/accounts/:id {currency}', () => {
 
   /**
    * One statement, one outcome. A rename riding along with a refused currency must
-   * not be applied on its own - a 200 for half of what was asked is exactly what the
+   * not be applied on its own. A 200 for half of what was asked is exactly what the
    * single UPDATE exists to make unrepresentable.
    */
   it('and takes a name sent in the same body down with it', async () => {
@@ -325,11 +325,11 @@ describe('PATCH /api/accounts/:id {currency}', () => {
   });
 
   /**
-   * The guard must NOT be paired with VISIBLE_ACCOUNT(), which every other predicate
-   * in db/index.ts is: that one excludes the transactions OF hidden accounts, so
-   * together they would read a hidden account holding a thousand rows as empty,
-   * re-denominate it at 200, and restore it into a screen of relabelled figures -
-   * unrecoverably, because those rows then refuse the change back.
+   * The guard must NOT be paired with VISIBLE_ACCOUNT(), as other predicates in
+   * db/index.ts are. That one excludes the transactions OF hidden accounts, so together
+   * they would read a hidden account full of rows as empty, re-denominate it at 200, and
+   * restore it into a screen of relabelled figures. Nothing could undo that, because
+   * those rows then refuse the change back.
    */
   it('refuses for a hidden account holding transactions too', async () => {
     const staged = await stage('Hidden And Full', 'hidden and full');
@@ -346,7 +346,7 @@ describe('PATCH /api/accounts/:id {currency}', () => {
   /**
    * The trap in correcting a currency while an import waits, run to the end. An import
    * stamps each of its rows with the account's currency when the file is READ, and
-   * nothing re-resolves that at confirm - so a correction made while an import waits
+   * nothing re-resolves that at confirm. So a correction made while an import waits
    * would stand on the account and be reverted on its rows, which then refuse every
    * further change. The guard refuses inside that window instead, and the sentence names
    * the one way through: discard, correct, upload again.
@@ -389,7 +389,7 @@ describe('PATCH /api/accounts/:id {currency}', () => {
  */
 describe('DELETE /api/accounts/:id', () => {
   const STAGED =
-    'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account';
+    'this account has an import waiting to be confirmed. Confirm it or discard it, then delete the account';
 
   const create = async (name: string) => {
     const res = await agent.post('/api/accounts').send({ name, currency: 'EUR' });
@@ -428,10 +428,10 @@ describe('DELETE /api/accounts/:id', () => {
 
   /**
    * Numeric literals after JSON.stringify catch a count that arrived as a string from
-   * node-postgres, and the key set catches a field that arrived undefined through rowsVia
-   * - toEqual alone treats an absent key and an undefined one as the same thing. The
-   * three numbers are deliberately different: equal ones would let a dropped
-   * `document_key_version` pass as a correct answer.
+   * node-postgres. The key set catches a field that arrived undefined through rowsVia,
+   * because toEqual alone treats an absent key and an undefined one as the same thing.
+   * The counts are deliberately different, so a count reported under another's key, or
+   * a `documents` that stopped filtering on document_stored, cannot pass as correct.
    */
   it('answers with what it destroyed, and with nothing else', async () => {
     const account = await create('Destroyed Counts');
@@ -466,9 +466,9 @@ describe('DELETE /api/accounts/:id', () => {
 
   /**
    * The waiting import's refusal on the wire. The state is momentary and one click from
-   * over in either direction, and the sentence says so - where the currency correction's
-   * near-identical refusal offers only discard, because confirming defeats that one and
-   * is harmless here.
+   * over in either direction, and the sentence says so. The currency correction's
+   * near-identical refusal offers only discard, because confirming defeats that one,
+   * while here confirming is harmless.
    *
    * One test, two holders: the clause is on the imports statement AND on the
    * accounts one, and dropping either turns this 200. Without the first the imports
@@ -493,7 +493,7 @@ describe('DELETE /api/accounts/:id', () => {
   });
 
   /** The accounts people delete are the ones they hid first. */
-  it('deletes an account that was removed from the app', async () => {
+  it('deletes an account that is hidden', async () => {
     const account = await create('Hidden Then Deleted Http');
     await commit(account.id, csvRows('2026-07-04,-74.00,Hidden and full'));
     expect((await agent.patch(`/api/accounts/${account.id}`).send({ hidden: true })).status).toBe(200);
@@ -533,8 +533,8 @@ describe('DELETE /api/accounts/:id', () => {
   /**
    * The consequence of a real delete: its transfers re-read as income and expense across
    * the whole history, retroactively. The surviving leg's monthly figures move,
-   * legitimately and with nothing on screen saying so - which is the client's sentence to
-   * decide and the route's to leave possible.
+   * legitimately and with nothing on screen saying so. Saying so is for the client to
+   * decide and for the route to leave possible.
    *
    * Asserted as the EFFECT and not as the call: `reclassifyAll` appears nowhere else
    * in this suite, so "the route calls it" is held by nothing at all. Removing the
@@ -562,8 +562,8 @@ describe('DELETE /api/accounts/:id', () => {
 /**
  * The confirm gate on the picked account, on the wire. This is the two-tab case at HTTP
  * scale: the upload proved the account was there, the account was removed in another tab,
- * and Confirm is pressed on a summary card that is still on screen. The status is what
- * matters as much as the sentence - a 409 is the user's to fix, where the 500
+ * and Confirm is pressed on a summary card that is still on screen. The status matters
+ * as much as the sentence. A 409 is the user's to fix, where the 500 that
  * ImportNotConfirmable answers would page an operator for a state the user created, and
  * every clause of its sentence would be false here.
  */
@@ -587,10 +587,10 @@ describe('a confirm whose account was removed while it waited', () => {
     const refused = await confirm(staged.importId);
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe(
-      'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again',
+      'nothing was imported: the account these rows go to is hidden. Unhide it, then press Confirm import again',
     );
 
-    // the way out the sentence names, walked: restore, press Confirm again
+    // the way out the sentence names, walked: unhide, press Confirm import again
     expect((await agent.patch(`/api/accounts/${created.body.id}`).send({ hidden: false })).status)
       .toBe(200);
     const confirmed = await confirm(staged.importId);
@@ -600,9 +600,9 @@ describe('a confirm whose account was removed while it waited', () => {
 });
 
 /**
- * The sibling above's harder half: the account was not hidden, it was
- * deleted, and no request the user can make brings it back - ids are minted
- * server-side. So the sentence may not say "try again", which is what disqualified
+ * The sibling above's harder half: the account was not hidden but deleted, and no
+ * request the user can make brings it back, because ids are minted server-side.
+ * So the sentence may not say "try again", which is what disqualified
  * reusing account-hidden's, and this is the only place that sentence is asserted at
  * all: the exhaustive switch behind it holds that a member has a case, never that the
  * case says anything true.
@@ -625,10 +625,10 @@ describe('a confirm whose account was deleted while it waited', () => {
       'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account',
     );
     expect(refused.body.error).toMatch(/Discard/);
-    expect(refused.body.error).not.toMatch(/try again|press Confirm again|restore it/);
+    expect(refused.body.error).not.toMatch(/try again|press confirm|unhide it/i);
 
-    // and it stays refused, so the sentence is not sending the user in a circle -
-    // then the way out it names, walked
+    // it stays refused, so the sentence is not sending the user in a circle, and the
+    // Discard it names works
     expect((await confirm(staged.importId)).status).toBe(409);
     expect((await agent.post(`/api/imports/${staged.importId}/discard`)).status).toBe(200);
   });

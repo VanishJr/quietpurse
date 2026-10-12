@@ -4,12 +4,13 @@
  * The whole feature is two columns: `category` is what the categorizer decided and
  * `category_manual` is the user's own answer, and every read that reports a category
  * to a person has to go through COALESCE(category_manual, category). SQL text is
- * invisible to tsc and a named fragment is a convention a new query can skip, so the
- * sweep is held by the enumeration in describe 2 rather than by anything structural -
- * one override, read back from every surface that reports a category.
+ * invisible to tsc and a named fragment is a convention a new query can skip, so
+ * nothing structural holds the sweep. The enumeration over HTTP below holds it: one
+ * override, read back from every surface that reports a category.
  *
- * Describe 1 is the data layer; describe 2 is the same feature over real HTTP, and it
- * starts from an empty database of its own because every figure it asserts is exact.
+ * The first describe is the data layer. The second is the same feature over real HTTP,
+ * and it starts from an empty database of its own because every figure it asserts is
+ * exact.
  */
 import { sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -39,8 +40,6 @@ import { idOf } from './helpers';
 import { type Agent, serve } from './loopback';
 import { freshTestDb } from './pglite';
 
-// ---------- describe 1: the data layer ----------
-
 /** A window over the whole data-layer fixture. */
 const FROM = '2026-01-01T00:00:00.000Z';
 const TO = '2026-12-31T23:59:59.999Z';
@@ -55,7 +54,7 @@ const RENT = 400;
 /** The row the manual mark is set on, and one of the four rows the rule caption counts. */
 const STRAY = 5;
 const CAPTION_ROW = 1;
-/** Every row that really is 'other' - the moved one is deliberately not among them. */
+/** Every row that really is 'other'. The moved one is deliberately not among them. */
 const OTHER_SPEND = RENT * 2 + STRAY + CAPTION_ROW * 2;
 
 const tx = (over: Partial<NewTransaction>): NewTransaction => ({
@@ -138,7 +137,7 @@ beforeAll(async () => {
   ]);
   expect((await updateAccount(concealed.id, { hidden: true })).ok).toBe(true);
 
-  // the categorizer's own answers, and `recurring`, before any override exists - so
+  // the categorizer's own answers, and `recurring`, before any override exists. Then
   // every stored auto category below is what a recompute would write anyway, and no
   // case in this file depends on another having run first
   await reclassifyAll();
@@ -149,7 +148,7 @@ beforeAll(async () => {
   await setCategoryOverride(await idOf('CAPTION beta'), 'food');
 });
 
-/** The newest row of the rent group - the one listRecurringGroups reports. */
+/** The newest row of the rent group: the row whose category listRecurringGroups reports. */
 async function newestRentId(): Promise<string> {
   const rows = (await listTransactions({ from: FROM, to: TO, limit: 1000 })).filter(
     (t) => t.description === 'ZZ Monthly Rent',
@@ -161,9 +160,9 @@ async function newestRentId(): Promise<string> {
 describe('the data layer: a manual category, and what may not touch it', () => {
   /**
    * The user corrects one row, then writes a rule that moves that row's AUTO answer. The
-   * rule may not clear the mark, the mark still wins, and the auto column underneath must
-   * be brought up to date by the recompute - because that is what a later clear falls
-   * back to. A recompute that skipped overridden rows would leave a months-old answer
+   * rule may not clear the mark, the mark still wins, and the recompute must bring the
+   * auto column underneath up to date, because that is what a later clear falls back
+   * to. A recompute that skipped overridden rows would leave a months-old answer
    * there and nothing on screen would say so.
    */
   it('survives a recompute, and the auto answer underneath is kept current', async () => {
@@ -246,12 +245,11 @@ describe('the data layer: a manual category, and what may not touch it', () => {
   });
 
   /**
-   * `matches` keeps meaning "rows whose description contains the
-   * pattern" - four here, one of them on a hidden account, because
-   * countCategoryRuleMatches carries WS() and no VISIBLE_ACCOUNT() and `overridden`
-   * must carry exactly the same filters. Take one of the two through the visibility
-   * filter and `matches - overridden` is wrong for anyone with a hidden
-   * account, quietly.
+   * `matches` keeps meaning "rows whose description contains the pattern": four here,
+   * one of them on a hidden account, because countCategoryRuleMatches carries WS() and
+   * no VISIBLE_ACCOUNT(). `overridden` must carry exactly the same filters. Take one of
+   * the two through the visibility filter and `matches - overridden` is quietly wrong
+   * for anyone with a hidden account.
    */
   it('the rule caption counts the rows it cannot change, through the same filters', async () => {
     expect(await countCategoryRuleMatches('caption')).toEqual({ matches: 4, overridden: 1 });
@@ -301,8 +299,6 @@ describe('the data layer: a manual category, and what may not touch it', () => {
     expect((await getTransaction(await idOf('ZZ Mystery One')))!.category).toBe('transport');
   });
 });
-
-// ---------- describe 2: over real HTTP ----------
 
 const now = new Date();
 const monthStartAt = (delta: number): Date =>
@@ -448,7 +444,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     /**
      * The absent key is its own arm, and it is not the same request as `null`: an
      * undefined must not reach the data layer, where drizzle's one-field .set()
-     * refuses to build a statement at all - a 500 rather than a refusal.
+     * refuses to build a statement at all. That is a 500 rather than a refusal.
      */
     it('refuses a body with no category key at all', async () => {
       const res = await patchCategory(agent, shopId, {});
@@ -475,10 +471,10 @@ describe('over HTTP: the route, and every surface that reports a category', () =
   });
 
   /**
-   * The enumeration. Every surface is asserted positively - the
-   * overridden category present with the amount the fixture says - before anything is
-   * asserted about the slug it left, because `not.toContain` over an empty payload is
-   * green whether the sweep landed or not.
+   * The enumeration. Every surface is asserted positively, with the overridden category
+   * present at the amount the fixture says, before anything is asserted about the slug
+   * it left. `not.toContain` over an empty payload is green whether the sweep landed or
+   * not.
    */
   describe('the effective category on every surface that reports one', () => {
     it('GET /api/transactions: the value, and whether a person chose it', async () => {
@@ -535,10 +531,10 @@ describe('over HTTP: the route, and every surface that reports a category', () =
     });
 
     /**
-     * Both arms call the same two functions, so sweeping the function covers this
-     * by construction - which is a test that passes because of how the code is
-     * factored. The card on the account screen is the one place a user's correction
-     * could silently fail to appear.
+     * Both arms call the same functions, so sweeping the function covers this by
+     * construction. Relying on that is a test that passes because of how the code is
+     * factored, and the spending card of one account on the Overview is the one place
+     * a user's correction could silently fail to appear.
      */
     it('GET /api/summary?accountId=: the same, on the per-account arm', async () => {
       const res = await agent.get(`/api/summary?accountId=${walletId}`);
@@ -598,7 +594,7 @@ describe('over HTTP: the route, and every surface that reports a category', () =
         category: 'entertainment',
       });
       expect(created.status, JSON.stringify(created.body)).toBe(200);
-      // Shop, Income and Clear - and the two the user has answered for by hand
+      // Shop, Income and Clear match, and the user has answered for two of them by hand
       expect(created.body).toMatchObject({ matches: 3, overridden: 2 });
 
       const list = await agent.get('/api/category-rules');

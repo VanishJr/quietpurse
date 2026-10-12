@@ -211,7 +211,7 @@ describe('what a category rule just did', () => {
 
   it('reports a pattern that matches nothing as saved, not as refused', () => {
     const caption = categoryRuleCaption('Zzz', 'other', { matches: 0, overridden: 0 });
-    expect(caption).toContain('the rule is saved and applies to transactions that arrive later');
+    expect(caption).toContain('Nothing matches that text yet. The rule is saved and applies to transactions that arrive later.');
     expect(caption).not.toContain('0 transactions');
   });
 

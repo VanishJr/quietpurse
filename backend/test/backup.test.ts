@@ -85,7 +85,7 @@ describe('backup and restore (JSON)', () => {
 
     const txs = await listTransactions({ accountId: 'acc1' });
     expect(txs.find((t) => t.description === 'backup with fee')!.fee).toBe(0.44);
-    // NULL, not 0 - the fact "the source stated none" is what round-trips
+    // NULL, not 0, because what round-trips is the fact "the source stated none"
     expect(txs.find((t) => t.description === 'backup without fee')!.fee).toBeUndefined();
   });
 
@@ -115,8 +115,8 @@ describe('backup and restore (JSON)', () => {
    * The person's own backup, restored onto the machine that holds their statements:
    * the documents must still open. The key is derived from originalFilename, id and
    * sourceType, and a backup carries all three, so the pointer is reconstructible and
-   * stripping it threw away something the restore can rebuild. Asserted on the DISK
-   * and through getDocument both - a pointer that comes back and a file that does not
+   * stripping it threw away something the restore can rebuild. Asserted both on the
+   * DISK and through getDocument: a pointer that comes back and a file that does not
    * would pass either one alone.
    */
   it('a restore keeps the documents readable, and deleting the import still removes them', async () => {
@@ -150,8 +150,8 @@ describe('backup and restore (JSON)', () => {
 
   /**
    * The other arm of the restore, and the crafted backup with it. A claim the disk
-   * cannot honour is not refused at restore time any more - it is answered at read
-   * time, by the hash the row carries: a claim reaches a file only where the derived
+   * cannot honour is not refused at restore time. It is answered at read time, by
+   * the hash the row carries: a claim reaches a file only where the derived
    * key names one, and the bytes under it must hash to what the row recorded. So the
    * forged row resolves to a ref (the column is restored) and reads as nothing.
    */
@@ -238,13 +238,13 @@ describe('backup and restore (JSON)', () => {
    * The operator's own upgrade path: a backup taken before the bank
    * integrations were deleted is the file they restore from AFTER dropping and
    * recreating the database, so it has to keep working with tables and columns this
-   * schema no longer has. The two halves are held differently and both are asserted
-   * here - restoreBackup iterates BACKUP_TABLES, so a removed table's key is
-   * structurally unreachable, while a removed COLUMN is dropped by sanitizeRow, which
-   * is ordinary application code a later change can delete.
+   * schema no longer has. The two halves are held differently, and both are asserted
+   * here. restoreBackup iterates BACKUP_TABLES, so a removed table's key is
+   * structurally unreachable. A removed COLUMN is dropped by sanitizeRow, which is
+   * ordinary application code a later change can delete.
    *
-   * `tables: 1` is the pin on the first half: the three legacy keys contributed
-   * nothing and, more to the point, were never offered to a table that does not exist.
+   * `tables: 1` is the pin on the first half: the legacy keys contributed nothing
+   * and, more to the point, were never offered to a table that does not exist.
    */
   it('a backup taken before the bank integrations were removed still restores', async () => {
     const legacy = {
@@ -261,7 +261,7 @@ describe('backup and restore (JSON)', () => {
             balanceCents: 123456,
             iban: null,
             hidden: false,
-            // the three columns this task dropped, exactly as an old export wrote them
+            // columns this schema no longer has, exactly as an old export wrote them
             ebSessionId: 'eb-session-abc',
             lastSyncedAt: '2026-04-30T21:00:00.000Z',
             historyFrom: '2025-05-01',
@@ -607,10 +607,10 @@ describe('backup and restore (JSON)', () => {
 
   /**
    * imports.account_id is an ordinary column, so it exports and restores with no code
-   * of its own - exportBackup selects whole rows and sanitizeRow keeps every real
-   * column a restore carries like any other. Asserted rather than assumed, because the failure is
-   * silent: an import that restores without the id it was staged against is one whose
-   * confirm can no longer find its account.
+   * of its own: exportBackup selects whole rows, and sanitizeRow keeps every real
+   * column a restore carries like any other. Asserted rather than assumed, because the
+   * failure is silent: an import that restores without the id it was staged against
+   * is one whose confirm can no longer find its account.
    */
   it('the account an import was staged for survives the round-trip', async () => {
     const imported = await importAndConfirm({
@@ -627,10 +627,10 @@ describe('backup and restore (JSON)', () => {
 
   /**
    * accounts_name_unique applies to a restore, which inserts the file's accounts
-   * wholesale: a backup holding two names differing only in case now fails, whole.
-   * Accepted, and what makes it acceptable rather than catastrophic is that the DELETE
-   * and every INSERT are one transaction - a refused restore leaves the database
-   * exactly as it was, which is the half asserted here.
+   * wholesale: a backup holding two names differing only in case fails, whole. That
+   * is accepted. What makes it acceptable rather than catastrophic is that the DELETE
+   * and every INSERT are one transaction, so a refused restore leaves the database
+   * exactly as it was. That half is the one asserted here.
    */
   it('a restore refused by the name index leaves the existing rows untouched', async () => {
     await insertTransactions([tx('restore refusal survivor', -12)]);
@@ -660,7 +660,8 @@ describe('backup and restore (JSON)', () => {
     expect(await listTransactions({ accountId: 'acc1', limit: 100 })).toHaveLength(before.length);
     // this is the line that depends on the rollback: accounts IS in the backup, so
     // its DELETE ran and only the rollback put the person's own accounts back. The
-    // transactions line above does not - a table the backup omits is skipped whole
+    // transactions line above does not depend on it: a table the backup omits is
+    // skipped whole
     expect((await listAccounts(true)).map((a) => a.id).sort()).toEqual(accountsBefore);
     expect((await listAccounts(true)).map((a) => a.id)).not.toContain('dup-a');
   });

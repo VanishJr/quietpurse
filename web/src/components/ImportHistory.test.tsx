@@ -243,9 +243,9 @@ describe('the list', () => {
     expect(
       screen.queryByRole('button', { name: /Download the file/ }),
     ).not.toBeInTheDocument();
-    // these are the rows likeliest to still have bytes, and the route was
-    // built to reach them. Hidden, the only way left is Delete import — which takes
-    // the transactions too, and no purge exists behind it.
+    // these are the rows likeliest to still have bytes, and the route was built to
+    // reach them. With Delete file hidden, the only way left would be Delete import.
+    // That takes the transactions too, and no purge exists behind it.
     const { group } = await openActions();
     expect(
       within(group).getByRole('button', { name: 'Delete the file for statement.csv' }),
@@ -333,7 +333,7 @@ describe('deleting an import', () => {
     expect(
       await screen.findByText(/Delete this import and the 12 transactions that belong to it\?/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/The account stays too/)).toBeInTheDocument();
+    expect(screen.getByText(/Its stored file is removed too, but the account stays\./)).toBeInTheDocument();
     expect(deletes()).toEqual([]);
     expect(requests()).toEqual(['GET /api/imports']);
     expect(onChanged).not.toHaveBeenCalled();
@@ -354,7 +354,7 @@ describe('deleting an import', () => {
 
     // anchor: the notice, which is written only once the re-read came back
     expect(
-      await screen.findByText('Import deleted — 12 transactions removed.'),
+      await screen.findByText('Import deleted. 12 transactions were removed.'),
     ).toBeInTheDocument();
     expect(screen.getByText(/Nothing has been imported yet/)).toBeInTheDocument();
     expect(countOf('DELETE /api/imports/imp-1')).toBe(1);
@@ -387,7 +387,7 @@ describe('deleting an import', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete import' }));
 
     expect(
-      await screen.findByText('Import deleted — no transactions were removed.'),
+      await screen.findByText('Import deleted. No transactions were removed.'),
     ).toBeInTheDocument();
     expect(countOf('DELETE /api/imports/imp-1')).toBe(1);
   });
@@ -649,7 +649,7 @@ describe('mutation recovery', () => {
     mount();
     const first = await openConfirmation('import');
     fireEvent.click(within(first.dialog).getByRole('button', { name: 'Delete import' }));
-    await screen.findByText('Import deleted — 12 transactions removed.');
+    await screen.findByText('Import deleted. 12 transactions were removed.');
     expect(screen.getByRole('heading', { name: 'Import history' })).toHaveFocus();
     const second = await openConfirmation('import', 'second.csv');
     fireEvent.click(within(second.dialog).getByRole('button', { name: 'Cancel' }));
@@ -694,7 +694,7 @@ describe('mutation recovery', () => {
 
       expect(await screen.findByText('Updating import history…')).toBeInTheDocument();
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-      expect(screen.queryByText('Import deleted — 1 transaction removed.')).not.toBeInTheDocument();
+      expect(screen.queryByText('Import deleted. 1 transaction was removed.')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Actions for second.csv' })).not.toHaveFocus();
       expect(screen.getByRole('heading', { name: 'Import history' })).not.toHaveFocus();
       expect(onChanged).not.toHaveBeenCalled();
@@ -705,7 +705,7 @@ describe('mutation recovery', () => {
         refresh.resolve(ok(importsResponse(target === 'survivor' ? [survivor] : [])));
       });
 
-      expect(screen.getByText('Import deleted — 1 transaction removed.')).toBeInTheDocument();
+      expect(screen.getByText('Import deleted. 1 transaction was removed.')).toBeInTheDocument();
       expect(screen.queryByRole('article', { name: 'statement.csv' })).not.toBeInTheDocument();
       expect(screen.queryByText('Updating import history…')).not.toBeInTheDocument();
       const focusTarget = target === 'survivor'
@@ -780,7 +780,7 @@ describe('mutation recovery', () => {
     const { dialog } = await openConfirmation('import');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete import' }));
 
-    expect(await screen.findByText('Import deleted — 3 transactions removed.')).toBeInTheDocument();
+    expect(await screen.findByText('Import deleted. 3 transactions were removed.')).toBeInTheDocument();
     const error = screen.getByRole('alert');
     expect(error).toHaveTextContent('History could not be loaded');
     expect(error).toHaveTextContent('refresh refused');
@@ -798,7 +798,7 @@ describe('mutation recovery', () => {
     await vi.waitFor(() => expect(screen.queryByRole('article', { name: 'statement.csv' })).not.toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'second.csv' })).toBeInTheDocument();
-    expect(screen.queryByText('Import deleted — 3 transactions removed.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Import deleted. 3 transactions were removed.')).not.toBeInTheDocument();
     expect(countOf('GET /api/imports')).toBe(3);
     expect(deletes()).toEqual(['DELETE /api/imports/imp-1']);
     expect(onChanged).toHaveBeenCalledTimes(1);
@@ -896,7 +896,7 @@ describe('mutation recovery', () => {
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(screen.getByText(kind === 'document'
-        ? 'The stored statement was deleted.' : 'Import deleted — 12 transactions removed.'))
+        ? 'The stored statement was deleted.' : 'Import deleted. 12 transactions were removed.'))
         .toBeInTheDocument();
       expect(kind === 'document' ? trigger : screen.getByRole('heading', { name: 'Import history' }))
         .toHaveFocus();
@@ -910,10 +910,10 @@ describe('mutation recovery', () => {
 });
 
 /**
- * The server filters and totals, and this screen prints what it was
- * sent. Two of the three cases below are about code that is NOT here any more — the
- * client-side filter, and a caveat that used to be unconditional — and both would
- * pass silently if they were written after the change rather than before it.
+ * The server filters and totals, and this screen prints what it was sent. Some cases
+ * below are about code that is NOT here any more: the client-side filter, and a caveat
+ * that used to be unconditional. Both would pass silently if they were written after
+ * the change rather than before it.
  */
 describe('one account, filtered by the server', () => {
   const ACCOUNT: Account = {
@@ -982,7 +982,7 @@ describe('one account, filtered by the server', () => {
 
     expect(
       await screen.findByText(
-        'Newest first — the most recent 2 of 137. 135 older imports are not listed.',
+        'Showing the 2 most recent of 137, newest first. 135 older imports are not listed.',
       ),
     ).toBeInTheDocument();
     // and the page it was sent is still the page it renders
@@ -995,7 +995,7 @@ describe('one account, filtered by the server', () => {
     mountFor(ACCOUNT);
     await screen.findByText('statement.csv');
 
-    expect(screen.queryByText(/Newest first/)).toBeNull();
+    expect(screen.queryByText(/newest first/)).toBeNull();
     // the withheld count is what this arm may not carry, and the sentence this
     // one replaced said it unconditionally
     expect(screen.queryByText(/not listed/)).toBeNull();

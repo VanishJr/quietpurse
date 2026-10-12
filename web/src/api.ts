@@ -72,7 +72,7 @@ async function refuse(res: Response): Promise<never> {
     const parsed = JSON.parse(body) as { error?: unknown };
     if (typeof parsed.error === 'string') message = bounded(parsed.error, MAX_ERROR_CHARS);
   } catch {
-    // not JSON — the status and the body are all there is
+    // not JSON, so the status and the body are all there is
   }
   throw new ApiError(res.status, message);
 }
@@ -90,7 +90,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * A summary body, checked against the unit it was asked for: `scope` is the only thing
  * that says which of the two bodies answered, and an account request answered with the
  * other one would put all the money on screen under one account's name and currency
- * code — right-looking, wrong, and permanent.
+ * code. That looks right, is wrong, and stays wrong.
  *
  * So this throws where a client fallback is normally a sentence. The bad shape is not a
  * skew between a new client and an old server but what this repository produces the day
@@ -141,8 +141,8 @@ const accountSummaryPath = (base: string, accountId: string, from: string, to: s
   `${base}?accountId=${encodeURIComponent(accountId)}&from=${from}&to=${to}`;
 
 /**
- * Bytes or a throw — never a Response and never a URL. A route answering a file is
- * a route that can answer 500, and `<a href download>` saves that too.
+ * Returns bytes or throws, never a Response and never a URL. A route answering a file
+ * is a route that can answer 500, and `<a href download>` saves that too.
  */
 async function download(path: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`);
@@ -167,9 +167,9 @@ const json = (method: string, body?: unknown): RequestInit => ({
 /**
  * Branded, and minted in one place, `parseChartList`, over a body the server sent. The
  * route's compare-and-swap is what keeps two devices from silently overwriting each
- * other, and it is defeated by arithmetic — `version + 1` after an optimistic save is
- * right until one PUT is refused, and from then on every save lands on somebody else's
- * list and is answered 200. `putCharts(3, …)` does not compile, so there is no
+ * other, and arithmetic defeats it. `version + 1` after an optimistic save is right
+ * until one PUT is refused, and from then on every save lands on somebody else's list
+ * and is answered 200. `putCharts(3, …)` does not compile, so there is no
  * arithmetic here because there is no number here.
  */
 declare const chartsVersion: unique symbol;
@@ -239,7 +239,7 @@ export const api = {
     return request<Transaction[]>(`/api/transactions?${qs.toString()}`);
   },
 
-  /** null — hand the decision back to auto-detection. */
+  /** null hands the decision back to auto-detection. */
   setTransfer: (id: string, transfer: boolean | null) =>
     request<Transaction>(
       `/api/transactions/${encodeURIComponent(id)}/transfer`,
@@ -288,7 +288,7 @@ export const api = {
       'monthly summary',
     ),
 
-  /** null — hand the decision back to auto-detection. */
+  /** null hands the decision back to auto-detection. */
   setIncomeSource: (id: string, source: IncomeSource | null) =>
     request<Transaction>(
       `/api/transactions/${encodeURIComponent(id)}/source`,
@@ -399,7 +399,7 @@ export const api = {
   /**
    * Not through `request<T>`: `refuse` reads `{ error }` and throws the rest of the body
    * away, and the rest of a 409 on this route is the current version and the current
-   * list — put there by the route so that a stale client does not have to ask again.
+   * list. The route puts them there so that a stale client does not have to ask again.
    * Everything else still goes through `refuse`, so any other refusal reads as every
    * other call's does.
    */
@@ -415,7 +415,7 @@ export const api = {
 
   /**
    * Every transaction, account and setting as readable JSON. Not a disaster-recovery
-   * backup: it is unencrypted, and the uploaded statements are not in it — those are
+   * backup: it is unencrypted, and the uploaded statements are not in it. Those are
    * downloaded one at a time from the import history.
    */
   backup: () => download('/api/backup'),

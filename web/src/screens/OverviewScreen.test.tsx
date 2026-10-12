@@ -42,23 +42,23 @@ import { setUrl } from '../url';
 import { OverviewScreen } from './OverviewScreen';
 
 /**
- * The Overview dashboard: the tab rail on the hero, and the four cells under it —
- * balance, income against expenses, spending by category, and the last transactions of
- * the account on the tab. Everything about the workspace rather than about one account
- * moved to the Account screen and is asserted there; the theme button and the avatar
- * moved to the navigation bar and are asserted in App.test.tsx.
+ * The Overview dashboard: the tab rail on the hero, and under it the balance, income
+ * against expenses, spending by category and the last transactions of the account on
+ * the tab. Everything about the workspace rather than one account moved to the Settings
+ * screen and is asserted there. The theme button moved to the navigation bar and is
+ * asserted in App.test.tsx.
  *
- * Two things this file cannot assert, both limits of the environment rather than gaps:
- * the two charts themselves — recharts measures a 0x0 box in jsdom — and anything about
- * width, so the narrow layout of the transactions table stays a manual check. Both
- * charts' numbers are asserted through the table beside each, which is the same data
- * and is what a screen reader gets.
+ * This file cannot assert two things, and both are limits of jsdom rather than gaps.
+ * It cannot see the charts, because recharts measures a zero-size box there. It cannot
+ * see width, so the narrow layout of the transactions table stays a manual check. Each
+ * chart's numbers are asserted through the table beside it instead: the same data, and
+ * what a screen reader gets.
  *
- * Note on the route table: the harness keys on method and path and discards the query,
- * so a handler is given the URL as its second argument. The two summary bodies below
- * are built from it — the account they answer for and the window they cover are the
- * ones that were asked for, which is both what api.ts insists on and what makes a
- * request for the wrong month show up as a card labelled with it.
+ * The route table: the harness keys on method and path and discards the query, so a
+ * handler gets the URL as its second argument. The summary bodies below are built from
+ * that URL, so they answer for the account and the window that were asked for. api.ts
+ * insists on that, and it makes a request for the wrong month show up as a card
+ * labelled with that month.
  */
 
 /** Newest first: the endpoint orders by date DESC, and the recent list trusts it. */
@@ -160,9 +160,9 @@ const param = (key: string): string | null =>
 const tab = (name: string) => screen.findByRole('button', { name });
 
 /**
- * The anchor for everything under the rail. It arrives three requests later than the
- * tab does — the recent seven, and then the two summaries they anchor — so a
- * synchronous query after `tab()` is a query run before the panel exists.
+ * The anchor for everything under the rail. It arrives later than the tab, after the
+ * recent list and then the summaries that list anchors. A synchronous query after
+ * `tab()` runs before the panel exists.
  */
 const panel = (name: string) => screen.findByRole('region', { name });
 
@@ -183,8 +183,8 @@ describe('the page heading', () => {
   it('names the page under today’s date', async () => {
     mount();
     expect(await screen.findByRole('heading', { name: 'Overview' })).toBeInTheDocument();
-    // the day this test runs on, formatted the one way fmtWeekday formats it — so the
-    // assertion is that the line is drawn from a real clock, not that it says a date
+    // the day this test runs on, in fmtWeekday's one format. So what is asserted is that
+    // the line reads a real clock, not that it prints a date
     expect(screen.getByText(fmtWeekday(new Date()))).toBeInTheDocument();
   });
 
@@ -208,8 +208,8 @@ describe('the page heading', () => {
   it('drops the panel from the URL on the way out, which is what the bar reads', async () => {
     // the bar cannot see this any other way: Import is a section up there and a panel
     // down here, so without it the bar marked Overview as the page over a full window
-    // of Import. It was a callback, and a callback fired from a passive effect — one
-    // frame late, every time — where this is the same fact in a place both can read.
+    // of Import. It used to be a callback fired from a passive effect, which landed one
+    // frame late every time. The URL holds the same fact in a place both can read.
     mount({ ...OVERVIEW_ROUTES, 'GET /api/imports/presets': () => ok(PRESETS) }, '/?panel=import');
     await screen.findByRole('heading', { name: 'Import a statement' });
 
@@ -244,8 +244,8 @@ describe('the URL', () => {
   });
 
   it('falls back to the first account when the URL names one that is not there', async () => {
-    // deleted, hidden, or from somebody else's Quietpurse — all the same case, and none of
-    // them is a reason to paint a rail with no tab marked and nothing underneath it
+    // deleted, hidden, or from somebody else's Quietpurse: all one case, and none of them
+    // is a reason to paint a rail with no tab marked and nothing underneath it
     mount(OVERVIEW_ROUTES, '/?account=acc-does-not-exist');
 
     expect(await panel('Balance of Sparkasse Giro')).toBeInTheDocument();
@@ -442,10 +442,10 @@ describe('income against expenses', () => {
     // Income has no base to compare against (July's income was 0), so it says nothing
     // rather than printing an infinity dressed up as a percentage.
     expect(within(flows).queryAllByText(/%/).length).toBeGreaterThan(0);
-    // Spending doubled. The direction is asserted through the text of the whole line
-    // rather than through the class that colours it: the text is what a screen reader
-    // is given — the arrow beside it is `aria-hidden` and the figure is unsigned — and
-    // a colour is not an assertion at all.
+    // Spending doubled. The direction is asserted through the text of the whole line,
+    // not the class that colours it. The text is what a screen reader gets, since the
+    // arrow beside it is `aria-hidden` and the figure is unsigned. A colour is not an
+    // assertion at all.
     const expense = within(flows).getByText('100.0%').closest('p');
     expect(expense).toHaveTextContent('up 100.0%');
     expect(expense).toHaveTextContent('vs Jul');
@@ -486,24 +486,25 @@ describe('income against expenses', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '3M' }));
 
-    // the chips are the only thing that moved: the longest window is fetched once and
-    // 3 and 6 are cuts of it, so narrowing is arithmetic rather than a request. The
-    // whole list and not the transaction reads alone — the request this toggle would
+    // only the chips moved: the longest window is fetched once and the shorter ones are
+    // cuts of it, so narrowing is arithmetic, not a request. The whole request list is
+    // compared, not only the transaction reads, because the request this toggle would
     // tempt somebody into making is a summary one.
     expect(await screen.findByRole('button', { name: '3M', pressed: true })).toBeInTheDocument();
     expect(requests()).toEqual(before);
   });
 
   it('refuses on an account holding a second unit, in both the claims it can make', async () => {
-    // the endpoint's list is all time and the figures beside it are one window, so this
-    // sentence carries two claims of unequal strength and each is asserted: the balance
-    // adds the foreign rows in and IS wrong, while a figure here is wrong only if one of
-    // them falls in a month it covers — which the client was not told and says so. The
-    // second half is the one a later edit flattens into the first, and the absence of
-    // the paragraph is green against a card that never draws it, so this asserts text.
-    // Its scope is asserted with it: the donut's total sums the same unconverted rows
-    // and carries no sentence of its own, so narrowing this one to the card it sits on
-    // takes the donut out of coverage without turning anything red.
+    // the endpoint's list covers all time and the figures beside it cover one window, so
+    // this sentence makes two claims of unequal strength, and each is asserted. The
+    // balance adds the foreign rows in and IS wrong. A figure here is wrong only if one
+    // of those rows falls in a month it covers, and the client was not told which months
+    // those are, so it says so. A later edit tends to flatten the second claim into the
+    // first. A check that the paragraph is absent stays green against a card that never
+    // draws it, so this asserts the text. The scope is asserted too: the donut's total
+    // sums the same unconverted rows and has no sentence of its own, so narrowing this
+    // one to the card it sits on takes the donut out of coverage without turning
+    // anything red.
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/summary/months': (_init, url) =>
@@ -516,9 +517,9 @@ describe('income against expenses', () => {
       "The account's balance adds them in as though they were EUR, so it is wrong",
     );
     expect(flows).toHaveTextContent(
-      'So is any other figure on this screen covering a month one of them falls in',
+      'So is any other figure on this screen for a month that includes one of them',
     );
-    expect(flows).toHaveTextContent(/nothing here knows which months those are/);
+    expect(flows).toHaveTextContent(/This screen cannot tell which months those are/);
   });
 });
 
@@ -531,8 +532,8 @@ describe('spending by category', () => {
     mount();
 
     const card = await panel('Spending by category, Aug 2026');
-    // August spent 120 in Food and nothing else — the 300 to savings is a transfer and
-    // is not spending, which is the same rule the Expenses figure above it follows
+    // August spent 120 in Food and nothing else. The 300 to savings is a transfer, not
+    // spending, by the same rule the Expenses figure above it follows
     const rows = within(await legend());
     expect(rows.getByText('Food')).toBeInTheDocument();
     expect(rows.getByText('120 EUR')).toBeInTheDocument();
@@ -561,7 +562,7 @@ describe('spending by category', () => {
 
     const card = await panel('Spending by category, Aug 2026');
     const rows = within(await legend());
-    // the legend is the top three, and then the tail named as a tail — 100 of 1000
+    // the legend is the top three, then the tail named as a tail, which holds 100 of 1000
     expect(rows.getByText('Remaining · 1 category')).toBeInTheDocument();
     expect(rows.getByText('100 EUR')).toBeInTheDocument();
     expect(rows.queryByText('Health')).not.toBeInTheDocument();
@@ -714,15 +715,15 @@ describe('spending by category', () => {
     // the way out of the card is not part of the breakdown, and a month that spent
     // nothing is exactly when somebody goes looking at a wider range
     const more = within(card).getByRole('button', { name: 'All analytics' });
-    // the arrow is a picture of the verb and is read as a word — it stays on screen and
-    // stays out of the name, which is what the name above being the bare phrase asserts
+    // the arrow is a picture of the verb and is read as a word. It stays on screen and
+    // out of the name, which is what querying the bare phrase as the name above asserts
     expect(more).toHaveTextContent('↗');
   });
 
   it('keeps the net figures in the legend and says so when a refund is inside them', async () => {
-    // two in the tail, one of them a refund that exactly offsets the other: the tail's
-    // legend row is the server's net remainder, and the ring — which jsdom cannot see —
-    // draws the cash that was spent; `categories.test.ts` pins that half on the same fixture
+    // two in the tail, one of them a refund that exactly offsets the other. The tail's
+    // legend row is the server's net remainder. The ring draws the cash that was spent;
+    // jsdom cannot see it, and `categories.test.ts` pins that half on the same fixture
     const refunds: AccountSummary['byCategory'] = [
       { category: 'food', total: 100 },
       { category: 'health', total: 50 },
@@ -748,18 +749,18 @@ describe('spending by category', () => {
   });
 
   it('gives the figure in the middle of the ring to the table beside it', async () => {
-    // `.donut-center` is inside the container the donut is hidden by — it is painted over
-    // a drawing that has to be hidden as one piece — so the biggest number on the card
-    // was the one thing on it a screen reader was never given. The table that stands in
-    // for the ring had all twelve categories and no total.
+    // `.donut-center` is painted over a drawing that has to be hidden as one piece, so it
+    // sits inside the container that hides the donut. That made the biggest number on
+    // the card the one thing on it a screen reader was never given. The table that
+    // stands in for the ring had every category and no total.
     mount();
 
     const card = await panel('Spending by category, Aug 2026');
     const table = within(card).getByRole('table', { name: /Spending by category/ });
     const total = within(table).getByRole('rowheader', { name: 'Total' }).closest('tr');
     expect(total).toHaveTextContent('120 EUR');
-    // and it is the same figure the ring prints, which is the Expenses figure off the
-    // card beside it rather than the sum of the sectors — see the header of the component
+    // and it is the same figure the ring prints: the Expenses figure off the card beside
+    // it, not the sum of the sectors
     expect(within(card).getByText('120')).toBeInTheDocument();
   });
 
@@ -785,6 +786,10 @@ describe('switching tabs while a read is in flight', () => {
       'GET /api/transactions': () => new Promise<Response>((resolve) => (release = resolve)),
     });
     await tab('Sparkasse Giro');
+    // the tab and the status paint in one commit and the read starts in an effect after
+    // it, so a release before the request is made answers nothing and the panel never
+    // comes
+    await waitFor(() => expect(requests()).toContain('GET /api/transactions'));
     expect(screen.getByRole('status')).toHaveTextContent('Loading your account');
     expect(screen.queryByRole('region', { name: 'Balance of Sparkasse Giro' })).toBeNull();
     release(ok(TXS));
@@ -946,11 +951,10 @@ describe('switching tabs while a read is in flight', () => {
     release(ok(TXS));
     await settle();
 
-    // Slow's answer must not start Slow's summaries, and must not reach `data`: an
-    // id the render then rejects is no dashboard, no error and no reason to fetch
-    // again — the effect's deps did not move, so the screen stays empty until the
-    // reader clicks a third tab. Two recent reads, one for each tab, and one pair of
-    // summaries — Quick's.
+    // Slow's answer must not start Slow's summaries or reach `data`. The render would
+    // reject its id, which leaves no dashboard, no error and no reason to fetch again:
+    // the effect's deps did not move, so the screen stays empty until the reader clicks
+    // a third tab. So each tab gets one recent read, and only Quick gets summaries.
     expect(requests().filter((r) => r === 'GET /api/transactions')).toHaveLength(2);
     expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1);
     expect(requests().filter((r) => r === 'GET /api/summary/months')).toHaveLength(1);
@@ -979,7 +983,7 @@ describe('switching tabs while a read is in flight', () => {
     });
 
     // the switch happens after Slow's recent list landed and its summaries were asked
-    // for — the case above holds the other window, before the recent list comes back
+    // for. The case above covers the other window, before the recent list comes back
     await waitFor(() => expect(requests().filter((r) => r === 'GET /api/summary')).toHaveLength(1));
     fireEvent.click(await tab('Quick'));
     await panel('Balance of Quick');
@@ -1024,8 +1028,8 @@ describe('what the dashboard asks the server for', () => {
     mount();
     await panel('Sparkasse Giro');
 
-    // the whole list and in order, so the window fetch this row deleted comes back as
-    // a fourth entry rather than as a screen that is merely slower than it was
+    // the whole list and in order, so a separate window fetch, if one came back, shows
+    // as a fourth entry rather than as a screen that is merely slower than it was
     expect(requests()).toEqual([
       'GET /api/accounts',
       'GET /api/app-settings',
@@ -1043,7 +1047,7 @@ describe('what the dashboard asks the server for', () => {
     mount(OVERVIEW_ROUTES, '/?account=acc-1');
     await panel('Sparkasse Giro');
 
-    // requests() cannot see this — keyOf drops the query — and the failure it guards
+    // requests() cannot see this, because keyOf drops the query. The failure it guards
     // against is silent: an id that never reaches the wire is answered with the whole
     // workspace's money, printed under this account's name and currency code
     const summaries = requestUrls().filter((u) => u.includes('/api/summary'));
@@ -1077,7 +1081,6 @@ describe('what the dashboard asks the server for', () => {
 
     const error = await screen.findByText(/^Error:/);
     expect(error).toHaveTextContent(/over every account/);
-    // the dashboard's own refusal, under a rail that loaded — not a blank screen
     expect(
       screen.queryByRole('region', { name: 'Income and expenses for Sparkasse Giro' }),
     ).not.toBeInTheDocument();
@@ -1121,8 +1124,8 @@ describe('a month the account has nothing in', () => {
     ]);
     // June spent nothing, so there is no base and no percentage at all. An
     // implementation reading the server's array straight through compares July with
-    // May instead and prints "up 100.0% vs May" — right-looking, two calendar months
-    // out, and with nothing on screen saying so.
+    // May instead and prints "up 100.0% vs May". That looks right, is two calendar
+    // months out, and nothing on screen says so.
     expect(within(flows).queryByText(/\d\.\d%/)).not.toBeInTheDocument();
     expect(within(flows).queryByText(/vs May/)).not.toBeInTheDocument();
   });
@@ -1202,9 +1205,9 @@ describe('the recent transactions', () => {
 
   it('keeps every cell in its own column', async () => {
     // `display: flex` on a <td> takes it out of the table, and CSS fixup then wraps it
-    // together with its adjacent non-cell siblings into ONE anonymous cell — which put
-    // the category underneath the description while the headers stayed put. The layout
-    // lives on a span inside each cell now, and the row has four of them.
+    // together with its adjacent non-cell siblings into ONE anonymous cell. That put the
+    // category underneath the description while the headers stayed put. The layout now
+    // lives on a span inside each cell.
     mount();
     const list = await panel('Recent transactions in Sparkasse Giro');
 
@@ -1251,14 +1254,14 @@ describe('the empty states', () => {
 
     // the tail as well as the opening: this is the first sentence a new user reads
     // about what to upload
-    expect(await screen.findByText(/Export a statement from your bank/)).toHaveTextContent(/\.pdf/);
+    expect(await screen.findByText(/Export a statement in any format your bank offers/)).toHaveTextContent(/\.pdf/);
     expect(screen.queryByText(/^Error:/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Import a statement/ }));
     expect(await screen.findByRole('heading', { name: 'Import a statement' })).toBeInTheDocument();
-    // the list is empty, so the import panel opens straight onto its create arm — and
-    // this sentence is the only thing that fails if baseCurrency stops crossing the
-    // mount, which it has to because that screen creates the account itself now
+    // the list is empty, so the import panel opens straight onto its create arm. This
+    // sentence is the only thing that fails if baseCurrency stops crossing the mount,
+    // and it has to cross because that screen now creates the account itself
     expect(
       screen.getByText(new RegExp(`It will hold amounts in ${APP_SETTINGS.baseCurrency}`)),
     ).toBeInTheDocument();
@@ -1289,8 +1292,8 @@ describe('the empty states', () => {
     // the reload is the observable, and the request count is how it is read: the panel
     // replaces this screen while it is open, so the rail the created account has to
     // reach is not mounted here to be asserted about. Nothing else on this path asks
-    // for the list again — the create arm appends its account to its own copy — so the
-    // second GET is onAccountCreated and nothing else.
+    // for the list again, because the create arm appends its account to its own copy.
+    // So the second GET is onAccountCreated and nothing else.
     const accountLoads = () => requests().filter((r) => r === 'GET /api/accounts').length;
     const before = accountLoads();
 
@@ -1304,15 +1307,15 @@ describe('the empty states', () => {
 
     expect(await screen.findByText(/^Error:/)).toBeInTheDocument();
     // `accounts` was never loaded, so there is nothing to be empty
-    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start with a statement from your bank/)).not.toBeInTheDocument();
   });
 
   /**
-   * Both refusals appear only once a request has come back — which is a moment nothing
-   * about the page moving marks, and on this screen there is nothing else on the page to
-   * be found by looking. `closest` and not a document query: AccountTabs renders a polite
-   * region on this same screen, so a document query would pass with the sentence sitting
-   * outside every one of them.
+   * Both refusals appear only once a request has come back. Nothing on the page moves to
+   * mark that moment, and on this screen there is nothing else to find by looking.
+   * `closest` and not a document query: AccountTabs renders a polite region on this same
+   * screen, so a document query would pass with the sentence sitting outside every one
+   * of them.
    */
   it('puts the rail’s refusal in a live region', async () => {
     mount({ ...OVERVIEW_ROUTES, 'GET /api/accounts': () => fail(500) });
@@ -1341,7 +1344,7 @@ describe('the empty states', () => {
     expect(screen.getByText(/Nothing has been loaded into Cash/)).toBeInTheDocument();
     // and the tab is still there: the account exists, it is the data that does not
     expect(await tab('Cash')).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start with a statement from your bank/)).not.toBeInTheDocument();
   });
 
   it('keeps the way out of Hidden on the panel, which is the only one there is', async () => {
@@ -1351,10 +1354,10 @@ describe('the empty states', () => {
     fireEvent.click(screen.getByRole('button', { name: /Show 1 hidden account/ }));
     fireEvent.click(await tab('Old DKB (hidden)'));
 
-    // the ⋮ is on the balance card, and a hidden account draws no balance card — so
-    // this panel carries the same control under the same name. Without it the panel's
-    // own instruction pointed at a menu that was nowhere on the page, and the account
-    // could not be brought back from anywhere in the app
+    // the ⋮ is on the balance card, and a hidden account draws no balance card, so this
+    // panel carries the same control under the same name. Without it the panel's own
+    // instruction pointed at a menu that was nowhere on the page, and the account could
+    // not be brought back from anywhere in the app
     expect(
       await screen.findByRole('button', { name: 'Account menu: Old DKB' }),
     ).toBeInTheDocument();
@@ -1369,8 +1372,8 @@ describe('the empty states', () => {
     fireEvent.click(await tab('Old DKB (hidden)'));
     fireEvent.click(await screen.findByRole('button', { name: 'Unhide this account' }));
 
-    // the step was opened AT, not stepped into, so there is nothing behind it — and the
-    // button says Cancel rather than Back to mean it
+    // the step was opened AT, not stepped into, so there is nothing behind it. The
+    // button says Cancel rather than Back to mean that
     fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -1401,7 +1404,7 @@ describe('the empty states', () => {
     expect(await screen.findByText(/Every account you have is hidden/)).toBeInTheDocument();
     // "no accounts yet" over accounts the user hid is the same untruth as over accounts
     // that never loaded
-    expect(screen.queryByText(/Nothing here yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start with a statement from your bank/)).not.toBeInTheDocument();
   });
 });
 
@@ -1476,7 +1479,7 @@ describe('the account menu', () => {
 
     fireEvent.click(within(menu).getByText('Hide'));
     // the whole difference: hiding takes it off the screen and destroys nothing
-    expect(await screen.findByText(/nothing is deleted/)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing is deleted/)).toBeInTheDocument();
   });
 
   it('hides the account, and the rail drops it', async () => {
@@ -1517,7 +1520,7 @@ describe('the account menu', () => {
     expect(screen.getByText('2 imports')).toBeInTheDocument();
     expect(screen.getByText('1 uploaded file')).toBeInTheDocument();
     // the wall this replaced said the server had no endpoint for it. It has one now,
-    // and the control is here — behind the account's name rather than behind nothing
+    // and the control is here, behind the account's name rather than behind nothing
     expect(screen.queryByText(/no endpoint that deletes an account/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Delete permanently' })).toBeDisabled();
     // the one consequence to another account, said where it is still actionable
@@ -1528,10 +1531,10 @@ describe('the account menu', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/imports': () => ok(importsResponse()),
-      // the dashboard's recent seven against the dialog's count, told apart by the
-      // limit each asks for rather than by their ordinal — the ordinal was one number
-      // that moved when the dashboard stopped making a second read. The counted rows
-      // are never looked at, only measured, so they are not built.
+      // the dashboard's recent list and the dialog's count are told apart by the limit
+      // each asks for, not by their ordinal. The ordinal moved when the dashboard
+      // stopped making a second read. The counted rows are never looked at, only
+      // measured, so they are not built.
       'GET /api/transactions': (_init, url) =>
         ok(
           url?.includes(`limit=${COUNT_LIMIT}`) ? new Array(COUNT_LIMIT).fill(null) : TXS,
@@ -1543,15 +1546,14 @@ describe('the account menu', () => {
 
     // a number that is silently the limit is the one number this dialog must not print
     expect(await screen.findByText(`at least ${COUNT_LIMIT} transactions`)).toBeInTheDocument();
-    expect(screen.getByText(/it is the limit and not the answer/)).toBeInTheDocument();
+    expect(screen.getByText(/reached the limit this dialog asks for, so there are at least that many/)).toBeInTheDocument();
   });
 
   /**
-   * The per-account view is per-account, and that is the server's job:
-   * the assertion is what the screen ASKED for, not what it kept. Asserting the
-   * render instead would be a tautology — a mock answering one row proving that one
-   * row appears — and the client re-filtering is what ImportHistory's own suite
-   * refuses.
+   * The per-account view is per-account, and that is the server's job, so the assertion
+   * is what the screen ASKED for, not what it kept. Asserting the render instead would
+   * be a tautology: a mock answering one row would prove that one row appears. The
+   * client re-filtering is what ImportHistory's own suite refuses.
    */
   it('opens the imports of this account and not of the workspace', async () => {
     mount({ ...OVERVIEW_ROUTES, 'GET /api/imports': () => ok(importsResponse()) });
@@ -1671,9 +1673,9 @@ describe('deleting an account', () => {
   });
 
   /**
-   * The money-shaped one. Deleting a whole account breaks every transfer pair one of
-   * whose legs was in it, so the SURVIVING account's figures move — and nothing on the
-   * screen would say so.
+   * The money-shaped one. Deleting a whole account breaks every transfer pair with a leg
+   * in it, so the SURVIVING account's figures move, and nothing on the screen would say
+   * so.
    */
   it('re-reads the surviving account, whose transfers the delete un-paired', async () => {
     const A = account({ id: 'acc-1', name: 'Sparkasse Giro' });
@@ -1684,7 +1686,7 @@ describe('deleting an account', () => {
     ];
     // the same month after the server re-classified those rows: the surviving leg has
     // no partner left, so it stops being a transfer and starts counting as spending.
-    // `net` does not move — a transfer was always inside it.
+    // `net` does not move, because a transfer was always inside it.
     const augustSpent = (spent: number): AccountMonthTotals[] => [
       { month: '2026-08', income: 0, expense: spent, net: -420 },
     ];
@@ -1742,7 +1744,7 @@ describe('deleting an account', () => {
     await confirmDelete('Sparkasse Giro');
 
     // the screen a new user gets, rather than a rail with nothing under it
-    expect(await screen.findByText(/Nothing here yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/Start with a statement from your bank/)).toBeInTheDocument();
     expect(screen.getByText(/Sparkasse Giro was deleted/)).toBeInTheDocument();
   });
 
@@ -1802,7 +1804,7 @@ describe('deleting an account', () => {
 
     // each count singular on its own, so a mixed sentence still reads
     expect(
-      await screen.findByText(/Old DKB was deleted — 1 transaction, 1 import and 1 uploaded file/),
+      await screen.findByText(/Old DKB was deleted, along with 1 transaction, 1 import and 1 uploaded file\./),
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /hidden account/ })).toBeNull();
   });
@@ -1871,7 +1873,7 @@ describe('what left this screen', () => {
     mount();
     await panel('Sparkasse Giro');
 
-    // all four moved to the Account screen, in order, and are asserted there
+    // these moved to the Settings screen and are asserted there
     expect(screen.queryByLabelText('Base currency')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Export backup/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/Recurring payments/)).not.toBeInTheDocument();

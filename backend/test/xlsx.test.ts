@@ -6,8 +6,8 @@
  * are all about cell TYPES, which is exactly what the writer lets us state.
  *
  * The case this suite exists for is the mixed sheet. A workbook where only some
- * dates are typed as dates imports half a statement and answers 200 - louder
- * failures announce themselves, that one does not.
+ * dates are typed as dates imports half a statement and answers 200. Louder
+ * failures announce themselves, and that one does not.
  */
 import ExcelJS from 'exceljs';
 import { describe, expect, it, vi } from 'vitest';
@@ -106,9 +106,9 @@ describe('xlsx: typed cells', () => {
   });
 
   /**
-   * The dates are the point: read with local-time getters, half the world's
+   * The dates are the point. Read with local-time getters, half the world's
    * timezones would shift the calendar day, and the shifted day goes into the
-   * dedup key - so the same statement re-imported elsewhere would duplicate.
+   * dedup key, so the same statement re-imported elsewhere would duplicate.
    */
   it('a 1904-date-system workbook lands on the same calendar days', async () => {
     // a General-formatted date column comes back as a raw serial; in the 1904
@@ -142,7 +142,7 @@ describe('xlsx: typed cells', () => {
     const r = await importFile('Number Date Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([2, 1, 1]);
     expect(r.problems[0]).toBe(
-      'row 3: the date cell holds the number 20260106, which this parser will not read as a date - format that column as a date and upload again',
+      'row 3: the date cell holds the number 20260106, which this parser will not read as a date. Format that column as a date, and upload again',
     );
   });
 });
@@ -173,18 +173,18 @@ describe('xlsx: cells that are not scalars', () => {
 
     // and the two it dropped are reported as what they are, not as "could not parse"
     expect(r.problems).toEqual([
-      'row 4: the amount cell is a formula with no stored result - open the file in Excel, re-save it, and upload again',
+      'row 4: the amount cell is a formula with no stored result. Open the file in Excel, re-save it, then upload again',
       'row 5: the amount cell contains #N/A',
     ]);
   });
 
   /**
-   * The error text is the FILE's, not the type's: CellErrorValue['error'] is seven
-   * string literals at compile time and exceljs never checks the bytes it read against
-   * them, so a workbook no spreadsheet wrote carries whatever it likes into the note.
-   * Without errorNote's cut this composed 432 characters, past the 159 the derivation
-   * above statement.ts's CELL_QUOTE_MAX declares - and a row reason that long evicts
-   * noRowsParsed's notice about a different part of the file whole.
+   * The error text is the FILE's, not the type's: CellErrorValue['error'] is a union of
+   * string literals at compile time, and exceljs never checks the bytes it read against
+   * them. So a workbook no spreadsheet wrote carries whatever it likes into the note.
+   * Without errorNote's cut this composed a reason past the 159 that the derivation
+   * above statement.ts's CELL_QUOTE_MAX declares. A row reason that long makes
+   * noRowsParsed drop its whole notice about a different part of the file.
    */
   it('an error text the seven literals do not cover is cut, not carried', async () => {
     const forged = `#${'A'.repeat(400)}!`;
@@ -227,7 +227,7 @@ describe('xlsx: finding the statement', () => {
   /**
    * The descriptor on the path that runs the column resolver most: readXlsx calls it once
    * per candidate row, and this file makes most of those calls rejections. None of them
-   * builds a descriptor - genericMapping answers null for "Kontoauszug 2026" and for
+   * builds a descriptor: genericMapping answers null for "Kontoauszug 2026" and for
    * "Datum | irgendwas", so resolveColumns returns ok: false above the site that builds
    * one. What this case pins is the outcome: the header the scan settled on is the
    * header the summary names.
@@ -282,7 +282,7 @@ describe('xlsx: finding the statement', () => {
     // Cover was looked at and had no header, so it is announced like any other sheet
     // the import left behind; Notes is hidden, and a hidden sheet is never named
     expect(r.problems).toEqual([
-      'these rows come from "Transactions" - "Cover" was not imported - save it as a separate file to import it',
+      'these rows come from "Transactions"; "Cover" was not imported. Save it as a separate file to import it',
     ]);
   });
 
@@ -303,9 +303,9 @@ describe('xlsx: finding the statement', () => {
 
   /**
    * A statement that ends in "Total  1.234,56". It is not blank, so it survives
-   * into the counts and shows the client's "rows couldn't be read" warning - which
-   * is exactly what a CSV of the same statement does today. Asserted so the next
-   * person meets it here rather than in a bug report.
+   * into the counts and shows the client's "rows couldn't be read" warning. A CSV of
+   * the same statement does exactly the same today. Asserted so the next person meets
+   * it here rather than in a bug report.
    */
   it('a trailing summary row is skipped and reported', async () => {
     const book = await xlsx((wb) => {
@@ -328,10 +328,10 @@ describe('xlsx: finding the statement', () => {
       ws.addRow([utc('2026-07-01'), -10, 'Bakery']);
     });
 
-    // and it carries the reason the nearest row was not a header - the header row
-    // itself, which beats the data row it ties with on width
+    // and it carries the reason the nearest row was not a header. That row is the
+    // header row itself, which beats the data row it ties with on width
     await expect(importFile('Odd Columns Bank', book)).rejects.toThrow(
-      /could not find a header row in any sheet of the workbook \(looked at: Sheet1\).*- the closest row \(sheet "Sheet1", row 1\) does not match: could not find date\/amount\/description columns in the header: when, how much, what/,
+      /could not find a header row in any sheet of the workbook \(looked at: Sheet1\).*; the closest row \(sheet "Sheet1", row 1\) does not match: could not find date\/amount\/description columns in the header: when, how much, what/,
     );
     const failed = (await listImports()).imports.filter((i) =>
       /could not find a header row/.test(i.errorDetail ?? ''),
@@ -346,7 +346,7 @@ describe('xlsx: finding the statement', () => {
     });
     expect(await listTransactions({ accountId: await accountFor('Odd Columns Bank') })).toEqual([]);
 
-    // a failed import does not claim the file - only a committed one does
+    // only a committed import claims the file, and a failed one does not
     const retried = await importAndConfirm({
       accountId: await accountFor('Odd Columns Bank'),
       bytes: book,
@@ -358,8 +358,8 @@ describe('xlsx: finding the statement', () => {
 
   /**
    * Every sheet hidden means no sheet was ever eligible to have columns, so the
-   * usual refusal blames a header row that was never read - and lists the sheets it
-   * looked at, of which there are none. A refusal has to name its own cause.
+   * usual refusal blames a header row that was never read. It also lists the sheets
+   * it looked at, of which there are none. A refusal has to name its own cause.
    */
   it('a workbook with no visible sheet is refused as that, not as a column problem', async () => {
     const book = await xlsx((wb) => {
@@ -373,7 +373,7 @@ describe('xlsx: finding the statement', () => {
 
     const thrown = await rejectionOf(importFile('All Hidden Bank', book));
     expect(thrown.message).toBe(
-      'this workbook has no visible sheet - unhide the sheet holding the statement, or export the statement again',
+      'this workbook has no visible sheet. Unhide the sheet holding the statement, or export the statement again',
     );
     expect(thrown.message).not.toMatch(/looked at|the columns must include/);
 
@@ -407,9 +407,9 @@ describe('xlsx: finding the statement', () => {
   });
 
   /**
-   * The sniffer sees a zip and cannot know more than that. Unlike a PDF or an
-   * .xls - refused before any import row exists - this one fails inside the
-   * loader, so it does leave a failed import. That asymmetry is deliberate.
+   * The sniffer sees a zip and cannot know more than that. An .xls is refused by the
+   * sniffer before any import row exists. This one fails inside the loader, so it does
+   * leave a failed import. That asymmetry is deliberate.
    */
   it('a zip that is not a workbook fails with a message about zips', async () => {
     const notAWorkbook = Buffer.concat([
@@ -430,7 +430,7 @@ describe('xlsx: finding the statement', () => {
   /**
    * The other half of that file: a real .zip holding something that is not a
    * workbook loads clean, and leaves no worksheets behind. It used to fall through
-   * to the refusal for a workbook whose sheets are all hidden - telling the user to
+   * to the refusal for a workbook whose sheets are all hidden, which told the user to
    * unhide a sheet in a file that has none. One question, one answer.
    */
   it('a workbook with no worksheets is refused as a zip, not as sheets to unhide', async () => {
@@ -439,7 +439,7 @@ describe('xlsx: finding the statement', () => {
 
     const thrown = await rejectionOf(importFile('Empty Workbook Bank', book));
     expect(thrown.message).toBe(
-      'this is a zip archive but not an Excel workbook (.xlsx) - .ods and .numbers are not supported; export the statement as .xlsx or CSV',
+      'this is a zip archive but not an Excel workbook (.xlsx). .ods and .numbers files are not supported; export the statement as .xlsx or CSV',
     );
     expect(thrown.message).not.toMatch(/unhide|looked at/);
 
@@ -468,9 +468,9 @@ describe('xlsx: the same statement in two formats', () => {
   /**
    * Why one name resolves to one id whatever parser ran, and the rows keep one
    * provider: the same bank exported as CSV one month and as XLSX the next has to
-   * land in ONE account. Two accounts would mean two dedup namespaces - the unique
-   * index is (account_id, dedup_key) - and every overlapping row would
-   * insert a second time, silently duplicating real history. The ids are compared
+   * land in ONE account. The unique index is (account_id, dedup_key), so two accounts
+   * would mean two dedup namespaces, and every overlapping row would insert a second
+   * time, silently duplicating real history. The ids are compared
    * to each other rather than to a literal: what matters is that they agree, and an
    * id nothing derives has no literal to be written down as.
    */
@@ -542,8 +542,8 @@ describe('the row guard', () => {
   });
 
   /**
-   * A sheet nobody can read is disqualified the way a hidden one is - it is not
-   * the statement. Refusing the workbook for it would turn a cover sheet somebody
+   * A sheet nobody can read is not the statement, so it is disqualified the way a
+   * hidden one is. Refusing the workbook for it would turn a cover sheet somebody
    * formatted to the bottom into a statement that cannot be imported at all.
    */
   it('an oversized sheet is skipped, and the statement behind it still imports', async () => {
@@ -562,7 +562,7 @@ describe('the row guard', () => {
     expect(await listTransactions({ accountId: r.accountId })).toHaveLength(3);
     // the counts above are what pins it: the notice is a fact about the file, not a row
     expect(r.problems).toEqual([
-      'sheet "Cover" (600000 rows) was too large to read and was skipped - these rows come from "Statement"',
+      'sheet "Cover" (600000 rows) was too large to read and was skipped; these rows come from "Statement"',
     ]);
   });
 
@@ -587,7 +587,7 @@ describe('the row guard', () => {
     const r = await importFile('Two Months Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([2, 2, 0]);
     expect(r.problems).toEqual([
-      'sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+      'sheet "Januar" (600000 rows) was too large to read and was skipped; these rows come from "Februar"',
     ]);
     expect((await rowsOf(r.accountId)).map((row) => row[2])).toEqual([
       'februar one',
@@ -596,7 +596,7 @@ describe('the row guard', () => {
   });
 
   /**
-   * With nothing behind it the workbook is still refused - but as what it is. "Could
+   * With nothing behind it the workbook is still refused, but as what it is. "Could
    * not find a header row" would send the user looking at their column names for a
    * sheet that was never read.
    */
@@ -610,10 +610,10 @@ describe('the row guard', () => {
     const accountId = await accountFor('Oversized Bank');
     const attempt = () => importFile('Oversized Bank', book);
 
-    await expect(attempt()).rejects.toThrow(/skipped as too large to read: Huge \(600000 rows\)/);
+    await expect(attempt()).rejects.toThrow(/too large to read and skipped: Huge \(600000 rows\)/);
     expect(await listTransactions({ accountId })).toEqual([]);
     // no committed import claims the hash, so the same bytes are read again
-    await expect(attempt()).rejects.toThrow(/skipped as too large to read/);
+    await expect(attempt()).rejects.toThrow(/too large to read and skipped/);
 
     const refused = (await listImports()).imports.filter((i) =>
       /too large to read/.test(i.errorDetail ?? ''),
@@ -640,9 +640,9 @@ describe('the row guard', () => {
 
     const thrown = await rejectionOf(importFile('Both Clauses Bank', book));
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
-    expect(thrown.message).toContain(' - skipped as too large to read: Huge (600000 rows)');
+    expect(thrown.message).toContain('; too large to read and skipped: Huge (600000 rows)');
     expect(thrown.message).toMatch(
-      new RegExp(` - the closest row \\(sheet "Statement", row 1\\) does not match: .*${MARK}$`),
+      new RegExp(`; the closest row \\(sheet "Statement", row 1\\) does not match: .*${MARK}$`),
     );
     // and it names only columns the workbook has: the cut falls between two entries,
     // which is what the `...` this used to pin said nothing whatever about
@@ -659,10 +659,10 @@ describe('the row guard', () => {
 
   /**
    * The budget is spent in order, so the list that spends first has to leave the one
-   * behind it room for its own last resort - which is a count, and a count is still
-   * characters. Nine oversized sheets is where the too-large list ate all but two of
-   * them and the base list emitted its count anyway, five characters past what
-   * error_detail keeps.
+   * behind it room for its own last resort. That last resort is a count, and a count is
+   * still characters. Nine oversized sheets is where the too-large list ate almost all
+   * of the budget and the base list emitted its count anyway, past what error_detail
+   * keeps.
    */
   it('a workbook of nothing but oversized sheets still fits what the import stores', async () => {
     const book = await xlsx((wb) => {
@@ -674,7 +674,7 @@ describe('the row guard', () => {
     const thrown = await rejectionOf(importFile('Nine Sheets Bank', book));
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
     expect(thrown.message).toContain(
-      ' - skipped as too large to read: Kontoauszug 01-2026 (600000 rows)',
+      '; too large to read and skipped: Kontoauszug 01-2026 (600000 rows)',
     );
 
     const failed = (await listImports()).imports.filter((i) =>
@@ -685,9 +685,10 @@ describe('the row guard', () => {
   });
 
   /**
-   * When nothing parsed the user reads one sentence - the client cuts at 200
-   * characters - and it has to be the one they can act on. A workbook whose amounts
-   * are formulas with no stored result says so; that a sheet was skipped follows.
+   * When nothing parsed the user reads one message, and what they can act on has to
+   * lead it: a clause behind the row's reason is what the error_detail cap drops. A
+   * workbook whose amounts are formulas with no stored result says so, and that a sheet
+   * was skipped follows.
    */
   it('nothing parsed: the row reason comes first and the notice follows it', async () => {
     const book = await xlsx((wb) => {
@@ -703,26 +704,26 @@ describe('the row guard', () => {
 
     const thrown = await rejectionOf(importFile('No Rows Bank', book));
     expect(thrown.message).toBe(
-      'no row could be parsed (2 skipped): row 2: the amount cell is a formula with no stored result - open the file in Excel, re-save it, and upload again' +
-        ' - sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+      'no row could be parsed (2 skipped): row 2: the amount cell is a formula with no stored result. Open the file in Excel, re-save it, then upload again' +
+        '. Sheet "Januar" (600000 rows) was too large to read and was skipped; these rows come from "Februar"',
     );
   });
 
   /**
    * The other arm: a notice that no longer fits behind the row's reason. It is dropped
-   * whole rather than cut - and the fact it carried is not lost with it, because the
-   * log runs at the parser and not on the successful path. On a refusal `problems` is
-   * never sent and the `imports` row stores only the message.
+   * whole rather than cut. The fact it carried is not lost with it, because the log
+   * runs at the parser and not on the successful path. On a refusal `problems` is never
+   * sent and the `imports` row stores only the message.
    *
-   * It used to be built on a 400-character date cell, and it cannot be any more: every
-   * cell describeRow quotes is bounded now, so noRowsParsed's head is at most 199 and a
-   * NOTICE_MAX-bounded notice with its join at most 293 - 492 of the 500, which is
-   * exactly what that derivation is for. The one clause left that can still overrun is
-   * the too-large list, which sheetNotice leaves unbounded and which xlsx.ts names as
-   * the one that wins. Twelve oversized sheets put that list alone past error_detail
-   * whatever the head is, so the drop is
-   * forced by the clause and not by the length of the row's reason - a wording change
-   * upstream cannot quietly stop exercising this arm.
+   * It used to be built on a very wide date cell, and it cannot be any more. Every cell
+   * describeRow quotes is bounded now, so noRowsParsed's head and a NOTICE_MAX-bounded
+   * notice with its join always fit in error_detail together, which is exactly what the
+   * derivation above NOTICE_MAX in xlsx.ts is for. The one clause left that can still
+   * overrun is the too-large list, which sheetNotice leaves unbounded and which xlsx.ts
+   * names as the one that wins. Twelve oversized sheets put that list alone past
+   * error_detail whatever the head is. So the drop is forced by the clause and not by
+   * the length of the row's reason, and a wording change upstream cannot quietly stop
+   * exercising this arm.
    */
   it('nothing parsed and no room for the notice: it is dropped, and logged instead', async () => {
     const book = await xlsx((wb) => {
@@ -765,9 +766,9 @@ describe('the row guard', () => {
   });
 
   /**
-   * A notice and row problems both up against the cap - the combination no case
-   * covered. The notice keeps the head of the array, where the client's window is,
-   * and costs the rows one slot rather than pushing the total to six.
+   * A notice and row problems both up against the cap. The notice keeps the head of
+   * the array, where the client's window is, and costs the rows one slot rather than
+   * pushing the total past the cap.
    */
   it('a notice and row problems share one cap, the notice first', async () => {
     const book = await xlsx((wb) => {
@@ -782,7 +783,7 @@ describe('the row guard', () => {
     expect([r.total, r.inserted, r.skipped]).toEqual([7, 1, 6]);
     expect(r.problems).toHaveLength(5);
     expect(r.problems[0]).toBe(
-      'sheet "Januar" (600000 rows) was too large to read and was skipped - these rows come from "Februar"',
+      'sheet "Januar" (600000 rows) was too large to read and was skipped; these rows come from "Februar"',
     );
     expect(r.problems.slice(1)).toEqual(
       [3, 4, 5, 6].map(
@@ -795,8 +796,8 @@ describe('the row guard', () => {
 /**
  * One sheet is imported and the rest are not. The import is a success
  * either way, so the only thing standing between the user and a half-loaded history
- * is the sentence the summary carries - and it must not be the one that sends them
- * back to the upload button, because those bytes are claimed once this is confirmed.
+ * is the sentence the summary carries. That sentence must not send them back to the
+ * upload button, because those bytes are claimed once this is confirmed.
  */
 describe('xlsx: the sheets that were not used', () => {
   it('a two-month workbook imports January and says February was not', async () => {
@@ -813,14 +814,14 @@ describe('xlsx: the sheets that were not used', () => {
     expect([r.total, r.inserted, r.skipped]).toEqual([1, 1, 0]);
     expect((await rowsOf(r.accountId)).map((row) => row[2])).toEqual(['januar one']);
     expect(r.problems).toEqual([
-      'these rows come from "Januar" - "Februar" was not imported - save it as a separate file to import it',
+      'these rows come from "Januar"; "Februar" was not imported. Save it as a separate file to import it',
     ]);
   });
 
   /**
-   * The list is metadata only - the loop never opens a sheet it did not import. A
-   * header peek would name the sheets whose columns resolve and silence the ones
-   * whose do not, which is exactly backwards: a February sheet the mapper cannot
+   * The list is built from metadata only, and the loop never opens a sheet it did not
+   * import. A header peek would name the sheets whose columns resolve and silence the
+   * ones whose do not, which is exactly backwards: a February sheet the mapper cannot
    * read is missing from the import AND from the notice.
    */
   it('a second sheet the mapper could not have read is named all the same', async () => {
@@ -835,7 +836,7 @@ describe('xlsx: the sheets that were not used', () => {
 
     const r = await importFile('Odd Second Sheet Bank', book);
     expect(r.problems).toEqual([
-      'these rows come from "Januar" - "Februar" was not imported - save it as a separate file to import it',
+      'these rows come from "Januar"; "Februar" was not imported. Save it as a separate file to import it',
     ]);
   });
 
@@ -859,7 +860,7 @@ describe('xlsx: the sheets that were not used', () => {
 
     const r = await importFile('Oversized Second Sheet Bank', book);
     expect(r.problems).toEqual([
-      'these rows come from "Januar" - "Februar" was not imported - save it as a separate file to import it',
+      'these rows come from "Januar"; "Februar" was not imported. Save it as a separate file to import it',
     ]);
     expect(r.problems[0]).not.toContain('too large');
   });
@@ -905,7 +906,7 @@ describe('xlsx: the sheets that were not used', () => {
     const r = await importFile('Both Causes Bank', book);
     expect([r.total, r.inserted, r.skipped]).toEqual([1, 1, 0]);
     expect(r.problems).toEqual([
-      'sheet "Cover" (600000 rows) was too large to read and was skipped - these rows come from "Januar" - "Februar" was not imported - save it as a separate file to import it',
+      'sheet "Cover" (600000 rows) was too large to read and was skipped; these rows come from "Januar"; "Februar" was not imported. Save it as a separate file to import it',
     ]);
     // the sheet skipped for size is named by its own clause and never again by the
     // other one, and the sheet the rows came from is named once
@@ -915,7 +916,7 @@ describe('xlsx: the sheets that were not used', () => {
 
   /**
    * A workbook with a sheet per month would otherwise compose a notice long enough
-   * that noRowsParsed drops it - so the fact would exist on the success path and
+   * that noRowsParsed drops it. The fact would then exist on the success path and
    * never on the failure path, which is the corner that costs the most.
    */
   it('a workbook of many sheets names what it can and counts the rest', async () => {
@@ -937,11 +938,11 @@ describe('xlsx: the sheets that were not used', () => {
     // count of the rest is what UNUSED_LIST_MAX buys, and a ceiling asserted with
     // slack is a ceiling the suite watches nobody cross
     expect(r.problems).toEqual([
-      'these rows come from "Januar" - "Tabelle01", "Tabelle02", "Tabelle03", "Tabelle04", "Tabelle05", "Tabelle06", "Tabelle07", "Tabelle08", "Tabelle09", "Tabelle10" and 10 more were not imported - save them as separate files to import them',
+      'these rows come from "Januar"; "Tabelle01", "Tabelle02", "Tabelle03", "Tabelle04", "Tabelle05", "Tabelle06", "Tabelle07", "Tabelle08", "Tabelle09", "Tabelle10" and 10 more were not imported. Save them as separate files to import them',
     ]);
     // the notice's own ceiling, restated rather than imported: when the constant
     // moves this is where a human should be made to look at the arithmetic again
-    expect(r.problems[0].length).toBeLessThanOrEqual(290);
+    expect(r.problems[0].length).toBeLessThanOrEqual(291);
 
     // and the same notice still fits behind a row reason on the path where nothing
     // parsed, which is where it is dropped whole rather than shortened
@@ -982,7 +983,7 @@ describe('xlsx: the sheets that were not used', () => {
     const r = await importFile('No Room Bank', book);
     expect(r.inserted).toBe(1);
     expect(r.problems).toEqual([
-      `sheets ${skipped.map((n) => `"${n}" (600000 rows)`).join(', ')} were too large to read and were skipped - these rows come from "Statement"`,
+      `sheets ${skipped.map((n) => `"${n}" (600000 rows)`).join(', ')} were too large to read and were skipped; these rows come from "Statement"`,
     ]);
     // dropped, not cut: no fragment of a sheet name survives anywhere in it
     expect(r.problems[0]).not.toContain('not imported');
@@ -992,11 +993,11 @@ describe('xlsx: the sheets that were not used', () => {
   /**
    * Where NOTICE_MAX is set from, and the only place the suite can see it move. On
    * the nothing-parsed path the notice is weighed against error_detail behind the
-   * row's own reason, and it is appended whole or not at all - so a notice a single
-   * character too long does not lose its own clause, it loses the too-large one as
-   * well, which reached the user before this task existed. Two summary sheets
-   * formatted to the bottom, a sheet per month, and a reference number in the date
-   * column is where both halves are longest at once.
+   * row's own reason, and it is appended whole or not at all. So a notice a single
+   * character too long does not lose only its own clause: it loses the too-large one
+   * as well, which used to reach the user. Two summary sheets formatted to the
+   * bottom, a sheet per month, and a reference number in the date column is where
+   * both halves are longest at once.
    */
   it('the skipped clause still reaches error_detail behind the longest row reason', async () => {
     const months = 'Jan Feb Mar Apr Mai Jun Jul Aug Sep Okt Nov Dez'.split(' ');
@@ -1019,8 +1020,8 @@ describe('xlsx: the sheets that were not used', () => {
     // the whole of it, both clauses: the row's reason first because it is the half
     // the user can act on, and the two skipped sheets still named behind it
     expect(thrown.message).toBe(
-      'no row could be parsed (1 skipped): row 2: the date cell holds the number 1234567890123456, which this parser will not read as a date - format that column as a date and upload again' +
-        ' - sheets "Jahresuebersicht" (600000 rows), "Kategorien 2026" (600000 rows) were too large to read and were skipped - these rows come from "Jan 2026" - "Feb 2026", "Mar 2026", "Apr 2026", "Mai 2026", "Jun 2026" and 6 more were not imported - save them as separate files to import them',
+      'no row could be parsed (1 skipped): row 2: the date cell holds the number 1234567890123456, which this parser will not read as a date. Format that column as a date, and upload again' +
+        '. Sheets "Jahresuebersicht" (600000 rows), "Kategorien 2026" (600000 rows) were too large to read and were skipped; these rows come from "Jan 2026"; "Feb 2026", "Mar 2026", "Apr 2026", "Mai 2026", "Jun 2026", "Jul 2026" and 5 more were not imported. Save them as separate files to import them',
     );
     expect(thrown.message.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);
 
@@ -1034,8 +1035,8 @@ describe('xlsx: the sheets that were not used', () => {
  * The size cap is decidable from the bytes, so it is refused before an `imports`
  * row exists at all: nothing was parsed and nothing could have been written, and
  * `failed` means "an import did not complete", not "the user picked the wrong
- * file". The PDF byte cap is the same band, and the PDF PAGE cap deliberately is
- * not - see the band comment in statement.ts.
+ * file". The PDF byte cap is in the same band. The PDF PAGE cap deliberately is not:
+ * backend/src/providers/SPEC.md says which refusals leave an `imports` row.
  */
 describe('the workbook size cap', () => {
   it('a workbook past the cap is refused before an import row exists', async () => {
@@ -1073,25 +1074,25 @@ describe('the workbook size cap', () => {
 /**
  * Where a refusal is cut. The closest-row clause carries a reason
  * composed for a budget it does not know about, and the cut used to land wherever
- * the 300 characters ran out: inside a quoted accepted name, inside an unquoted
+ * the budget ran out: inside a quoted accepted name, inside an unquoted
  * header cell, or through the dump noColumnMatched appends whole or not at all.
  * What reached the user then named a column called `S`.
  *
  * Swept over the PREFIX rather than sampled over the reason, because the prefix is
- * the variable: ` - the closest row (sheet "…", row …) does not match: ` is 52
- * characters of fixed prose plus the user's sheet name plus up to six digits of row
- * label, and every one of those pushes the cut one character further in. The
- * holder in csv.test.ts - "no preset composes an xlsx refusal that is cut through a
- * column name" - asserts an even quote count over both headers and every preset and
- * was green while all of this was live, because its workbook is named `Statement`
- * with the header at the first row and so pins the one input the invariant is about. It
- * stays exactly as written; this is its generalisation, not its successor.
+ * the variable: `; the closest row (sheet "…", row …) does not match: ` is fixed
+ * prose plus the user's sheet name plus the row label's digits, and every character
+ * of those pushes the cut one character further in. The holder in csv.test.ts, "no
+ * preset composes an xlsx refusal that is cut through a column name", asserts an even
+ * quote count over both headers and every preset. It was green while all of this was
+ * live, because its workbook is named `Statement` with the header at the first row,
+ * and so it pins the one input the invariant is about. It stays exactly as written:
+ * this case is its generalisation, not its successor.
  */
 describe('a refusal is cut at a boundary or not at all', () => {
   /** Excel's own ceiling for a worksheet name: the widest prefix a sheet can buy. */
   const SHEET_NAME_MAX = 31;
   const LONG_SHEET = 'Kontoauszug-2026-Januar-Umsatze';
-  /** 1 digit, 2 digits, 6 - the label reaches the message as its digits and nothing else. */
+  /** Chosen for their digit widths: the label reaches the message as its digits alone. */
   const ROW_LABELS = [1, 12, 100_000];
   const REASON = ' does not match: ';
   const HEADERS = [
@@ -1143,8 +1144,8 @@ describe('a refusal is cut at a boundary or not at all', () => {
   /**
    * The reason itself, whole. The same function composes it from the same header and
    * the same preset on the CSV path, where it is thrown as it stands instead of being
-   * carried inside a clause with a budget - which is the asymmetry this row closes,
-   * and which makes that path the oracle every cut below is checked against.
+   * carried inside a clause with a budget. That makes the CSV path the oracle every
+   * cut below is checked against.
    */
   async function wholeReason(key: string | null, header: string[]): Promise<string> {
     const delimiter = key === null ? ',' : (CSV_PRESETS[key].mapping.delimiter ?? ',');
@@ -1178,12 +1179,12 @@ describe('a refusal is cut at a boundary or not at all', () => {
   /**
    * The unquoted comma lists a refusal carries, found by the prose introducing each:
    * the generic arm's header and the dump. The slot list beside them is prose and
-   * not names - `amount (tried "Betrag"` states something true about a column that
-   * exists, and the paren it leaves dangling fabricates nothing.
+   * not names. Cut short, `amount (tried "Betrag"` still states something true about a
+   * column that exists, and the paren it leaves dangling fabricates nothing.
    */
   function headerList(message: string): string[] {
     const lists: [string, string | null][] = [
-      ['columns in the header: ', ' - set a mapping or pick a preset'],
+      ['columns in the header: ', '. Set a mapping or pick a preset'],
       ['; the header reads: ', null],
     ];
     const entries: string[] = [];
@@ -1290,7 +1291,7 @@ describe('a refusal is cut at a boundary or not at all', () => {
   /**
    * A column name the REQUEST spelled, with a separator inside it. resolveColumns is
    * the header scan's predicate as well as the mapper's, so a mapping reaches this
-   * clause quoted - and both of the separators the cut looks for are legal inside a
+   * clause quoted, and both of the separators the cut looks for are legal inside a
    * name. Nothing else in the sentence puts one there: no accepted name in
    * CSV_PRESETS carries a comma or a semicolon, which is why a cutter that reads
    * neither quote passes every other case in this file.
@@ -1339,8 +1340,8 @@ describe('a refusal is cut at a boundary or not at all', () => {
   it('the header dump is dropped whole rather than cut through', async () => {
     // Two headers, because the rule is not "stop at the last separator that fits".
     // Four long cells is the shape this defect was measured on and it puts the dump's
-    // first comma out of the budget's reach; twenty short ones put it inside, which is
-    // where a cutter treating the seam as one more entry stops - and delivers a dump
+    // first comma out of the budget's reach; twenty short ones put it inside. That is
+    // where a cutter treating the seam as one more entry stops, and it delivers a dump
     // that is neither absent nor whole
     const headers = [
       Array.from({ length: 4 }, (_, i) => `Spalte-sehr-ausfuehrlich-${i}`),
@@ -1355,25 +1356,24 @@ describe('a refusal is cut at a boundary or not at all', () => {
         });
       });
 
-      // the dump WAS composed for this header - the same reason, off the path that
-      // carries it whole - so its absence below is a drop and not a coincidence
+      // the same reason, read off the path that carries it whole, shows the dump WAS
+      // composed for this header, so its absence below is a drop and not a coincidence
       expect(await wholeReason('dkb', header)).toContain('; the header reads: ');
 
       const message = (await refusalFor(bytes, 'dkb')) ?? '';
       expect(message, header[0]).not.toContain('; the header reads');
       expect(message, header[0]).toMatch(
-        new RegExp(`- pick a different preset or set a mapping${MARK}$`),
+        new RegExp(`\\. Pick a different preset or set a mapping${MARK}$`),
       );
     }
   });
 
   /**
    * A clause whose own prose no longer fits is dropped, not delivered headless.
-   * CLOSEST_CLAUSE_MIN's 60 was measured against one shape of the sentence: the prefix is
-   * 52 characters plus the sheet name plus the row label, so 62 at `Statement` with a
-   * one-digit row label and 85 at Excel's ceiling with a two-digit one, and between those
-   * two the constant guarded nothing at all. Three oversized sheets spend the budget down
-   * to where the difference shows.
+   * closestClause measures its prefix rather than holding a fixed minimum: the prefix is
+   * fixed prose plus the sheet name plus the row label, so a minimum measured against one
+   * shape of the sentence guards nothing for the others. Three oversized sheets spend the
+   * budget down to where the difference shows.
    *
    * The pair is what keeps the numbers honest: the same workbook, the same oversized
    * sheets, the same candidate row, and a candidate sheet named 4 characters instead
@@ -1395,7 +1395,7 @@ describe('a refusal is cut at a boundary or not at all', () => {
     const tight = (await refusalFor(await build(LONG_SHEET), 'revolut')) ?? '';
 
     expect(roomy).toContain(`${REASON}no column matched for date (tried "Completed Date"`);
-    expect(tight).toContain(' - skipped as too large to read: Kontoauszug-2026-Monat01');
+    expect(tight).toContain('; too large to read and skipped: Kontoauszug-2026-Monat01');
     expect(tight).toContain(`${LONG_SHEET})`);
     expect(tight).not.toContain(REASON);
     expect(tight.length).toBeLessThanOrEqual(ERROR_DETAIL_MAX);

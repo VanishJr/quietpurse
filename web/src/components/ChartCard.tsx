@@ -10,7 +10,7 @@ const CHART_HEIGHT = 300;
 
 interface Props {
   spec: Chart;
-  /** null while the list is still being read — see `useChartData`. */
+  /** null while the list is still being read (see `useChartData`). */
   accounts: Account[] | null;
   /** ...and why, when it is null because the read failed rather than not finished. */
   accountsError: string | null;
@@ -95,16 +95,16 @@ function Figures({ spec, data }: { spec: Chart; data: ChartData }) {
   }
 
   /*
-   * The parts the PLOT drew, which on a donut or a radar is not all of them — see
-   * `drawnShares`. Sorted biggest-first at the source, and a filter keeps that.
+   * The parts the PLOT drew, which on a donut or a radar is not all of them (see
+   * `drawnShares`). Sorted biggest-first at the source, and a filter keeps that.
    */
   const drawn = drawnShares(spec.kind, data.slices);
   const total = drawn.reduce((sum, s) => sum + s.value, 0);
   const biggest = drawn[0];
   /*
    * ...and the ranking is the part the filter does not reach. It KEEPS its negative
-   * bars — a bar chart has a baseline and can draw one — so its total is a NET while
-   * the largest part is a gross positive.
+   * bars, because a bar chart has a baseline and can draw one. So its total is a NET
+   * while the largest part is a gross positive.
    *
    * A percentage needs a whole that the part is part of, and a net is not one. So the
    * ranking prints the two figures and says nothing about the share, rather than a

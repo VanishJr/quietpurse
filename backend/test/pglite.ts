@@ -3,14 +3,13 @@
  *
  * By default an embedded PGlite (WASM Postgres) in memory: what every local run and
  * the fast CI job uses, and the same engine the product itself runs on. Set
- * TEST_DATABASE_URL and the same tests run against a real Postgres instead — the
- * second CI job does that, because PGlite is single-connection and cannot exercise
- * anything about concurrency: the partial unique index on imports, or two writers
- * at once.
+ * TEST_DATABASE_URL and the same tests run against a real Postgres instead. A second
+ * CI job does that, because PGlite is single-connection and cannot exercise anything
+ * about concurrency: the partial unique index on imports, or two writers at once.
  *
  * Either way there is one instance per test worker. A PGlite is a whole WASM
- * instance (~tens of MB that never really free), and spawning one per test file -
- * let alone per test - piled up until the worker crashed with a native V8 OOM. So
+ * instance whose memory is never really freed, and spawning one per test file, let
+ * alone per test, piled up until the worker crashed with a native V8 OOM. So
  * the handle lives on globalThis, surviving vitest's per-file module registry
  * resets, and callers get isolation by truncating every table instead. The driver
  * modules are imported dynamically so the unused one is never loaded at all.
@@ -33,9 +32,10 @@ const MIGRATIONS = { migrationsFolder: path.resolve(process.cwd(), 'drizzle') };
 
 /**
  * The first thing the suite does to a database is TRUNCATE every table in it, so
- * pointing it at the wrong one destroys real data - and a person's own database is
- * one typo away (`quietpurse` vs `quietpurse_test`) from the URL they would paste. Refuse
- * anything not named for the purpose rather than discover the mistake afterwards.
+ * pointing it at the wrong one destroys real data. A person's own database is one
+ * typo away from the URL they would paste: `quietpurse` against `quietpurse_test`.
+ * Refuse anything not named for the purpose rather than discover the mistake
+ * afterwards.
  */
 export function assertTestDatabase(url: string): void {
   const name = new URL(url).pathname.replace(/^\//, '');

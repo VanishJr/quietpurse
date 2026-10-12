@@ -78,8 +78,8 @@ describe('windowMonths', () => {
   });
 
   it('keeps a gap inside the range, because an empty month is a fact', () => {
-    // the server answers only the months that have rows, so this filling is the
-    // client's alone — and it is what makes `priorMonth` the adjacent month
+    // the server answers only the months that have rows, so only the client fills the
+    // gap. That filling is what makes `priorMonth` the adjacent month
     const months = windowMonths([month('2026-05', { expense: 10, net: -10 }), august], 12);
     expect(months.map((m) => m.month)).toEqual(['2026-05', '2026-06', '2026-07', '2026-08']);
     expect(months[1]).toEqual({ month: '2026-06', income: 0, expense: 0, net: 0 });
@@ -139,7 +139,7 @@ describe('the comparisons on the three cards', () => {
 
   it('compares against the adjacent month of the window and not the answer’s', () => {
     // the server skips a month with no rows, so an implementation reading its array
-    // straight through compares August with May and says "vs May" — or worse, says
+    // straight through compares July with May and says "vs May". Worse, it may say
     // "vs Jun" over May's figures
     const months = windowMonths(
       [month('2026-05', { expense: 60, net: -60 }), month('2026-07', { expense: 120, net: -120 })],
@@ -150,7 +150,8 @@ describe('the comparisons on the three cards', () => {
 
   it('derives the balance it started the month with rather than remembering one', () => {
     // no history of the balance is stored anywhere, but the balance IS the sum of
-    // every row — so what it was before this month is today's balance less the month
+    // every row. So what it was before this month is today's balance less the month's
+    // net
     const months = windowMonths([month('2026-08', { income: 100, net: 100 })], 12);
     // 1100 now, +100 over August, so it opened at 1000
     expect(balanceChange(1100, latestMonth(months))).toBeCloseTo(10);
@@ -173,11 +174,11 @@ describe('the comparisons on the three cards', () => {
 
 describe('money is counted in cents, not in doubles', () => {
   it('rounds to cents before deciding whether there is a base at all', () => {
-    // The defect this pins, from a real account: one month of history, so the balance
-    // before it was exactly zero — balance minus the month's net. As doubles that
-    // subtraction can leave a residue near 1e-16 instead, and the percentage taken
-    // against it rendered as 103138588731900000.0%. Rounding first is what makes the
-    // null branch reachable exactly where it is needed.
+    // The defect this pins, from a real account: with one month of history, the
+    // balance before it was exactly zero, computed as balance minus the month's net.
+    // As doubles that subtraction can leave a tiny residue instead, and the percentage
+    // taken against it rendered as an absurdly large number. Rounding first is what
+    // makes the null branch reachable exactly where it is needed.
     expect(percentChange(900, 0.1 + 0.2 - 0.3)).toBeNull();
   });
 

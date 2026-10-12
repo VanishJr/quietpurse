@@ -7,11 +7,10 @@ import { notifyResizeObservers } from '../test/resize';
 /**
  * The strip's own arithmetic: which page is shown, and when it is allowed to move.
  *
- * Tested here rather than through the Overview screen because the two cases that
- * matter are about the props changing underneath a page the strip already picked —
- * the parent re-rendering with the same list, and the parent re-rendering with the
- * same selection at a different index. Both are one `rerender` away here and several
- * requests away there.
+ * Tested here rather than through the Overview screen, because the cases that matter
+ * are about the props changing underneath a page the strip already picked: the parent
+ * re-renders with the same list, or with the same selection at a different index.
+ * Both are one `rerender` away here and several requests away there.
  */
 
 const acct = (id: string, name: string): Account => ({
@@ -117,10 +116,10 @@ describe('which page the strip shows', () => {
   });
 
   it('keeps the paging region in the DOM while there is nothing to page', () => {
-    // it was rendered under `pages > 1`, which is the one arrangement that cannot work:
-    // the region and its first sentence arrived in the same commit, so there was never a
-    // region present for that sentence to be a change TO — and paging, the one thing on
-    // this rail a screen reader cannot otherwise tell happened, announced nothing
+    // rendering it only under `pages > 1` is the one arrangement that cannot work. The
+    // region and its first sentence arrive in the same commit, so no region is present
+    // for that sentence to be a change TO. Paging is the one thing on this rail a screen
+    // reader cannot otherwise tell happened, and it would announce nothing
     render(strip([ALPHA], ALPHA.id));
 
     const region = document.querySelector('[aria-live="polite"]');

@@ -36,20 +36,21 @@ const MIN_CHARS_PER_PAGE = 50;
 /**
  * The whole of what a note may spend ON THIS PATH: 132 under a five-digit label
  * composes exactly the 159 derived above statement.ts's CELL_QUOTE_MAX. The budget is
- * per path and this is not the smallest - the same 132 under xlsx's six digits is 160.
+ * per path, and this path is not the smallest: the same 132 under xlsx's six digits is
+ * 160.
  */
 export const NOTE_MAX = 132;
 
 const CELL_QUOTE_MAX = 24;
 
 const ENCRYPTED =
-  'this PDF is password-protected - open it with its password and save an unprotected copy, or download the statement again from your online banking';
+  'this PDF is password-protected. Open it with its password and save an unprotected copy, or download the statement again from your online banking';
 
 const NOT_A_PDF =
-  'this file looks like a PDF but could not be opened as one - download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
+  'this file looks like a PDF but could not be opened as one. Download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
 
 const NOT_RECOGNISED_TAIL =
-  'layout is not one this importer recognises yet - export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that; those import today';
+  'layout is not one this importer recognises yet. Export the same statement as CSV or Excel (.xlsx) from the same online banking and upload that. Those import today';
 
 const NOT_RECOGNISED = `this statement's ${NOT_RECOGNISED_TAIL}`;
 
@@ -57,37 +58,37 @@ const notRecognisedFrom = (name: string): string =>
   `this looks like a statement from ${name}, and its ${NOT_RECOGNISED_TAIL}`;
 
 const SCANNED =
-  'this looks like a scan - this importer reads the text layer of a PDF and this one has none; download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
+  'this looks like a scan: this importer reads the text layer of a PDF, and this one has none. Download the statement again from your online banking, or export it as CSV or Excel (.xlsx)';
 
 const ambiguousLayout = (titles: string[]): string =>
-  `this statement matches more than one of the layouts this importer knows (${titles.map(quote).join(' and ')}) - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that; those import today`;
+  `this statement matches more than one of the layouts this importer knows (${titles.map(quote).join(' and ')}). Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that. Those import today`;
 
 const tooManyPages = (pages: number, max: number): string =>
-  `this PDF has ${pages} pages, more than the ${max} this importer reads in one file - export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
+  `this PDF has ${pages} pages, more than the ${max} this importer reads in one file. Export a narrower date range, or export the statement as CSV or Excel (.xlsx)`;
 
 const tookTooLong = (read: number, pages: number, seconds: number): string =>
-  `this PDF was taking longer than ${seconds} seconds to read, so reading it was stopped after ${read} of its ${pages} pages - it may simply be a very large statement; export a narrower date range, or export the statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this PDF was taking longer than ${seconds} seconds to read, so reading it was stopped after ${read} of its ${pages} pages. It may simply be a very large statement. Export a narrower date range, or export the statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const unreadableTable = (title: string, cell: string): string =>
-  `this ${title} statement has a table this importer cannot read (${cell}) - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement has a table this importer cannot read (${cell}). Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const noTransactionLines = (title: string): string =>
-  `this ${title} statement has no transaction lines in it - if the statement is really empty then nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking`;
+  `this ${title} statement has no transaction lines in it. If the statement is really empty, nothing is missing; otherwise export it as CSV or Excel (.xlsx) from your online banking`;
 
 const noBalanceBox = (title: string, label: string, found: number): string =>
-  `this ${title} statement has a balance summary this importer could not read: it expects exactly one "${label}" line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement has a balance summary this importer could not read: it expects exactly one "${label}" line and found ${found}. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const unplacedBalanceBox = (title: string, opens: string): string =>
-  `this ${title} statement's balance summary is one this importer could not place: it reads the summary of the section headed "${opens}", and this document prints no such heading - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's balance summary is one this importer could not place: it reads the summary of the section headed "${opens}", and this document prints no such heading. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const noStatementPeriod = (title: string, found: number): string =>
-  `this ${title} statement's rows carry a day and a month and no year, so this template reads the year off the period the statement covers - and it expects exactly one such line and found ${found} - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's rows carry a day and a month and no year, so this template reads the year off the period the statement covers. It expects exactly one such line and found ${found}. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const twoFeeLines = (title: string, label: string): string =>
-  `this ${title} statement prints more than one "${label}" line under one transaction, where this template reads one fee per transaction - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement prints more than one "${label}" line under one transaction, where this template reads one fee per transaction. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const unreadableFee = (title: string, label: string, cell: string, example: string): string =>
-  `this ${title} statement's "${label}" line reads ${quote(cell)} after its label, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's "${label}" line reads ${quote(cell)} after its label, where this template reads an amount like "${example}". Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 type BalanceRole = 'opening balance' | 'closing balance' | 'outgoing total' | 'incoming total';
 
@@ -105,14 +106,14 @@ const unreadableBalance = (
   cell: string,
   example: string,
 ): string =>
-  `this ${title} statement's ${which} cell reads ${quote(cell)} on its "${label}" line, where this template reads an amount like "${example}" - export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's ${which} cell reads ${quote(cell)} on its "${label}" line, where this template reads an amount like "${example}". Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const mixedBalanceCurrencies = (
   title: string,
   a: { role: BalanceRole; label: string; currency: string },
   b: { role: BalanceRole; label: string; currency: string },
 ): string =>
-  `this ${title} statement's ${a.role} (${quote(a.label)}) is stated in ${a.currency} and its ${b.role} (${quote(b.label)}) in ${b.currency} - this importer cannot check a statement that mixes currencies; export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
+  `this ${title} statement's ${a.role} (${quote(a.label)}) is stated in ${a.currency} and its ${b.role} (${quote(b.label)}) in ${b.currency}. This importer cannot check a statement that mixes currencies. Export the same statement as CSV or Excel (.xlsx) from your online banking and upload that`;
 
 const bounded = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -196,7 +197,7 @@ type FeeLine = { kind: 'none' } | { kind: 'included'; label: string };
 /**
  * What it costs when the span is wrong is silent by design and not by oversight: nothing
  * about an MCC refuses, counts or reaches a gate, so no CHECK and no screen can see a
- * span pointing at a neighbour - what holds it is the spans guard over TEMPLATES in
+ * span pointing at a neighbour. What holds it is the spans guard over TEMPLATES in
  * pdf.test.ts.
  */
 type MccColumn = { kind: 'none' } | { kind: 'column'; span: Span };
@@ -265,24 +266,25 @@ type DateFormat = 'ru-abbrev' | 'de-numeric' | 'de-day-month-pair';
 type DateSource =
   | { format: 'ru-abbrev' | 'de-numeric' }
   /**
-   * it does not, and this is where the year is read from instead: the one line of the
-   * balance box's scope whose whole text is the period the statement covers. Groups 1..3
-   * are the first day, month and year; 4..6 the last. No `g` and no `y` flag - this is
-   * matched once per line over the whole scope, and a sticky or global regex keeps
-   * `lastIndex` and answers true, false, true for the same line.
+   * The date cell carries no year, so the year is read instead from the line `period`
+   * matches: the one line of the balance box's scope whose whole text is the period the
+   * statement covers.
+   * Groups 1..3 are the first day, month and year; 4..6 the last. No `g` and no `y` flag:
+   * this is matched once per line over the whole scope, and a sticky or global regex
+   * keeps `lastIndex` and answers true, false, true for the same line.
    */
   | { format: 'de-day-month-pair'; period: RegExp };
 
 /**
  * Groups 1..3 of `shape` are the day, the month and the year, in that order, in every
- * vocabulary whose cell carries a year - stated once here rather than per entry, because
- * it is what readDate below reads them as. A `no-year` vocabulary states its own group
- * order in its own entry.
+ * vocabulary whose cell carries a year. That is stated once here rather than per entry,
+ * because it is what readDate below reads them as. A `no-year` vocabulary states its own
+ * group order in its own entry.
  *
- * `shape` is also what decides whether a line is a transaction at all - one regex rather
- * than two, or the anchor and the parser drift and a line that looks like a row is
- * dropped as furniture. A line that matches the shape and not the month table is a
- * SKIPPED row with a reason, never a dropped one.
+ * `shape` is also what decides whether a line is a transaction at all. It is one regex
+ * rather than two because two would let the anchor and the parser drift, and a line that
+ * looks like a row would then be dropped as furniture. A line that matches the shape and
+ * not the month table is a SKIPPED row with a reason, never a dropped one.
  */
 type DateVocabulary =
   | { kind: 'named-month'; shape: RegExp; months: Readonly<Record<string, number>> }
@@ -322,13 +324,12 @@ const DATE_FORMATS = {
 
 /**
  * UTC throughout and never `new Date(string)`: the calendar day goes into the dedup key,
- * and a local-time parse shifts it by one for half the world's timezones - so the same
- * statement imported from another machine would duplicate every row.
+ * and a local-time parse shifts it by one for half the world's timezones. The same
+ * statement imported from another machine would then duplicate every row.
  *
  * The round trip is the check that the components are a real date: Date.UTC rolls 31
- * February over into March rather than refusing it. One function, so the two callers - a
- * cell that carries its year and a period line that carries two - cannot come to disagree
- * about which day-month pairs exist.
+ * February over into March rather than refusing it. It is one function so that its
+ * callers cannot come to disagree about which day-month pairs exist.
  */
 function utcDate(day: number, month: number, year: number): Date | null {
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -380,7 +381,7 @@ function statementPeriod(
 /**
  * The year of a row whose cell carries none: the ONE year in the period's own range for
  * which the day and month are a real date inside the period. Zero or more than one is no
- * date at all - a skipped row with a note - and there is no fallback, no walk back a year
+ * date at all: the row is skipped with a note. There is no fallback, no walk back a year
  * and no default to the period's end year. The gate sums amounts and cannot see a date,
  * so a row given the wrong year reconciles to the cent, imports, and lands in the wrong
  * month on the Transactions screen, in the analytics buckets and in the dedup key. A
@@ -451,7 +452,7 @@ const MCC = 5;
 /**
  * The fee and the MCC are deliberately absent: COLUMNS is a Partial<CsvMapping> and
  * CsvMapping has neither. The mapper is told which cell carries one by PdfStatement.fee
- * and PdfStatement.mcc, which carry the convention with them - a name here would be a
+ * and PdfStatement.mcc, which carry the convention with them. A name here would be a
  * column resolved twice and a convention resolved nowhere.
  */
 const COLUMNS: Partial<CsvMapping> = {
@@ -500,8 +501,8 @@ export interface TextLine {
  *
  * What a row splitting in two costs is silent: the date and the amount would form their
  * own line, that line's date cell still matches the shape, and the transaction imports
- * with the right day, the right amount and an empty description - reconciling to the
- * cent.
+ * with the right day, the right amount and an empty description. It still reconciles to
+ * the cent.
  *
  * Not a template field, though it is a fact about a layout: the grouping is what a
  * template is matched against, so it is fixed before any template is known.
@@ -554,8 +555,8 @@ async function readLines(
     const seconds = Math.round(limits.deadlineMs / 1000);
     // Expiry throws rather than destroying the task. destroy() resolves while the getPage or
     // getTextContent it interrupted settles neither way, so the frame suspended at that await
-    // - and the copy of the file it holds - would be retained for the life of the process.
-    // The throw unwinds through the destroy() below with no pdfjs call in flight.
+    // would be retained for the life of the process, and with it the copy of the file it
+    // holds. The throw unwinds through the destroy() below with no pdfjs call in flight.
     const stopIfLate = (read: number): void => {
       if (performance.now() > deadline) throw new Error(tookTooLong(read, pages, seconds));
     };
@@ -605,7 +606,7 @@ const cellAt = (line: TextLine, span: Span): string =>
  *
  * null and never '': an empty string is a cell that was read and was blank, null is a
  * column the template never declared. readMcc answers undefined to both, so nothing
- * downstream turns on it - the sheet simply does not assert something the template did
+ * downstream turns on it: the sheet simply does not assert something the template did
  * not say.
  */
 function mccCellOf(mcc: MccColumn, line: TextLine): Cell {
@@ -712,7 +713,7 @@ function debitCredit(
     return {
       value: null,
       currency: '',
-      note: `holds ${quote(debit)} and ${quote(credit)} - a line carries a debit or a credit, not both`,
+      note: `holds ${quote(debit)} and ${quote(credit)}. A line carries a debit or a credit, not both`,
     };
   }
   if (!debit && !credit) {
@@ -789,7 +790,7 @@ function readRows(
       }
       // A line that attaches to the row above it: nothing in the date column, something
       // in the description one, and on the page that row's dated line was read on. TWO
-      // things attach - a continuation and a fee line - and they share this condition
+      // things attach, a continuation and a fee line, and they share this condition
       // rather than restating it.
       //
       // The page test is not decoration. Pages 2..n of a statement may repeat the title
@@ -829,11 +830,11 @@ function readRows(
           // Two conditions and one drop, silent where the refusals above are loud.
           //
           // fee_cents carries no currency column, so a fee stated in another one would be
-          // stored as the row's; and a SIGNED fee is a convention nobody here has
-          // measured - it may point at the fee or at the movement - so it is dropped and
-          // never Math.abs'd, which is guessing which. Without the sign half a negative
-          // reaches readFee, which refuses the cell and SKIPS the row, taking the file to
-          // doesNotAddUp - a sentence about balances that names nothing about a fee.
+          // stored as the row's. A SIGNED fee is a convention nobody here has measured:
+          // the sign may point at the fee or at the movement. So it is dropped, and never
+          // Math.abs'd, which would be guessing which. Without the sign half, a negative
+          // reaches readFee, which refuses the cell and SKIPS the row. That takes the file
+          // to doesNotAddUp, a sentence about balances that names nothing about a fee.
           if (read.value >= 0 && read.currency === cellText(open.row[CURRENCY])) {
             open.row[FEE] = read.value;
           }
@@ -900,7 +901,7 @@ function scopeOf(template: PdfTemplate, lines: TextLine[]): TextLine[] {
 
 /**
  * What the document says it started and ended with, and what it says each side came to,
- * off the line - or the lines - that state it for the whole statement.
+ * read off the line or lines that state it for the whole statement.
  *
  * Exactly one line per label is required WITHIN THE SCOPE, not the first of several: a
  * layout that repeats a label inside one section is a layout nobody has measured, and
@@ -910,10 +911,10 @@ function scopeOf(template: PdfTemplate, lines: TextLine[]): TextLine[] {
  * fingerprints the transaction table, and the reason is measured rather than economic: in
  * the first document this was written against, the closing column's heading wraps onto
  * two baselines either side of the header row, so the assertion could only ever be
- * partial - and a table named in half its columns is a table whose shape is not known.
+ * partial, and a table named in half its columns is a table whose shape is not known.
  * What stands in its place is the gate, which makes the locator self-checking per side as
- * well as end to end. Any misread of the box - a column inserted, two values swapped, the
- * wrong line matched - changes the arithmetic and refuses the import.
+ * well as end to end. Any misread of the box changes the arithmetic and refuses the
+ * import: a column inserted, two values swapped, the wrong line matched.
  */
 function readBalances(template: PdfTemplate, scoped: TextLine[]): StatementBalances {
   const { balances } = template;
@@ -1128,8 +1129,8 @@ export const TEMPLATES: readonly PdfTemplate[] = [
         // Two independent measurements that happen to equal `columns.debit` and
         // `columns.credit` today, and they must NOT be turned into a reference to them.
         // This box is a row of the balance summary table and not of the transaction
-        // table: two of the four spans here correspond to no column of it at all -
-        // `opening` sits inside its description span and `closing` past its last column.
+        // table: `opening` and `closing` correspond to no column of it at all. `opening`
+        // sits inside its description span and `closing` past its last column.
         // A redesign that moved one table alone would break a reference while both
         // literals were still individually correct.
         outgoing: [330, 410],
@@ -1140,11 +1141,11 @@ export const TEMPLATES: readonly PdfTemplate[] = [
   {
     id: 'n26-de',
     title: 'N26',
-    // The generator's own German wording twice, plus the bank's own BIC out of the
-    // footer. Never the account holder's IBAN, which sits in the same text item: a
-    // fingerprint that falls back to a per-customer value is a stop-and-report. The word
-    // "N26" is deliberately not here - on page 1 it is vector art, and every occurrence
-    // of the string is a transaction DESCRIPTION, which another month would not carry.
+    // The generator's own German wording, plus the bank's own BIC out of the footer.
+    // Never the account holder's IBAN, which sits in the same text item: a fingerprint
+    // that falls back to a per-customer value is a stop-and-report. The word "N26" is
+    // deliberately not here: on page 1 it is vector art, and every occurrence of the
+    // string is a transaction DESCRIPTION, which another month would not carry.
     issuer: ['Kontoauszug Nr.', 'Erstellt am', 'BIC: NTSBDEB1XXX'],
     amounts: 'signed',
     columns: {
@@ -1220,9 +1221,9 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // the generator's; correcting it here would stop the header matching and refuse the
       // whole document.
       //
-      // The `''` is what this baseline really reads - the amount column's own heading
-      // wraps across the other baselines of the heading block - and inventing a heading
-      // it does not carry would make the fingerprint a fiction.
+      // The `''` is what this baseline really reads: the amount column's own heading
+      // wraps across the other baselines of the heading block. Inventing a heading it
+      // does not carry would make the fingerprint a fiction.
       {
         header: { date: 'Дата i час', description: 'Деталі операції', amount: '' },
         collect: true,
@@ -1233,7 +1234,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // The trailing code is a literal " UAH" and NOT " [A-Z]{3}": a balance printed in
       // another currency has to fail this pattern and refuse loudly, where a generic
       // three-letter group would read it as UAH and import somebody's dollar statement as
-      // hryvnia. It is optional because the transaction cells carry no code at all - the
+      // hryvnia. It is optional because the transaction cells carry no code at all: the
       // currency is in the column heading, which is what `per-column` supplies.
       pattern: /^(-?\d{1,3}(?: \d{3})*\.\d{2})(?: UAH)?$/u,
       decimal: '.',
@@ -1248,7 +1249,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     fee: { kind: 'none' },
     // The whole gap between the two windows either side of it, and a literal rather than
     // a reference to them for the reason the `gross` comment above gives. A tighter span
-    // is not the cautious choice - the column is centred, so a code of narrow glyphs sits
+    // is not the cautious choice. The column is centred, so a code of narrow glyphs sits
     // right of one of wide glyphs, and the tight span is the one that misses it.
     mcc: { kind: 'column', span: [190, 215] },
     balances: {
@@ -1292,7 +1293,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       accountNumbers: { kind: 'not-printed' },
     },
     fee: { kind: 'none' },
-    // It is the code that carries this locale, not a merchant name - the description
+    // It is the code that carries this locale, not a merchant name: the description
     // column prints the bank's own category label and no merchant at all.
     mcc: { kind: 'column', span: [190, 215] },
     balances: {
@@ -1317,26 +1318,27 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     amounts: 'signed',
     // `date`'s left edge is BELOW the leftmost thing this document draws, and that is
     // deliberate rather than slack: it puts every line the layout writes in the left
-    // margin - the summary labels, the section headings, the footer, the whole of the
-    // legal page - inside the date cell, where a non-empty date cell is what stops
+    // margin inside the date cell. That is the summary labels, the section headings, the
+    // footer and the whole of the legal page, and a non-empty date cell is what stops
     // readRows taking any of them for a continuation. Tightening it to the leftmost drawn
     // item makes the footer's address line one, measured.
     //
     // `description`'s right edge is what separates the footer's own legal name from a
-    // transaction's detail line - see `rows` below. Its cost is real: a description drawn
-    // as a SECOND run beginning past that edge would be dropped silently.
+    // transaction's detail line, as `rows` below explains. Its cost is real: a
+    // description drawn as a SECOND run beginning past that edge would be dropped
+    // silently.
     //
     // `amount` reaches much further left than the widest amount this document contains,
     // because the column is right-aligned and an item is assigned by its LEFT edge: a
     // span drawn for the amounts this file happens to print would read an empty amount
     // cell for every four-figure movement, skip the row and refuse an ordinary month. The
-    // obvious lower bound - the footer's own page number - is not available, because a
-    // four-figure amount begins within a point of it.
+    // footer's own page number would be the obvious lower bound, and it is not available,
+    // because a four-figure amount begins within a point of it.
     columns: { date: [40, 135], description: [135, 250], amount: [460, 596] },
     marker: { column: 'description', text: 'Transaktionsinformation' },
     tables: [
       // "Buchung" and "Valuta" are two headings in one span, joined by cellAt exactly as
-      // the two date cells under them are - so the fourth column is NAMED, and a redesign
+      // the two date cells under them are. So the fourth column is NAMED, and a redesign
       // that renames or moves it stops this template matching rather than reading rows
       // against columns that have shifted.
       {
@@ -1364,7 +1366,7 @@ export const TEMPLATES: readonly PdfTemplate[] = [
       // its digits in a second run, and cellAt joins runs with a space, so the cell
       // arrives as "+ 0,08 €" where the summary line writes "+0,08 €" as one run.
       // parseAmount strips whitespace before it parses, so the pattern is the only place
-      // this matters - and it still matches the WHOLE cell, which is what stops
+      // this matters. The pattern still matches the WHOLE cell, which is what stops
       // "1234,56-" being read as positive.
       pattern: /^([+-]? ?\d{1,3}(?:\.\d{3})*,\d{2}) ([^\s\d]+)$/u,
       decimal: ',',
@@ -1374,11 +1376,11 @@ export const TEMPLATES: readonly PdfTemplate[] = [
     // `drop` is EMPTY, and that is the whole point of the description span's right edge.
     // The bank's own legal name appears twice on page 1: once as transaction 1's own
     // first detail line, and once as the page footer, on the same page as the last
-    // transaction and blank in the amount column - a continuation's exact shape. The two
-    // texts are byte-identical and differ only in x, so no rule over the description TEXT
-    // can separate them: a drop list naming it takes the real detail line with the
-    // footer, which is a silent truncation of a real description. Only a rule keyed on x
-    // can tell them apart, and the span is that rule.
+    // transaction and blank in the amount column, which is a continuation's exact shape.
+    // The two texts are byte-identical and differ only in x, so no rule over the
+    // description TEXT can separate them: a drop list naming it takes the real detail
+    // line with the footer, which is a silent truncation of a real description. Only a
+    // rule keyed on x can tell them apart, and the span is that rule.
     rows: { kind: 'continuations', drop: [], accountNumbers: { kind: 'not-printed' } },
     fee: { kind: 'none' },
     mcc: { kind: 'none' },
@@ -1404,11 +1406,11 @@ export const TEMPLATES: readonly PdfTemplate[] = [
 ];
 
 /**
- * Every sentence in the refusal set, composed at its own extreme out of every template's
- * own literals - the title a refusal names the layout by, the balance labels it quotes
- * back, the currency codes it declares and the example it offers - and out of the issuer
- * directory's own longest entry, for the one refusal that names a bank rather than a
- * layout.
+ * Every sentence in the refusal set, each composed at its own extreme out of every
+ * template's own literals: the title a refusal names the layout by, the balance labels
+ * it quotes back, the currency codes it declares and the example it offers. The one
+ * refusal that names a bank rather than a layout is composed out of the issuer
+ * directory's own longest entry.
  *
  * It composes rather than measures because a measurement is true only on the day it is
  * taken: a template added with a long label moves the longest sentence, and a number
@@ -1417,7 +1419,8 @@ export const TEMPLATES: readonly PdfTemplate[] = [
  *
  * What holds a refusal added above and not added here is test/refusal-set.test.ts, which
  * parses this file and requires every throw site's refusal to be named below. Nothing
- * structural can - the set is literals and builders with different signatures.
+ * structural can hold it, because the set is literals and builders with different
+ * signatures.
  */
 export function refusals(templates: readonly PdfTemplate[] = TEMPLATES): string[] {
   const cell = 'W'.repeat(CELL_QUOTE_MAX + 2);

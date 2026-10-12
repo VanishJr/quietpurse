@@ -38,7 +38,7 @@ export function tooltipProps(
     /*
      * One object for two shapes: on a line or area chart only the stroke is ever seen,
      * and on a bar chart the cursor is a filled band whose fill is set here because the
-     * library's own default for it was measured wrong in both palettes — a mid-grey that
+     * library's own default for it was measured wrong in both palettes: a mid-grey that
      * is wrong on a white card and a slab on a dark card. It is the grid's colour rather
      * than a chip's: the band is painted on the plotting area, which is the ground the
      * chart sits on and not the tooltip's own.

@@ -8,13 +8,14 @@ import { AccountDialog, COUNT_LIMIT, type DialogKind } from './AccountDialog';
 
 /**
  * The delete panel, mounted on its own. Reaching its hidden-account branch through
- * OverviewScreen is four interactions and a fixture change, and that branch is the
- * only place `totals.transactions` is ever printed, so the component is mounted directly.
+ * OverviewScreen takes several interactions and a fixture change, and that branch is
+ * the only place `totals.transactions` is ever printed. So the component is mounted
+ * directly.
  *
  * What is asserted here is what the panel does: which numbers it prints, what it
- * offers and when, and what it hands back. What happens to the screen afterwards —
- * the rail, the reload, the sentence — is OverviewScreen.test.tsx's, and that split
- * is the design under test rather than a convenience.
+ * offers and when, and what it hands back. What happens to the screen afterwards
+ * belongs to OverviewScreen.test.tsx: the rail, the reload, the sentence. That split is
+ * the design under test, not a convenience.
  */
 
 const ACCOUNT: Account = {
@@ -249,8 +250,8 @@ describe('the delete preview', () => {
 
   /**
    * The transactions endpoint answers nothing for a hidden account, so this branch
-   * is the one that has to count from the imports — and it is the only place a
-   * total that is larger than the page can be printed as a transaction count.
+   * has to count from the imports. It is also the only place where a total larger
+   * than the page can be printed as a transaction count.
    */
   it('counts a hidden account from the totals, and says that is what it did', async () => {
     // no GET /api/transactions in the table: asking it for a hidden account would
@@ -262,9 +263,9 @@ describe('the delete preview', () => {
   });
 
   /**
-   * The caveat this row replaces. It said an import older than the page is not in
-   * these numbers; after this change every number is over the whole history, so
-   * leaving it would teach the reader to disbelieve the ones that are still true.
+   * No caveat that an import older than the page is missing from these numbers: every
+   * number is over the whole history, so such a caveat would teach the reader to
+   * disbelieve the ones that are still true.
    */
   it('no longer warns that older imports are missing from the numbers', async () => {
     mount(ACCOUNT, {
@@ -331,9 +332,9 @@ describe('the delete itself', () => {
   };
 
   /**
-   * While the counts are unread the panel says so and offers nothing. Rendered rather
-   * than disabled — nothing on screen would explain a dead control here, and the counts
-   * are what the decision is made on.
+   * While the counts are unread the panel says so and offers nothing. The controls are
+   * left out rather than disabled: nothing on screen would explain a dead control here,
+   * and the counts are what the decision is made on.
    */
   it('offers nothing to click while the counts are still being read', async () => {
     mount(ACCOUNT, { 'GET /api/imports': () => new Promise<Response>(() => {}) });
@@ -422,8 +423,8 @@ describe('the delete itself', () => {
    * The refusal is printed and never classified: request() throws a bare Error and
    * the status is gone with it, so a branch could only match the backend's wording
    * across two packages nothing ties together. Import history is the real way out of
-   * this one — deleting the staged import from there unblocks the account — and it is
-   * on the panel whether or not a refusal has been given.
+   * this one, because deleting the staged import from there unblocks the account. It
+   * is on the panel whether or not a refusal has been given.
    */
   it('prints the server’s refusal and still offers the way out of it', async () => {
     mount(ACCOUNT, {
@@ -431,7 +432,7 @@ describe('the delete itself', () => {
       'DELETE /api/accounts/acc-1': () =>
         fail(409, {
           error:
-            'this account has an import waiting to be confirmed - confirm it or discard it, then delete the account',
+            'this account has an import waiting to be confirmed. Confirm it or discard it, then delete the account',
         }),
     });
 
@@ -439,7 +440,7 @@ describe('the delete itself', () => {
     fireEvent.click(destroyButton());
 
     expect(
-      await screen.findByText(/confirm it or discard it, then delete the account/),
+      await screen.findByText(/Confirm it or discard it, then delete the account/),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open import history' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open import history' }).closest('.sheet-footer')).not.toBeNull();

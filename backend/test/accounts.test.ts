@@ -1,13 +1,12 @@
 /**
  * An account's identity is its id, not its name.
  *
- * Two things are asserted here that nothing else can hold. **No two accounts in one
- * share a name**, and that is the database's job - accounts_name_unique over
- * lower(name) - so the first test inserts straight into the
- * table rather than through a function that could be checking in JS. And **an upload
- * records the id it was given and the confirm reads it back**, so the two requests
- * cannot come to disagree about where the rows went. Everything else in the file is
- * a consequence of those two.
+ * Two things are asserted here that nothing else can hold. **No two accounts share a
+ * name**, and that is the database's job: accounts_name_unique over lower(name). So
+ * the first test inserts straight into the table rather than through a function that
+ * could be checking in JS. And **an upload records the id it was given and the
+ * confirm reads it back**, so the two requests cannot come to disagree about where
+ * the rows went. Everything else in the file is a consequence of those two.
  */
 import { sql, type SQL } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
@@ -50,7 +49,7 @@ async function uploadTo(accountId: string, csv: string): Promise<ImportSummary> 
   return result.summary;
 }
 
-/** What the import row itself records - the column, not the response that echoed it. */
+/** The id read off the import row's own column, not off the response that echoed it. */
 async function recordedAccountId(importId: string): Promise<string | null> {
   const res = (await dbInstance().execute(
     sql`SELECT account_id FROM imports
@@ -91,8 +90,8 @@ describe('a name is unique, case-insensitively', () => {
       sql`INSERT INTO accounts (id, provider, name, currency, balance_cents)
           VALUES ('idx-a', 'upload', 'Revolut', 'EUR', 0)`,
     );
-    // drizzle wraps the driver error, so the constraint is read off the cause - the
-    // same chain isUniqueViolation walks. Asserted by NAME: any unique violation
+    // drizzle wraps the driver error, so the constraint is read off the cause, which is
+    // the same chain isUniqueViolation walks. Asserted by NAME: any unique violation
     // would satisfy the code alone, and only this one is evidence that
     // accounts_name_unique is what refused the insert
     const refused = await dbInstance()
@@ -108,7 +107,7 @@ describe('a name is unique, case-insensitively', () => {
   });
 
   /**
-   * Renaming an account to a case-variant of its own name is not a collision -
+   * Renaming an account to a case-variant of its own name is not a collision, because
    * Postgres does not treat a row's own superseded version as a conflicting tuple.
    * Asserted rather than assumed: if it were false, a user could not fix the
    * capitalisation of their own account name and would be refused on behalf of the
@@ -148,9 +147,9 @@ describe('a name is unique, case-insensitively', () => {
   /**
    * The lookup folds a name the way the index folds it, held here by something that
    * fails rather than by findAccountByName's docstring alone. Every other name in the
-   * suite is ASCII, where JS and SQL agree, so a JS fold would leave the file green -
-   * and under one, an upload typed 'İSTANBUL' against an account stored as 'istanbul'
-   * misses branch (a), mints a fresh id, and the confirm meets accounts_name_unique.
+   * suite is ASCII, where JS and SQL agree, so a JS fold would leave the file green.
+   * Under one, 'İSTANBUL' beside an account stored as 'istanbul' could be refused by
+   * accounts_name_unique while the lookup finds no holder for the refusal to name.
    *
    * The AGREEMENT is what is asserted, never one collation's answer: an engine whose
    * lower() maps U+0130 differently is not a defect, two doors disagreeing is.
@@ -168,11 +167,11 @@ describe('a name is unique, case-insensitively', () => {
 });
 
 /**
- * The id arm: the screen offers the accounts that exist and the
- * upload carries the id of the one that was picked. There is no name and no currency
- * in the request at all, so neither can be typed wrong - and the two columns the
- * import records come off the account's own row, which is what stops the currency
- * overwrite that was accepted as a consequence when identity moved to the id.
+ * The id arm: the screen offers the accounts that exist and the upload carries the id
+ * of the one that was picked. There is no name and no currency in the request at all,
+ * so neither can be typed wrong. The two columns the import records come off the
+ * account's own row, and that is what stops the currency overwrite that was accepted
+ * as a consequence when identity moved to the id.
  */
 describe('an upload that picks its account by id', () => {
   it("records the account's own name and currency, never the request's", async () => {
@@ -192,11 +191,12 @@ describe('an upload that picks its account by id', () => {
   /**
    * The case accepted as a consequence when identity moved to the id: there is no
    * currency in the request to overwrite the account's with, because the column the
-   * import records is read off the account's own row - and since the upload stopped
-   * taking a name there is no other arm for one to arrive on.
+   * import records is read off the account's own row. Since the upload stopped taking a
+   * name, there is no other arm for one to arrive on.
    *
-   * It is closed from the other side as well: `currency` is not in upsertAccountOn's
-   * conflict set, so nothing rewrites an existing account's currency at confirm either.
+   * It is closed from the other side as well: the confirm does not call
+   * upsertAccountOn, whose conflict set leaves `currency` out anyway, so nothing
+   * rewrites an existing account's currency at confirm either.
    */
   it("leaves the account's currency alone when the statement states another", async () => {
     const created = await createAccount({ name: 'Savings', currency: 'EUR' });
@@ -268,10 +268,10 @@ describe('an upload that picks its account by id', () => {
 
   /**
    * The confirm reads imports.account_id and derives nothing from the other two
-   * columns. It is asserted by rewriting account_name to a string no account answers
-   * to - if anything below the null guard still read it, the rows would land
-   * somewhere else or not at all - and on the column rather than on the response,
-   * because an id echoed back from the request would pass either way.
+   * columns. The case rewrites account_name to a string no account answers to: if
+   * anything below the null guard still read it, the rows would land somewhere else or
+   * not at all. It asserts on the column rather than on the response, because an id
+   * echoed back from the request would pass either way.
    */
   it('the confirm uses the id recorded on the import row, not the name', async () => {
     const id = await accountFor('Recorded Bank');
@@ -312,10 +312,9 @@ describe('an upload that picks its account by id', () => {
 });
 
 /**
- * The delete that is not a hide. Asserted per table with raw counts rather
- * than through the functions that read them - listTransactions and listImports both
- * filter, and a delete that left rows behind an account nothing displays would pass
- * every one of them.
+ * The delete that is not a hide. Asserted per table with raw counts rather than through
+ * the functions that read them. listTransactions and listImports both filter, so a
+ * delete that left rows behind an account nothing displays would pass every one of them.
  */
 const countOf = async (q: SQL): Promise<number> => {
   const res = (await dbInstance().execute(q)) as unknown as { rows: { n: string | number }[] };
@@ -365,8 +364,8 @@ const newAccount = async (name: string): Promise<string> => {
 };
 
 /**
- * An import attributed to an account with nothing staged under it - the only way to
- * write imports.account_id without going through a real file.
+ * An import attributed to an account with nothing staged under it. This is the only way
+ * to write imports.account_id without going through a real file.
  */
 async function importFor(accountId: string, fileHash: string): Promise<string> {
   const record = await createImport({ fileHash, sourceType: 'csv', parserVersion: 1 });
@@ -391,7 +390,7 @@ describe('deleting an account', () => {
     const second = await uploadTo(id, csvFile(`2026-06-03,-63.00,${name} three`));
     expect(await confirmImport(second.importId)).toMatchObject({ confirmed: true, inserted: 1 });
     // one of the two no longer claims a readable document, so `documents` and
-    // `imports` are different numbers - equal ones would hide a column that arrived
+    // `imports` are different numbers. Equal ones would hide a column that arrived
     // undefined through rowsVia and read as "no pointer"
     await clearImportDocument(second.importId);
     await addTransferRule(`${name} transfer`, id);
@@ -417,8 +416,8 @@ describe('deleting an account', () => {
   });
 
   /**
-   * The staged rows go by the foreign key on import_id and not by a
-   * statement of this delete's own - which is the entry ACCOUNT_CASCADE answers with
+   * The staged rows go by the foreign key on import_id and not by a statement of this
+   * delete's own. That is why ACCOUNT_CASCADE answers their entry with
    * CASCADES_FROM_IMPORTS. Reachable only through rows the account does not own:
    * staged rows carrying its OWN id refuse the delete instead (the case below).
    *
@@ -474,9 +473,9 @@ describe('deleting an account', () => {
   });
 
   /**
-   * accounts_name_unique is unconditional - lower(name), nothing
-   * partial about it - so a delete that left the row behind would make the name
-   * permanently unusable with nothing on any screen holding it.
+   * accounts_name_unique is an unconditional index on lower(name), with nothing partial
+   * about it. So a delete that left the row behind would make the name permanently
+   * unusable, with nothing on any screen holding it.
    */
   it('frees the name it held', async () => {
     const id = await populate('Reusable Name');
@@ -496,9 +495,9 @@ describe('deleting an account', () => {
   });
 
   /**
-   * Committed imports do NOT refuse - an account worth deleting
-   * is precisely one that holds those, which is the case above - and this state is
-   * different in kind: it is momentary and one click from over in either direction.
+   * Committed imports do NOT refuse the delete, because an account worth deleting is
+   * precisely one that holds them, as in the case above. This state is different in
+   * kind: it is momentary and one click from over in either direction.
    *
    * Without the clause the delete takes the outstanding import too, and the summary the
    * user is looking at answers "import not found" on Confirm.
@@ -515,8 +514,8 @@ describe('deleting an account', () => {
     expect(await rulesOfAccount(id)).toBe(1);
     expect(await getAccount(id)).toBeDefined();
 
-    // transient, not a latch - and confirming is a way out as well as discarding,
-    // which is what the route's sentence offers
+    // transient, not a latch. Confirming is a way out as well as discarding, which is
+    // what the route's sentence offers
     expect(await confirmImport(staged.importId)).toMatchObject({ confirmed: true });
     expect(await deleteAccount(id)).toMatchObject({
       ok: true,
@@ -552,7 +551,7 @@ describe('deleting an account', () => {
     await recalcAccountBalanceFromTransactions(victim);
     expect(await balanceOf(victim)).toBe(-1500);
 
-    // the count on the wire is the doomed account's OWN rows - it has none. What the
+    // the count on the wire is the doomed account's OWN rows, and it has none. What the
     // cascade took from the victim is in the log, not in this number
     expect(await deleteAccount(doomed)).toEqual({
       ok: true,
@@ -569,8 +568,8 @@ describe('deleting an account', () => {
   });
 
   /**
-   * The compile-time census has a hole `satisfies` cannot close - it proves an entry
-   * exists, not that it is executed - so a new account-scoped table must also make a
+   * The compile-time census has a hole `satisfies` cannot close: it proves an entry
+   * exists, not that it is executed. So a new account-scoped table must also make a
    * test fail, not only the type checker.
    */
   it('accounts for every account-scoped table in the schema', () => {

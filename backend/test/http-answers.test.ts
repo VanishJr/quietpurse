@@ -255,7 +255,7 @@ describe('what the walk refuses at import', () => {
       });
     });
     expect(() => registeredAnswerKeys(anonymous)).toThrow(
-      /a middleware the door does not name is on the app: anonymous - /,
+      /a middleware the door does not name is on the app: anonymous\. /,
     );
     const named = withRoutes((t) => {
       t.use(function probeMiddleware(_req, res) {
@@ -263,7 +263,7 @@ describe('what the walk refuses at import', () => {
       });
     });
     expect(() => registeredAnswerKeys(named)).toThrow(
-      /a middleware the door does not name is on the app: probeMiddleware - /,
+      /a middleware the door does not name is on the app: probeMiddleware\. /,
     );
   });
 

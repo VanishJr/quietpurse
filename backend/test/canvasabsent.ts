@@ -2,17 +2,17 @@
  * What the PDF parser answers, reduced to something two processes can compare.
  *
  * The parser has to keep parsing where `@napi-rs/canvas` is not installed. pdfjs-dist
- * lists it as optional, so npm skips it on any machine no prebuilt binary matches, and
- * whether this one has it is not knowable from here - which is why the child below
- * makes the package unresolvable rather than asking. So this module is imported twice
- * - once by canvasabsent.test.ts as the machine found it, once by
- * canvasabsent.child.ts in a child process where it cannot be resolved - and the two
- * answers are compared.
+ * lists it as optional, so npm skips it on any machine no prebuilt binary matches.
+ * Whether this machine has it is not knowable from here, which is why
+ * canvasabsent.child.ts makes the package unresolvable rather than asking. So this
+ * module is imported by canvasabsent.test.ts as the machine found it, and by
+ * canvasabsent.child.ts in a child process where the package cannot be resolved, and
+ * the two answers are compared.
  *
- * The template is synthetic. It is not either shipped layout and is not evidence
- * about one: what it has to exercise is the four ways readPdf can answer, one of
- * which - the password refusal - only comes out right if the dynamic import handed
- * back pdfjs's real namespace rather than something shaped like it.
+ * The template is synthetic. It is not a shipped layout and is not evidence about
+ * one. What it has to exercise is how readPdf answers: a parse, a scan, a password and
+ * a layout it does not know. The password refusal only comes out right if the dynamic
+ * import handed back pdfjs's real namespace rather than something shaped like it.
  */
 import { PdfTemplate, StatementBalances, readPdf } from '../src/providers/pdf';
 import { Cell } from '../src/providers/sheet';

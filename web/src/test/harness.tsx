@@ -16,15 +16,14 @@ import {
  * Deny-by-default fetch for the jsdom project.
  *
  * The rejection this returns for an unknown route is not what holds the line. Several
- * background loads in this client end in `.catch(() => {})` - CsvImport.tsx,
- * OverviewScreen.tsx and three in TransactionsScreen.tsx - so a rejection changes
- * nothing observable and the screen renders in its empty state. What holds it is
- * the afterEach in setup.ts, which throws naming every request no route matched.
+ * background loads in this client end in `.catch(() => {})`, so a rejection changes
+ * nothing observable and the screen renders in its empty state. What holds it is the
+ * afterEach in setup.ts, which throws naming every request no route matched.
  *
- * Which is why requests() exists. Where the subject of a test is a request - a
- * confirm that must never fire - the assertion you want is that a request happened,
- * not that a frame was painted: a frame is also painted by a screen that never
- * asked, and awaiting one races the two loads.
+ * Which is why requests() exists. Where the subject of a test is a request, such as a
+ * confirm that must never fire, the assertion you want is on the requests, not on a
+ * painted frame: a frame is also painted by a screen that never asked, and awaiting
+ * one races the two loads.
  *
  * Known limit: the guard sees only what was requested by the time its afterEach
  * runs. One arriving later is wiped by the next test's resetFetch(), or never read
@@ -99,8 +98,8 @@ export function mockFetch(table: Routes): void {
 export const requests = (): string[] => [...seen];
 
 /**
- * The same list with the query string kept — the only place a parameter the client
- * SENT can be asserted, since keyOf drops it and a handler is called with no URL.
+ * The same list with the query string kept. It is the only place a parameter the
+ * client SENT can be asserted, since keyOf drops it and a handler is called with no URL.
  * Beside requests() rather than instead of it: putting the query into the key would
  * break every route declared in the suite.
  */
@@ -139,24 +138,23 @@ export const renderThemed = (ui: React.ReactNode): RenderResult =>
 
 /**
  * Every request the app fires on first paint, produced by running the App test
- * against an empty table and reading the guard's list - not by reading the screens.
+ * against an empty table and reading the guard's list, not by reading the screens.
  * A row that adds a first-paint request is told so by a red test.
  *
  * /api/imports/presets (once CsvImport mounts) is deliberately absent: it is not first
  * paint.
  *
  * Neither is any summary request, and that is now true from both directions. Overview
- * asks for every account that HAS a transaction - but TRANSACTIONS here is empty, so it
+ * asks for every account that HAS a transaction, but TRANSACTIONS here is empty, so it
  * short-circuits on `recent.length === 0` and fires neither. Give that fixture a row and
  * Overview fires both; the guard then names the missing one, which is this mechanism
  * working rather than a hole in it. Analytics is a board of charts the reader builds:
- * an empty
- * one asks for the account list and for the charts themselves, which live on the
- * server. /api/summary is requested only when a saved chart needs it.
+ * an empty one asks for the account list and for the charts themselves, which live on
+ * the server. /api/summary is requested only when a saved chart needs it.
  *
  * The charts row answers version 0 with nothing in it, which is deliberately the one
- * response that would set the migration going - and it stays quiet here because there
- * is nothing in localStorage to migrate. A test that seeds that key gets a PUT, which
+ * response that would set the migration going. It stays quiet here because there is
+ * nothing in localStorage to migrate. A test that seeds that key gets a PUT, which
  * is the migration and not a first-paint request.
  */
 export const FIRST_PAINT_ROUTES: Routes = {

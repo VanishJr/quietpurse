@@ -7,15 +7,15 @@ import { commentsOf, type Comment } from '../scripts/comment-tokens';
  * A spec sits beside the module it describes, or at the root when it describes the
  * whole, and nothing imports it and nothing typechecks it. What rots in one is a
  * coordinate that has moved, a path somebody renamed, a pointer to a file only this
- * machine has, and a status a reader cannot see - and prose that has rotted is read as
- * settled. A comment in source is prose too, and the same four things rot in it, so
- * the clauses that can run over a comment run over every one the tree carries.
+ * machine has, and a status a reader cannot see. Prose that has rotted is read as
+ * settled. A comment in source is prose too and the same things rot in it, so the
+ * clauses that can run over a comment run over every one the tree carries.
  *
  * The frontmatter is what the tool that indexes this tree reads a spec by, and it is
- * read here under a grammar of this file's own rather than a YAML parser: the tool
- * reads YAML whole, and every form it reads differently from this file - or drops in
- * silence - is a field filled in and then trusted. The grammar is the subset both read
- * one way, and everything outside it is refused by name.
+ * read here under a grammar of this file's own rather than a YAML parser. The tool
+ * reads YAML whole. Any form it reads differently from this file is a field filled in
+ * and then trusted, and so is any form it drops in silence. The grammar is the subset
+ * both read one way, and everything outside it is refused by name.
  *
  * The unpublished set is DERIVED from .gitignore, never listed here. The rule is
  * "ignored by .gitignore" and never "is a root-level .md": AGENTS.md is a root-level
@@ -76,8 +76,8 @@ const BOUNDARY = '(?<![\\w@.\\-:/])';
 const PATH_TOKEN = new RegExp(`${BOUNDARY}[\\w@.-]+(?:/[\\w@.-]+)*\\.(?:${EXT})\\b`, 'g');
 /**
  * The second shape a pointer takes. A directory carries no extension, so PATH_TOKEN
- * cannot see one - and a pointer into the task directories is what this whole file
- * was raised about.
+ * cannot see one. A pointer into the task directories is what this whole file was
+ * raised about.
  */
 const DIR_TOKEN = new RegExp(`${BOUNDARY}[\\w@.-]+(?:/[\\w@.-]+)*/`, 'g');
 /** No boundary, deliberately: this one refuses rather than resolves, so a lookbehind could
@@ -128,9 +128,9 @@ const splitFrontmatter = (text: string): Block | undefined => {
 /**
  * What makes a file a spec to the tool that indexes this tree: a fenced block carrying
  * an id and a type. Read off the lines rather than off a YAML parse, and read wide on
- * purpose - a line naming the key indented, quoted, spaced before its colon or with its
- * value on the line below is a candidate - so a spec written and not declared is found
- * here first and refused by the grammar by name second. Where this can still disagree
+ * purpose, so a spec written and not declared is found here first and refused by the
+ * grammar by name second. A line naming the key indented, quoted, spaced before its
+ * colon or with its value on the line below is a candidate. Where this can still disagree
  * with the tool, the direction that stays open is a form YAML reads as an identity and
  * this pattern does not; the other, a candidate the tool would not read, costs a
  * refusal by name and never a silence.
@@ -147,8 +147,8 @@ type Parsed = { fm: Frontmatter; faults: string[] };
 const isField = (key: string): key is Field => (FIELDS as readonly string[]).includes(key);
 /** What YAML reads as something other than the text written: an indicator in front, a
  * mapping or a comment inside, a bare word, a figure or a special float it types for you.
- * A colon is a mapping before whitespace or at the end, a hash a comment after
- * whitespace - a tab and a line end count, not the space alone. */
+ * A colon is a mapping before whitespace or at the end, and a hash is a comment after
+ * whitespace. A tab and a line end count as whitespace there, not only the space. */
 const INDICATOR = /^[-?:,[\]{}#&*!|>'"%@`]/;
 const MAPPING = /:(?:\s|$)/;
 const COMMENT = /\s#/;
@@ -414,8 +414,8 @@ const META = new Set(['.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\
  * output, and the group a doubled star expands to carries a star and a question mark
  * of its own that the later steps then eat. A pattern compiled that way matches
  * nothing at all, drops out of the deny set in silence, and the derivation still looks
- * populated - the same shape as a pattern carrying a trailing carriage return, by a
- * second route and with no crafted case pointed at it until now.
+ * populated. A pattern carrying a trailing carriage return fails the same way, by a
+ * second route.
  */
 const toRegex = (pattern: string): RegExp => {
   let source = '';
@@ -466,15 +466,15 @@ const parseGitignore = (text: string): IgnoreRule[] =>
  * git's model rather than substring containment: every prefix of the path, every
  * pattern in file order, last match wins, a `!` line un-ignores. Containment would
  * refuse a published path that merely contains an ignored name; matching only the full
- * path would permit a decisions file two levels inside an ignored directory, which is
- * not published, because what excludes it is the pattern hitting its parent directory.
+ * path would permit a decisions file nested inside an ignored directory, which is not
+ * published, because what excludes it is the pattern hitting its parent directory.
  *
  * A file under an excluded directory cannot be re-included, so a level that comes out
  * ignored ends the walk.
  *
- * A trailing slash is how a caller says the last level is a directory - a directory
- * citation in a spec, and this file's own walk. Without it the data folder is tested
- * as a file and every dirOnly pattern declines to look at it.
+ * A trailing slash is how a caller says the last level is a directory. A directory
+ * citation in a spec says it that way, and so does this file's own walk. Without it the
+ * data folder is tested as a file and every dirOnly pattern declines to look at it.
  */
 const isIgnored = (p: string, rules: readonly IgnoreRule[]): boolean => {
   const parts = p.split('/').filter((part) => part !== '');
@@ -496,7 +496,7 @@ const GITIGNORE = read('.gitignore');
 const RULES = parseGitignore(GITIGNORE);
 
 /**
- * NOT the deny set - that one is derived. This is what the derivation has to come out denying, so
+ * NOT the deny set, which is derived. This is what the derivation has to come out denying, so
  * a .gitignore that stops ignoring them empties it rather than passing over every spec in silence.
  * Each is present and untracked here, which is why existence separates none of them from a
  * published file.
@@ -511,13 +511,13 @@ const KNOWN_UNPUBLISHED = [
 ];
 
 /**
- * The one walk two sets are read off: the specs on disk, and every source file whose
+ * The one walk both sets are read off: the specs on disk, and every source file whose
  * comments are read below. It skips what isIgnored denies rather than a second skip
- * list by hand - an unpublished file is out of scope by the rule the rest of this file
- * already uses, and a file the walk visits and a path a comment names are judged by
- * the same derivation - and skips .git, which is not the tree git tracks, node_modules
- * by name even if the rule that ignores it were to go, and a symlink, which a read
- * would follow to wherever it points.
+ * list kept by hand. That way an unpublished file is out of scope by the rule the rest
+ * of this file already uses, and a file the walk visits and a path a comment names are
+ * judged by the same derivation. It also skips .git, which is not the tree git tracks,
+ * and a symlink, which a read would follow to wherever it points. It skips
+ * node_modules by name, so that holds even if the rule that ignores it were to go.
  */
 const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -533,7 +533,7 @@ const findFiles = (dir: string, keep: (name: string) => boolean, prefix = ''): s
 /**
  * SPEC_FILES holds one direction and only one: a spec that was deleted. The other is a
  * spec that was written and not declared, which no clause here reads and which
- * therefore rots with the suite green - and the tool that indexes this tree takes any
+ * therefore rots with the suite green. The tool that indexes this tree takes any
  * markdown file whose frontmatter carries an id and a type, wherever it sits and
  * whatever it is called, so that is what the walk looks for.
  */

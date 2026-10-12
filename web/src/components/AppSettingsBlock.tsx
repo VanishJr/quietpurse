@@ -47,7 +47,7 @@ interface Props {
  * cleared by the screen's other handlers, wiping a failed save here.
  */
 export function AppSettingsBlock({ onChanged = () => {} }: Props) {
-  /** null until the GET answered — a prefilled "EUR" nobody stored is a smaller lie, not a truth */
+  /** null until the GET answers: a prefilled "EUR" nobody stored is still a lie, if a smaller one */
   const [stored, setStored] = useState<AppSettings | null>(null);
   const [currency, setCurrency] = useState('');
   const [owners, setOwners] = useState<OwnerTag[]>([]);
@@ -164,7 +164,7 @@ export function AppSettingsBlock({ onChanged = () => {} }: Props) {
       } else {
         setStored(next);
         setError(
-          `the server stored something else (${storedInstead(patch, next)}) — your edits are still here; review them before retrying`,
+          `the server stored something else (${storedInstead(patch, next)}). Your edits are still here. Review them before you save again.`,
         );
       }
     } catch (e) {

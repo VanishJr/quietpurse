@@ -22,7 +22,7 @@ const glue = (keyword: string): string =>
 
 /**
  * Reddens whenever a rule list changes. Bump RULES_VERSION in src/categorizer.ts and
- * paste the value below — without the bump rulesSignature() does not move and the
+ * paste the value below. Without the bump, rulesSignature() does not move and the
  * change re-tags nobody's existing database.
  */
 it('the rule lists carry the version that reaches existing databases', () => {
@@ -167,7 +167,7 @@ describe('word boundaries', () => {
   });
 });
 
-describe('more spellings as statements print them', () => {
+describe('spellings as statements print them', () => {
   it('spends by the keyword', () => {
     expect(categorize(undefined, 'Cafe Extrablatt', -12.8)).toBe('food');
     expect(categorize(undefined, 'ESPL BAR O FULANO', -4.2)).toBe('food');

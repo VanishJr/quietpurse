@@ -59,8 +59,8 @@ export interface SpendSector extends CategorySummary {
 }
 
 /**
- * Only the positive categories: a refund can push one below zero — the purchase it
- * reverses was in an earlier month — and there is no such thing as a negative sector.
+ * Only the positive categories. A refund can push one below zero when the purchase it
+ * reverses was in an earlier month, and there is no such thing as a negative sector.
  * That is also why the figure in the hole `SpendingByCategory` draws is the month's
  * expense total and not the sum of these.
  *
@@ -95,7 +95,7 @@ export interface SpendRing {
 /**
  * The legend keeps the server's net figures while the ring draws only what has a size,
  * so the tail's sector is the sum of its positive categories and not the legend's
- * remainder — a refund inside the tail can zero the one and not the other.
+ * remainder. A refund inside the tail can bring one of them to zero and not the other.
  */
 export function spendRing(spend: CategorySummary[], total: number): SpendRing {
   const top = spend.slice(0, RING_TOP);
@@ -131,7 +131,7 @@ export function categoryRuleCaption(
   const { matches, overridden } = counts;
   const rule = `The rule sets ${categoryLabel(category)} for transactions whose description contains ${quote(pattern)}.`;
   if (matches === 0) {
-    return `${rule} Nothing matches that text yet — the rule is saved and applies to transactions that arrive later.`;
+    return `${rule} Nothing matches that text yet. The rule is saved and applies to transactions that arrive later.`;
   }
   const found = `${matches} transaction${matches === 1 ? ' matches' : 's match'} that text across every account, hidden ones included.`;
   if (overridden === 0) return `${rule} ${found}`;

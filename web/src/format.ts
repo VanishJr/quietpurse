@@ -27,8 +27,8 @@ export function fmtShort(n: number): string {
 
 /**
  * A chart's Y-axis upper bound: the smallest round number that is not below the
- * data's maximum. Here beside `fmtShort` because it is the same job — the axis — and
- * a second copy of it in a screen would drift.
+ * data's maximum. It sits beside `fmtShort` because both serve the axis, and a second
+ * copy of it in a screen would drift.
  */
 export function niceMax(max: number): number {
   if (max <= 0) return 1;
@@ -66,8 +66,8 @@ export const fmtMonthTick = (month: string): string =>
  *
  * End-truncation is the usual answer and it is the wrong one here. An account named
  * after the statement it came from carries the filename, extension and all, and a
- * bank's export names are a `report_` prefix, a date and a time — everything that
- * distinguishes two of them is at the end. Cut from the right, every such account is
+ * bank's export names are a `report_` prefix, a date and a time, so everything that
+ * tells two of them apart is at the end. Cut from the right, every such account is
  * called `report_03-09-…`, which names none of them.
  *
  * `budget` is the whole result including the ellipsis, so the caller states the width

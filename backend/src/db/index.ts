@@ -110,7 +110,7 @@ export function initDb(instance: Db): void {
 }
 
 function getDb(): Db {
-  if (!db) throw new Error('database not initialized - call connectDatabase() first');
+  if (!db) throw new Error('database not initialized: call connectDatabase() first');
   return db;
 }
 
@@ -197,8 +197,9 @@ export async function seedDefaults(): Promise<void> {
       {
         id: 'family',
         // the id is data and stays; the label is what a stranger reads, and a
-        // scholarship is not family. A database seeded earlier keeps its label - the
-        // insert ends onConflictDoNothing - and renames it through Settings.
+        // scholarship is not family. The insert ends onConflictDoNothing, so a
+        // database seeded earlier keeps its label, and the person renames it through
+        // Settings.
         label: 'Support',
         kind: 'external',
         patterns: JSON.stringify(config.familyNames),
@@ -244,7 +245,7 @@ const NOT_TRANSFER = sql`NOT COALESCE(transfer_manual, transfer)`;
 
 /**
  * The effective category: the user's own answer for this row beats the categorizer's.
- * Two arms and not three - `category` is NOT NULL DEFAULT 'other', so there is no
+ * Two arms and not three: `category` is NOT NULL DEFAULT 'other', so there is no
  * third case to fall through to.
  */
 const CATEGORY = sql`COALESCE(category_manual, category)`;
@@ -257,14 +258,14 @@ const CURRENCY_KEY = currencyKeyOf(sql`currency`);
 
 /**
  * Transactions of hidden accounts are neither shown nor counted. They aren't
- * deleted: the classifier needs them as the other leg of a transfer - hiding N26
+ * deleted: the classifier needs them as the other leg of a transfer. Hiding N26
  * shouldn't lose the transfer flag on the matching Revolut income.
  */
 const VISIBLE_ACCOUNT = (): SQL => sql`account_id NOT IN (SELECT id FROM accounts WHERE hidden)`;
 
 /**
- * A row of this account's own, in either table - the two reasons its currency must
- * not move. `transactions` is what balance_cents sums
+ * A row of this account's own, in either table. Each table holds one of the two
+ * reasons its currency must not move. `transactions` is what balance_cents sums
  * (recalcAccountBalanceFromTransactionsOn) whatever each row's own currency says,
  * so re-denominating an account holding them relabels a total that was never in
  * the new unit. `staged_transactions` rows were stamped with the account's currency
@@ -285,9 +286,9 @@ const HOLDS_STAGED_ROWS = (accountId: string): SQL =>
       WHERE staged_transactions.account_id = ${accountId})`;
 
 /**
- * Clauses of the UPDATE that writes the currency rather than a count before it -
- * confirmImport's note is the pattern. Counting first and writing after is a window
- * an import commits inside, and the loser is a silent re-denomination.
+ * Clauses of the UPDATE that writes the currency, not a count taken before it, on the
+ * pattern of confirmImport's note. Counting first and writing after is a window an
+ * import commits inside, and the loser is a silent re-denomination.
  *
  * Not a latch: both tables empty again and the account is correctable again, which
  * is what makes discarding an import and deleting one the ways out.
@@ -402,8 +403,8 @@ export async function upsertAccountOn(d: Db, a: Omit<Account, 'hidden'>): Promis
       // indexed column.
       //
       // `currency` is out of it for a reason of the same kind. It is the account's
-      // own now - updateAccount writes it, and only while the account holds no rows
-      // - so writing a remembered one back would revert a correction with nothing
+      // own now: updateAccount writes it, though only while the account holds no
+      // rows. Writing a remembered one back would revert a correction with nothing
       // said. Out of the set there is no application branch to drop later.
       //
       // The INSERT above keeps both: an account created here has to have a name and
@@ -470,14 +471,13 @@ export async function getAccount(id: string): Promise<Account | undefined> {
 }
 
 /**
- * The account a name refers to, folded the way accounts_name_unique folds it - so a
- * name this misses is a name the index would also let through, and the lookup can
- * never be followed by an insert that collides. Folding in JS instead is what makes
- * those two disagree - toLowerCase() and lower() do not agree on every alphabet -
- * and the disagreement surfaces as a 500 on the upload path.
+ * The account a name refers to, folded the way accounts_name_unique folds it, so a
+ * refusal of a taken name can say which account holds it. A fold in JS would disagree
+ * with the index on some alphabets, because toLowerCase() and lower() do not agree
+ * everywhere, and the refusal would then find no holder to name.
  *
- * Hidden accounts are included deliberately: an upload naming a removed account has
- * always landed in it, and narrowing that here would fix half of a defect.
+ * Hidden accounts are included deliberately: a hidden account still holds its name,
+ * and the refusal tells the person to unhide it.
  */
 export async function findAccountByName(name: string): Promise<Account | undefined> {
   const rows = await getDb()
@@ -579,16 +579,16 @@ export async function updateAccount(id: string, patch: AccountPatch): Promise<Ac
         and(
           eq(s.accounts.id, id),
           // and() drops undefined, so a rename or a hide keeps exactly the WHERE it
-          // has always had - which is what leaves a populated account renameable
+          // has always had. That is what leaves a populated account renameable
           patch.currency === undefined ? undefined : NO_ROWS(id),
         ),
       )
       .returning();
     if (rows[0]) return { ok: true, account: rowToAccount(rows[0]) };
-    // Zero rows is ambiguous exactly when a guard was on, and NO_ROWS is the ONLY
-    // guarded clause in the WHERE above - which is why this readback is conditional
-    // on the same field. A clause added later must be read back here too, or its
-    // refusal tells a user their account does not exist while they are looking at it.
+    // Zero rows is ambiguous exactly when a guard was on. NO_ROWS is the ONLY guarded
+    // clause in the WHERE above, which is why this readback is conditional on the
+    // same field. A clause added later must be read back here too, or its refusal
+    // tells a user their account does not exist while they are looking at it.
     if (patch.currency !== undefined) {
       const refused = await currencyRefusal(id);
       if (refused) return { ok: false, reason: refused };
@@ -630,7 +630,7 @@ export async function insertTransactions(
 
 /**
  * The rows of a batch that will actually be offered to the database, each with the
- * key it claims. **The only place computed keys are numbered** - the confirmation
+ * key it claims. **The only place computed keys are numbered.** The confirmation
  * preview asks the same question of the same list (see countNewKeys), and a second
  * copy of this loop would let the number the user reads before pressing Confirm
  * drift from the number the confirm inserts, with nothing failing until it does.
@@ -681,8 +681,9 @@ export async function insertTransactionsOn(
   if (txs.length === 0) return 0;
   const values: (typeof s.transactions.$inferInsert)[] = claimedKeys(txs).map(
     ({ tx: t, date, amountCents, dedupKey }) => {
-      // transactions already in the base currency need no conversion - fill it now;
-      // for the rest base_amount is filled later by backfillBaseAmounts (fxrates.ts)
+      // a transaction already in the base currency needs no conversion, so its
+      // base_amount is filled now; for the rest it is filled later by
+      // backfillBaseAmounts (fxrates.ts)
       const isBase = sameCurrency(t.currency, baseCurrency);
       return {
         id: crypto.randomUUID(),
@@ -795,11 +796,11 @@ export async function listTransactions(f: TxFilter): Promise<Transaction[]> {
 
 /**
  * Rows without base_amount (the rate hasn't been fetched yet) are left out of the
- * summaries - otherwise we would be adding euros to hryvnias.
+ * summaries, or we would be adding euros to hryvnias.
  *
- * The all-accounts arm's clause, and scopeSql below is the only thing that may name it:
- * per account it drops a real transaction from its own account's total - an import
- * short by a row, in the account's own currency, that nothing reports.
+ * The all-accounts arm's clause, and scopeSql below is the only thing that may name it.
+ * Applied to one account, it drops a real transaction from that account's own total:
+ * an import short by a row, in the account's own currency, that nothing reports.
  */
 const CONVERTED = sql`base_amount_cents IS NOT NULL`;
 
@@ -816,14 +817,13 @@ export interface AccountScope {
 export type SummaryScope = AllAccountsScope | AccountScope;
 
 /**
- * The rows a scope is about and the column its money lives in - together, from one
- * value, because picking the filter of one arm and the column of the other is what
- * puts two currencies in one sum.
+ * The rows a scope is about and the column its money lives in, together and from one
+ * value: picking the filter of one arm and the column of the other is what puts two
+ * currencies in one sum.
  *
- * NOT_TRANSFER is in the WHERE on both arms. The one exception is accountMonths,
- * which needs the month to survive even when every row in it is a transfer and
- * therefore spells its own WHERE - see the note there.
- *
+ * NOT_TRANSFER is in the WHERE on both arms. The one exception is accountMonths, whose
+ * note explains why it spells its own WHERE: it needs the month to survive even when
+ * every row in it is a transfer.
  */
 const scopeSql = (scope: SummaryScope): { where: SQL; money: SQL } =>
   scope.kind === 'account'
@@ -940,8 +940,8 @@ async function allAccountsMonths(from: string, to: string): Promise<MonthTotals[
     WHERE ${where} AND date >= ${from} AND date <= ${to}
     GROUP BY 1
     ORDER BY 1 ASC`);
-  // the SUMs above are in cents (bigint strings from the driver) - convert every
-  // money field at the boundary
+  // the SUMs above are in cents, as bigint strings from the driver, and every money
+  // field is converted here at the boundary
   return rows.map((r) => ({
     month: r.month,
     expense: fromCents(Number(r.expense)),
@@ -956,11 +956,11 @@ async function allAccountsMonths(from: string, to: string): Promise<MonthTotals[
  * The same chart for one account, in that account's own currency.
  *
  * This is the one summary query that does not take its WHERE from scopeSql, and the
- * reason is the GROUP BY: it is the only query here that can lose a whole bucket, so
- * a WHERE excluding transfers deletes a month whose every row is a transfer from the
- * chart - which reads as "nothing happened" rather than "nothing is shown". So
- * NOT_TRANSFER moves into the income and expense CASEs, where it excludes transfers
- * from those two figures exactly as everywhere else, and the month survives.
+ * reason is the GROUP BY: it is the only query here where a lost bucket is a wrong
+ * answer. A WHERE excluding transfers would delete from the chart a month whose every
+ * row is a transfer, and that reads as "nothing happened" rather than "nothing is
+ * shown". So NOT_TRANSFER moves into the income and expense CASEs, where it excludes
+ * transfers from those two figures exactly as everywhere else, and the month survives.
  *
  * `net` carries no NOT_TRANSFER at all: it is a balance movement, summed by
  * recalcAccountBalanceFromTransactions' rule (every row of the account, transfers
@@ -1174,9 +1174,9 @@ export async function createImport(input: {
 }
 
 /**
- * The file is on disk: the row may now claim it. A separate write rather than a
- * field on createImport/failImport, because the put happens between the two - and
- * a FAILED import keeps its document, which is what makes a miss diagnosable.
+ * The file is on disk: the row may now claim it. This is a separate write rather than
+ * a field on createImport/failImport because the put happens between the two, and a
+ * FAILED import keeps its document, which is what makes a miss diagnosable.
  *
  * Never called before the put: a row claiming a document that is not there is the
  * state every read would have to distrust.
@@ -1187,15 +1187,15 @@ export async function recordImportDocument(id: string): Promise<void> {
 
 /**
  * The row no longer claims a readable document. Called only AFTER the bytes are
- * gone: between the two, a crash leaves a row whose document throws on read, which
- * is loud and self-healing - the other order leaves a statement on disk that the
- * user has been told is deleted, and nothing revisits it.
+ * gone. A crash between the two then leaves a row whose document throws on read,
+ * which is loud and self-healing. The other order leaves a statement on disk that
+ * the user has been told is deleted, and nothing revisits it.
  */
 export async function clearImportDocument(id: string): Promise<void> {
   await getDb().update(s.imports).set({ documentStored: false }).where(eq(s.imports.id, id));
 }
 
-/** What names the file on disk, plus the pointer - never the file's path itself. */
+/** What names the file on disk, plus the pointer. Never the file's path itself. */
 export interface ImportDocumentInfo extends DocumentLocator {
   sourceType: ImportSourceType;
   documentStored: boolean;
@@ -1262,15 +1262,15 @@ type ImportListRow = ImportRow & {
 };
 
 /**
- * Newest first, each with how many transactions it still owns - which is not
- * rows_accepted: a row an earlier import already wrote belongs to that one - plus
- * totals over the whole filtered set.
+ * Newest first, each with how many transactions it still owns, plus totals over the
+ * whole filtered set. What an import still owns is not rows_accepted: a row an
+ * earlier import already wrote belongs to that one.
  *
  * Page and totals come out of ONE statement: window functions run after WHERE and
  * before LIMIT, so there is no interval in which a concurrent upload or delete can
- * move a total without moving the page printed beside it. Two statements would not
- * be fixed by db.transaction() either - READ COMMITTED takes a fresh snapshot per
- * statement.
+ * move a total without moving the page printed beside it. Wrapping two statements in
+ * db.transaction() would not fix that either, because READ COMMITTED takes a fresh
+ * snapshot per statement.
  */
 export async function listImports(
   opts: { accountId?: string; limit?: number } = {},
@@ -1312,7 +1312,7 @@ export async function listImports(
 }
 
 /**
- * Where an import's rows actually are - which is not where a caller asked for
+ * Where an import's rows actually are, as opposed to where a caller asked for
  * them to go. Empty when the import owns nothing: everything it accepted had
  * already been written by an earlier import (see transactions.import_id). That
  * is not "nothing was imported".
@@ -1359,8 +1359,8 @@ export interface StagedAccount {
 }
 
 /**
- * Stages a parsed file and flips the import to `awaiting_confirmation` - in ONE
- * transaction, rows first. That status has to mean "the complete staged set is
+ * Stages a parsed file and flips the import to `awaiting_confirmation`, in ONE
+ * transaction and rows first. That status has to mean "the complete staged set is
  * present", and a crash anywhere inside here leaves `pending`, which nothing can
  * confirm.
  */
@@ -1408,8 +1408,8 @@ const keyPairs = (pairs: { accountId: string; dedupKey: string }[]): SQL =>
   );
 
 /**
- * How many of a parsed batch are not already in the database - the one number the
- * user reads before pressing Confirm, so it is asked of the same key list the
+ * How many of a parsed batch are not already in the database. It is the one number
+ * the user reads before pressing Confirm, so it is asked of the same key list the
  * confirm will offer (claimedKeys) rather than recomputed alongside it.
  *
  * A snapshot, not a promise: another import committing in between can take one of
@@ -1440,14 +1440,14 @@ const SUPERSEDED_BY_REUPLOAD =
  * say so. The import history lists such an import but cannot confirm it, so
  * re-uploading the file is the only way back to one whose tab was closed.
  *
- * Nothing is deleted to do this - a staged import owns no transactions - and the
+ * Nothing is deleted to do this, since a staged import owns no transactions. The
  * document is kept, referenced by the row that stays behind at `discarded`.
  *
  * **Older, not merely other, and that is the whole concurrency story.** An
  * `id <> exceptId` predicate is symmetric: two uploads of one file that overlap in
  * time both reach `awaiting_confirmation`, then each supersede matches the other and
- * both end up `discarded` - zero confirmable imports and a file that needs a third
- * upload. The tuple excludes self on its own, and the `id` tiebreak decides two
+ * both end up `discarded`. That leaves no confirmable import and a file that needs a
+ * third upload. The tuple excludes self on its own, and the `id` tiebreak decides two
  * uploads landing in the same millisecond, which comparing `uploaded_at` alone would
  * leave superseding neither. `uploaded_at` is read here rather than passed in so that
  * `exceptId` alone determines the comparison; a caller handing over someone else's
@@ -1522,10 +1522,10 @@ export class ImportNotConfirmable extends Error {}
 const UNIQUE_VIOLATION = '23505';
 
 /**
- * Whether a throw is that unique index. The constraint name is checked as well as
- * the code, because the whole point is to answer 409 for one collision and let
- * every other one surface as itself - and the name reaches us either as a field
- * (node-postgres) or only inside the message (PGlite), through however many layers
+ * Whether a throw is a violation of the named unique index. The constraint name is
+ * checked as well as the code, because the whole point is to answer 409 for one
+ * collision and let every other one surface as itself. The name reaches us either
+ * as a field (node-postgres) or only inside the message (PGlite), under the layers
  * of `cause` the driver wrapped it in.
  */
 function isUniqueViolation(e: unknown, constraint: string): boolean {
@@ -1586,10 +1586,9 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       if (!row) throw new NotAwaitingConfirmation();
       // the columns are nullable because every import from before the confirmation
       // step is. Confirming one anyway means inventing the account it goes to, and
-      // reporting that as a success. accountName and accountCurrency are CHECKED and
-      // not read - nothing below reads either - and they stay checked because a row
-      // missing them is a row from before this step, which must not become
-      // confirmable just because the reader that used them went away
+      // reporting that as a success. accountName is CHECKED although nothing below
+      // reads it: a row missing it is a row from before this step, which must not
+      // become confirmable just because the reader that used it went away
       if (row.accountName === null || row.accountCurrency === null || row.accountId === null) {
         throw new ImportNotConfirmable(
           `import ${id} is awaiting confirmation but records no account name, currency or id`,
@@ -1601,7 +1600,7 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
         .where(
           eq(s.stagedTransactions.importId, id),
         )
-        // the ORDER BY is not what makes the counts right - ordinals are numbered
+        // the ORDER BY is not what makes the counts right: ordinals are numbered
         // within a group, so the count is order-independent. What it decides is
         // which of a group's identical rows gets which ordinal, and therefore which
         // description ends up on the row that survives deduplication
@@ -1611,16 +1610,16 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       // a summary that promised a larger one
       if (staged.length !== row.rowsAccepted) {
         throw new ImportNotConfirmable(
-          `import ${id} was staged with ${row.rowsAccepted} rows and ${staged.length} are present - refusing to confirm a partial import`,
+          `import ${id} was staged with ${row.rowsAccepted} rows but ${staged.length} are present, so a partial import is refused`,
         );
       }
       accountId = row.accountId;
-      // stageImport takes the rows and the account as independent arguments and
-      // there is no foreign key from transactions.account_id to accounts.id, so a
+      // stageImport takes the rows and the account as independent arguments, and
+      // there is no foreign key from transactions.account_id to accounts.id. A
       // caller whose rows were built for a different account than the one recorded
-      // here would get: an account nobody's rows join, rows against an account with
-      // no row, and the balance of the empty one recomputed - all reported as
-      // confirmed. Today's single caller threads one resolved id into both.
+      // here would get an account nobody's rows join, rows against an account with
+      // no row, and the balance of the empty one recomputed, all reported as
+      // confirmed.
       const stray = staged.find((r) => r.accountId !== accountId);
       if (stray) {
         throw new ImportNotConfirmable(
@@ -1643,19 +1642,19 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       // FOR UPDATE, and it is load-bearing rather than decoration: under READ
       // COMMITTED a plain read here can be overtaken by a
       // PATCH /api/accounts/:id {hidden:true} committing between it and the insert,
-      // and the rows land invisible behind a 200. With the lock that PATCH either
-      // waits for this transaction to commit - hiding an account that legitimately
-      // has rows, which is reversible and correct - or wins first, and this read
-      // then sees hidden = true. Deleting `.for('update')` leaves every test in the
-      // suite green: PGlite is single-connection, so nothing here can hold this
-      // transaction open while a second one commits.
+      // and the rows land invisible behind a 200. With the lock, that PATCH either
+      // waits for this transaction to commit, or wins first and this read then sees
+      // hidden = true. A PATCH that waits then hides an account that legitimately
+      // has rows, which is reversible and correct. No test on either engine shows the
+      // lock gone: PGlite is single-connection, and no case races a second transaction
+      // against this one on Postgres either.
       //
       // `.at(0)` rather than a destructure so that deleting the throw below is a
       // compile error. This tsconfig has no noUncheckedIndexedAccess, and `strict`
-      // does not imply it: NO index form is guarded - `rows[0]` is exactly as silent
-      // as `const [holder] =` - so both would type non-optional and the resurrection
-      // would come back unannounced. `.at(0)`'s `T | undefined` comes from
-      // lib.es2022 instead, which no config here can turn off.
+      // does not imply it, so NO index form is guarded: `rows[0]` is exactly as
+      // silent as `const [holder] =`. Both would type non-optional, and the
+      // resurrection would come back unannounced. `.at(0)`'s `T | undefined` comes
+      // from lib.es2022 instead, which no config here can turn off.
       const holder = (
         await tx
           .select({ hidden: s.accounts.hidden })
@@ -1691,10 +1690,10 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
       return { confirmed: false, reason: 'currency-not-a-code', currency: e.currency };
     }
     // two uploads of one file overlapping in time both reach awaiting_confirmation
-    // (the partial index only blocks `committed`), so the second
-    // confirm meets the index rather than the status check. Its rows are identical
-    // to the ones that landed, so nothing is lost - what must not happen is a 500 on
-    // the one screen whose job is telling the user whether their data arrived
+    // (the partial index only blocks `committed`), so the second confirm meets the
+    // index rather than the status check. Its rows are identical to the ones that
+    // landed, so nothing is lost. What must not happen is a 500 on the one screen
+    // whose job is telling the user whether their data arrived
     if (isUniqueViolation(e, 'imports_file_hash_unique')) {
       const state = await importStateOf(id);
       const held = state && (await findCommittedImportByHash(state.fileHash));
@@ -1753,7 +1752,7 @@ async function rowsVia<T>(d: Executor, q: SQL): Promise<T[]> {
 /**
  * execCount on a caller-supplied executor. Needed where the count a caller reports
  * must be the affected-row count of the statement that did the deleting, inside the
- * transaction that did it - execCount reaches for the pool, which is a second
+ * transaction that did it. execCount reaches for the pool, which is a second
  * connection and a second snapshot.
  */
 async function execCountVia(d: Executor, q: SQL): Promise<number> {
@@ -1809,7 +1808,7 @@ const keyAssignments = (rows: { id: string; key: string }[]): SQL =>
  * Two passes over the rows that actually move, because the final key of one row
  * is often the current key of another. Between them the affected slots are all
  * free, so a concurrent import into one of these groups can take a slot and make
- * the second pass violate the unique index - which rolls the whole delete back
+ * the second pass violate the unique index. That rolls the whole delete back
  * rather than corrupting anything. Fail-safe, and acceptable for one person
  * uploading files, which is the only shape this application has.
  *
@@ -1905,9 +1904,9 @@ export async function deleteImport(
 
   // The rows are gone; the blob goes second, on its own, and before the balance
   // recalcs so a slow recalc does not widen the window. A filesystem delete cannot
-  // join the transaction above, so the order is the choice: a blob that survives
-  // its row is garbage - unreadable, unreachable, removable by hand - while a row
-  // that survives its blob is a lie every read has to distrust.
+  // join the transaction above, so the order is the choice. A blob that survives
+  // its row is garbage that nothing reads or reaches and a person can remove by
+  // hand. A row that survives its blob is a lie every read has to distrust.
   //
   // A failure here is logged rather than raised: the rows really are deleted, and
   // reporting otherwise would send the user to press the button again. It is logged
@@ -1918,7 +1917,7 @@ export async function deleteImport(
   } catch (e) {
     logDb.error(
       { err: e },
-      `import ${id} deleted, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
+      `import ${id} deleted, but its stored document was not removed: ${causeChain(e)}. Remove it by hand`,
     );
   }
 
@@ -1951,10 +1950,10 @@ const CASCADES_FROM_IMPORTS = Symbol('cascades from imports');
 
 /**
  * The other kind of answer: rows that stay. A chart naming an account that is gone
- * is a state the client draws deliberately - the tab remains and says the account
- * is no longer here - so deleting the chart with the account would take a tab away
- * with nothing said, and blanking its account would silently turn one account's
- * chart into an all-accounts one under its old title.
+ * is a state the client draws deliberately: the tab remains and says the account is
+ * no longer here. Deleting the chart with the account would take a tab away with
+ * nothing said, and blanking its account would silently turn one account's chart
+ * into an all-accounts one under its old title.
  */
 const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
 
@@ -1962,8 +1961,8 @@ const OUTLIVES_THE_ACCOUNT = Symbol('outlives the account');
  * What deleteAccount does to each of them, and `satisfies` rather than an
  * annotation: a missing key and an excess key are both compile errors, while each
  * statement keeps its own type at the call site. What it does NOT prove is that an
- * entry is executed - the body consumes these by name, in an order that is not
- * interchangeable - so a table added here and never called would compile.
+ * entry is executed. The body consumes these by name, in an order that is not
+ * interchangeable, so a table added here and never called would compile.
  * ACCOUNT_CASCADE_TABLES is the other half of that; why that list is derived from the
  * schema rather than written down is in this module's SPEC.md.
  */
@@ -2013,10 +2012,10 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
       deleted.transactions = await execCountVia(tx, ACCOUNT_CASCADE.transactions(id));
 
       // after the delete above, so every row this can still see is another
-      // account's by construction. Empty in every state a product path produces -
-      // confirmImport refuses a staged set whose rows disagree with the import's
-      // account - and a semi-join over this account's imports is what proves that
-      // instead of assuming it
+      // account's by construction. It is empty in every state a product path
+      // produces, since confirmImport refuses a staged set whose rows disagree with
+      // the import's account. A semi-join over this account's imports is what
+      // proves that instead of assuming it
       const strays = await rowsVia<{ import_id: string; account_id: string }>(
         tx,
         sql`SELECT DISTINCT t.import_id, t.account_id FROM transactions t
@@ -2065,8 +2064,8 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
     throw e;
   }
 
-  // The rows are gone; the blobs go second, for deleteImport's reasons, and from
-  // the set the DELETE returned rather than one selected before it - an upload
+  // The rows are gone; the blobs go second, for deleteImport's reasons. They come
+  // from the set the DELETE returned rather than one selected before it: an upload
   // landing between a select and the delete would leave a blob nothing can reach
   // again. A failure is logged and not raised: the rows really are deleted.
   for (const row of gone) {
@@ -2079,7 +2078,7 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
     } catch (e) {
       logDb.error(
         { err: e },
-        `import ${row.id} was deleted with account ${id}, but its stored document was not removed: ${causeChain(e)} - remove it by hand`,
+        `import ${row.id} was deleted with account ${id}, but its stored document was not removed: ${causeChain(e)}. Remove it by hand`,
       );
     }
   }
@@ -2091,14 +2090,14 @@ export async function deleteAccount(id: string): Promise<AccountDelete> {
   // repair that then rolled back. Past the catch, the rows really are gone.
   if (strayAccountIds.length > 0) {
     logDb.warn(
-      `account ${id} holds imports (${strayImportIds.join(', ')}) that own rows in ${strayAccountIds.join(', ')} - deleting the account takes those rows too`,
+      `account ${id} holds imports (${strayImportIds.join(', ')}) that own rows in ${strayAccountIds.join(', ')}. Deleting the account takes those rows too`,
     );
   }
 
-  // Nothing is owed for `id` itself: the balance is the sum of an account's own
+  // Nothing is owed for `id` itself. The balance is the sum of an account's own
   // transactions, so no other account moves when these go, and the account's own
-  // row no longer exists - recalculating it would update nothing and log that
-  // something happened. These are the accounts the stray probe named, which lost
+  // row no longer exists: recalculating it would update nothing while reading as
+  // if something happened. These are the accounts the stray probe named, which lost
   // rows to the imports cascade above.
   for (const accountId of strayAccountIds) {
     await recalcAccountBalanceFromTransactions(accountId);
@@ -2124,24 +2123,25 @@ export interface Classification {
 
 /**
  * How many rows one UPDATE carries. Six bound parameters per row against Postgres's
- * ceiling of 65,535 puts the hard limit near 10,900; 500 is well under it and is
- * chosen for the other end - it is the size at which a batch is still a single
+ * ceiling of 65,535 puts the hard limit near 10,900. 500 is well under it and is
+ * chosen for the other end: it is the size at which a batch is still a single
  * round trip a reader can wait on.
  */
 export const CLASSIFY_BATCH = 500;
 
 /**
- * Writes the classification result. Manual marks (transfer_manual,
- * income_source_manual, one_off) are left alone - they beat auto-detection.
+ * Writes the classification result. Manual marks (the *_manual columns and one_off)
+ * are left alone, because they beat auto-detection.
  *
- * One statement per batch, and no transaction around the whole run. This used to be
- * one UPDATE per row inside a single transaction, which is correct against a
- * connection POOL and is a freeze against the embedded database: PGlite has ONE
- * connection, so every other query in the application queues behind the open
- * transaction and the app answers nothing until the re-tag finishes. Nothing sees it
- * - the suite runs sequentially, and the node-postgres side never had the property.
+ * One statement per batch, and no transaction around the whole run. One UPDATE per row
+ * inside a single transaction is correct against a connection POOL and is a freeze
+ * against the embedded database: PGlite has ONE connection, so every other query in
+ * the application queues behind the open transaction and the app answers nothing
+ * until the re-tag finishes. Nothing would show the freeze: the suite runs
+ * sequentially, and node-postgres, with its pool, never froze.
  *
- * What a run that dies half way leaves behind without one is in this module's SPEC.md.
+ * What a run that dies half way leaves behind without a transaction is in this
+ * module's SPEC.md.
  *
  * The casts are on the first VALUES row's business, not decoration: a bound
  * parameter in a VALUES list arrives as `unknown` and Postgres will not compare it
@@ -2247,7 +2247,7 @@ function rowToIncomeSource(r: IncomeSourceRow): IncomeSourceDef {
     const v = JSON.parse(r.patterns);
     if (Array.isArray(v)) patterns = v.map(String);
   } catch {
-    // corrupted JSON - treat it as having no patterns
+    // corrupted JSON counts as no patterns
   }
   return {
     id: r.id,
@@ -2318,7 +2318,7 @@ export async function upsertIncomeSource(
 
 /**
  * Deletes a source (builtin ones cannot be). Transactions tagged with it (auto or
- * manual) fall back to 'other' - otherwise their income would silently drop out of
+ * manual) fall back to 'other'. Otherwise their income would silently drop out of
  * the by-source summaries under an unknown id.
  */
 export async function deleteIncomeSource(id: string): Promise<boolean> {
@@ -2565,8 +2565,9 @@ export async function setBaseForBaseCurrency(baseCurrency: string): Promise<Base
 }
 
 /**
- * Changing the base currency: every base_amount is recomputed from scratch - the
- * old values were computed in the previous currency and cannot be added to the new ones.
+ * Changing the base currency clears every base_amount so it is recomputed from
+ * scratch. The old values were computed in the previous currency and cannot be added
+ * to the new ones.
  */
 export async function resetBaseAmounts(): Promise<number> {
   return execCount(
@@ -2588,12 +2589,12 @@ export async function listUnconvertedDays(): Promise<{ day: string; currency: st
 
 /**
  * Fills base_amount for every unconverted row of that day in that currency.
- * k - units of `base` per unit of `currency` on that day.
+ * `k` is the units of `base` per unit of `currency` on that day.
  * The cast is on the parameter, not on the product: amount_cents is an integer
  * column, so `amount_cents * $1` types $1 as integer too and every fractional
  * rate is rejected before a cast on the result can matter. ::numeric and not
- * ::float8 - ROUND(numeric) is half away from zero, like toCents(); ROUND(double)
- * is half to even.
+ * ::float8, because ROUND(numeric) is half away from zero, like toCents(), while
+ * ROUND(double) is half to even.
  */
 export async function applyBaseRate(
   day: string,
@@ -2759,9 +2760,9 @@ export async function deleteCategoryRule(id: number): Promise<boolean> {
 
 /**
  * How many transactions the pattern covers, and how many of those the rule cannot
- * change because the user set the category by hand. One filter computing both, so the
- * two can never be taken through different filters and matches - overridden go wrong
- * as soon as one account is hidden.
+ * change because the user set the category by hand. One filter computes both, so the
+ * two can never be taken through different filters, which would make
+ * `matches - overridden` wrong as soon as one account is hidden.
  */
 export async function countCategoryRuleMatches(pattern: string): Promise<CategoryRuleCounts> {
   const rows = await rowsOf<Pick<TxRow, 'description' | 'category_manual'>>(
@@ -2781,7 +2782,7 @@ const CHARTS_VERSION_KEY = 'analytics_charts_version';
  * meta.value is text, so the counter comes back a string on both drivers. Parsed
  * here and nowhere else: a route comparing '1' to 1 would answer 409 to every
  * write after the first, for ever. Anything unparseable reads as 0 rather than
- * throwing - restoreBackup is a door that inserts values nothing validated.
+ * throwing, because restoreBackup is a door that inserts values nothing validated.
  */
 const parseChartsVersion = (raw: string | undefined): number => {
   const n = Number(raw);
@@ -2802,7 +2803,7 @@ function rowToChart(r: ChartRow): Chart {
     const v = JSON.parse(r.metrics);
     if (Array.isArray(v)) metrics = v.filter((m): m is ChartMetric => KNOWN_METRICS.has(m));
   } catch {
-    // corrupted JSON - a chart with no measures, which the client draws a sentence for
+    // corrupted JSON gives a chart with no measures, which the client draws a sentence for
   }
   return {
     id: r.id,
@@ -3579,9 +3580,9 @@ type Widened<T extends string> = T extends unknown ? ({} extends Record<T, 1> ? 
  * Every table a backup carries, under the name the file gives it, in the order restore inserts
  * them. The constraint's condition is what refuses a table whose SQL name is typed as a string no
  * literal pins: a mapped type over such a name requires no key, so that table would pass this check
- * and LOCAL_TABLES' undecided. A table out of every type's sight here - its name typed never, its
- * export typed object or unknown - passes both; the case in backup.test.ts that reads the schema's
- * values holds it.
+ * and LOCAL_TABLES' undecided. A table out of every type's sight here passes both: one whose name
+ * is typed never, or whose export is typed object or unknown. The case in backup.test.ts that reads
+ * the schema's values holds it.
  */
 const BACKUP_TABLES = {
   accounts: s.accounts,
@@ -3613,7 +3614,7 @@ const BACKUP_TABLES = {
 type BackupTable = keyof typeof BACKUP_TABLES;
 
 /**
- * Rows of an upload nobody has confirmed are not the person's data yet - the same reason a
+ * Rows of an upload nobody has confirmed are not the person's data yet. That is also why a
  * restore turns an import that was awaiting confirmation into a discarded one.
  */
 const UNCONFIRMED = Symbol('an upload nobody has confirmed');
@@ -3652,9 +3653,9 @@ export async function exportBackup(): Promise<BackupData> {
 }
 
 /**
- * The envelope. Row contents are checked separately, per table, against the real
- * columns - see sanitizeRow: the shape of a row depends on which table it is, and
- * a restore file is the one place where a user hands us raw rows to insert.
+ * The envelope. sanitizeRow checks row contents separately, per table, against the
+ * real columns: the shape of a row depends on which table it is, and a restore file
+ * is the one place where a user hands us raw rows to insert.
  */
 const backupEnvelope = z.object({
   // finto-backup is what the app wrote under its earlier name; those files are someone's
@@ -3936,8 +3937,7 @@ function sanitizeRow(
 }
 
 /**
- * After restoring, the caller runs a full reclassification - same as after any bulk
- * import.
+ * After restoring, the caller runs a full reclassification, as after any bulk import.
  */
 export async function restoreBackup(data: BackupData): Promise<{ tables: number; rows: number }> {
   const provided = new Set(Object.keys(data.tables));

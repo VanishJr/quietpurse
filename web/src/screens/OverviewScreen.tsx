@@ -44,7 +44,7 @@ const DEFAULT_WINDOW: MonthWindow = 6;
  */
 interface AccountData {
   accountId: string;
-  /** Newest first — the endpoint orders by date DESC. */
+  /** Newest first, because the endpoint orders by date DESC. */
   recent: Transaction[];
   /**
    * Both summary bodies or neither, so that "the summary is present exactly when the
@@ -55,7 +55,7 @@ interface AccountData {
 }
 
 /**
- * The panels are pages and not dialogs — which is why they are in the URL beside the
+ * The panels are pages and not dialogs, which is why they are in the URL beside the
  * screen rather than in state beside `dialog`.
  *
  * Neither carries an account of its own: the import history is always about the account
@@ -81,18 +81,18 @@ const count = (n: number, one: string, many: string): string =>
   `${n} ${n === 1 ? one : many}`;
 
 /**
- * What the delete removed, in the server's own numbers and never the preview's — for
- * a hidden account the two legitimately differ, and the one worth printing is the
- * count of rows that actually went. "uploaded file" is the noun the preview uses too,
+ * What the delete removed, in the server's own numbers and never the preview's. For a
+ * hidden account the two legitimately differ, and the one worth printing is the count
+ * of rows that actually went. "uploaded file" is the noun the preview uses too,
  * and deliberately: the two numbers are a claim about the same fact, so a reader who
  * compares them is entitled to find them equal.
  */
 const destroyedSentence = (name: string, d: AccountDeleted): string =>
   d.transactions === 0 && d.imports === 0 && d.documents === 0
     ? `${name} was deleted. It held no transactions, no imports and no uploaded files.`
-    : `${name} was deleted — ${count(d.transactions, 'transaction', 'transactions')}, ` +
+    : `${name} was deleted, along with ${count(d.transactions, 'transaction', 'transactions')}, ` +
       `${count(d.imports, 'import', 'imports')} and ` +
-      `${count(d.documents, 'uploaded file', 'uploaded files')} went with it.`;
+      `${count(d.documents, 'uploaded file', 'uploaded files')}.`;
 
 interface Props {
   onOpenTransactions: (accountId: string) => void;
@@ -147,8 +147,8 @@ export function OverviewScreen({
 
   /**
    * Taken once, at mount. Read on every render it would be a different Date object per
-   * frame for a line that changes at most at midnight — and a session left open across
-   * one is not a reason to re-render the screen.
+   * frame for a line that changes at most at midnight, and a session left open past
+   * midnight is not a reason to re-render the screen.
    */
   const [today] = useState(() => new Date());
 
@@ -162,7 +162,7 @@ export function OverviewScreen({
       const next = await api.accounts(true);
       if (token !== accountsRequest.current) return;
       setAccounts(next);
-      // read for one thing — the currency a new account is created in: the client never
+      // read for one thing, the currency a new account is created in. The client never
       // sends one, the endpoint defaults to the base currency, and both create arms say which.
       api
         .appSettings()
@@ -188,16 +188,16 @@ export function OverviewScreen({
   );
 
   /**
-   * Nothing chosen yet, or what was chosen has left the rail — the first account
+   * If nothing is chosen yet, or what was chosen has left the rail, the first account
    * stands in. Resolved while rendering rather than in an effect that writes the answer
    * back: an effect leaves a render of a rail with no tab marked and no panel under it,
-   * and everything downstream — which page the rail shows, which account's transactions
-   * are fetched — decides against that empty render.
+   * and everything downstream decides against that empty render, from which page the
+   * rail shows to which account's transactions are fetched.
    *
-   * The fallback is not written back to the URL either: `?screen=overview` with no
-   * account is a true and useful URL — "the dashboard, whichever account is first" —
-   * and an app that rewrote it to name today's first account would hand out links that
-   * go stale on the next upload. It also means an `?account=` naming something deleted,
+   * The fallback is not written back to the URL either. `?screen=overview` with no
+   * account is a true and useful URL: "the dashboard, whichever account is first". An
+   * app that rewrote it to name today's first account would hand out links that go
+   * stale on the next upload. It also means an `?account=` naming something deleted,
    * hidden, or from another installation lands on the first account rather than on a
    * blank screen.
    */
@@ -339,8 +339,8 @@ export function OverviewScreen({
 
   /*
     `&& selected`, and it is load-bearing. ImportHistory reads a missing account as
-    every account, so a reload straight onto `?panel=history` — where the accounts are
-    still in flight and nothing is selected yet — would answer with every import the user
+    every account. On a reload straight onto `?panel=history` the accounts are still in
+    flight and nothing is selected yet, so it would answer with every import the user
     has ever made under a heading about one account. It falls through to the dashboard
     for the tick that takes and arrives once there is an account for it to be about.
   */
@@ -399,12 +399,12 @@ export function OverviewScreen({
         {accounts !== null && onRail.length === 0 && hidden.length === 0 && (
           <div className="acct-blank">
             <h2 className="acct-blank-title">
-              Nothing here yet — start with a statement
+              Start with a statement from your bank
             </h2>
             <p className="acct-blank-text">
-              Export a statement from your bank in whatever format it offers — .csv, .xlsx
-              or .pdf — and drop it in. Quietpurse reads the transactions out of it and puts
-              them in an account you name on the way in.
+              Export a statement in any format your bank offers: .csv, .xlsx or .pdf. Drop
+              it in, and Quietpurse puts its transactions into an account you name while
+              importing.
             </p>
             <div className="acct-blank-actions">
               <Button type="button" variant="secondary" size="standard" onClick={() => setUrl({ panel: 'import' })}>
@@ -418,8 +418,8 @@ export function OverviewScreen({
               </Button>
             </div>
             <p className="hint">
-              An empty account is for money that has no statement — cash, or a card you
-              enter by hand.
+              An empty account is for money that has no statement, such as cash or a card
+              you enter by hand.
             </p>
           </div>
         )}
@@ -442,14 +442,14 @@ export function OverviewScreen({
           <div className="acct-panel" role="region" aria-label={selected.name}>
             {selected.hidden ? (
               /* The ⋮ lives on the balance card, and a hidden account has no balance card
-                 to put it on — so this panel carries the same control under the same
+                 to put it on, so this panel carries the same control under the same
                  accessible name. */
               <div className="acct-blank">
                 <h2 className="acct-blank-title">{selected.name} is hidden</h2>
                 <p className="acct-blank-text">
-                  Its transactions are out of every figure the app computes — including
-                  the ones this screen would draw. Nothing has been deleted, and unhiding
-                  it brings all of them back.
+                  Its transactions are left out of every figure in the app, including the
+                  ones this screen would show. Nothing has been deleted. Unhide it to bring
+                  them all back.
                 </p>
                 <div className="acct-blank-actions">
                   <Button type="button" variant="primary" size="standard"
@@ -491,9 +491,9 @@ export function OverviewScreen({
                       Nothing has been loaded into {selected.name}
                     </h2>
                     <p className="acct-blank-text">
-                      The account is here, and it is empty — which is why its balance is{' '}
+                      This account has no transactions yet, so its balance is{' '}
                       {fmtMoney(selected.balance, selected.currency)}. Import a statement
-                      into it and the figures, the chart and the transactions fill in.
+                      into it to fill in the figures, the chart and the transactions.
                     </p>
                     <div className="acct-blank-actions">
                       <Button type="button" variant="secondary" size="standard" onClick={() => setUrl({ panel: 'import' })}>

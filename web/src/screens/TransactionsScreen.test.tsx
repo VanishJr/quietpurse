@@ -266,7 +266,8 @@ describe('the window the screen asks for', () => {
     await settle();
 
     // "All transactions →" is what sent the reader here, so the request behind it
-    // carries no lower bound - and the raise the backend's default 1000 needs
+    // carries no lower bound. It also raises the limit, which the backend's default
+    // would cut short
     const asked = requestUrls().filter((u) => u.includes('/api/transactions'));
     expect(asked[asked.length - 1]).not.toMatch(/[?&]from=/);
     expect(asked[asked.length - 1]).toMatch(/[?&]limit=5000/);

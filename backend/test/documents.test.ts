@@ -1,11 +1,10 @@
 /**
  * The storage seam and the stored statements above it.
  *
- * Two things are held here that nothing else can. The file a person finds in their
- * statements folder is the file they uploaded, byte for byte, under a name they can
- * recognise - that is the whole reason the folder is theirs to open. And a name is
- * derived from user input for the first time in this application, so the derivation
- * is exercised against every shape a filename can arrive in rather than trusted.
+ * The file a person finds in their statements folder is the file they uploaded, byte
+ * for byte, under a name they can recognise. That is the whole reason the folder is
+ * theirs to open. And the name is derived from user input, so the derivation is
+ * exercised against every shape a filename can arrive in rather than trusted.
  */
 import crypto from 'crypto';
 import fs from 'fs/promises';
@@ -94,7 +93,7 @@ describe('the storage seam', () => {
   it('the boot check fails on a root that cannot be written to', async () => {
     // a plain FILE where the root should be: no chmod, and the same result on
     // Windows and Linux. mkdir itself already throws on this one, so this case
-    // does NOT distinguish the probe from a bare mkdir -p - the case below is the
+    // does NOT distinguish the probe from a bare mkdir -p. The case below is the
     // one that does
     await fs.mkdir(storageRoot(), { recursive: true });
     const asFile = path.join(storageRoot(), 'boot-check-root');
@@ -218,11 +217,11 @@ describe('the stem a filename becomes', () => {
   /**
    * The property, not another example. documentStem and the storage seam live in
    * different files and agree only through SEGMENT_START, so this drives the stem's
-   * whole character set through both doors - one character at a time, and in every
-   * position, because a class that is wrong at the head alone is green in the middle
-   * and at the tail. `)` is the character that was wrong: it is legal inside a key
-   * segment and closes one, and it opens none, so a name beginning with `)` built a key
-   * resolveKey threw on and the upload was refused as an unwritable folder, forever.
+   * whole character set through both doors. It goes one character at a time and in
+   * every position, because a class that is wrong at the head alone is green in the
+   * middle and at the tail. `)` is the character that was wrong: it is legal inside a
+   * key segment and closes one, and it opens none, so a name beginning with `)` built a
+   * key resolveKey threw on and the upload was refused as an unwritable folder, forever.
    *
    * getObject is the door, because resolveKey is not exported: a key it refuses
    * throws, where a key it accepts and cannot find answers undefined.
@@ -362,8 +361,8 @@ describe('documents: the domain layer', () => {
 
   /**
    * The name is derived from the row, never stored, so a row whose filename or type
-   * were changed underneath it addresses a different file - which is what makes a
-   * crafted backup unable to point at somebody's statement by writing a path.
+   * were changed underneath it addresses a different file. That is what keeps a
+   * crafted backup from pointing at somebody's statement by writing a path.
    */
   it('the name is a function of the row, so nothing on it may move after the put', async () => {
     const importId = 'doc-domain-moved';

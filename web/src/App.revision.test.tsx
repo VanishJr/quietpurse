@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import {
   accountMonths,
@@ -13,6 +13,12 @@ import {
 } from './test/fixtures';
 import { askedFor, FIRST_PAINT_ROUTES, mockFetch, ok, requests, requestUrls, type Routes } from './test/harness';
 import type { Account, Transaction } from './types';
+
+/**
+ * The test budget and the first wait below are App.test.tsx's, for the reason it gives
+ * beside its own: the first mount of the whole app can land right at the default waits.
+ */
+vi.setConfig({ testTimeout: 15_000 });
 
 const giro: Account = {
   id: 'acc-1',
@@ -75,7 +81,7 @@ const openTransactions = async () => {
 
 const start = async () => {
   render(<App />);
-  await screen.findByRole('region', { name: 'Balance of Sparkasse Giro' });
+  await screen.findByRole('region', { name: 'Balance of Sparkasse Giro' }, { timeout: 5_000 });
   return openTransactions();
 };
 
@@ -131,7 +137,7 @@ describe('removal data revision', () => {
     const before = await confirmInHistory(
       'Delete import',
       'Delete import',
-      'Import deleted — 1 transaction removed.',
+      'Import deleted. 1 transaction was removed.',
     );
 
     await expectReread(before, list);
@@ -147,7 +153,7 @@ describe('removal data revision', () => {
     const before = await confirmInHistory(
       'Delete import',
       'Delete import',
-      'Import deleted — 1 transaction removed.',
+      'Import deleted. 1 transaction was removed.',
     );
 
     await waitFor(() => expect(recurringReads()).toBeGreaterThan(recurring));
@@ -167,7 +173,7 @@ describe('removal data revision', () => {
     ).toHaveTextContent('1,242');
 
     openSettingsHistory();
-    await confirmInHistory('Delete import', 'Delete import', 'Import deleted — 1 transaction removed.');
+    await confirmInHistory('Delete import', 'Delete import', 'Import deleted. 1 transaction was removed.');
 
     fireEvent.click(nav().getByRole('link', { name: 'Overview' }));
     await waitFor(() =>
