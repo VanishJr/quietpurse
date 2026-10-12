@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
-import { accountMonths, accountSummary } from './test/fixtures';
+import { accountMonths, accountSummary, txDate } from './test/fixtures';
 import { askedFor, FIRST_PAINT_ROUTES, mockFetch, ok, requests } from './test/harness';
 import type { IncomeSourceDef, Transaction } from './types';
 
@@ -20,7 +20,7 @@ const income: Transaction = {
   provider: 'upload',
   amount: 500,
   currency: 'EUR',
-  date: '2026-07-14',
+  date: txDate('2026-07-14'),
   description: 'Family Support Payment',
   category: 'other',
   categoryManual: false,
@@ -53,7 +53,7 @@ describe('income-source data revision', () => {
       count: 3,
       avgAmount: -40,
       monthlyAvg: -40,
-      lastDate: '2026-07-10',
+      lastDate: txDate('2026-07-10'),
       ignored: false,
     };
     mockFetch({

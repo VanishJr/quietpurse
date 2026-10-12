@@ -38,6 +38,8 @@ import {
 } from '../types';
 import {
   CHART_METRICS,
+  type CalendarDay,
+  calendarDay,
   type CategoryRule,
   type CategoryRuleCounts,
   type CategoryRulePreview,
@@ -45,6 +47,7 @@ import {
   type ChartList,
   type ChartMetric,
   ERROR_DETAIL_MAX,
+  instant,
   type ImportList,
   type ImportRecord,
   type ImportSourceType,
@@ -631,11 +634,15 @@ export async function insertTransactions(
  */
 function claimedKeys(
   txs: NewTransaction[],
-): { tx: NewTransaction; amountCents: number; dedupKey: string }[] {
+): { tx: NewTransaction; date: CalendarDay; amountCents: number; dedupKey: string }[] {
   const ordinals = new Map<string, number>();
   const batchKeys = new Set<string>();
-  const out: { tx: NewTransaction; amountCents: number; dedupKey: string }[] = [];
+  const out: { tx: NewTransaction; date: CalendarDay; amountCents: number; dedupKey: string }[] = [];
   for (const t of txs) {
+    const date = calendarDay(t.date);
+    if (date === null) {
+      throw new Error(`a transaction's date is not a real day, or not a real time of one, so nothing was inserted: "${t.date}"`);
+    }
     const amountCents = toCents(t.amount);
     let dedupKey = t.dedupKey;
     if (!dedupKey) {
@@ -647,7 +654,7 @@ function claimedKeys(
     }
     if (batchKeys.has(`${t.accountId}|${dedupKey}`)) continue;
     batchKeys.add(`${t.accountId}|${dedupKey}`);
-    out.push({ tx: t, amountCents, dedupKey });
+    out.push({ tx: t, date, amountCents, dedupKey });
   }
   return out;
 }
@@ -666,7 +673,7 @@ export async function insertTransactionsOn(
 ): Promise<number> {
   if (txs.length === 0) return 0;
   const values: (typeof s.transactions.$inferInsert)[] = claimedKeys(txs).map(
-    ({ tx: t, amountCents, dedupKey }) => {
+    ({ tx: t, date, amountCents, dedupKey }) => {
       // transactions already in the base currency need no conversion - fill it now;
       // for the rest base_amount is filled later by backfillBaseAmounts (fxrates.ts)
       const isBase = t.currency === baseCurrency;
@@ -678,7 +685,7 @@ export async function insertTransactionsOn(
         amountCents,
         feeCents: toCentsOrNull(t.fee),
         currency: t.currency,
-        date: t.date,
+        date,
         description: t.description,
         mcc: t.mcc ?? null,
         category: t.category,
@@ -718,7 +725,7 @@ interface TxRow {
   amount_cents: number;
   fee_cents: number | null;
   currency: string;
-  date: string;
+  date: CalendarDay;
   description: string;
   mcc: number | null;
   category: string;
@@ -1106,7 +1113,7 @@ const rowToImport = (r: ImportRow & { transactions?: number }): ImportRecord => 
   originalFilename: r.originalFilename,
   accountName: r.accountName,
   accountId: r.accountId,
-  uploadedAt: r.uploadedAt,
+  uploadedAt: instant(r.uploadedAt),
   parserVersion: r.parserVersion,
   status: r.status,
   rowsAccepted: r.rowsAccepted,
@@ -1491,6 +1498,12 @@ class AccountRemoved extends Error {}
 
 class AccountMissing extends Error {}
 
+class StagedDateNotReal extends Error {
+  constructor(readonly date: string) {
+    super(`staged date ${date} is not a real day or time`);
+  }
+}
+
 export class ImportNotConfirmable extends Error {}
 
 const UNIQUE_VIOLATION = '23505';
@@ -1528,7 +1541,8 @@ export type ConfirmOutcome =
   | { confirmed: false; reason: 'status'; status: ImportStatus }
   | { confirmed: false; reason: 'file-committed'; heldBy: string }
   | { confirmed: false; reason: 'account-missing' }
-  | { confirmed: false; reason: 'account-hidden' };
+  | { confirmed: false; reason: 'account-hidden' }
+  | { confirmed: false; reason: 'date-not-real'; date: string };
 
 export async function confirmImport(id: string): Promise<ConfirmOutcome | undefined> {
   const baseCurrency = await currentBaseCurrency();
@@ -1599,6 +1613,10 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
           `import ${id} is recorded against account ${accountId} but staged a row for ${stray.accountId}`,
         );
       }
+      // only an import staged by an earlier version, which read such a date off the file
+      // and stored it; an upload now refuses the file instead
+      const impossible = staged.find((r) => calendarDay(r.date) === null);
+      if (impossible) throw new StagedDateNotReal(impossible.date);
       // The account was there and visible when the file was uploaded; the user
       // removed it while the summary sat on screen.
       //
@@ -1648,6 +1666,7 @@ export async function confirmImport(id: string): Promise<ConfirmOutcome | undefi
     }
     if (e instanceof AccountRemoved) return { confirmed: false, reason: 'account-hidden' };
     if (e instanceof AccountMissing) return { confirmed: false, reason: 'account-missing' };
+    if (e instanceof StagedDateNotReal) return { confirmed: false, reason: 'date-not-real', date: e.date };
     // two uploads of one file overlapping in time both reach awaiting_confirmation
     // (the partial index only blocks `committed`), so the second
     // confirm meets the index rather than the status check. Its rows are identical
@@ -2589,7 +2608,7 @@ export async function listRecurringGroups(sinceIso: string): Promise<RecurringGr
   const rows = await rowsOf<{
     description: string;
     category: string;
-    date: string;
+    date: CalendarDay;
     base_amount_cents: number;
   }>(sql`
     SELECT description, ${CATEGORY} AS category, date, base_amount_cents
@@ -3162,10 +3181,7 @@ const selectedGoalAccounts = async (d: Executor, ids: string[]): Promise<GoalAcc
   return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
 };
 
-const validDateOnly = (value: string): boolean => {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-};
+const validDateOnly = (value: string): boolean => value.length === 10 && calendarDay(value) !== null;
 
 const prepareGoalWrite = async (
   d: Executor,
@@ -3824,6 +3840,16 @@ const migrateLegacyBackup = (data: BackupData): BackupData => {
 
 const NOT_RESTORABLE_STATUS = new Set<ImportStatus>(['awaiting_confirmation']);
 
+const CALENDAR_DAY_COLUMNS: {
+  readonly [T in keyof typeof BACKUP_TABLES]?: keyof (typeof BACKUP_TABLES)[T]['$inferSelect'];
+} = { transactions: 'date', fx_rates: 'date' };
+
+/**
+ * The shape only, and not calendarDay: a backup carries what an earlier version stored, and
+ * an earlier version stored 2026-02-30 or 25:99 off a statement without checking either.
+ */
+const STARTS_WITH_A_DAY = /^\d{4}-\d{2}-\d{2}/;
+
 const RESTORED_UNCONFIRMABLE =
   'restored from a backup: this import was still awaiting confirmation when the backup was taken, and a backup carries no staged rows, so it can never be confirmed here';
 
@@ -3853,6 +3879,7 @@ function sanitizeRow(
     { notNull: boolean; dataType: string; enumValues?: readonly string[] } | undefined
   > = getTableColumns(table);
   const out: Record<string, unknown> = {};
+  const dayColumn = CALENDAR_DAY_COLUMNS[tableName as keyof typeof BACKUP_TABLES];
   for (const [key, value] of Object.entries(row as Record<string, unknown>)) {
     const column = columns[key];
     if (!column) continue; // unknown column
@@ -3876,6 +3903,9 @@ function sanitizeRow(
     // one the database it was migrated into checks.
     if (column.enumValues && !column.enumValues.includes(value as string)) {
       throw new BackupRefused(`${tableName}.${key}: expected one of ${column.enumValues.join(', ')}`);
+    }
+    if (dayColumn === key && !STARTS_WITH_A_DAY.test(value as string)) {
+      throw new BackupRefused(`${tableName}.${key}: expected a value that starts with YYYY-MM-DD`);
     }
     out[key] = value;
   }

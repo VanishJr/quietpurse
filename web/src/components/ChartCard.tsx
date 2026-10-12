@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { BREAKDOWN_DEFS, chartKind, drawnShares, METRICS, rangeDef, suggestedTitle } from '../analytics';
+import { BREAKDOWN_DEFS, type Bounds, chartKind, drawnShares, METRICS, rangeDef, suggestedTitle } from '../analytics';
 import { ChartData, useChartData } from '../chartData';
 import { fmtDay, fmtMoney } from '../format';
 import { Notice } from './Notice';
@@ -36,7 +36,7 @@ export function ChartCard({ spec, accounts, accountsError, dataRevision = 0, act
   const range = rangeDef(spec.range);
   const period = data?.period;
   const prior = data?.priorPeriod;
-  const dates = ({ from, to }: { from: string; to: string }) => `${fmtDay(from)} – ${fmtDay(to)}`;
+  const dates = ({ from, to }: Bounds) => `${fmtDay(from)} – ${fmtDay(to)}`;
 
   return (
     <section className="chart-card" aria-label={title}>

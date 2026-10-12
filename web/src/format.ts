@@ -1,3 +1,5 @@
+import type { CalendarDay, Instant } from './types';
+
 /**
  * Hand-rolled rather than Intl: the output is deliberately locale-independent, so
  * amounts and dates read the same everywhere.
@@ -34,19 +36,10 @@ export function niceMax(max: number): number {
   return Math.ceil(max / (pow / 2)) * (pow / 2);
 }
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
 export const MONTHS_SHORT = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
-
-export function fmtMonth(d: Date): string {
-  return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
-}
 
 const DAYS = [
   'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
@@ -91,25 +84,23 @@ export function truncateMiddle(text: string, budget: number): string {
   return `${text.slice(0, head)}…${text.slice(text.length - (keep - head))}`;
 }
 
-export function fmtDate(iso: string): string {
-  const d = new Date(iso);
+export function fmtInstant(timestamp: Instant): string {
+  const d = new Date(timestamp);
   const dd = String(d.getDate()).padStart(2, '0');
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
 /**
- * dd.mm.yyyy from a plain YYYY-MM-DD. Not fmtDate: `new Date('2026-02-01')` is UTC
- * midnight, which reads back as the 31st for anyone west of UTC - and these are
- * calendar days off a bank statement, so that would be wrong every time, not
- * occasionally. A calendar date is split on the string and never turned into an
- * instant; fmtDate stays right for a real timestamp.
+ * Off the day's own ten characters, never through a `Date`: the stored
+ * `2026-02-01T00:00:00.000Z` is UTC midnight, which reads back as the 31st west of UTC,
+ * and a statement's late-evening time reads as the next day east of it.
  */
-export const fmtDay = (isoDay: string): string => isoDay.split('-').reverse().join('.');
+export const fmtDay = (day: CalendarDay): string => day.slice(0, 10).split('-').reverse().join('.');
 
 /** YYYY-MM-DD in local time */
-export function isoDay(d: Date): string {
+export function isoDay(d: Date): CalendarDay {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
+  return `${d.getFullYear()}-${mm}-${dd}` as CalendarDay;
 }

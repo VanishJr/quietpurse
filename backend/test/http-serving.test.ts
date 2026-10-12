@@ -8,7 +8,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import express from 'express';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   CLIENT_NOT_BUILT,
   WEB_DIST,
@@ -216,5 +216,18 @@ describe('the headers every answer carries', () => {
     const res = await agent.get(route);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  // either end of the local day: off UTC, one of the two is on another UTC day
+  it.each(['00:00', '23:59'])('names a backup taken at %s after the local day', async (time) => {
+    const [hour, minute] = time.split(':').map(Number);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 8, 30, hour, minute));
+    try {
+      const res = await agent.get('/api/backup');
+      expect(res.headers['content-disposition']).toBe('attachment; filename="quietpurse-backup-2026-09-30.json"');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

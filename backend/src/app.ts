@@ -1630,6 +1630,8 @@ const confirmConflict = (result: Extract<ConfirmOutcome, { confirmed: false }>):
       return 'nothing was imported: the account these rows go to was deleted while this import was waiting, and it cannot be brought back. Discard this import and upload the file again into another account';
     case 'account-hidden':
       return 'nothing was imported: the account these rows go to has been removed from the app - restore it, then press Confirm again';
+    case 'date-not-real':
+      return `nothing was imported: an earlier version read this file and kept the date "${result.date}", which is not a real day or time. Discard this import and upload the file again, and the upload will name the row to correct`;
     default: {
       const unreachable: never = result;
       return unreachable;
@@ -1854,11 +1856,17 @@ app.delete('/api/imports/:id/document', async (req, res) => {
   answer(res, 'DELETE /api/imports/:id/document', { deleted: true, importId: req.params.id, bytesRemoved });
 });
 
+const backupFilename = (now: Date): string => {
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `quietpurse-backup-${now.getFullYear()}-${mm}-${dd}.json`;
+};
+
 app.get('/api/backup', async (_req, res) => {
-  const stamp = new Date().toISOString().slice(0, 10);
+  const filename = backupFilename(new Date());
   const data = await exportBackup();
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="quietpurse-backup-${stamp}.json"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   // as on the CSV export and the document download: this is every table in the
   // database, and nothing may hold a copy of it that the person did not ask for
   res.setHeader('Cache-Control', 'no-store');

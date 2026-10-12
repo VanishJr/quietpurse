@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
-import { fmtDate, fmtMoney } from '../format';
+import { fmtDay, fmtMoney } from '../format';
 import type { Transaction, TransferRulePreview } from '../types';
 import { Button } from './Button';
 import { FormActions } from './FormActions';
@@ -124,7 +124,7 @@ export function TransferRuleEditor({ transaction, accountName, onBack, onBusyCha
                     <strong>{fmtMoney(tx.amount, tx.currency)}</strong>
                   </div>
                   <div className="sheet-meta">
-                    {fmtDate(tx.date)}
+                    {fmtDay(tx.date)}
                     {tx.transferManual !== null && (
                       <span> · {tx.transferManual ? 'Manually marked as transfer' : 'Manually marked as not a transfer'}</span>
                     )}

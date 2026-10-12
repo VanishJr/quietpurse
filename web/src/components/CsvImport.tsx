@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { api } from '../api';
-import { fmtDate, fmtDay, fmtMoney, rowCount } from '../format';
+import { api, ApiError } from '../api';
+import { fmtDay, fmtInstant, fmtMoney, rowCount } from '../format';
 import { balanceClaim, GENERIC_PRESET_TITLE, readAsSentence } from '../imports';
 import {
   Account,
@@ -157,6 +157,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   /** what landed once the summary was accepted — the backend's counts, not the preview's */
   const [confirmed, setConfirmed] = useState<ImportConfirmed | null>(null);
   const [confirmationUncertain, setConfirmationUncertain] = useState(false);
+  const [confirmRefused, setConfirmRefused] = useState(false);
   const [discarded, setDiscarded] = useState(false);
   const id = useId();
   const busyAction = useRef<'reading' | 'confirming' | 'discarding' | null>(null);
@@ -217,6 +218,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
   const newInput = (): number => {
     setFileRows(null);
     setConfirmationUncertain(false);
+    setConfirmRefused(false);
     setError(null);
     setResult(null);
     setConfirmed(null);
@@ -274,6 +276,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       setError(null);
       setConfirmed(null);
       setConfirmationUncertain(false);
+      setConfirmRefused(false);
       setDiscarded(false);
       // a throw here is the whole of the create arm's refusal: nothing below runs, so
       // a refused create never becomes an upload
@@ -315,7 +318,9 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
       // created went in when it was created, and does not arrive here
       await loadAccounts();
     } catch (e) {
-      setConfirmationUncertain(true);
+      // a 409 is the server's answer, not a lost one: its sentence says what happened
+      if (e instanceof ApiError && e.status === 409) setConfirmRefused(true);
+      else setConfirmationUncertain(true);
       setErrorArea('result');
       setError((e as Error).message);
     } finally {
@@ -373,6 +378,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
     if (busyAction.current || (summary && !confirmed)) return;
     setupFocusRequested.current = true;
     setConfirmationUncertain(false);
+    setConfirmRefused(false);
     setError(null);
     setResult(null);
     setConfirmed(null);
@@ -629,7 +635,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
                   You've already imported this file
                 </h2>
                 {sourceContext}
-                <p>You uploaded it on {fmtDate(duplicate.uploadedAt)}. It wasn't read again.</p>
+                <p>You uploaded it on {fmtInstant(duplicate.uploadedAt)}. It wasn't read again.</p>
                 <p>It had {rowCount(duplicate.total)} when it was read.</p>
                 {duplicate.skipped > 0 && <p>{duplicate.skipped} of them didn't import.</p>}
                 <p>Nothing was duplicated.</p>
@@ -639,7 +645,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
             {summary && !confirmed && (
               <section className="card import-review" aria-labelledby={`${id}-review-heading`} aria-busy={busy}>
                 <h2 id={`${id}-review-heading`} className="import-review-heading" ref={reviewHeading} tabIndex={-1}>
-                  Read {summary.accepted} of {summary.total} rows — {confirmationUncertain ? 'confirmation not verified' : 'nothing imported yet'}
+                  Read {summary.accepted} of {summary.total} rows: {confirmationUncertain ? 'confirmation not verified' : confirmRefused ? 'confirmation refused' : 'nothing imported yet'}
                 </h2>
                 <p className="import-review-reader">{readAsSentence(summary.readAs)}</p>
                 {sourceContext}

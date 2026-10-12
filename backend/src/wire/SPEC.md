@@ -123,3 +123,19 @@ bounds, `CHART_ID_SHAPE_SOURCE` and `ERROR_DETAIL_MAX`. It also re-exports the g
 tuples and `SUPPORT_INCOME_SOURCE`, which only its tests read. With no value import there is nothing to bundle; `web/src/types.test.ts` refuses
 a value import and a second door. The client's typecheck resolves `zod` from this package, so the
 `web` job in `.github/workflows/ci.yml` and `npm run setup` install this package first.
+
+**A calendar day is not a moment.** `CalendarDay` marks a day off a statement: a transaction's date
+and value date, a recurring payment's last date, a statement's first and last day. Its first ten
+characters are the YYYY-MM-DD the bank wrote. A transaction's date goes on with the time the file
+stated, or UTC midnight when it stated none, so it looks like an instant and is not one: read as an
+instant, it is the day before west of UTC, and a late-evening time is the next day east of it. A
+client takes the day from those ten characters. On the server the brand comes from `calendarDay`,
+which answers null unless the day exists and so does any time after it. An import and the insert of
+transactions run it, and a statement with a date that does not exist is refused whole. A restore
+checks the YYYY-MM-DD shape only, because a backup carries what an earlier version stored, and an
+earlier version stored a day or a time that does not exist without checking it. So a date this
+version imported is a real day and time. One it restored, or one an earlier version imported, starts
+with YYYY-MM-DD but may name a day or a time that does not exist. One an earlier version restored
+may have any shape, because that restore checked none. `Instant` marks a moment the app recorded,
+which a client shows in the reader's own zone. Both brands are type-only and the JSON is a string
+either way, so a client in another language has this paragraph and nothing else to go on.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { safeFilename } from './download';
+import { backupFilename, safeFilename } from './download';
 
 /**
  * originalFilename is a string the user chose, and it becomes a `download`
@@ -47,5 +47,13 @@ describe('safeFilename', () => {
     expect(cut.endsWith('😀')).toBe(true);
     // the emoji is two UTF-16 units: a cap by .slice(0, 100) would end on a lone one
     expect(cut).toHaveLength(101);
+  });
+});
+
+describe('backupFilename', () => {
+  // either end of the local day: off UTC, one of the two is on another UTC day
+  it.each(['00:00', '23:59'])('names a backup taken at %s after the local day', (time) => {
+    const [hour, minute] = time.split(':').map(Number);
+    expect(backupFilename(new Date(2026, 8, 30, hour, minute))).toBe('quietpurse-backup-2026-09-30.json');
   });
 });

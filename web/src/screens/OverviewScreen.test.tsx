@@ -9,11 +9,13 @@ import {
   accountMonths,
   accountSummary,
   APP_SETTINGS,
+  day,
   importRecord,
   importsResponse,
   PRESETS,
   summaryResult,
   SUMMARY,
+  txDate,
 } from '../test/fixtures';
 import {
   askedFor,
@@ -60,8 +62,8 @@ import { OverviewScreen } from './OverviewScreen';
  */
 
 /** Newest first: the endpoint orders by date DESC, and the recent list trusts it. */
-const txn = (date: string, amount: number, patch: Partial<Transaction> = {}): Transaction => ({
-  id: `t-${date}-${amount}`,
+const txn = (booked: string, amount: number, patch: Partial<Transaction> = {}): Transaction => ({
+  id: `t-${booked}-${amount}`,
   accountId: 'acc-1',
   provider: 'upload',
   currency: 'EUR',
@@ -74,16 +76,16 @@ const txn = (date: string, amount: number, patch: Partial<Transaction> = {}): Tr
   incomeSourceManual: false,
   recurring: false,
   oneOff: false,
-  date,
+  date: txDate(booked),
   amount,
   ...patch,
 });
 
 const TXS: Transaction[] = [
-  txn('2026-08-04T00:00:00.000Z', 900, { description: 'ACME payroll', category: 'salary' }),
-  txn('2026-08-03T00:00:00.000Z', -120, { description: 'Rewe', category: 'food' }),
-  txn('2026-08-02T00:00:00.000Z', -300, { description: 'To savings', transfer: true }),
-  txn('2026-07-20T00:00:00.000Z', -60, { description: 'Netflix', category: 'subscriptions' }),
+  txn('2026-08-04', 900, { description: 'ACME payroll', category: 'salary' }),
+  txn('2026-08-03', -120, { description: 'Rewe', category: 'food' }),
+  txn('2026-08-02', -300, { description: 'To savings', transfer: true }),
+  txn('2026-07-20', -60, { description: 'Netflix', category: 'subscriptions' }),
 ];
 
 /** The window the request named, so a body cannot claim a month nobody asked about. */
@@ -411,7 +413,7 @@ describe('income against expenses', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/transactions': () =>
-        ok([txn('2026-08-04T00:00:00.000Z', 60, { refund: true, category: 'shopping' })]),
+        ok([txn('2026-08-04', 60, { refund: true, category: 'shopping' })]),
       'GET /api/summary/months': (_init, url) => ok(monthsBody(url, refunded)),
       'GET /api/summary': (_init, url) =>
         ok(
@@ -825,7 +827,7 @@ describe('switching tabs while a read is in flight', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reclassify' }));
     await panel('Balance of Sparkasse Giro');
 
-    releaseOld(ok([txn('2026-09-01T00:00:00.000Z', 50)]));
+    releaseOld(ok([txn('2026-09-01', 50)]));
     await settle();
 
     expect(requests().filter((request) => request === 'GET /api/transactions')).toHaveLength(2);
@@ -1094,7 +1096,7 @@ describe('a month the account has nothing in', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/transactions': () =>
-        ok([txn('2026-07-20T00:00:00.000Z', -120, { category: 'food' })]),
+        ok([txn('2026-07-20', -120, { category: 'food' })]),
       'GET /api/summary/months': (_init, url) => ok(monthsBody(url, GAP)),
       'GET /api/summary': (_init, url) =>
         ok(
@@ -1148,7 +1150,7 @@ describe('the recent transactions', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/transactions': () => ok([
-        txn('2026-08-04T00:00:00.000Z', 60, {
+        txn('2026-08-04', 60, {
           description: 'Returned purchase', category: 'shopping',
           transfer: true, refund: true, oneOff: true,
         }),
@@ -1184,7 +1186,7 @@ describe('the recent transactions', () => {
     mount({
       ...OVERVIEW_ROUTES,
       'GET /api/transactions': () => ok([
-        txn('2026-08-04', -9876543210.45, { description: title, currency: 'USD', valueDate: '2026-08-03', refund: true }),
+        txn('2026-08-04', -9876543210.45, { description: title, currency: 'USD', valueDate: day('2026-08-03'), refund: true }),
       ]),
     });
     const list = await panel('Recent transactions in Sparkasse Giro');
@@ -1193,6 +1195,7 @@ describe('the recent transactions', () => {
     expect(row).toHaveClass('tx-row-long');
     expect(row.querySelectorAll('td')).toHaveLength(4);
     expect(within(row).getByText('−9,876,543,210.45 USD')).toBeInTheDocument();
+    expect(within(row).getByText('04.08.2026')).toBeInTheDocument();
     expect(within(row).getByText('Value date 03.08.2026')).toBeInTheDocument();
     expect(within(row).getByText('Refund')).toBeVisible();
   });
@@ -1676,8 +1679,8 @@ describe('deleting an account', () => {
     const A = account({ id: 'acc-1', name: 'Sparkasse Giro' });
     const B = account({ id: 'acc-2', name: 'Savings' });
     const PAIRED = [
-      txn('2026-08-03T00:00:00.000Z', -120, { description: 'Rewe', category: 'food' }),
-      txn('2026-08-02T00:00:00.000Z', -300, { description: 'To savings', transfer: true }),
+      txn('2026-08-03', -120, { description: 'Rewe', category: 'food' }),
+      txn('2026-08-02', -300, { description: 'To savings', transfer: true }),
     ];
     // the same month after the server re-classified those rows: the surviving leg has
     // no partner left, so it stops being a transfer and starts counting as spending.

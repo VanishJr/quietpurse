@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import { ACCOUNTS, INCOME_SOURCES } from '../test/fixtures';
+import { ACCOUNTS, day, INCOME_SOURCES, txDate } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, requestUrls, Routes } from '../test/harness';
 import { IncomeSourceDef, Transaction, CategoryRulePreview, TransferRulePreview, TransferRuleWithMatches } from '../types';
 import { TransactionsScreen } from './TransactionsScreen';
@@ -23,7 +23,7 @@ const ROWS: Transaction[] = [
     provider: 'upload',
     amount: -42.5,
     currency: 'EUR',
-    date: '2026-07-14',
+    date: txDate('2026-07-14'),
     description: 'REWE Berlin',
     category: 'food',
     categoryManual: false,
@@ -40,7 +40,7 @@ const ROWS: Transaction[] = [
     provider: 'upload',
     amount: -19,
     currency: 'EUR',
-    date: '2026-07-15',
+    date: txDate('2026-07-15'),
     description: 'BVG Ticket',
     category: 'transport',
     categoryManual: false,
@@ -80,7 +80,7 @@ const row = (patch: Partial<Transaction> & { id: string }): Transaction => ({
   provider: 'upload',
   amount: -12,
   currency: 'EUR',
-  date: '2026-07-14',
+  date: txDate('2026-07-14'),
   description: 'a row',
   category: 'other',
   categoryManual: false,
@@ -469,9 +469,9 @@ describe('the category of one transaction', () => {
   });
 
   it('puts a row that comes back to the filter where its date belongs, not at the foot', async () => {
-    const newest = row({ id: 'tx-new', description: 'Lidl Nord', date: '2026-07-20', category: 'food' });
-    const middle = row({ id: 'tx-mid', description: 'REWE Berlin', date: '2026-07-17', category: 'food' });
-    const oldest = row({ id: 'tx-old', description: 'Edeka Mitte', date: '2026-07-14', category: 'food' });
+    const newest = row({ id: 'tx-new', description: 'Lidl Nord', date: txDate('2026-07-20'), category: 'food' });
+    const middle = row({ id: 'tx-mid', description: 'REWE Berlin', date: txDate('2026-07-17'), category: 'food' });
+    const oldest = row({ id: 'tx-old', description: 'Edeka Mitte', date: txDate('2026-07-14'), category: 'food' });
     mockFetch({
       ...TX_ROUTES,
       'GET /api/transactions': () => ok([newest, middle, oldest]),
@@ -536,7 +536,7 @@ describe('the category of one transaction', () => {
 });
 
 const CATEGORY_PREVIEW: CategoryRulePreview = {
-  pattern: 'REWE Berlin', transactions: [ROWS[0], { ...ROWS[0], id: 'older', date: '2025-01-01', accountId: 'acc-2', categoryManual: true }],
+  pattern: 'REWE Berlin', transactions: [ROWS[0], { ...ROWS[0], id: 'older', date: txDate('2025-01-01'), accountId: 'acc-2', categoryManual: true }],
   matches: 2, overridden: 1, activeRule: null, otherRules: [], previewToken: 'c'.repeat(64),
 };
 const CATEGORY_ROUTES: Routes = {
@@ -1027,7 +1027,7 @@ describe('the income source', () => {
       accountId: 'acc-2',
       description: 'To ZZ',
       amount: -100,
-      date: '2026-07-13',
+      date: txDate('2026-07-13'),
       category: 'transfers',
       transfer: true,
     });
@@ -1090,7 +1090,7 @@ describe('the income source', () => {
       accountId: 'acc-2',
       description: 'To ZZ',
       amount: -100,
-      date: '2026-07-13',
+      date: txDate('2026-07-13'),
       category: 'other',
       transfer: false,
     });
@@ -1305,7 +1305,7 @@ const PREVIEW: TransferRulePreview = {
   txId: EXPENSE.id,
   accountId: EXPENSE.accountId,
   description: EXPENSE.description,
-  transactions: [EXPENSE, { ...EXPENSE, id: 'older', date: '2025-01-01', transferManual: false }],
+  transactions: [EXPENSE, { ...EXPENSE, id: 'older', date: txDate('2025-01-01'), transferManual: false }],
   matches: 2,
   manualOverrides: 1,
   activeRule: null,
@@ -1496,7 +1496,7 @@ describe('transaction descriptions', () => {
     const display = 'Example Person Gutschriften';
     mockFetch({
       ...TX_ROUTES,
-      'GET /api/transactions': () => ok([{ ...EXPENSE, date, description: original, displayDescription: display, valueDate: '2026-08-31' }]),
+      'GET /api/transactions': () => ok([{ ...EXPENSE, date: txDate(date), description: original, displayDescription: display, valueDate: day('2026-08-31') }]),
     });
     mount();
     await openSheet(display);
@@ -1509,6 +1509,33 @@ describe('transaction descriptions', () => {
     expect(screen.queryByText(/Value date:/) !== null).toBe(date !== '2026-08-31');
     expect(screen.queryByText(/spread over 12 months/)).toBeNull();
     expect(oneOffSwitch()).toBeInTheDocument();
+  });
+});
+
+describe('the day a transaction is on', () => {
+  it('is the day the bank wrote, in the list and in the sheet', async () => {
+    const booked = row({
+      id: 'tx-1', description: 'REWE Berlin', category: 'food',
+      date: txDate('2026-09-30'), valueDate: day('2026-10-01'),
+    });
+    mockFetch({ ...TX_ROUTES, 'GET /api/transactions': () => ok([booked]) });
+    mount();
+
+    expect((await screen.findByText('REWE Berlin')).closest('.row')).toHaveTextContent('30.09.2026 · Food');
+    await openSheet('REWE Berlin');
+    const sheet = screen.getByRole('dialog');
+    expect(within(sheet).getByText('30.09.2026 · Food')).toBeInTheDocument();
+    expect(within(sheet).getByText('Value date: 01.10.2026')).toBeInTheDocument();
+  });
+
+  it('is the day the bank wrote in a transfer rule preview', async () => {
+    mockFetch(PREVIEW_ROUTES);
+    mount();
+    await openPreview();
+
+    const matching = screen.getByRole('list', { name: 'Matching transactions' });
+    expect(within(matching).getByText('14.07.2026')).toBeInTheDocument();
+    expect(within(matching).getByText('01.01.2025')).toBeInTheDocument();
   });
 });
 

@@ -1,19 +1,16 @@
-import type { Transaction, TransferRule } from './wire';
+import { type CalendarDay, calendarDay, type Transaction, type TransferRule } from './wire';
 
 export function transactionDescription(description: string): {
   displayDescription?: string;
-  valueDate?: string;
+  valueDate?: CalendarDay;
 } {
   // (?<=\S): only the first space after a word can start the suffix, so a run of
   // whitespace is scanned once and not once per position
   const suffix = /(?<=\S)\s+Wertstellung\s+(\d{2})\.(\d{2})\.(\d{4})\s*$/i.exec(description);
   if (!suffix) return {};
   const displayDescription = description.slice(0, suffix.index).trim();
-  const valueDate = `${suffix[3]}-${suffix[2]}-${suffix[1]}`;
-  const date = new Date(`${valueDate}T00:00:00.000Z`);
-  if (!displayDescription || !Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== valueDate) {
-    return {};
-  }
+  const valueDate = calendarDay(`${suffix[3]}-${suffix[2]}-${suffix[1]}`);
+  if (!displayDescription || valueDate === null) return {};
   return { displayDescription, valueDate };
 }
 

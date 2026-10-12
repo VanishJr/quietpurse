@@ -66,6 +66,20 @@ describe('insertTransactions', () => {
     expect(await insertTransactions([tx({ ...row, date: '2026-05-02T19:30:00.000Z' })])).toBe(0);
   });
 
+  it('refuses the whole batch when a date is not a day on the calendar', async () => {
+    const row = { accountId: 'baddate', amount: -7, description: 'impossible day' };
+    await expect(
+      insertTransactions([
+        tx({ ...row, date: '2026-05-04T00:00:00.000Z' }),
+        tx({ ...row, date: '2026-02-30T00:00:00.000Z' }),
+      ]),
+    ).rejects.toThrow(
+      'a transaction\'s date is not a real day, or not a real time of one, so nothing was inserted: "2026-02-30T00:00:00.000Z"',
+    );
+    // the good row of the refused batch is new to the database
+    expect(await insertTransactions([tx({ ...row, date: '2026-05-04T00:00:00.000Z' })])).toBe(1);
+  });
+
   it('identical rows in one batch are numbered, so both survive', async () => {
     const row = { accountId: 'twice', date: '2026-06-03T00:00:00.000Z', amount: -3.5 };
     expect(await insertTransactions([tx(row), tx(row)])).toBe(2);

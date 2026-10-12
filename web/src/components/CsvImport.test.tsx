@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MAX_ERROR_CHARS } from '../api';
-import { fmtDate } from '../format';
+import { fmtInstant } from '../format';
 import { CONFIRMED, DUPLICATE, PRESETS, summaryResult } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { Account, BalancesNotShown } from '../types';
@@ -13,8 +13,8 @@ import { CsvImport } from './CsvImport';
  * leave the caller's data alone.
  *
  * No rendered date is asserted anywhere here but the duplicate card's, which is computed with
- * fmtDate and never written - the summary carries fmtDay(from) and the duplicate card
- * fmtDate(uploadedAt), and how a date is rendered is the copy's to change.
+ * fmtInstant and never written - the summary carries fmtDay(from) and the duplicate card
+ * fmtInstant(uploadedAt), and how a date is rendered is the copy's to change.
  */
 
 /**
@@ -1071,7 +1071,9 @@ describe('confirm', () => {
     // the control the sentence points at, still there and still pressable, on a card
     // the refused confirm left standing
     expect(screen.getByRole('button', { name: 'Discard' })).toBeEnabled();
-    expect(screen.getByRole('heading', { name: /confirmation not verified/ })).toBeInTheDocument();
+    // a 409 is an answer and not a lost one, so nothing may doubt what its sentence says
+    expect(screen.getByRole('heading', { name: /confirmation refused/ })).toBeInTheDocument();
+    expect(screen.queryByText(/It may have committed despite the error/)).not.toBeInTheDocument();
     // nothing landed, so nothing may tell the caller it did
     expect(onImported).not.toHaveBeenCalled();
     expect(screen.queryByText(/Imported 12 of 12 rows/)).not.toBeInTheDocument();
@@ -1225,7 +1227,7 @@ describe('discard', () => {
 
 describe('a file that is already in', () => {
   if (DUPLICATE.outcome !== 'duplicate') throw new Error('DUPLICATE is not the duplicate answer');
-  const uploadedOn = fmtDate(DUPLICATE.uploadedAt);
+  const uploadedOn = fmtInstant(DUPLICATE.uploadedAt);
 
   it('says so and offers nothing to confirm or discard', async () => {
     mockFetch({ ...BASE, 'POST /api/imports': () => ok({ ...DUPLICATE, total: 1 }) });

@@ -13,6 +13,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import {
+  type CalendarDay,
   CHART_BREAKDOWNS,
   CHART_KINDS,
   CHART_RANGES,
@@ -113,7 +114,7 @@ export const transactions = pgTable(
     // 0.00 asserts one. A default of 0 would make every statement claim the second.
     feeCents: integer('fee_cents'),
     currency: text('currency').notNull(),
-    date: text('date').notNull(),
+    date: text('date').$type<CalendarDay>().notNull(),
     description: text('description').notNull().default(''),
     mcc: integer('mcc'),
     // category slug (see categorizer.ts); human-readable names live in the client

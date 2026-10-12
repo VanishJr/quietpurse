@@ -125,6 +125,62 @@ describe('what the door refuses', () => {
     expect(((await agent.get('/api/backup')).body as { tables: unknown }).tables).toEqual(before.tables);
   });
 
+  describe('a date in a backup', () => {
+    type Dump = { format: string; version: number; tables: Record<string, Record<string, unknown>[]> };
+
+    /** The current contents plus `count` transactions on a new account, so the file is a real dump. */
+    const dumpWithTransactions = async (count = 1): Promise<{ data: Dump; accountId: string }> => {
+      const created = await agent.post('/api/accounts').send({ name: `Dated Bank ${crypto.randomUUID()}`, currency: 'EUR' });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const accountId = created.body.id as string;
+      await insertTransactions(Array.from({ length: count }, (_, n) => ({
+        accountId,
+        provider: 'upload' as const,
+        amount: -20 - n,
+        currency: 'EUR',
+        date: '2026-10-05T23:30:00.000Z',
+        description: 'Trattoria Nord',
+        category: 'other',
+        fee: null,
+      })));
+      return { data: (await agent.get('/api/backup')).body as Dump, accountId };
+    };
+
+    it.each([
+      ['transactions', '05.10.2026'],
+      ['transactions', 'Oct 5 2026'],
+      ['fx_rates', '2026/10/05'],
+    ])('%s.date %j is refused by name, and nothing is replaced', async (table, date) => {
+      const { data } = await dumpWithTransactions();
+      const before = structuredClone(data.tables);
+      if (table === 'transactions') data.tables.transactions[0].date = date;
+      else data.tables.fx_rates = [...(data.tables.fx_rates ?? []), { date, currency: 'USD', rate: 1.1 }];
+
+      const res = await restore('application/json', JSON.stringify(data));
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: `backup could not be restored: ${table}.date: expected a value that starts with YYYY-MM-DD`,
+      });
+      expect(((await agent.get('/api/backup')).body as Dump).tables).toEqual(before);
+    });
+
+    it('restores what an earlier version could have stored, a day or time that does not exist included', async () => {
+      const stored = ['2026-10-05', '2026-02-30T00:00:00.000Z', '2026-01-05T25:99:00.000Z'];
+      const { data, accountId } = await dumpWithTransactions(stored.length);
+      data.tables.transactions
+        .filter((t) => t.accountId === accountId)
+        .forEach((t, n) => { t.date = stored[n]; });
+      data.tables.fx_rates = [...(data.tables.fx_rates ?? []), { date: '2026-10-05', currency: 'USD', rate: 1.1 }];
+
+      const res = await restore('application/json', JSON.stringify(data));
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const after = ((await agent.get('/api/backup')).body as Dump).tables;
+      expect(after.transactions.filter((t) => t.accountId === accountId).map((t) => t.date).sort()).toEqual([...stored].sort());
+    });
+  });
+
   /**
    * The database's own refusal still says only that the write failed: its message is the
    * whole failed statement with every bound value, and that goes to the log.

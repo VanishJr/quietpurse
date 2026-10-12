@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  fmtDate,
   fmtDay,
+  fmtInstant,
   fmtMoney,
-  fmtMonth,
   fmtMonthKey,
   fmtMonthTick,
   fmtShort,
@@ -11,6 +10,7 @@ import {
   isoDay,
   truncateMiddle,
 } from './format';
+import { day, instant, txDate } from './test/fixtures';
 
 describe('fmtMoney', () => {
   it('groups thousands and drops a zero fraction', () => {
@@ -48,25 +48,20 @@ describe('fmtShort', () => {
 });
 
 describe('dates', () => {
-  it('formats dd.mm.yyyy', () => {
-    expect(fmtDate('2026-07-05T12:00:00Z')).toBe('05.07.2026');
+  it('runs west of UTC, where a day read through a Date is the day before', () => {
+    expect(new Date('2026-09-30T00:00:00.000Z').getDate()).toBe(29);
   });
 
-  it('reads a date-only string as UTC and prints it in local time', () => {
-    // The API sends date-only strings, which JS parses as UTC midnight, and
-    // fmtDate then reads them with local getters. West of UTC that is the day
-    // before. The suite pins TZ=UTC (vitest.config.ts) so this stays stable -
-    // the shift itself is real and lives on until dates are parsed as local.
-    expect(fmtDate('2026-07-05')).toBe('05.07.2026');
+  it("fmtInstant reads a moment in the reader's own zone", () => {
+    expect(fmtInstant(instant('2026-07-05T12:00:00.000Z'))).toBe('05.07.2026');
+    expect(fmtInstant(instant('2026-10-01T02:00:00.000Z'))).toBe('30.09.2026');
   });
 
-  it('fmtDay never turns a calendar date into an instant', () => {
-    // The statement summary's date range. fmtDate is wrong for these in any negative
-    // offset - `new Date('2026-02-01')` is UTC midnight, so it prints the 31st - and
-    // unlike the fmtDate case above, that is not a shift this suite's TZ=UTC hides:
-    // fmtDay splits the string, so there is no zone for it to be wrong in.
-    expect(fmtDay('2026-02-01')).toBe('01.02.2026');
-    expect(fmtDay('2026-12-31')).toBe('31.12.2026');
+  it('fmtDay prints the day the bank wrote, in each shape the server sends one', () => {
+    expect(fmtDay(day('2026-02-01'))).toBe('01.02.2026');
+    expect(fmtDay(txDate('2026-09-30'))).toBe('30.09.2026');
+    // a statement that states a time: east of UTC, read through a Date, this is the 6th
+    expect(fmtDay(txDate('2026-01-05', '23:30:00'))).toBe('05.01.2026');
   });
 
   it('isoDay is local and round-trips a local Date', () => {
@@ -74,14 +69,8 @@ describe('dates', () => {
     expect(isoDay(new Date(2026, 0, 1))).toBe('2026-01-01');
   });
 
-  it('fmtMonth names the month', () => {
-    expect(fmtMonth(new Date(2026, 6, 15))).toBe('July 2026');
-  });
-
   it('fmtMonthKey splits the string rather than parsing it', () => {
-    // `new Date('2026-01')` is UTC midnight and prints as December west of UTC. The
-    // suite pins TZ=UTC, so only a split can be shown to be immune here - what the
-    // assertion protects is that the implementation stays one.
+    // `new Date('2026-01')` is UTC midnight, which is December west of UTC
     expect(fmtMonthKey('2026-07')).toBe('Jul 2026');
     expect(fmtMonthKey('2026-01')).toBe('Jan 2026');
     expect(fmtMonthKey('2025-12')).toBe('Dec 2025');

@@ -27,17 +27,16 @@ export default defineConfig({
       exclude: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test/**'],
     },
     // TZ is set per project, not once at the top: a project does not inherit the
-    // root test block. fmtDate reads a UTC instant with local getters, so its
-    // output depends on the machine's zone - pinning it keeps the suite
-    // deterministic; it does not make the dependency go away (see the date-only
-    // case in src/format.test.ts).
+    // root test block. West of UTC on purpose: UTC is the one zone where a calendar
+    // day read through a `Date` still lands on its own day, so a suite pinned there
+    // cannot see that mistake.
     projects: [
       {
         test: {
           name: 'unit',
           environment: 'node',
           include: ['src/**/*.test.ts'],
-          env: { TZ: 'UTC' },
+          env: { TZ: 'America/New_York' },
         },
       },
       {
@@ -46,7 +45,7 @@ export default defineConfig({
           environment: 'jsdom',
           include: ['src/**/*.test.tsx'],
           setupFiles: ['src/test/setup.ts'],
-          env: { TZ: 'UTC' },
+          env: { TZ: 'America/New_York' },
         },
       },
     ],

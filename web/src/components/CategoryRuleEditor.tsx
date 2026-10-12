@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { api } from '../api';
 import { CATEGORIES, categoryLabel, categoryRuleCaption } from '../categories';
-import { fmtDate, fmtMoney } from '../format';
+import { fmtDay, fmtMoney } from '../format';
 import type { Account, CategoryRulePreview, Transaction } from '../types';
 import { Button } from './Button';
 import { Field } from './Field';
@@ -151,7 +151,7 @@ export function CategoryRuleEditor({ transaction, accounts, onBack, onBusyChange
                     <strong>{fmtMoney(tx.amount, tx.currency)}</strong>
                   </div>
                   <div className="sheet-meta">
-                    {fmtDate(tx.date)} · {accounts.find((account) => account.id === tx.accountId)?.name ?? 'Account'} · {categoryLabel(tx.category)}
+                    {fmtDay(tx.date)} · {accounts.find((account) => account.id === tx.accountId)?.name ?? 'Account'} · {categoryLabel(tx.category)}
                     {accounts.find((account) => account.id === tx.accountId)?.hidden && ' · Hidden account'}
                     {tx.categoryManual && ' · Manually assigned category kept'}
                   </div>

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { isAvailable, useDismiss } from '../dismiss';
 import { safeFilename, saveBlob } from '../download';
 import { useEditorSession } from '../editor';
-import { fmtDate, rowCount } from '../format';
+import { fmtInstant, rowCount } from '../format';
 import { importStatusLabel, importStatusNote } from '../imports';
 import { ScreenShown } from '../screen';
 import type { Account, ImportList, ImportRecord } from '../types';
@@ -241,7 +241,7 @@ export function ImportHistory({ onBack, backLabel, onChanged, account }: Props) 
             <article key={r.id} className="history-record" aria-labelledby={recordId}>
               <div className="history-record__identity">
                 <h2 id={recordId}>{title}</h2>
-                <p className="history-record__context">{importStatusLabel(r.status)} · {r.accountName ?? 'no account recorded'} · {fmtDate(r.uploadedAt)}</p>
+                <p className="history-record__context">{importStatusLabel(r.status)} · {r.accountName ?? 'no account recorded'} · {fmtInstant(r.uploadedAt)}</p>
                 <p className="history-record__counts">{countsLine(r)}</p>
                 {note && <p>{note}</p>}
                 {deduplicated(r) && <p>Every row in this file had already been imported when it was read, so none of them belong to this import.</p>}

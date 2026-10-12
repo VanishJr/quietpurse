@@ -18,6 +18,7 @@ import {
   IncomeSourceTotal,
 } from './types';
 import type {
+  CalendarDay,
   CHART_ACCOUNT_ID_MAX as WIRE_CHART_ACCOUNT_ID_MAX,
   CHART_ID_MAX as WIRE_CHART_ID_MAX,
   CHART_ID_SHAPE_SOURCE as WIRE_CHART_ID_SHAPE_SOURCE,
@@ -206,8 +207,8 @@ export const tickOf = (isoDate: string, grain: Grain): string =>
   grain === 'year' ? isoDate.slice(0, 4) : monthOf(isoDate);
 
 export interface Bounds {
-  from: string;
-  to: string;
+  from: CalendarDay;
+  to: CalendarDay;
 }
 
 /** The calendar days the range covers, inclusive — what the endpoints take. */

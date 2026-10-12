@@ -3,6 +3,7 @@ import {
   AccountMonthlySummary,
   AccountSummary,
   AppSettings,
+  CalendarDay,
   GoalList,
   GoalSummary,
   ImportConfirmed,
@@ -11,6 +12,7 @@ import {
   ImportSummary,
   ImportTotals,
   IncomeSourceDef,
+  Instant,
   RecurringSummary,
   StatementImportResult,
   Summary,
@@ -23,6 +25,19 @@ import {
  * `types.ts`: a field the server renames fails `tsc` here rather than a screen quietly
  * rendering a shape the server no longer sends.
  */
+
+/**
+ * A transaction's date as the server sends it: the day with the time the file stated, or
+ * UTC midnight when it stated none. A bare day here would hide a formatter that cannot read
+ * that shape.
+ */
+export const txDate = (day: string, time = '00:00:00'): CalendarDay =>
+  `${day}T${time}.000Z` as CalendarDay;
+
+/** A day the server sends bare: a value date, the first and last day of a statement. */
+export const day = (value: string): CalendarDay => value as CalendarDay;
+
+export const instant = (value: string): Instant => value as Instant;
 
 export const APP_SETTINGS: AppSettings = { baseCurrency: 'EUR', ownerNames: ['Yurii Kalvenko'] };
 
@@ -182,8 +197,8 @@ export const summaryResult = (patch: Partial<ImportSummary> = {}): StatementImpo
     problems: [],
     newRows: 12,
     alreadyPresent: 0,
-    from: '2026-06-01',
-    to: '2026-06-30',
+    from: day('2026-06-01'),
+    to: day('2026-06-30'),
     totals: [{ currency: 'EUR', net: -420.5 }],
     // the arm the component's own default chip ('generic') produces, so every case
     // that does not patch it renders the one a real upload from this screen would
@@ -215,7 +230,7 @@ export const importRecord = (patch: Partial<ImportRecord> = {}): ImportRecord =>
   originalFilename: 'statement.csv',
   accountName: 'Sparkasse Giro',
   accountId: 'acc-1',
-  uploadedAt: '2026-06-15T10:00:00.000Z',
+  uploadedAt: instant('2026-06-15T10:00:00.000Z'),
   parserVersion: 1,
   status: 'committed',
   rowsAccepted: 12,
@@ -252,7 +267,7 @@ export const DUPLICATE: StatementImportResult = {
   importId: 'imp-0',
   accountId: 'acc-9',
   accountIds: ['acc-9'],
-  uploadedAt: '2026-06-15T10:00:00.000Z',
+  uploadedAt: instant('2026-06-15T10:00:00.000Z'),
   skipped: 0,
   total: 12,
 };

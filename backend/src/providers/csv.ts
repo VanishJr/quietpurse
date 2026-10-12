@@ -254,7 +254,9 @@ export function parseAmount(raw: string, decimal: CsvMapping['decimal'] = 'auto'
 }
 
 /**
- * Row date -> ISO 8601. null = could not be parsed.
+ * Row date -> ISO 8601. null = the text has no date shape. A shape whose day or time does
+ * not exist (30.02.2026, 25:99) comes back as read: mapAndStore refuses the whole import
+ * over it, where a null here would drop that one row and import the rest.
  *
  * The default is 'auto', which matters for the generic preset: it detects the columns
  * but knows nothing about the file's locale, and a German statement (05.01.2026) is at

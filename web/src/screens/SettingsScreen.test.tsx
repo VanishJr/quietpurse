@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING } from '../test/fixtures';
+import { APP_SETTINGS, importsResponse, INCOME_SOURCES, RECURRING, txDate } from '../test/fixtures';
 import { fail, mockFetch, ok, renderThemed, requests, Routes } from '../test/harness';
 import { setUrl } from '../url';
 import { ScreenShown } from '../screen';
@@ -914,7 +914,7 @@ describe('the import history across every account', () => {
 describe('recurring payments', () => {
   const payment = (description: string, ignored = false, key = description.toLowerCase()) => ({
     key, description, category: 'subscriptions', months: 6, count: 6,
-    avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored,
+    avgAmount: -10, monthlyAvg: -10, lastDate: txDate('2026-07-01'), ignored,
   });
   const answer = (...groups: ReturnType<typeof payment>[]) => ({
     baseCurrency: 'EUR', monthlyTotal: -10, groups,
@@ -939,7 +939,7 @@ describe('recurring payments', () => {
     expect(await within(card).findByText('Long gym payment')).toBeInTheDocument();
     expect(within(card).getByText(/last twelve months/)).toBeInTheDocument();
     expect(within(card).getByText('Estimated per month')).toBeInTheDocument();
-    expect(within(card).getByText(/Subscriptions · 6 months detected/)).toBeInTheDocument();
+    expect(within(card).getByText(/Subscriptions · 6 months detected · last 01\.07\.2026/)).toBeInTheDocument();
     const row = within(card).getByRole('article', { name: 'Recurring payment Long gym payment' });
     const value = within(row).getByText('−10 EUR');
     expect(value.closest('.settings-recurring-amount')).toHaveTextContent('−10 EUR/mo');
@@ -1577,7 +1577,7 @@ describe('recurring payments', () => {
       count: 6,
       avgAmount: -10,
       monthlyAvg: -10,
-      lastDate: '2026-07-01',
+      lastDate: txDate('2026-07-01'),
       ignored: false,
     };
     mockFetch({
@@ -1665,7 +1665,7 @@ describe('recurring payments', () => {
   it('re-reads after a mutation whose answer was overtaken by a pre-write revision read', async () => {
     const group = (ignored: boolean) => ({
       key: 'spotify', description: 'Spotify', category: 'subscriptions', months: 6, count: 6,
-      avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored,
+      avgAmount: -10, monthlyAvg: -10, lastDate: txDate('2026-07-01'), ignored,
     });
     const before = { baseCurrency: 'EUR', monthlyTotal: -10, groups: [group(false)] };
     const after = { baseCurrency: 'EUR', monthlyTotal: 0, groups: [group(true)] };
@@ -1702,7 +1702,7 @@ describe('recurring payments', () => {
   it('keeps the post-write refresh when an older revision read finishes afterward', async () => {
     const group = (ignored: boolean) => ({
       key: 'spotify', description: 'Spotify', category: 'subscriptions', months: 6, count: 6,
-      avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored,
+      avgAmount: -10, monthlyAvg: -10, lastDate: txDate('2026-07-01'), ignored,
     });
     const before = { baseCurrency: 'EUR', monthlyTotal: -10, groups: [group(false)] };
     const after = { baseCurrency: 'EUR', monthlyTotal: 0, groups: [group(true)] };
@@ -1792,7 +1792,7 @@ describe('recurring payments', () => {
       count: 3,
       avgAmount: -10,
       monthlyAvg: -10,
-      lastDate: '2026-07-01',
+      lastDate: txDate('2026-07-01'),
       ignored: false,
     });
     let releaseOld: (response: Response) => void = () => {};

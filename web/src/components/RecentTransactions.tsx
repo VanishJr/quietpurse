@@ -1,5 +1,5 @@
 import { categoryLabel } from '../categories';
-import { fmtDate, fmtDay, fmtMoney } from '../format';
+import { fmtDay, fmtMoney } from '../format';
 import { TransactionsIcon } from './NavIcons';
 import { Account, Transaction } from '../types';
 import { useTheme } from '../theme';
@@ -83,7 +83,7 @@ export function RecentTransactions({ account, transactions, onSeeAll }: Props) {
                     </span>
                   </td>
                   <td className="tx-date">
-                    <span className="tx-cell">{fmtDate(t.date)}</span>
+                    <span className="tx-cell">{fmtDay(t.date)}</span>
                     {t.valueDate && t.valueDate !== t.date.slice(0, 10) && (
                       <span className="tx-value-date">Value date {fmtDay(t.valueDate)}</span>
                     )}

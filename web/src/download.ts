@@ -1,3 +1,5 @@
+import { isoDay } from './format';
+
 const MAX_FILENAME_CHARS = 100;
 
 const UNSAFE = /[\x00-\x1f\x7f\\/]/g;
@@ -24,6 +26,8 @@ export function safeFilename(
 ): string {
   return clean(name ?? '') || clean(`import-${importId}.${sourceType}`) || 'statement';
 }
+
+export const backupFilename = (now: Date): string => `quietpurse-backup-${isoDay(now)}.json`;
 
 export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);

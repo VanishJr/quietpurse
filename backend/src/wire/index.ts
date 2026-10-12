@@ -98,6 +98,31 @@ export const accountDeletedSchema = z.strictObject({
 });
 export type AccountDeleted = z.infer<typeof accountDeletedSchema>;
 
+/**
+ * A day off a statement, not a moment: its first ten characters are the YYYY-MM-DD the
+ * bank wrote, and whatever follows them is never read through a `Date`.
+ */
+export const calendarDaySchema = z.string().brand<'CalendarDay'>();
+export type CalendarDay = z.infer<typeof calendarDaySchema>;
+
+/**
+ * null unless the value is a YYYY-MM-DD that is a day on the calendar, alone or followed by a
+ * time that day has, written as `toISOString` writes one.
+ */
+export const calendarDay = (value: string): CalendarDay | null => {
+  const bare = value.length === 10;
+  const date = new Date(bare ? `${value}T00:00:00.000Z` : value);
+  if (Number.isNaN(date.getTime())) return null;
+  // compared back, because Date rolls 2026-02-30 into March and 24:00 into the next day
+  // rather than refusing them
+  const written = date.toISOString();
+  return (bare ? written.slice(0, 10) : written) === value ? (value as CalendarDay) : null;
+};
+
+export const instantSchema = z.string().brand<'Instant'>();
+export type Instant = z.infer<typeof instantSchema>;
+export const instant = (value: string): Instant => value as Instant;
+
 export const transactionSchema = z.strictObject({
   id: z.string(),
   accountId: z.string(),
@@ -106,11 +131,11 @@ export const transactionSchema = z.strictObject({
   amount: z.number(),
   currency: z.string(),
   /** ISO 8601 */
-  date: z.string(),
+  date: calendarDaySchema,
   description: z.string(),
   mcc: z.number().optional(),
   displayDescription: z.string().optional(),
-  valueDate: z.string().optional(),
+  valueDate: calendarDaySchema.optional(),
   category: z.string(),
   /** true: the category above was set by hand and no recompute will change it */
   categoryManual: z.boolean(),
@@ -318,7 +343,7 @@ export const recurringGroupSchema = z.strictObject({
   count: z.number(),
   avgAmount: z.number(),
   monthlyAvg: z.number(),
-  lastDate: z.string(),
+  lastDate: calendarDaySchema,
   ignored: z.boolean(),
 });
 export type RecurringGroup = z.infer<typeof recurringGroupSchema>;
@@ -438,8 +463,8 @@ export const importSummarySchema = z.strictObject({
   /** Of `accepted`, how many are not already in the database - the number the user reads before deciding. */
   newRows: z.number(),
   alreadyPresent: z.number(),
-  from: z.string(),
-  to: z.string(),
+  from: calendarDaySchema,
+  to: calendarDaySchema,
   totals: z.array(statementTotalSchema).readonly(),
   readAs: readAsSchema,
   balances: statementBalancesSchema.optional(),
@@ -455,7 +480,7 @@ export const statementImportResultSchema = z.discriminatedUnion('outcome', [
     importId: z.string(),
     accountId: z.string(),
     accountIds: z.array(z.string()),
-    uploadedAt: z.string(),
+    uploadedAt: instantSchema,
     skipped: z.number(),
     total: z.number(),
   }),
@@ -491,7 +516,7 @@ export const importRecordSchema = z.strictObject({
    * a rename moves the account, never this row's accountName.
    */
   accountId: z.string().nullable(),
-  uploadedAt: z.string(),
+  uploadedAt: instantSchema,
   parserVersion: z.number(),
   status: importStatusSchema,
   rowsAccepted: z.number(),

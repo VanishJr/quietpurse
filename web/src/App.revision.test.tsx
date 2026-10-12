@@ -9,6 +9,7 @@ import {
   PRESETS,
   SAVINGS_GOAL,
   summaryResult,
+  txDate,
 } from './test/fixtures';
 import { askedFor, FIRST_PAINT_ROUTES, mockFetch, ok, requests, requestUrls, type Routes } from './test/harness';
 import type { Account, Transaction } from './types';
@@ -30,7 +31,7 @@ const bakery: Transaction = {
   provider: 'upload',
   amount: -42,
   currency: 'EUR',
-  date: '2026-08-14',
+  date: txDate('2026-08-14'),
   description: 'Corner bakery',
   category: 'other',
   categoryManual: false,

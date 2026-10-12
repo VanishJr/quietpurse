@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { App } from './App';
-import { accountMonths, accountSummary, CONFIRMED, PRESETS, summaryResult } from './test/fixtures';
+import { accountMonths, accountSummary, CONFIRMED, PRESETS, summaryResult, txDate } from './test/fixtures';
 import { askedFor, FIRST_PAINT_ROUTES, mockFetch, ok, requests, requestUrls } from './test/harness';
 import type { Transaction } from './types';
 
@@ -11,7 +11,7 @@ const imported: Transaction = {
   provider: 'upload',
   amount: -42,
   currency: 'EUR',
-  date: '2026-08-14',
+  date: txDate('2026-08-14'),
   description: 'Corner bakery',
   category: 'other',
   categoryManual: false,

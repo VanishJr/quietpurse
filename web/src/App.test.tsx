@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
-import { ACCOUNTS, importsResponse, PRESETS } from './test/fixtures';
+import { ACCOUNTS, importsResponse, PRESETS, txDate } from './test/fixtures';
 import { FIRST_PAINT_ROUTES, mockFetch, ok, requests } from './test/harness';
 
 /**
@@ -366,7 +366,7 @@ describe('the shell', () => {
 
   it('returns to Settings on its heading, closing a recurring menu left open without re-entering it', async () => {
     const gym = { key: 'gym', description: 'Gym', category: 'subscriptions', months: 6, count: 6,
-      avgAmount: -10, monthlyAvg: -10, lastDate: '2026-07-01', ignored: false };
+      avgAmount: -10, monthlyAvg: -10, lastDate: txDate('2026-07-01'), ignored: false };
     mockFetch({ ...FIRST_PAINT_ROUTES, 'GET /api/recurring': () => ok({ baseCurrency: 'EUR', monthlyTotal: -10, groups: [gym] }) });
     render(<App />);
     expect(await appMounted()).toBeVisible();

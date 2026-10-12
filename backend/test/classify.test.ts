@@ -1,7 +1,9 @@
+import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
-import { canPair, reclassifyAll } from '../src/classify';
-import { insertTransactions } from '../src/db';
+import { canPair, pairingGap, reclassifyAll } from '../src/classify';
+import { dbInstance, insertTransactions } from '../src/db';
 import { NewTransaction, Transaction } from '../src/types';
+import { calendarDay } from '../src/wire';
 import { findTx } from './helpers';
 
 const HOUR = 3600_000;
@@ -22,6 +24,7 @@ const tx = (over: Partial<NewTransaction>): NewTransaction => ({
 const pairable = (over: Partial<NewTransaction>): Transaction => ({
   id: 'unused',
   ...tx(over),
+  date: calendarDay(tx(over).date)!,
   fee: undefined,
   categoryManual: false,
   transfer: false,
@@ -49,6 +52,18 @@ describe('canPair: pairing rules without touching the database', () => {
     expect(canPair(expense, pairable({ accountId: 'b', amount: 20.5 }), HOUR, {})).toBe(false);
   });
 
+  it('a gap that cannot be measured never pairs', () => {
+    expect(canPair(expense, income, NaN, {})).toBe(false);
+  });
+
+  it('a time that does not read is midnight of its day, and across currencies no time at all', () => {
+    const restored = { ...expense, date: '2026-01-05T25:99:00.000Z' } as Transaction;
+    const sameDay = { ...income, date: '2026-01-05T09:00:00.000Z' } as Transaction;
+    expect(pairingGap(restored, sameDay)).toBe(9 * HOUR);
+    expect(pairingGap(restored, { ...sameDay, currency: 'UAH' })).toBeNaN();
+    expect(pairingGap(expense, { ...income, date: '2026-01-10T15:00:00.000Z' } as Transaction)).toBe(3 * HOUR);
+  });
+
   it('one account never pairs with itself', () => {
     expect(canPair(expense, pairable({ accountId: 'a', amount: 20 }), HOUR, {})).toBe(false);
   });
@@ -65,6 +80,32 @@ describe('canPair: pairing rules without touching the database', () => {
 });
 
 describe('reclassifyAll: integration on an in-memory database', () => {
+  it('pairs a time that does not read as midnight of its day, as a restore can store one', async () => {
+    await insertTransactions([
+      tx({ accountId: 'restored:a', amount: -77, date: '2026-01-05T08:00:00.000Z', description: 'Restored leg out' }),
+      tx({ accountId: 'restored:b', amount: 77, date: '2026-01-05T09:00:00.000Z', description: 'Restored leg in' }),
+      tx({ accountId: 'restored:c', amount: -88, date: '2026-01-06T08:00:00.000Z', description: 'Restored lone out' }),
+      tx({ accountId: 'restored:d', amount: 88, date: '2026-03-20T08:00:00.000Z', description: 'Months later in' }),
+    ]);
+    // what a restore keeps from an earlier version, which no insert writes any more
+    for (const description of ['Restored leg out', 'Restored lone out']) {
+      await dbInstance().execute(
+        sql`UPDATE transactions SET date = substr(date, 1, 10) || 'T25:99:00.000Z' WHERE description = ${description}`,
+      );
+    }
+    expect((await stored('Restored leg out')).date).toBe('2026-01-05T25:99:00.000Z');
+
+    await reclassifyAll();
+
+    expect((await stored('Restored leg out')).transfer).toBe(true);
+    expect((await stored('Restored leg in')).transfer).toBe(true);
+    expect((await stored('Restored lone out')).transfer).toBe(false);
+    expect((await stored('Months later in')).transfer).toBe(false);
+
+    // the rows below in this file are their own; a 25:99 left here would be in their way
+    await dbInstance().execute(sql`DELETE FROM transactions WHERE account_id LIKE 'restored:%'`);
+  });
+
   it('transfers, false pairs, family, rent, recurring', async () => {
     await insertTransactions([
       // a real transfer between own accounts: a p2p MCC on both sides, same minute

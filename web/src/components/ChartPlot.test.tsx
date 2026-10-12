@@ -8,10 +8,10 @@ import type { Chart } from '../types';
 import { ChartPlot } from './ChartPlot';
 import { AccountFlows } from './AccountFlows';
 import { SpendingByCategory } from './SpendingByCategory';
-import { ACCOUNTS } from '../test/fixtures';
+import { ACCOUNTS, day } from '../test/fixtures';
 
 const spec: Chart = { id: 'c-color', title: 'Colors', kind: 'donut', accountId: null, range: '3m', metrics: ['income', 'expense'], breakdown: 'expense-categories' };
-const data: ChartData = { shape: 'share', currency: 'EUR', period: { from: '2026-01-01', to: '2026-03-31' }, priorPeriod: null, compared: null,
+const data: ChartData = { shape: 'share', currency: 'EUR', period: { from: day('2026-01-01'), to: day('2026-03-31') }, priorPeriod: null, compared: null,
   slices: [{ key: 'food', label: 'Food', value: 30 }, { key: 'future-category', label: 'Unknown category', value: 20 }, { key: 'other', label: 'Other', value: 10 }] };
 const marker = (label: string) => screen.getByText(label).querySelector('.dot') as HTMLElement;
 

@@ -73,6 +73,61 @@ const makeAccount = async (name: string, currency = 'EUR'): Promise<string> => {
 };
 
 describe('POST /api/imports', () => {
+  it.each([
+    ['30.02.2026', 'which is not a day on the calendar'],
+    ['2026-01-05 25:99', 'whose time of day does not exist'],
+  ])('refuses the whole statement over the date %j: the import ends failed, with no row staged', async (cell, why) => {
+    const accountId = await makeAccount(`Impossible Bank ${cell}`);
+    const file = Buffer.from(
+      ['date,amount,description', '2026-03-01,-10.00,Ordinary row', `${cell},-4.00,Impossible row`].join('\n'),
+      'utf8',
+    );
+    const refusal = `row 3: the date cell reads "${cell}", ${why} - nothing was imported, correct the date in the file and upload it again`;
+
+    const res = await agent.post('/api/imports').field('accountId', accountId).field('preset', 'generic').attach('file', file, 'impossible.csv');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain(refusal);
+    const [latest] = (await agent.get('/api/imports')).body.imports as { id: string }[];
+    expect(latest).toMatchObject({ originalFilename: 'impossible.csv', status: 'failed', errorDetail: refusal });
+    const staged = (await dbInstance().execute(
+      sql`SELECT COUNT(*) AS n FROM staged_transactions WHERE import_id = ${latest.id}`,
+    )) as unknown as { rows: { n: number | string }[] };
+    expect(Number(staged.rows[0].n)).toBe(0);
+  });
+
+  it('a confirm of rows an earlier version staged with a date that does not exist sends the user to upload again', async () => {
+    const accountId = await makeAccount('Staged Earlier Bank');
+    const res = await agent
+      .post('/api/imports')
+      .field('accountId', accountId)
+      .field('preset', 'generic')
+      .attach('file', csvFile('Staged by an earlier version'), 'earlier.csv');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const importId = res.body.summary.importId as string;
+    // what an earlier version staged, which no upload stages any more
+    await dbInstance().execute(
+      sql`UPDATE staged_transactions SET date = '2026-02-30T00:00:00.000Z' WHERE import_id = ${importId}`,
+    );
+
+    const refused = await confirm(importId);
+
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe(
+      'nothing was imported: an earlier version read this file and kept the date "2026-02-30T00:00:00.000Z", which is not a real day or time. Discard this import and upload the file again, and the upload will name the row to correct',
+    );
+    expect((await agent.get('/api/transactions').query({ accountId })).body).toEqual([]);
+    // rolled back whole: still waiting, its row still staged, so Discard is a way out
+    const waiting = ((await agent.get('/api/imports')).body.imports as { id: string; status: string }[])
+      .find((r) => r.id === importId);
+    expect(waiting?.status).toBe('awaiting_confirmation');
+    const staged = (await dbInstance().execute(
+      sql`SELECT COUNT(*) AS n FROM staged_transactions WHERE import_id = ${importId}`,
+    )) as unknown as { rows: { n: number | string }[] };
+    expect(Number(staged.rows[0].n)).toBe(1);
+    expect((await agent.post(`/api/imports/${importId}/discard`)).status).toBe(200);
+  });
+
   it('takes a CSV as multipart and answers with a summary to confirm', async () => {
     const res = await agent
       .post('/api/imports')

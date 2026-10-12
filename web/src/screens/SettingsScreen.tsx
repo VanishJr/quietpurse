@@ -10,8 +10,8 @@ import { Notice } from '../components/Notice';
 import { ImportIcon } from '../components/NavIcons';
 import { BackupIcon, ChevronIcon, HistoryIcon, MoreIcon } from '../components/SettingsActionIcons';
 import { isAvailable, useDismiss } from '../dismiss';
-import { saveBlob } from '../download';
-import { fmtDate, fmtMoney } from '../format';
+import { backupFilename, saveBlob } from '../download';
+import { fmtDay, fmtMoney } from '../format';
 import { useTheme } from '../theme';
 import { ScreenShown } from '../screen';
 import { RecurringSummary } from '../types';
@@ -166,7 +166,7 @@ export function SettingsScreen({
         <span className="financial-value"><span className="financial-value-text">{fmtMoney(g.monthlyAvg, recurring?.baseCurrency)}</span></span><span className="financial-qualifier">/mo</span>
       </strong>
       <div className="settings-recurring-meta">
-        {excluded && 'Excluded · '}{categoryLabel(g.category)} · {g.months} months detected · last {fmtDate(g.lastDate)}
+        {excluded && 'Excluded · '}{categoryLabel(g.category)} · {g.months} months detected · last {fmtDay(g.lastDate)}
       </div>
       {excluded ? (
         <Button type="button" variant="secondary" size="compact"
@@ -226,7 +226,7 @@ export function SettingsScreen({
       setExportError(null);
       const blob = await api.backup();
       // the name the backend's own Content-Disposition would have carried
-      saveBlob(blob, `quietpurse-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      saveBlob(blob, backupFilename(new Date()));
     } catch (e) {
       setExportError((e as Error).message);
     } finally {

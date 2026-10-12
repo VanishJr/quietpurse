@@ -47,7 +47,8 @@ type AssignedAfterInsert =
  * which keeps this type to what insertTransactionsOn reads: a required field added to
  * Transaction is a compile error at stagedToNew unless it is named there.
  */
-export type NewTransaction = Omit<Transaction, 'id' | 'fee' | AssignedAfterInsert> & {
+export type NewTransaction = Omit<Transaction, 'id' | 'fee' | 'date' | AssignedAfterInsert> & {
   dedupKey?: string;
   fee: number | null;
+  date: string;
 };

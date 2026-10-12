@@ -11,7 +11,7 @@ import { Notice } from '../components/Notice';
 import { PageHeader } from '../components/PageHeader';
 import { TransferRuleEditor } from '../components/TransferRuleEditor';
 import { CategoryRuleEditor } from '../components/CategoryRuleEditor';
-import { fmtDate, fmtMoney, isoDay } from '../format';
+import { fmtDay, fmtMoney, isoDay } from '../format';
 import { useTheme } from '../theme';
 import {
   Account,
@@ -398,7 +398,7 @@ export function TransactionsScreen({
               </span>
               <span className="row-sub transaction-record__context">
                 <span>
-                  {fmtDate(item.date)} · {categoryLabel(item.category)}
+                  {fmtDay(item.date)} · {categoryLabel(item.category)}
                   {account ? ` · ${account}` : ''}
                 </span>
                 {item.transfer && <span className="badge">transfer</span>}
@@ -464,12 +464,12 @@ export function TransactionsScreen({
               {fmtMoney(selected.amount, selected.currency)}
             </div>
             <div className="sheet-meta">
-              {fmtDate(selected.date)} · {categoryLabel(selected.category)}
+              {fmtDay(selected.date)} · {categoryLabel(selected.category)}
               {selected.recurring ? ' · recurring' : ''}
             </div>
             <div className="sheet-meta">{accountName(selected.accountId)}</div>
             {selected.valueDate && selected.valueDate !== selected.date.slice(0, 10) && (
-              <div className="sheet-meta">Value date: {fmtDate(selected.valueDate)}</div>
+              <div className="sheet-meta">Value date: {fmtDay(selected.valueDate)}</div>
             )}
             {selected.displayDescription && (
               <details className="transaction-original">

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
   ANSWERS,
+  calendarDay,
   type Declared,
   GOAL_TYPES,
   goalCreateSchema,
@@ -311,4 +312,30 @@ describe('every declared JSON body is strict all the way down', () => {
     expect(entries.length).toBeGreaterThan(0);
     for (const [key] of entries) expect(key).toMatch(/^(GET|POST|PUT|PATCH|DELETE) \//);
   });
+});
+
+describe('calendarDay', () => {
+  it.each(['2026-09-30', '2026-09-30T00:00:00.000Z', '2026-01-05T23:30:00.000Z', '2024-02-29'])(
+    'brands %j, which starts with a day on the calendar',
+    (value) => {
+      expect(calendarDay(value)).toBe(value);
+    },
+  );
+
+  it.each([
+    '2026-02-30T00:00:00.000Z',
+    '2025-02-29',
+    '2026-13-01',
+    '2026-1-05',
+    '05.10.2026',
+    '',
+    '2026-01-05T25:99:00.000Z',
+    '2026-01-05T24:00:00.000Z',
+    '2026-10-05x',
+  ])(
+    'refuses %j',
+    (value) => {
+      expect(calendarDay(value)).toBeNull();
+    },
+  );
 });

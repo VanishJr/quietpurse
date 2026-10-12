@@ -18,15 +18,17 @@ import { putDocument } from '../documents';
 import { logImport } from '../logger';
 import { fromCents, toCents } from '../money';
 import { NewTransaction } from '../types';
-import type {
-  BalancesNotShown,
-  ImportSummary as WireImportSummary,
-  ReadAs,
-  ReadColumns,
-  SeriesCounts,
-  StatementBalances as WireBalances,
-  StatementImportResult as WireImportResult,
-  StatementTotal,
+import {
+  type BalancesNotShown,
+  type CalendarDay,
+  calendarDay,
+  type ImportSummary as WireImportSummary,
+  type ReadAs,
+  type ReadColumns,
+  type SeriesCounts,
+  type StatementBalances as WireBalances,
+  type StatementImportResult as WireImportResult,
+  type StatementTotal,
 } from '../wire';
 import {
   CSV_PARSER_VERSION,
@@ -1044,7 +1046,7 @@ async function mapAndStore(
   // Pairs rather than two arrays, and txs is derived from them below: what the gate
   // checks and what the file stated beside it are read in one loop and cannot come
   // apart by an index.
-  const accepted: { tx: NewTransaction; stated: StatedRow }[] = [];
+  const accepted: { tx: NewTransaction; day: CalendarDay; stated: StatedRow }[] = [];
     // a notice is a fact about the file, not a rejected row: it goes in front of the
     // row problems and touches no count. The two
   // are kept apart so that neither has to be recovered from the other by index -
@@ -1133,6 +1135,10 @@ async function mapAndStore(
       }
       continue;
     }
+    const day = calendarDay(verdict.date.slice(0, 10));
+    if (day === null || calendarDay(verdict.date) === null) {
+      throw new Error(notADate(sheet, i, row[dateCol], day === null ? 'day' : 'time'));
+    }
     const description = descCols
       .map((c) => cellText(row[c]).trim())
       .filter(Boolean)
@@ -1147,6 +1153,7 @@ async function mapAndStore(
     const mcc = mccSource.kind === 'none' ? undefined : readMcc(row[mccSource.col]);
 
     accepted.push({
+      day,
       tx: {
         accountId: account.id,
         provider: 'upload',
@@ -1225,7 +1232,7 @@ async function mapAndStore(
   // imports_file_hash_unique and answers 409 rather than importing anything twice.
   const superseded = await supersedeStagedImports(fileHash, importId);
 
-  const days = txs.map((t) => t.date.slice(0, 10)).sort();
+  const days = accepted.map((a) => a.day).sort();
   return {
     outcome: 'awaiting_confirmation',
     summary: {
@@ -1824,6 +1831,9 @@ export function describeRow(
     }
   }
 }
+
+const notADate = (sheet: Sheet, i: number, cell: Cell | undefined, wrong: 'day' | 'time'): string =>
+  `row ${sheet.rowLabel(i)}: the date cell reads ${quote(cell)}, ${wrong === 'day' ? 'which is not a day on the calendar' : 'whose time of day does not exist'} - nothing was imported, correct the date in the file and upload it again`;
 
 export const feeRefused = (sheet: Sheet, i: number, text: string): string =>
   `row ${sheet.rowLabel(i)}: the fee cell reads "${bounded(text, FEE_QUOTE_MAX)}", which this parser cannot read as a fee - the row is skipped rather than imported without it`;

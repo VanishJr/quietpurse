@@ -181,6 +181,22 @@ function fxPlausible(
 }
 
 /** Exported so the pair rules can be exercised without a database. */
+/**
+ * The gap canPair's windows are held against. A time that does not read counts as midnight
+ * of its day: a restore keeps the 25:99 an earlier version stored, and the day is still the
+ * one the bank wrote. That places the row on its day and no closer, which the same-currency
+ * window can use and the ten-minute cross-currency one cannot, so across currencies the gap
+ * is unknown.
+ */
+export function pairingGap(expense: Transaction, income: Transaction): number {
+  const expenseAt = Date.parse(expense.date);
+  const incomeAt = Date.parse(income.date);
+  if (!Number.isNaN(expenseAt) && !Number.isNaN(incomeAt)) return Math.abs(incomeAt - expenseAt);
+  if (expense.currency !== income.currency) return NaN;
+  const dayOrTime = (at: number, date: string) => (Number.isNaN(at) ? Date.parse(date.slice(0, 10)) : at);
+  return Math.abs(dayOrTime(incomeAt, income.date) - dayOrTime(expenseAt, expense.date));
+}
+
 export function canPair(
   expense: Transaction,
   income: Transaction,
@@ -188,6 +204,8 @@ export function canPair(
   rates: Record<string, number>,
 ): boolean {
   if (expense.accountId === income.accountId) return false;
+  // a date whose day does not read either; NaN would pass each window below as not too far
+  if (Number.isNaN(gapMs)) return false;
   if (expense.currency === income.currency) {
     if (gapMs > SAME_CURRENCY_WINDOW_MS) return false;
     return Math.abs(Math.abs(expense.amount) - income.amount) <= AMOUNTS_EQUAL_EPS;
@@ -267,9 +285,8 @@ async function reclassifyWith({ rules, owed }: RunLoad): Promise<number> {
   // its real counterpart.
   const candidates: { expense: Transaction; income: Transaction; gapMs: number }[] = [];
   for (const expense of expenses) {
-    const expenseAt = Date.parse(expense.date);
     for (const income of incomes) {
-      const gapMs = Math.abs(Date.parse(income.date) - expenseAt);
+      const gapMs = pairingGap(expense, income);
       if (!canPair(expense, income, gapMs, rates)) continue;
       candidates.push({ expense, income, gapMs });
     }
