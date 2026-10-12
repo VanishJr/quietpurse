@@ -1,7 +1,6 @@
 ---
 id: module-backend
 type: module-design
-status: draft
 title: The backend's HTTP door, the process that opens it, and the service modules between them
 parent: architecture
 ---

@@ -6,10 +6,10 @@ import { commentsOf, type Comment } from '../scripts/comment-tokens';
 /**
  * A spec sits beside the module it describes, or at the root when it describes the
  * whole, and nothing imports it and nothing typechecks it. What rots in one is a
- * coordinate that has moved, a path somebody renamed, a pointer to a file only this
- * machine has, and a status a reader cannot see. Prose that has rotted is read as
- * settled. A comment in source is prose too and the same things rot in it, so the
- * clauses that can run over a comment run over every one the tree carries.
+ * coordinate that has moved, a path somebody renamed, and a pointer to a file only
+ * this machine has. Prose that has rotted is read as settled. A comment in source is
+ * prose too and the same things rot in it, so the clauses that can run over a comment
+ * run over every one the tree carries.
  *
  * The frontmatter is what the tool that indexes this tree reads a spec by, and it is
  * read here under a grammar of this file's own rather than a YAML parser. The tool
@@ -93,9 +93,9 @@ const SHA = /^[0-9a-f]{7,40}$/;
  * nothing, and then trusted. A file is a spec to the tool that indexes this tree when
  * the block carries an id and a type.
  */
-const FIELDS = ['id', 'type', 'status', 'title', 'parent', 'depends-on', 'references', 'implements'] as const;
+const FIELDS = ['id', 'type', 'title', 'parent', 'depends-on', 'references', 'implements'] as const;
 type Field = (typeof FIELDS)[number];
-const REQUIRED: readonly Field[] = ['id', 'type', 'status', 'title'];
+const REQUIRED: readonly Field[] = ['id', 'type', 'title'];
 const LIST_FIELDS: readonly Field[] = ['depends-on', 'references', 'implements'];
 const LINK_LISTS: readonly Field[] = ['depends-on', 'references', 'implements'];
 /**
@@ -104,8 +104,6 @@ const LINK_LISTS: readonly Field[] = ['depends-on', 'references', 'implements'];
  */
 const TYPES = ['architecture-design', 'module-design', 'submodule-design'];
 const ROOT_TYPE = 'architecture-design';
-/** A new or edited spec is draft, and the flip is the owner's review. */
-const STATUSES = ['draft', 'active'];
 
 const abs = (p: string): string => path.resolve(ROOT, p);
 const read = (p: string): string => fs.readFileSync(abs(p), 'utf8');
@@ -240,7 +238,7 @@ const parseSpec = (file: string, text: string): Parsed & { block: Block | undefi
       fm: {},
       block,
       faults: [
-        `${file} does not open with a frontmatter block, a fence on the first line and a second to close it - the title and the status live there now, and a document without one is one the spec tools do not index and this holder does not read`,
+        `${file} does not open with a frontmatter block, a fence on the first line and a second to close it - the title lives there, and a document without one is one the spec tools do not index and this holder does not read`,
       ],
     };
   }
@@ -257,15 +255,11 @@ const listOf = (fm: Frontmatter, key: Field): readonly string[] => {
 };
 
 const fieldFaults = (file: string, fm: Frontmatter): string[] => {
-  const status = scalarOf(fm, 'status');
   const type = scalarOf(fm, 'type');
   return [
     ...REQUIRED.filter((key) => scalarOf(fm, key) === undefined).map(
-      (key) => `${file} declares no ${key} - every spec here carries an id, a type, a status and a title`,
+      (key) => `${file} declares no ${key} - every spec here carries an id, a type and a title`,
     ),
-    ...(status !== undefined && !STATUSES.includes(status)
-      ? [`${file} reads status "${status}" - the flip out of draft is the owner's review and there is no third value to hide it behind`]
-      : []),
     ...(type !== undefined && !TYPES.includes(type)
       ? [
           `${file} reads type "${type}" - the durable types are the reading; a task-spec is a working file the spec tools keep in a directory .gitignore keeps out of the tree`,
@@ -336,14 +330,15 @@ const linkFaults = (nodes: readonly Node[]): string[] => {
   );
 };
 
-/** An H1 or a Status line in the body, however markdown lets either be dressed, is a
- * second copy of what the frontmatter holds; a setext underline is an H1 unread here. */
+/** An H1 in the body, however markdown lets one be dressed, is a second copy of the
+ * title the frontmatter holds; a setext underline is an H1 unread here. The indent is
+ * spaces only, because a tab in front makes the line a code block. */
 const bodyCopies = (file: string, block: Block): string[] =>
   block.body
     .split('\n')
     .flatMap((line, i) =>
-      /^(?:\s{0,3}#[ \t]|\W*[Ss]tatus\s*:)/.test(line)
-        ? [`${file}:${i + block.bodyLine} reads "${line}" - the title and the status live in the frontmatter, once; a heading or a Status line in the body is a second copy that drifts`]
+      /^ {0,3}#[ \t]/.test(line)
+        ? [`${file}:${i + block.bodyLine} reads "${line}" - the title lives in the frontmatter, once; an H1 in the body is a second copy that drifts`]
         : [],
     );
 
@@ -702,7 +697,7 @@ describe('every spec this repository declares', () => {
     expect(specs.flatMap((spec) => spec.faults)).toEqual([]);
   });
 
-  it('declares an id, a type, a status and a title, and the type and the status are values this tree has a reading for', () => {
+  it('declares an id, a type and a title, and the type is a value this tree has a reading for', () => {
     expect(specs.flatMap((spec) => fieldFaults(spec.file, spec.fm))).toEqual([]);
   });
 
@@ -718,7 +713,7 @@ describe('every spec this repository declares', () => {
     expect(linkFaults(specs)).toEqual([]);
   });
 
-  it('states its title and its status once, in the frontmatter, and not again in the body', () => {
+  it('states its title once, in the frontmatter, and not again in the body', () => {
     expect(specs.flatMap((spec) => (spec.block === undefined ? [] : bodyCopies(spec.file, spec.block)))).toEqual([]);
   });
 });
@@ -806,7 +801,6 @@ describe('the rules those clauses are built from', () => {
     '---',
     'id: crafted',
     'type: module-design',
-    'status: draft',
     'title: crafted',
     'parent: architecture',
     '---',
@@ -885,7 +879,6 @@ describe('the rules those clauses are built from', () => {
     '---',
     'id: module-x',
     'type: module-design',
-    'status: draft',
     'title: x — what it is, and what it is not',
     'parent: architecture',
     'depends-on: [module-y, module-z]',
@@ -907,18 +900,17 @@ describe('the rules those clauses are built from', () => {
       expect(fm, label).toEqual({
         id: 'module-x',
         type: 'module-design',
-        status: 'draft',
         title: 'x — what it is, and what it is not',
         parent: 'architecture',
         'depends-on': ['module-y', 'module-z'],
       });
       expect(block?.body.split('\n')[1], label).toBe('## Responsibility');
-      expect(block?.bodyLine, label).toBe(9);
+      expect(block?.bodyLine, label).toBe(8);
     }
   });
 
   const fenced = (lines: string[]): string => ['---', ...lines, '---', '', '## body', ''].join('\n');
-  const HEAD = ['id: a', 'type: module-design', 'status: draft', 'title: t'];
+  const HEAD = ['id: a', 'type: module-design', 'title: t'];
 
   /**
    * One row per form the tool reads differently from this file or not at all, each run
@@ -938,25 +930,26 @@ describe('the rules those clauses are built from', () => {
     ['a blank line inside the block', fenced([...HEAD, '']), 'a frontmatter line is a key'],
     ['a key written twice', fenced([...HEAD, 'id: b']), 'a second time'],
     ['a key nothing reads', fenced([...HEAD, 'depends_on: [x]']), 'nothing in this tree reads'],
-    ['a colon-space inside a value', fenced([...HEAD.slice(0, 3), 'title: foo: bar']), 'rephrase'],
-    ['a space-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo #bar']), 'rephrase'],
-    ['a quoted value', fenced([...HEAD.slice(0, 3), 'title: "quoted"']), 'rephrase'],
-    ['a figure', fenced([...HEAD.slice(0, 3), 'title: 2026']), 'write a word'],
-    ['a bare word YAML types', fenced([...HEAD.slice(0, 2), 'status: True', 'title: t']), 'write a word'],
-    ['a bare word a YAML 1.1 reader types', fenced([...HEAD.slice(0, 2), 'status: yes', 'title: t']), 'write a word'],
+    ['a colon-space inside a value', fenced([...HEAD.slice(0, 2), 'title: foo: bar']), 'rephrase'],
+    ['a space-hash inside a value', fenced([...HEAD.slice(0, 2), 'title: foo #bar']), 'rephrase'],
+    ['a quoted value', fenced([...HEAD.slice(0, 2), 'title: "quoted"']), 'rephrase'],
+    ['a figure', fenced([...HEAD.slice(0, 2), 'title: 2026']), 'write a word'],
+    ['a bare word YAML types', fenced([...HEAD.slice(0, 2), 'title: True']), 'write a word'],
+    ['a bare word a YAML 1.1 reader types', fenced([...HEAD.slice(0, 2), 'title: yes']), 'write a word'],
     ['an empty list', fenced([...HEAD, 'depends-on: []']), 'an empty list'],
     ['a list with no space after the comma', fenced([...HEAD, 'depends-on: [a,b]']), 'a comma'],
     ['a list field written as one value', fenced([...HEAD, 'depends-on: a']), 'as one value'],
-    ['a scalar field written as a list', fenced([...HEAD.slice(0, 3), 'title: [t]']), 'as a list'],
-    ['whitespace at the end of a value', fenced([...HEAD.slice(0, 3), 'title: t ']), 'at an end'],
+    ['a scalar field written as a list', fenced([...HEAD.slice(0, 2), 'title: [t]']), 'as a list'],
+    ['whitespace at the end of a value', fenced([...HEAD.slice(0, 2), 'title: t ']), 'at an end'],
     ['no closing fence', ['---', ...HEAD, '', '## body'].join('\n'), 'a fence on the first line'],
     ['a fence not on the first line', ['', ...fenced(HEAD).split('\n')].join('\n'), 'a fence on the first line'],
-    ['a trailing colon', fenced([...HEAD.slice(0, 3), 'title: foo:']), 'rephrase'],
-    ['a colon-tab inside a value', fenced([...HEAD.slice(0, 3), 'title: foo:\tbar']), 'rephrase'],
-    ['a tab-hash inside a value', fenced([...HEAD.slice(0, 3), 'title: foo\t#bar']), 'rephrase'],
+    ['a trailing colon', fenced([...HEAD.slice(0, 2), 'title: foo:']), 'rephrase'],
+    ['a colon-tab inside a value', fenced([...HEAD.slice(0, 2), 'title: foo:\tbar']), 'rephrase'],
+    ['a tab-hash inside a value', fenced([...HEAD.slice(0, 2), 'title: foo\t#bar']), 'rephrase'],
     ['a trailing colon inside a list item', fenced([...HEAD, 'depends-on: [a, b:]']), 'rephrase'],
-    ['a special float', fenced([...HEAD.slice(0, 3), 'title: .inf']), 'write a word'],
+    ['a special float', fenced([...HEAD.slice(0, 2), 'title: .inf']), 'write a word'],
     ['a field the spec tools read and nothing here does', fenced([...HEAD, 'tags: [a]']), 'nothing in this tree reads'],
+    ['a status, which no spec here carries', fenced([...HEAD, 'status: draft']), 'nothing in this tree reads'],
   ];
 
   /**
@@ -965,10 +958,10 @@ describe('the rules those clauses are built from', () => {
    * leading dot that spells a word rather than a float.
    */
   const ACCEPTED: ReadonlyArray<readonly [string, string]> = [
-    ['an interior colon', fenced([...HEAD.slice(0, 3), 'title: http://x/y'])],
-    ['a clock', fenced([...HEAD.slice(0, 3), 'title: 1:30'])],
-    ['an interior hash', fenced([...HEAD.slice(0, 3), 'title: foo#bar'])],
-    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 3), 'title: .agents'])],
+    ['an interior colon', fenced([...HEAD.slice(0, 2), 'title: http://x/y'])],
+    ['a clock', fenced([...HEAD.slice(0, 2), 'title: 1:30'])],
+    ['an interior hash', fenced([...HEAD.slice(0, 2), 'title: foo#bar'])],
+    ['a leading dot that spells a word', fenced([...HEAD.slice(0, 2), 'title: .agents'])],
   ];
 
   it('refuses every frontmatter shape the spec tools read differently, or not at all', () => {
@@ -1017,19 +1010,18 @@ describe('the rules those clauses are built from', () => {
     expect(parseSpec('crafted.md', nothing).faults.join()).toContain('nothing after the colon');
   });
 
-  it('refuses a task-spec, a type it has no reading for, a third status and a missing field', () => {
-    const full = { id: 'a', type: 'module-design', status: 'draft', title: 't' } as const;
+  it('refuses a task-spec, a type it has no reading for and a missing field', () => {
+    const full = { id: 'a', type: 'module-design', title: 't' } as const;
     expect(fieldFaults('c.md', full)).toEqual([]);
     expect(fieldFaults('c.md', { ...full, type: 'task-spec' }).join()).toContain('working file');
     expect(fieldFaults('c.md', { ...full, type: 'banana' }).join()).toContain('reads type "banana"');
-    expect(fieldFaults('c.md', { ...full, status: 'reviewed' }).join()).toContain('no third value');
-    expect(fieldFaults('c.md', { id: 'a', type: 'module-design' })).toHaveLength(2);
+    expect(fieldFaults('c.md', { id: 'a' })).toHaveLength(2);
   });
 
   const node = (file: string, fm: Frontmatter): Node => ({ file, fm });
-  const root = node('root.md', { id: 'root', type: 'architecture-design', status: 'draft', title: 'r' });
+  const root = node('root.md', { id: 'root', type: 'architecture-design', title: 'r' });
   const under = (id: string, parent: string, more: Frontmatter = {}): Node =>
-    node(`${id}.md`, { id, type: 'module-design', status: 'draft', title: id, parent, ...more });
+    node(`${id}.md`, { id, type: 'module-design', title: id, parent, ...more });
 
   it('refuses a dangling parent, a second root, a root with a parent, a cycle and a dangling link', () => {
     const clean = [root, under('a', 'root'), under('b', 'a', { 'depends-on': ['a'] })];
@@ -1051,7 +1043,7 @@ describe('the rules those clauses are built from', () => {
     expect(missed).toEqual([]);
   });
 
-  it('finds a title or a status written again in the body', () => {
+  it('finds a title written again in the body', () => {
     const block = splitFrontmatter(
       [
         '---',
@@ -1060,35 +1052,20 @@ describe('the rules those clauses are built from', () => {
         '',
         '# a',
         '',
-        'Status: draft',
-        '',
         '#\ta',
         '',
         '   # a',
         '',
-        '**Status:** draft',
-        '',
-        'Status : draft',
-        '',
-        ' Status: draft',
-        '',
-        'status: draft',
+        '\t# a',
         '',
         '## body',
-        '',
-        'The status: draft',
         '',
       ].join('\n'),
     );
     expect(block && bodyCopies('c.md', block).map((f) => f.split(' - ')[0])).toEqual([
-      'c.md:8 reads "# a"',
-      'c.md:10 reads "Status: draft"',
-      'c.md:12 reads "#\ta"',
-      'c.md:14 reads "   # a"',
-      'c.md:16 reads "**Status:** draft"',
-      'c.md:18 reads "Status : draft"',
-      'c.md:20 reads " Status: draft"',
-      'c.md:22 reads "status: draft"',
+      'c.md:7 reads "# a"',
+      'c.md:9 reads "#\ta"',
+      'c.md:11 reads "   # a"',
     ]);
   });
 

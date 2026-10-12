@@ -1,7 +1,6 @@
 ---
 id: submodule-backend-wire
 type: submodule-design
-status: draft
 title: The declared answer of every route
 parent: module-backend
 ---

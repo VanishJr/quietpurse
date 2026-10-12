@@ -1,7 +1,6 @@
 ---
 id: submodule-backend-db
 type: submodule-design
-status: draft
 title: The schema, every query, and the one function that opens the database
 parent: module-backend
 ---

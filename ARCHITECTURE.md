@@ -1,7 +1,6 @@
 ---
 id: architecture
 type: architecture-design
-status: draft
 title: The Quietpurse module map and the path one statement takes through it
 ---
 

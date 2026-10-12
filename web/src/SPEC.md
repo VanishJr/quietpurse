@@ -1,7 +1,6 @@
 ---
 id: module-web
 type: module-design
-status: draft
 title: The web client's requests, month arithmetic, sentences and entry point
 parent: architecture
 ---

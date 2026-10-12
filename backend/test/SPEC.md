@@ -1,7 +1,6 @@
 ---
 id: submodule-backend-test
 type: submodule-design
-status: draft
 title: The backend suite, its harness, and the checks that read a file as text
 parent: module-backend
 ---
@@ -139,8 +138,3 @@ path honest.
 **`typescript` is declared in `backend/package.json` for the typecheck, and is also a library
 here.** Several tests and the comment tool in `backend/scripts/` import its compiler API, on
 purpose: an invariant about the shape of source has no other reader.
-
-**`specs.test.ts` holds that a spec's status is one of two values, and nothing about which one is
-true.** The flip out of draft follows the owner's review, and no check can tell who typed it. An
-agent writing `active` is refused by nobody, so a status is evidence only as far as its reader knows
-where it came from.

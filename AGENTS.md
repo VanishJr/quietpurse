@@ -180,14 +180,12 @@ for. A reason goes **where the edit that would break it is made**:
   is written, and what it crosses.
 
 **Specs.** A spec is a markdown file whose frontmatter carries an `id` and a `type`. The frontmatter
-is the only copy of its title and status.
+is the only copy of its title.
 
 - `ARCHITECTURE.md` is the root. Every other spec is a `SPEC.md` beside its module and names its
   parent by id.
-- Fields: `id`, `type`, `status`, `title`, `parent`, and, only where the code shows the edge,
+- Fields: `id`, `type`, `title`, `parent`, and, only where the code shows the edge,
   `depends-on`, `references`, `implements`. A line is `key: value` or `key: [a, b]`, nothing else.
-- Status is `draft` or `active`. A new or edited spec is `draft` until the owner has read it; the
-  flip is the owner's.
 - A module spec opens with `## Responsibility` and has `## Boundary` and `## Invariants` for the
   rules no type and no test holds. Its other sections are its own, and the root keeps its own.
 - No line citation, commit sha, reference to the plan, or path a reader of the public tree cannot

@@ -1,7 +1,6 @@
 ---
 id: submodule-backend-providers
 type: submodule-design
-status: draft
 title: The one ingestion surface and the per-format parsers behind it
 parent: module-backend
 ---
