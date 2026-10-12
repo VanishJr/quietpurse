@@ -2,193 +2,145 @@
 id: submodule-backend-test
 type: submodule-design
 status: draft
-title: test — the backend suite, its harness, and the checks that read a file as text
+title: The backend suite, its harness, and the checks that read a file as text
 parent: module-backend
 ---
 
-What the backend suite is, where it reaches, and the rules about it that no type and no test holds.
-`AGENTS.md`'s *Verification has a hole* carries what a green run does and does not cover — which
-database it runs against, what jsdom cannot see, what skips on this platform.
-
 ## Responsibility
 
-- **The harness.** `backend/test/pglite.ts` is the database, embedded or real, and the truncate
-  that stands in for isolation; `backend/test/setup.ts` is the shared environment, set
-  before anything reads config, which is why everything it loads from `backend/src`, directly or
-  through a harness module, is a dynamic import. The truncate names every table
-  `backend/src/db/schema.ts` exports, read from the schema when it runs rather than written down,
-  so a table added to the schema is cleared between files without anyone listing it. A table added
-  to or renamed in the schema without `npm run db:generate` fails every file at its truncate, and
-  one removed without it fails the truncate-list case in `backend/test/harness.test.ts`.
-  `backend/test/setup.ts` is a vitest setup file, so it runs once per test file and truncates
-  before each one — what the files share is the engine instance and the module registry, never the
-  rows.
-  `backend/test/helpers.ts` is the fixture layer. `backend/test/answers.ts` is the reporter the
-  door records an answer mismatch into and the drain the setup file empties in its after hooks, so
-  the case that produced the mismatch is the case that fails with it; the rule it holds is
-  `backend/src/wire`'s. The drain runs in `afterAll` as well as `afterEach`, because an answer a
-  file issues from its own `afterAll` has no case left to fail — and it needs the setup file's hook
-  to run after the test file's own, which `sequence.hooks` pinned to `'stack'` in
-  `backend/vitest.config.ts` is what provides.
+This directory is the backend suite: its harness, and the checks that read a file as text where a
+rule about the shape of code has no other reader. What a green run covers, the database it runs on,
+what skips and what the coverage reading is are in `AGENTS.md` under *Verification has a hole*.
 
-  `backend/test/loopback.ts` is the one way a test reaches a server: it serves the target it is
-  given — `app`, or an app a file builds for itself — on a server of its own listening on
-  `127.0.0.1`, and hands back a supertest agent on it, because supertest handed an app listens on
-  the unspecified address, which can be handed a port another program holds on `127.0.0.1`, and
-  the URL supertest builds then carries the request to that program. The servers it opens stay
-  open until the setup file closes every one of them in an `afterAll` that runs after the test
-  file's own hooks, which rests on the same `sequence.hooks` ordering as the drain. A server the
-  harness has closed cannot listen again, because supertest listens on the unspecified address
-  itself whenever the server it was handed is not listening. `backend/test/idle.ts` is the wait
-  the setup file's after hooks run: `settleRecomputes` puts the offline `fetch` back and then waits
-  until the recompute queue is idle, because that queue lives in the module registry the files
-  share, and a run still in it would finish inside the next file's freshly truncated tables. So a
-  `fetch` mock lives for one case: it is installed in the case or in `beforeEach`, never in
-  `beforeAll` or at file scope, where every case after the first runs offline whether or not an
-  assertion notices. A mock that parks a call rejects it when the request's signal aborts: a
-  parked call that ignores the signal never settles, and the wait then fails every later case in
-  every later file. A module instance imported after `vi.resetModules()` keeps a queue of its own,
-  and the wait does not see it. The wait contains every run queued before it returns, and none
-  queued after: when the test timeout fails a case while its body is suspended on a held run, the
-  body can resume after the wait has returned and queue into the next case's tables, and no hook
-  can stop it. So a hold case awaits nothing that settles only after a held run — the run's own
-  promise, or a call that queues behind it — until it has released that run, and it waits for a
-  held run to reach a point only through `vi.waitFor`. A refill the base-currency route starts
-  does not run on that queue, so nothing waits for it, and a case that parks one releases it in
-  its own `finally`.
-- **The checks that read another file as text** instead of importing it. They exist where an
-  invariant spans something no type can carry: a rule about the *shape* of code. A value that has
-  to agree with one in the other package is no longer that kind of invariant: the client derives
-  its wire types from `backend/src/wire` by type-only import and pins its runtime copies to the
-  module's exports by type, so the pinned constants and the vocabularies meet in the client's `tsc`
-  rather than in a file here that reads the client's source.
-- **The coverage reading.** `npm run coverage` in either package runs its suite under the v8
-  provider and prints a per-file table. The include is declared in `backend/vitest.config.ts` and
-  `web/vitest.config.ts`: everything under `backend/src/` and `backend/scripts/` here, everything
-  under `web/src/` less the test files and the harness in `web/src/test/` there — the harness is not
-  product, and vitest excludes only the root setup files by itself, which the `dom` project's is
-  not. The entry points, `backend/src/index.ts` and `web/src/main.tsx`, stay in and read nothing:
-  they boot on import, so no case imports them — `backend/src/index.ts` is exercised by the `app`
-  job in `.github/workflows/ci.yml`, `web/src/main.tsx` is built by it and runs only in a browser.
-  It is a reading and not a gate: no threshold, and no CI step reads it.
+**The harness.**
+
+- `pglite.ts` opens and migrates its own database from `backend/drizzle`, embedded or real, not
+  through `openDatabase`, and truncates every table
+  `backend/src/db/schema.ts` exports, read at run time, so a new table is cleared without being
+  listed.
+- `setup.ts` sets the environment before anything reads config, so everything it loads from
+  `backend/src`, directly or through a harness module, is a dynamic import.
+- `answers.ts` records the answer mismatches the door reports, and the setup file drains them so the
+  case that caused one fails with it. The rule it holds is `backend/src/wire`'s.
+- `loopback.ts` is the only way a test reaches a server. It serves its target on a server of its own
+  on `127.0.0.1` and returns a supertest agent. Handed an app, supertest listens on the unspecified
+  address, which can be given a port another program holds on `127.0.0.1`, and the request then
+  reaches that program. The setup file closes these servers in an `afterAll` that has to run after
+  the file's own hooks, as the answer drain does, on the `sequence.hooks` order pinned in
+  `backend/vitest.config.ts`. A closed server refuses to listen again, because supertest would
+  otherwise listen again itself, on the unspecified address.
+- `idle.ts` is the wait in the setup file's after hooks. `settleRecomputes` puts the offline `fetch`
+  back, then waits for the recompute queue to go idle. The queue lives in the module registry the
+  files share, and a run left in it would land in the next file's freshly truncated tables. Hence
+  the rules for a case:
+  - A `fetch` mock lives for one case. It goes in the case or in `beforeEach`, never in `beforeAll`
+    or at file scope, where every case after the first runs offline whether or not anything notices.
+  - A mock that parks a call rejects it when the request's signal aborts. One that ignores the
+    signal never settles, and the wait then fails every later case in every later file.
+  - A module instance imported after `vi.resetModules()` has a queue of its own, which the wait does
+    not see.
+  - The wait covers the runs queued before it returns, not after. A case that times out while its
+    body waits on a held run can resume later and queue into the next case's tables, and no hook can
+    stop it. So a hold case awaits nothing that settles only after a held run (the run's own
+    promise, or a call queued behind it) until it has released that run, and it waits for a held run
+    to reach a point only through `vi.waitFor`.
+  - A refill the base-currency route starts is not on that queue, so nothing waits for it. A case
+    that parks one releases it in its own `finally`.
+- `helpers.ts` is the fixture layer.
+
+**The checks that read a file as text**, listed below. A value that must agree with one in the
+client is not their kind: the client derives its wire types from `backend/src/wire` by type-only
+import and pins its runtime copies to the module's exports by type, so the two meet in the client's
+`tsc`.
+
+**What the coverage include means.** `backend/vitest.config.ts` includes `backend/src/` and
+`backend/scripts/`; `web/vitest.config.ts` includes `web/src/` less its tests and its harness, and
+says why. The entry points, `backend/src/index.ts` and `web/src/main.tsx`, stay in and read nothing:
+they boot on import, so no case imports them. The `app` job in `.github/workflows/ci.yml` starts the
+first and builds the second.
 
 ## Boundary
 
-A check here may read any file in the repository, and some do. Every one of them resolves its root
-from `process.cwd()`, which is this package's root — locally, and in CI, where the backend jobs run
-from this directory (`.github/workflows/ci.yml`). `web/src/copy.test.ts` resolves from
-`import.meta.url` instead, and its own header states why: the root of its walk *is* the directory it
-sits in, where a check here reads a target that is not beside it and so needs a package root. The
-two idioms disagree on purpose; do not fix them into agreement.
+A check here may read any file in the repository, and some do. Each resolves its root from
+`process.cwd()`, the package root both locally and in CI, where the backend jobs run from this
+directory (`.github/workflows/ci.yml`). The web package's checks resolve from `import.meta.url`
+instead, as `web/src/copy.test.ts` explains in its header: their root is the directory they sit in,
+while a check here reads a target elsewhere and needs a package root. The difference is deliberate;
+do not unify them. What the web checks hold is in `web/src/SPEC.md`, and for
+`web/src/copy.test.ts` in that test's own header.
 
-The checks that read source as text: `backend/test/refusal-set.test.ts` reads the PDF importer and
-requires every refusal it can throw to be composed where the budget case can measure it;
-`backend/test/summary.test.ts` reads the data
-layer's summary block and refuses a further summary query written with the scoping helper's filters
-rather than through it; `backend/test/http-body.test.ts` reads the HTTP door and refuses a route
-that reads `req.body` by any shape but the four it names — a zod parse, the JSON-body helper's own
-read into `unknown`, the restore route's read into `unknown`, and the upload route's read of what
-multer populated — refuses a call to that helper that is not a binding followed by its return, and
-refuses the helper's own refusal arm unless its next line is `return undefined;`, because a bare
-read of a body no parser claimed is a `TypeError` answered as the server's fault, a helper call
-whose result is defaulted lands a write behind a refusal, a helper that answers the refusal and
-hands an object back leaves every route's return dead, and only the file's text can see the next
-route written any of those ways; the shape rule's one instrument is the token `req.body`; a
-spelling that does not carry that token — a renamed request parameter, `const { body } = req`,
-`req['body']`, an alias — and a line whose read sits after a `//` inside a string are not seen,
-and none is closed here;
-`backend/test/loopback.test.ts` reads every script in the package outside `node_modules` and
-refuses, in any of them but `backend/test/loopback.ts`, the name `supertest`, its types package or
-a path inside either written as a quoted literal — the one spelling an import, a type-only import,
-a re-export, a `require`, an `import()`, a `typeof import()` and a triple-slash directive share —
-and reads every script under `backend/test/` and `backend/scripts/` and refuses, in any of them but
-that file, a call written `.listen(`, and requires that file to be among the scripts each of those
-readings takes in and to carry both, because a request supertest builds from an app reaches
-whatever holds its port on `127.0.0.1`, a test reaches supertest through any module it imports as
-well as by naming it, and only the text shows the next file written that way; it also reads the
-name of every file in the package outside `node_modules` that vitest's default include collects,
-pinning that default to the pattern it copies, requires its own name among them, and refuses any
-that sits outside `backend/test/`, because the suite runs such a file wherever it sits and the
-reading for `.listen(` stops at those directories; a specifier assembled at run time, a listen
-reached through an alias or a computed key, a listen in a module under `backend/src/` or anywhere
-else outside those directories, a listener started in a child process, and a test file
-collected only through an `include` written into `backend/vitest.config.ts` or reached through a
-symlinked directory are not seen, and none is closed here, while a quoted name in a comment or a
-string that names no module is refused, which costs a word to rephrase and never a silence;
-`backend/test/specs.test.ts` reads every spec this repository declares — `ARCHITECTURE.md` at the root
-and every `SPEC.md` — and every comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree — the config files beside the packages
-included, and an untracked probe dropped under either package included — enumerated through
-`commentsOf` in the comment tool's pure core rather than by a walk of its own or a scan of lines,
-and refuses in a comment what it refuses in a spec: a path `.gitignore` keeps out of the tree, a
-line citation, a commit sha, and any reference to the plan that carries no path — the plan's name, a
-row, an item, a task id, a decision, finding, invariant, question, trap or stage number, a lettered
-invariant, a section mark, a decision by letter, a settled item or a memo finding by its letter and
-number, a pull request, a round of review or of fixing — because a reader who clones the repository
-cannot open what those point at, while the same words inside a string literal or rendered as JSX
-text are the product's and are not read; the price of the letter-and-digit family is that a hash
-algorithm's or a cloud bucket's name spelled that way in a comment reds and is one word to rephrase,
-which is the tie-break the file already states; a reference that names no number, one wrapped across
-a line break in a `//` run or a starred block, a row of the plan written out in words, a row id
-written with its stage letter and no padding, a bare hash sign and a number, *pull request* in words,
-the pipeline's own vocabulary, *this row* in the plan's sense, a sha not in backticks, an absolute
-path and an unpublished file named by its stem are not seen, and none is closed here; and the path
-half is bounded by the extensions the citation clause reads, so a dotfile a reader creates for
-themselves is unseen, rightly; it reads each spec's frontmatter under a grammar of its own — a line
-is a key, a colon, one space and a value, or an inline list, and nothing else — because the tool
-that indexes these files reads YAML whole, and a form that tool reads differently from this holder,
-or drops in silence, is a field filled in and then trusted; it holds the identity a file declares
-to be one the literal declares, the id unique, the type one of the durable ones, the status one of
-two, every parent a declared spec and the parents one tree with `ARCHITECTURE.md` as its only root, and a
-link, where one is written, resolving; a markdown file whose frontmatter carries an id and a type
-is a spec to that tool whether or not anything here declares it, so the walk reads an identity wide
-on purpose — a key indented, quoted, spaced before its colon or with its value on the line below is
-a candidate — finds those, requires the set to equal the literal, and leaves a candidate outside
-the grammar to be refused by name; what it cannot see, stated as a direction rather than a list: a
-spec under a directory `.gitignore` keeps out of the tree, which the tool indexes and this holder
-does not, and an identity written in a form YAML reads and the walk's pattern does not — the
-direction the over-reading closes is the other one, a candidate the tool would not read, which
-costs a refusal and never a silence;
-`backend/test/wire.test.ts` reads every source file under `backend/src/wire` and requires each to
-name `zod` or a file inside that directory and nothing else — by import, re-export, `require`,
-`import()`, `typeof import()` or triple-slash directive, anywhere in the tree — because the client's
-own typecheck will compile that module and pull in whatever it imports;
-`backend/test/comment-tokens.test.ts` reads the comment tool's pure core and its entry and requires
-the core to name `typescript` alone and run nothing at its top level and the entry to be the
-opposite of both, because a purity check that has only ever been shown a pure file cannot
-demonstrate it can tell the two apart; and `web/src/copy.test.ts`, `web/src/tokens.test.ts` and
-`web/src/types.test.ts` do the same thing from the other package, the second reading
-`web/src/styles/tokens.css` for declarations and the whole package for the `var()` that reaches
-them, because a custom property nothing names costs nothing at run time and so cannot be found any
-other way, and the third reading every source file there for a specifier that reaches `backend/`,
-requiring each to be the statement form `import type` or `export type` and `web/src/types.ts` to be
-the only file carrying one, because a value import of the wire compiles, is erased by nothing and
-bundles the module into the client with every suite green, and requiring every reference to browser
-storage in the package's product files — its tests and its harness set aside — to sit in the two
-files `web/src/SPEC.md` names and to be the operations it names for each, because *Platforms* says
-no state lives only in the browser and the theme is its one deliberate exception. **Nothing holds
-that list** —
-a check added and not named here is named nowhere, which is the failure the hand-written lists below
-describe in another module.
+## The checks that read a file as text
+
+Each reads its target as text because only the text shows the next file written the wrong way.
+**Nothing holds this list:** a check added and not named here is named nowhere. Where a check's own
+docblock gives its reason or its blind spots, they are not repeated here.
+
+- **`refusal-set.test.ts`** requires every refusal `backend/src/providers/pdf.ts` throws to be named
+  in `refusals()`, where the budget case measures it.
+- **`summary.test.ts`** refuses a summary query in the data layer that writes the scoping helper's
+  filters itself instead of calling the helper.
+- **`http-body.test.ts`** reads `backend/src/app.ts` and holds every read of `req.body`, and every
+  call to the JSON-body helper and its refusal arm, to the shapes its docblocks name. Those
+  docblocks give the reasons and what its one token, `req.body`, cannot see; none of that is closed.
+- **`loopback.test.ts`** keeps every request on a harness server. A request supertest builds from an
+  app reaches whatever holds its port on `127.0.0.1`, and a test reaches supertest through any
+  module it imports as well as by naming it.
+  - In every script of the package outside `node_modules`, except `loopback.ts`, it refuses the name
+    of supertest, of its types package or of a path inside either, as a quoted literal: the one
+    spelling every import, re-export, `require`, `import()`, `typeof import()` and triple-slash form
+    shares.
+  - In every script under `backend/test/` and `backend/scripts/`, except `loopback.ts`, it refuses a
+    call written `.listen(`.
+  - It requires `loopback.ts` to be read by both readings and to carry both.
+  - It refuses any file that vitest's default include collects outside `backend/test/`, and pins
+    that default to the pattern it copies, because the suite runs such a file wherever it sits and
+    the `.listen(` reading stops at those directories.
+  - Not seen, and none closed: a specifier built at run time; a listen reached through an alias or a
+    computed key; a listen outside those directories, `backend/src/` included; a listener in a child
+    process; a test file collected only through an `include` in `backend/vitest.config.ts` or
+    through a symlinked directory. A quoted name in a comment or a string that names no module is
+    refused, which costs a word to rephrase and never a silence.
+- **`specs.test.ts`** reads every declared spec (`ARCHITECTURE.md` and every `SPEC.md`) and every
+  comment in every `.ts` and `.tsx` file `.gitignore` leaves in the tree, the config files beside
+  the packages and untracked files included. Its docblocks give the reasons for its frontmatter
+  grammar and its identity walk.
+  - In specs and comments alike it refuses a path `.gitignore` keeps out of the tree, a line
+    citation, a commit sha and any reference to the plan, because a reader of the clone cannot open
+    them. It reads comments through `commentsOf` in the comment tool's pure core, so the words in a
+    string literal or in JSX text, which are the product's, are never read. A hash algorithm's or a
+    cloud bucket's letter-and-digit name in a comment fails too, and costs one word to rephrase.
+  - Not seen by those clauses, and none closed: a reference that names no number; one wrapped across
+    a line break in a `//` run or a starred block; a row of the plan written out in words; a row id
+    with its stage letter and no padding; a bare hash sign and a number; *pull request* in words;
+    the pipeline's own vocabulary; *this row* in the plan's sense; a sha not in backticks; an
+    absolute path; an unpublished file named by its stem. A path is read only with an extension the
+    citation clause knows, so a dotfile a reader creates for themselves is unseen, rightly.
+  - Its identity walk reads wide, so a spec written and not declared is found and refused by name.
+    What it cannot see: a spec under a directory `.gitignore` keeps out of the tree, which the
+    indexing tool still reads, and an identity in a form YAML reads and the walk's pattern does not.
+- **`wire.test.ts`** requires every file under `backend/src/wire/` to import only `zod` or files in
+  that directory, and counts the object schemas declared there so the strictness walk cannot skip
+  one.
+- **`comment-tokens.test.ts`** requires the comment tool's core,
+  `backend/scripts/comment-tokens.ts`, to import `typescript` alone and run nothing at its top
+  level, and its entry, `backend/scripts/comment-check.ts`, to be the opposite of both.
+- **`initial-migration.test.ts`** reads `backend/drizzle/` and its journal and requires a single
+  initial migration and snapshot, the pre-release rule in `AGENTS.md`.
 
 ## Invariants
 
-**A green default run does not prove a raw `sql` aggregate is read correctly.** PGlite answers a
-`COUNT` as a number and node-postgres answers it as a string, so an aggregate that reaches a caller
-without `Number()` around it is green on every local run and red only in the CI job that sets
-`TEST_DATABASE_URL`. A change that adds a raw `sql` aggregate is run against a real Postgres before
-it is believed. The default run is on the engine the product itself uses now, so what it proves
-about the embedded database it proves about the product; the PostgreSQL job is what keeps the
-connection-string path honest.
+**A green default run does not prove a raw `sql` aggregate is read correctly.** PGlite returns a
+`COUNT` as a number and node-postgres returns it as a string, so an aggregate without `Number()`
+around it is green locally and red only in the CI job that sets `TEST_DATABASE_URL`. A change that
+adds one is run against a real Postgres before it is believed. The default run uses the product's
+own engine, so what it proves holds for the product; the Postgres job keeps the connection-string
+path honest.
 
-**`typescript` is declared in `backend/package.json` for the typecheck script, and a test in this
-directory also imports its compiler API as a library.** That import is deliberate rather than a
-transitive accident: an invariant about the *shape* of source has no other reader.
+**`typescript` is declared in `backend/package.json` for the typecheck, and is also a library
+here.** Several tests and the comment tool in `backend/scripts/` import its compiler API, on
+purpose: an invariant about the shape of source has no other reader.
 
-**A list in this directory that pins which tables a backup or an account delete reaches is a
-literal on purpose**, so that a change to it is an edit to a test; what each governs is written
-once, in `backend/src/db/SPEC.md`.
-
-**`backend/test/specs.test.ts` holds that a spec declares one of two statuses, and holds nothing
-about which one is true.** The flip out of draft follows the owner's review, and no check can tell
-whose hand typed the line: an agent writing `active` is refused by nobody, so a status is
-evidence only to the extent that the person reading it knows where it came from.
+**`specs.test.ts` holds that a spec's status is one of two values, and nothing about which one is
+true.** The flip out of draft follows the owner's review, and no check can tell who typed it. An
+agent writing `active` is refused by nobody, so a status is evidence only as far as its reader knows
+where it came from.

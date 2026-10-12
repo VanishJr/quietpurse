@@ -407,8 +407,7 @@ export function CsvImport({ onBack, onImported, onAccountCreated, baseCurrency }
    * "undefined rows couldn't be read".
    *
    * The filtered rows are missing from here on purpose, for the reason `web/src/SPEC.md`
-   * gives under *The sentences a person reads, and what is lifted out of a screen to
-   * hold them*.
+   * gives under *The sentences a person reads*.
    */
   const emptyFile = file !== null && (file.size === 0 || fileRows === 0);
 

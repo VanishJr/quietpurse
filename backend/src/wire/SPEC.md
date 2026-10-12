@@ -2,183 +2,124 @@
 id: submodule-backend-wire
 type: submodule-design
 status: draft
-title: wire — the declared answer of every route
+title: The declared answer of every route
 parent: module-backend
 ---
 
-What this module owns, what it may depend on, and the rules about the API's answers that no type
-and no test holds. `backend/src/SPEC.md` answers for the door the requests come through — the
-request schemas, the refusal sentences, the status split — and stops here; this document answers
-for what goes *out*.
-
 ## Responsibility
 
-**The declared answer of every route.** Every 2xx JSON body the API gives is declared once, here,
-as a zod schema, and `ANSWERS` keys each declaration by the method and the path exactly as Express
-registers the route. The refusal envelope — `{ error }` with a sentence in it — is a declared shape
-too, and the one refusal that carries more than a sentence, the charts route's stale 409 with the
-current version and list inside it, is declared as its own shape beside the route it belongs to.
+**Every route's answer, declared once.** Each 2xx JSON body is a zod schema here, and `ANSWERS` keys
+it by method and path exactly as Express registers the route. The refusal envelope `{ error }` is
+declared too, and so is the one richer refusal: the charts route's stale 409, which carries the
+current version and list.
 
-**The backend's own type for every one of those shapes is the declaration's inference.** There is
-no hand-written wire shape anywhere else in `backend/src`: `backend/src/types.ts`, the data layer,
-the ingestion surface, the settings modules and the independence computation re-export their names
-from here. A module may narrow a wire shape — by `Omit`, `Exclude`, `Extract` or a compile-time
-brand — or re-compose one from the wire's own pieces, and put on the derivation what the wire does
-not carry: `NewTransaction` in `backend/src/types.ts` omits from `Transaction` the id and every
-field the data layer assigns after insert, so a parser states what a statement states and nothing
-else, and adds the key a format's own stable reference to an operation plugs into; the ingestion
-surface's `ImportSummary` puts a brand on the two fields only its reconciliation may fill, over the
-wire's own `totals` and `balances` types. What a module may not do is write a wire shape's fields
-out again on its own: a type for a wire shape that no type operator ties back to the declaration
-is a second declaration, and a declaration that exists twice agrees with the route by luck.
+**The backend's types are inferred from these schemas.** No file in `backend/src` writes a wire
+shape by hand. A module may narrow one (`Omit`, `Exclude`, `Extract`, a brand) or recompose it from
+the wire's pieces, and add what the wire lacks, as `NewTransaction` in `backend/src/types.ts` and the
+ingestion surface's `ImportSummary` do. Writing a shape's fields out again makes a second
+declaration, which matches the route only by luck.
 
-**The vocabularies and bounds the client composes against.** The chart kinds, ranges, breakdowns
-and measures, the chart length bounds, the id charset — as a string source beside the
-`RegExp` built from it, because a type can carry the string and not the pattern — the import
-source types and statuses, the income-source kinds, the goal types, bases, income scopes, progress
-semantics, units, statuses, periods and bounds, the reasons a balance pair is not shown, and the
-diagnostic budget `ERROR_DETAIL_MAX`. `backend/src/db` imports the tuples for its column options and
-its check constraints and never the reverse. The strict discriminated Goals create and replacement
-schemas live here because they are the public REST contract shared by future clients; route-local
-request schemas in `backend/src/app.ts` compose over the remaining tuples with their own refusal
-sentences. Monetary writes are accepted only at cent precision, and savings-rate targets only at
-basis-point precision, because a value the integer columns would round is not a valid request.
-Financial independence summaries carry both required work hours and the server-computed monthly
-capacity and whether the requirement exceeds it, so weekly availability is not inert configuration.
-The client re-exports every goal union from this module, pins each union to its wire tuple, and
-formats progress from the answer's semantic and unit rather than inferring either from goal type.
+**The vocabularies and bounds the client builds against**: chart kinds, ranges, breakdowns, measures
+and bounds; the chart id charset; import source types and statuses; income-source kinds; goal types,
+bases, income scopes, progress semantics, units, statuses, periods and bounds; the reasons a balance
+pair is not shown; and `ERROR_DETAIL_MAX`. `backend/src/db` imports these tuples, never the reverse.
+
+**The chart id charset is a string, `CHART_ID_SHAPE_SOURCE`, beside the `RegExp` built from it**,
+because a type can carry a string but not a pattern. The client cannot import the `RegExp`, since a
+value import would bundle this package. It builds its own from a string pinned by type to the wire's.
+Narrowing the charset here without the client is then a compile error in `web/`, instead of a client
+that keeps sending an id the route refuses and loses the whole list over it.
+
+**Goal requests are part of the public contract.** Their strict create and replacement schemas live
+here for future clients; other request schemas are local to `backend/src/app.ts`, built on the tuples
+here, with their own refusal sentences. Money is accepted only in whole cents and savings-rate
+targets only in whole basis points, because a value the integer columns would round is not a valid
+request. A Financial independence summary carries the required work hours, the server's monthly
+capacity and whether it is exceeded, so the weekly hours a person enters actually count. The client
+pins each goal union to its tuple and formats progress from the answer's semantic and unit, never
+from the goal type.
+
+**`SUPPORT_INCOME_SOURCE` is the read-only income source derived from the Support category.** Its
+namespaced id cannot be created through the API, it is not in the editable source list, and it
+always counts as external income.
 
 ## Boundary
 
-**This module imports zod and its own files, and nothing else.** No node builtin, no `express`,
-no `drizzle-orm`, nothing from `backend/src/db` or `backend/src/providers` — not even as a type.
-The client's own typecheck will compile this file, and it pulls in whatever the file imports: a
-data-layer type reached through the schema module would drag the whole of `drizzle-orm` into the
-client's program. That is why the vocabularies moved *into* this module and the data layer imports
-them back. Held by `backend/test/wire.test.ts`, which walks every import, re-export, `require`,
-`import()`, `typeof import()` and triple-slash directive in the module's source over the whole tree
-and refuses any specifier that is not `zod` or a relative path inside this directory.
+`backend/src/SPEC.md` covers what comes in: the request schemas, the refusal sentences and which
+status a refusal gets. This spec covers what goes out.
 
-**The file is compiled by two compilers, and the second is the client's.** `web/src/types.ts`
-re-exports this module's types, so the client's `tsc` — `ESNext` modules, `bundler` resolution,
-`isolatedModules`, `noUnusedLocals`, `noUnusedParameters` — compiles this file beside this package's
-own `commonjs` one. An edit only the client's refuses — a type re-export without `export type`, an
-unused local — is green in both backend jobs and red in the `web` job, and that coupling is what
-holds the file to `export type` on every type-only re-export and nothing left unused. An `export =`
-is refused by both — by this package's compiler because the module has other exports, and by the
-client's because it compiles ES modules; an `import x = require()` is refused by both, because
-`backend/tsconfig.test.json` compiles `backend/test/` and everything it reaches as ES modules; a
-`require()` of anything but zod or a file in this directory is refused by the specifier walk
-whichever compiler runs; a `const enum`, a `__dirname` and a `require('zod')` are refused by
-neither.
+**This module imports only zod and its own files**, not even types from elsewhere. The client's
+typecheck compiles this file and everything it imports, so one data-layer type would pull
+`drizzle-orm` into the client. That is why the vocabularies live here. `backend/test/wire.test.ts`
+checks every import form, including `require`, `import()`, `typeof import()` and triple-slash
+directives.
+
+**The client's compiler compiles this file too.** `web/src/types.ts` re-exports its types, so the
+client's stricter `tsc` (`isolatedModules`, `noUnusedLocals`, `noUnusedParameters`) reads it. A type
+re-export without `export type`, or an unused local, passes both backend jobs and fails the `web`
+job. So every type-only re-export uses `export type` and nothing is left unused. Nothing catches a
+`const enum`, a `__dirname` or a `require('zod')`.
 
 ## What a declaration says, and how it is read
 
-An income source is normally a configured source id. `SUPPORT_INCOME_SOURCE` is the exception:
-it identifies the read-only source derived from the effective Support category in transactions and
-income summaries. Its namespaced id cannot be generated by creating a configured source through
-the API. It is absent from the editable source catalog and always contributes as external income.
+**Every object is strict**, and `backend/test/wire.test.ts` holds it and says why.
 
-**Every object on the wire is strict.** A plain `z.object` strips the keys it does not know and
-would certify a body it never saw; a strict one turns an undeclared field into a parse failure.
-`backend/test/wire.test.ts` walks every declared body through its arrays, unions, optionals,
-nullables and readonly wrappers and refuses an object node whose catchall is not `never`, and it
-counts the nodes it visited so a walk that found nothing reds rather than passing over an empty
-set.
+**Optionality follows what the producer emits, read from the mapper.** A field set on every row is
+required; a field a producer omits is optional. Absent and `null` are different answers and are
+declared apart; the field's own docblock says which is which. An account's list of foreign
+currencies is required, because empty means "checked, none" and absent would mean "never checked". A
+flag that is only ever `true` (a delete, a discard, a restore, health) is declared as the literal;
+the client may read it as a boolean and lose nothing.
 
-**Optionality is what the producer emits, found by reading the mapper.** A field the row mapper
-sets on every row is required, whatever the old hand-written type said; a field a producer omits is
-optional. Absence and `null` are different answers and are declared apart: a base-currency amount is
-absent while no rate has been fetched, never null; a fee is absent on the way out and null on the
-way in, and `NewTransaction` is where the null lives; the manual transfer flag is null when the user
-has not decided and is present on every row. A list of an account's foreign currencies is required
-rather than optional because empty means *checked, and there are none* where absent means nobody
-looked. A flag that is only ever `true` on the wire — a delete, a discard, a restore, the health
-answer — is declared as the literal, because that is what the route emits; the client may read it as
-a boolean and lose nothing.
+**A value a screen shows as prose crosses as a slug**: the reasons a balance pair is not shown,
+categories, income-source ids. The client's dictionary holds the words.
 
-**A value a screen renders as prose crosses as a slug.** The reasons a balance pair is not shown
-are a closed vocabulary here and a sentence in the client's dictionary, which is this codebase's own
-idiom for a value a screen renders as prose; the same holds for a category and an income-source id.
-
-**A route that answers something other than a screen's JSON says so.** The CSV export, the stored
-statement's bytes and the built client are declared `not-json`; the backup is declared
-`opaque-json`, because its body is JSON whose shape belongs to the restore route that reads it, and
-"not JSON" and "JSON whose shape lives with `parseBackup`" are different facts a client should be
-able to read apart. A key absent from the registry is a third state, and the walk below refuses it.
+**Answers that are not a screen's JSON are declared as such.** The CSV export, a stored statement
+and the built client are `not-json`. The backup is `opaque-json`: JSON whose shape belongs to
+`parseBackup`, which a client should be able to tell apart from "not JSON". A route missing from the
+registry is a third state, and the router walk refuses it.
 
 ## How the declaration is held against the door
 
-The holds below each cover what the others cannot see, and all of them live in `backend/src/app.ts`,
-because the door owns what crosses it and they need the `express` types this module may not import.
+The checks below each cover what the others miss. They live in `backend/src/app.ts`, because they
+need the `express` types this module may not import.
 
-**A typed reply helper at every success site holds production, by type.** `answer` takes the route
-key as a literal, so a key the registry does not carry is a compile error; it takes the body as the
-declaration's inferred type, so a route whose body is not its declared shape is a compile error, and
-where the body is a fresh object literal an undeclared field is one too; and it reads the status off
-the registry, so a route cannot answer the wrong status by accident. What it cannot see: a value
-whose type says `number` while the driver hands over a string, an object built inside a `.map()`
-callback, which is inferred rather than checked, and a route that reaches for the response's own `json` method directly.
+**The `answer` helper checks success replies by type.** The route key must be in the registry, the
+body must have the declared type (with no extra fields in a fresh object literal), and the status
+comes from the registry. It cannot see a driver returning a string for a `number`, an object built
+in a `.map()` callback (inferred, not checked), or a route calling `json` directly.
 
-**A wrapper over the response's `json` and `send` methods holds the wire under the suite, by value.** It is the
-first middleware on the app and is inert until something puts a reporter under the app setting
-`ANSWER_CHECK` names — `backend/test/setup.ts` does, and nothing in production does, so a production
-answer pays nothing and a foreign settings row restored from another version does not become a 500
-on the settings route. Under the suite every JSON answer is parsed in its serialised form, never the
-in-memory object, because an undefined property and a `Date` are different things before and after
-the wire; a mismatch is recorded with the route, the status and every zod issue path, and the setup
-file drains that record in `afterEach` and in `afterAll`, so the case that produced the mismatch is
-the case that fails with it, and an answer issued from a file's own `afterAll` is not lost when the
-next file installs a fresh reporter. Recorded and never thrown from inside the `json` method: a throw there
-is caught by Express and answered as `internal error`, with the reason in a silenced log. The
-wrapper's own work sits inside a `try` for the same reason, and the original is still called with the
-original body whatever the check found — the case's own assertions see the true answer. The `res.send`
-half exists for one line: a declared JSON route edited to answer `res.type('json').send(...)` would
-otherwise be green with an unparsed body. Anything sent through `send` on a `json` route with a
-success status and no `json` call behind it is recorded as such; a route writing to the socket
-through `res.end` or `res.write` directly is the residual nothing here sees. What the wrapper cannot
-see: a route the suite never hits.
+**A wrapper over `json` and `send` checks every answer by value, under the suite only.** It is the
+app's first middleware and does nothing unless a reporter is set under the `ANSWER_CHECK` app
+setting. `backend/test/setup.ts` sets one and production never does, so production pays nothing. A
+mismatch is recorded, not thrown: Express would turn a throw into `internal error`, with the reason
+in a silenced log. For the same reason the check runs in a `try` and the original body is always
+sent, so the test's own assertions see the real answer. The setup file drains the record after each
+case and each file, so the case that caused a mismatch is the one that fails. The `send` half catches a JSON route
+rewritten as `res.type('json').send(...)`. Not seen: `res.end`, `res.write`, and routes no test
+calls.
 
-**A walk over the router at import holds registration.** After the last route is registered,
-`assertAnswersDeclared` reads every route off the app's router and requires the set of keys to equal
-the registry's, in both directions — a route with no declaration and a declaration with no route are
-each listed by key in the throw. It throws at import, so `npm start` dies before the lock is taken,
-every test file that imports the app reds at collection, and the CI job that starts the real process
-reds too. Routes are registered on `app` directly so the declaration walk can see them: a router
-mounted under a prefix carries its routes inside its own stack, where both directions of the
-equality would pass over a route nobody declared, so the walk refuses a mounted router outright
-rather than recursing with a prefix it could compose wrongly. A handler mounted with `use` rather
-than registered as a route is the sibling form: it answers with no route for the wrapper to key its
-body by, so no declaration could ever cover it, and both directions of the equality pass over it
-too. The walk therefore refuses every non-route layer it does not recognise, and it recognises by
-function name against the door's own middlewares — the answer check, the response headers and
-request log, the origin check, the JSON body parser, the static file server and the error handler —
-so the app's non-route layers are those and nothing else, and an anonymous handler or a foreign one
-throws at import naming itself. A rename inside Express of one of the two it does not own reds the
-boot loud rather than letting anything through. Of the layers it recognises, the answer check is
-required to be the router's first, by identity and not by name — a reorder that puts any layer
-ahead of it, or a deletion of it, reds at import wherever the app is imported, because the wrapper
-sees only what sits behind it, and a layer ahead of it that answers, answers unparsed.
+**A walk over the router at import checks registration.** `assertAnswersDeclared` requires the
+registered routes and the declared keys to match in both directions, and lists every mismatch. It
+throws at import, so `npm start` fails before taking the lock, test files fail at collection, and so
+does the CI job that starts the app. Routes are registered on `app` directly: a mounted router hides
+its routes in its own stack, so the walk refuses one rather than recurse with a prefix it might
+compose wrongly. A handler added with `use` has no route to key its answer by, so no declaration
+could cover it, and the walk refuses every non-route layer except the door's named middlewares. An
+anonymous or unknown one throws, naming itself; if Express renames its body parser or static server,
+startup fails loudly. The answer check must be the first layer, compared by identity: it sees only
+what comes after it, and a layer before it could answer unchecked.
 
 ## Invariants
 
-**A count in a body is a number.** The embedded engine answers an aggregate as a number and a
-PostgreSQL server answers it as a string, so a `z.number()` over a figure that comes out of a raw
-`sql` template is green on the default run and red only against the server. The suite against a real
-server is what holds it; the fix is `Number()` in the route, never a coerced or widened schema.
+**A count in a body is a number.** A `COUNT` from a raw `sql` template is a number on PGlite and a
+string on PostgreSQL, and other aggregates can be strings on either. So `z.number()` over such a
+figure can pass by default and fail only against a server, where the PostgreSQL suite catches it. Fix it with `Number()` where the value is read, never by
+coercing or widening the schema.
 
-**A relocated docblock is a claim.** The reasoning on a schema field here came from the hand-written
-types it replaced, and each sentence was read against the mapper or the query it describes when it
-landed. The next move re-reads them; age is not evidence.
-
-**What the client builds on.** The client reaches this module by type only and through one door,
-`web/src/types.ts`: the shapes and the union types under this module's own names — the chart
-vocabularies', the goal types', bases', income scopes', progress semantics', units', statuses' and
-periods', and the income source kinds' among them — and `typeof` of the constants its runtime copies
-are pinned to: `CHARTS_MAX`,
-`CHART_TITLE_MAX`, `CHART_ID_MAX`, `CHART_ACCOUNT_ID_MAX`, `CHART_ID_SHAPE_SOURCE` and
-`ERROR_DETAIL_MAX`. It never names the tuples and imports no value, so it carries no runtime
-dependency it would have to bundle; `web/src/types.test.ts` refuses a value import and a second
-door. Its typecheck resolves `zod` through this package's dependencies, so the `web` job in
-`.github/workflows/ci.yml` installs this package's dependencies before its own, and `npm run setup`
-installs this package first.
+**The client reaches this module by type only, through `web/src/types.ts`.** It takes the shapes and
+unions, plus, type-only, the constants its own copies are pinned to with `typeof`: the chart
+bounds, `CHART_ID_SHAPE_SOURCE` and `ERROR_DETAIL_MAX`. It also re-exports the goal bounds and
+tuples and `SUPPORT_INCOME_SOURCE`, which only its tests read. With no value import there is nothing to bundle; `web/src/types.test.ts` refuses
+a value import and a second door. The client's typecheck resolves `zod` from this package, so the
+`web` job in `.github/workflows/ci.yml` and `npm run setup` install this package first.
