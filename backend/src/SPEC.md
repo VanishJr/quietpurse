@@ -41,9 +41,10 @@ below.
 binding loopback is what answers for that. No middleware asks who is calling.
 
 **One middleware asks where a request came from,** because loopback keeps other machines out but not
-a page in the owner's own browser. `originCheck` checks `Host`, `Origin` and `Sec-Fetch-Site` on every
-`/api` request; its docblock says what each header closes, and `SECURITY.md` says it for readers
-outside the code. It runs before any body parser, so a refused request is never parsed.
+a page in the owner's own browser. `originCheck` checks `Host` and `Origin` on every `/api` request,
+and `Sec-Fetch-Site` on every request that can change state; its docblock says what each header
+closes, and `SECURITY.md` says it for readers outside the code. It runs before any body parser, so
+a refused request is never parsed.
 
 In normal use nothing crosses an origin: `web/vite.config.ts` proxies the API in development, and the
 start command serves the client from the backend. So the check needs no allowlist, no preflight and
@@ -79,8 +80,9 @@ without the other stages rows the confirm then refuses, or refuses a file the co
 
 **A stored currency is compared in one form.** An earlier version could store `eur`, and it is the
 same currency as `EUR`. Every comparison and grouping of a currency read from the database goes
-through `currencyKey` in `backend/src/currency.ts` or `CURRENCY_KEY` in `backend/src/db`. The two
-fold ASCII letters only and agree letter for letter, and `backend/test/currency.test.ts` holds them
+through `currencyKey`, declared in `backend/src/wire/currency.ts` and re-exported by
+`backend/src/currency.ts`, or `CURRENCY_KEY` in `backend/src/db`. The two fold ASCII letters only
+and agree letter for letter, and `backend/test/currency.test.ts` holds them
 to each other and scans for a comparison written past them. Stored rows keep their spelling; answers
 send the folded form, as `backend/src/wire/SPEC.md` says, and so does the CSV export. The dedup key
 keeps its own `toUpperCase`, because it is stored: a different fold would give an earlier row a
@@ -99,6 +101,13 @@ and what a crash may leave behind*.
 
 **4xx is the caller's fault and 5xx the server's,** for the log as much as for the screen. A route
 may change the body of a refusal the server caused, never its class.
+
+**The upload does not keep that rule yet.** `POST /api/imports` answers every failure of the import
+with 400 and the failure's own message. So a statements folder that cannot be written to, a failed
+internal check that every row the importer read was kept or dropped, or a database error reads as
+the caller's fault, the last with the failed statement in its text. The restore answers a failed
+database write with 400 too, with a sentence of its own. A new route follows the rule, not these
+two.
 
 **`errorHandler` follows the `http-errors` contract** of the body-parser and http-errors that the
 express in `backend/package.json` brings, so an upgrade can move it silently:
@@ -222,8 +231,8 @@ pair and a real expense leaves the figures as a transfer.
 row for the family patterns. The environment only seeds them, so editing it changes nothing once a row
 exists. After that only the base currency reads the environment again, as the fallback for a missing
 row; the owner names and family patterns have no fallback. So `backend/src/config.ts` answers for
-nothing else at runtime, and the Settings screen is where a person changes these values. The settings
-door, the table and the screen all rely on this split, and none of them states it.
+none of the others at runtime, and the Settings screen is where a person changes these values.
+The settings door, the table and the screen all rely on this split, and none of them states it.
 
 **A PostgreSQL connection string changes the engine.** `backend/src/db` reads it to open the database,
 and `backend/src/lock.ts` reads it to claim no file, so the two must read it the same way.
@@ -332,9 +341,10 @@ matching key from it.
 
 **A rule preview and its write are one contract.** The server computes a preview over the whole
 history, never over the client's filtered and capped list, and it names what the write will change.
-Applying a similar-description rule replaces the exact rules in that account's normalized group and
-clears the manual transfer marks the preview showed. A category rule leaves manual category choices
-in place as exceptions. The token binds the write to what the preview showed.
+Applying a similar-description rule replaces every rule in that account's normalized group, an
+earlier similar rule included, and clears the manual transfer marks the preview showed. A category
+rule leaves manual category choices in place as exceptions. The token binds the write to what the
+preview showed.
 
 **The signature carries the transfer rules, match mode included,** so a restart repairs a recompute
 that an applied rule left unfinished. Applying a similar-description rule rechecks the preview token

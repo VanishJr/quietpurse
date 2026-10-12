@@ -61,7 +61,7 @@ another device. The legacy browser key is read once: on the first load that find
 never saved, `analytics.ts` migrates it, and removes it only after the server accepts a write, never
 on a refusal. It never writes the key, and an installation that never ran the browser-only list
 finds nothing under it. Removing the migration changes behaviour, and this document does not rule on
-it. Cases in `web/src/screens/AnalyticsScreen.test.tsx` hold two client-only rules:
+it. Cases in `web/src/screens/AnalyticsScreen.test.tsx` hold these client-only rules:
 
 - **One write is in flight at a time**, because two mutations sharing a version make the reader's
   own second click look like another device's.
@@ -226,11 +226,15 @@ base becomes a tiny one, and a percentage of it means nothing. So `accounts.ts` 
 `analytics.ts` sums integers and divides once, and `spendRing` in `categories.ts` calls `toCents`
 rather than keeping a copy.
 
-`monthOf`, `fmtDay` and `fmtMonthKey` split a calendar key as text and never make an instant. The
-server buckets months with `SUBSTR` over the stored ISO date in `backend/src/db/index.ts`, and a
-local `Date` disagrees with it west of UTC: on the first of the month for a month key, and always
-for a statement's day, which is a calendar day, not a moment. `fmtWeekday` takes a real instant on
-purpose, today where the reader is, and uses the local getters.
+`monthOf`, `fmtDay` and `fmtMonthKey` read a calendar day or month off its first characters and
+never make an instant. The server buckets months with `SUBSTR` over the stored ISO date in
+`backend/src/db/index.ts`. A statement's day is a `CalendarDay`, which may carry the time the file
+stated, or UTC midnight when it stated none (`backend/src/wire/SPEC.md` says what each date brand
+marks). Read through a local `Date`, a day at midnight or an early hour falls on the day before west
+of UTC, and a late-evening time on the day after east of it; a month key read that way is the month
+before west of UTC.
+`fmtWeekday` (today, where the reader is) and `fmtInstant` (an `Instant`, such as when a file was
+uploaded) take real moments on purpose and use the local getters.
 
 `monthEnd` gives a month's last day in UTC. `accountSummary` and `accountMonths` in `api.ts` send
 that calendar day as `to`, which the summary routes in `backend/src/app.ts` and the transaction
@@ -257,12 +261,12 @@ charts, which plot one period's parts against each other. The two take different
 endpoints and are configured by different questions. `chartKind` is the one answer the wizard and
 the loader both read.
 
-**Three fields of `Chart` mean something on the client.** The title is the reader's: the wizard
-suggests one until the reader types, and never overwrites a typed one. `metrics` may be empty
-between choices, since the chips set no minimum; such a series chart cannot be saved, and
-`ChartPlot` says so on the plot. `accountId: null` is every account together, as the summary
-endpoints answer without an id. An id naming no account is not that: `chartData.ts` refuses it
-rather than draw the whole under one account's title.
+**`Chart`'s `title`, `metrics` and `accountId` mean something on the client.** The title is the
+reader's: the wizard suggests one until the reader types, and never overwrites a typed one.
+`metrics` may be empty between choices, since the chips set no minimum; such a series chart cannot
+be saved, and `ChartPlot` says so on the plot. `accountId: null` is every account together, as the
+summary endpoints answer without an id. An id naming no account is not that: `chartData.ts` refuses
+it rather than draw the whole under one account's title.
 
 `useChartData` is the one seam between a chart and the server. `analytics.ts` holds the model and
 the arithmetic, never fetches or touches React, and takes `today` as an argument, so every series
@@ -276,7 +280,7 @@ transfer between the reader's own accounts stays out of income and expenses (thr
 filter or inside the sums), and a refund reduces the expenses of the period it landed in. Only the
 unit differs, so `currency` comes from the body that answered, never from the accounts list.
 
-`useChartData` tells apart three states of the account list, and the screen decides which holds.
+`useChartData` tells apart the states of the account list, and the screen decides which holds.
 `accounts` is null while `web/src/screens/AnalyticsScreen.tsx` has no list: before its first read
 lands, or after a read failed. That differs from "read, and this account is not in it": with both as
 an empty array, every per-account chart would say its account is gone for the length of one request.
@@ -362,8 +366,8 @@ rest.
 
 `loadAccounts` in `AnalyticsScreen` reads the account list, hidden accounts included, and hands it
 to the card and to `ChartWizard`, because the answer is the same for every chart and the card
-remounts whenever the chart changes. It re-reads on both revisions and on its own Retry, keeping the
-old list until the new one lands.
+remounts whenever the chart changes. It re-reads on both revisions and on its own Try again,
+keeping the old list until the new one lands.
 
 ## Where the reader is
 
@@ -435,7 +439,7 @@ pending save holds navigation. Nothing promises recovery.
 them. No code branches on an `IMPORT_STATUS_LABELS` label, so one can change without a slug moving.
 
 `categoryRuleCaption` states the rule and a transaction count, never which category rows ended up
-in, because two backend facts would make that false. `overridden` in `backend/src/db/index.ts`
+in, because these backend facts would make that false. `overridden` in `backend/src/db/index.ts`
 counts every hand-set row whatever its value. And a newer overlapping rule keeps the rows this one
 matched: `makeCategoryRuleMatcher` in `backend/src/classify.ts` takes the first match over rules
 listed newest first, and saving a rule again, through `applyPreviewedCategoryRule` or
@@ -473,11 +477,12 @@ answer, and staged problems show without a disclosure. The sentence saying how t
 comes before the review's figures, because it qualifies them. The balance pair's claim stays in the
 details, since a continuous run does not prove the statement complete.
 
-A failed confirmation is unverified: the review points the person to the import history or the
-transactions to check, and never claims that leaving discards the import. A confirmation that
-inserted nothing leaves the created-account notice standing, because the account was written before
-the upload. A successful read, confirmation or discard focuses the new heading, outside the Tab
-order, so the answer is not lost below the setup.
+A 409 to a confirmation is the server's answer, not a lost one: the review says the confirmation
+was refused and shows the server's sentence. Any other failure is unverified: the review points the
+person to the import history or the transactions to check. Neither claims that leaving discards the
+import. A confirmation that inserted nothing leaves the created-account notice standing, because the
+account was written before the upload. A successful read, confirmation or discard focuses the new
+heading, outside the Tab order, so the answer is not lost below the setup.
 
 `CsvImport`'s re-upload card and the note `deduplicated` gates in `ImportHistory` never say where a
 file's rows are now. `import_id` names only the first writer (*Import provenance, and what an

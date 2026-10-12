@@ -38,9 +38,17 @@ today. Root, or the disk itself, gets past all of it.
 
 **Someone who reaches the port** can read and change everything: there is no sign-in and no password,
 and none is planned. The server binds `127.0.0.1` unless `QUIETPURSE_HOST` says otherwise.
-`QUIETPURSE_HOST=0.0.0.0`, meant for a phone on the same Wi-Fi, is the one way to open it, and it
-gives the whole network that access for as long as the app runs. Its name is the warning, and no
-other setting widens the bind.
+`QUIETPURSE_HOST=0.0.0.0`, meant for a phone on the same Wi-Fi, opens it, and it gives the whole
+network that access for as long as the app runs. Its name is the warning.
+
+**`VITE_HOST=true` opens the data as well, and its name does not warn.** It is a development
+setting, read from the environment of `npm run dev` or `npm run preview` in `web/`. That server then
+listens on every interface while the app behind it stays on loopback, and it forwards `/api` with
+`Host` rewritten to the app's own, so the `Host` check below passes every request it forwards. Any
+device on the network can then read everything through it, the backup and the uploaded statements
+included, and a client that sends no `Origin`, such as a script, can change it. A browser on
+another device sends an `Origin` with every write and is refused, so a phone gets an app that reads
+but cannot save. Use it only on a network you trust.
 
 **A second Quietpurse on the same folder.** PGlite does not refuse a second opener, and two writers
 corrupt it silently. So before the database opens, `backend/src/lock.ts` claims
@@ -97,8 +105,9 @@ interrupt a pdfjs call. They stop an accidental pathological file, not someone w
 
 **Format confusion.** `sniff()` decides the format from the bytes, never from the filename or the
 declared content type. XLSX and PDF are recognised by evidence that they are present, including a
-signed container with `%PDF-` at byte 71. CSV is the fallback for a file that is neither and has no
-NUL byte near its start.
+signed container with `%PDF-` past its start. CSV is the fallback for a file that is neither, and
+only for text: a UTF-16 byte-order mark makes a file CSV outright, and otherwise a file that opens
+with `<`, as XML and HTML do, or has a NUL byte near its start is refused.
 
 **A half-understood statement imported silently.** Nothing is committed on upload: rows reach
 `transactions` only on an explicit `confirm`. A reconciliation gate refuses a file rather than

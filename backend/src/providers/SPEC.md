@@ -175,10 +175,10 @@ The budget is **one chain** across `statement.ts`, `xlsx.ts`, `pdf.ts` and the d
 reason. What a reason's prose and its row label leave bounds a frontend's note.
 
 **The chain is written whole in one place, in code, above `CELL_QUOTE_MAX` in `statement.ts`, and it
-stays there**, with why it is not split and why a note producer writes against the widest-label
-path's figure rather than its own. What yields when a sentence does not fit is decided where it is
-composed (`AGENTS.md`): fixed prose is never shortened, and a refinement yields before a fact with
-no other channel.
+stays there**, with why it is not split and why each note producer writes against its own path's
+figure, taken at the widest label that path can emit. What yields when a sentence does not fit is
+decided where it is composed (`AGENTS.md`): fixed prose is never shortened, and a refinement yields
+before a fact with no other channel.
 
 **An unread sheet is such a fact.** If a workbook's first month is formatted past the early-out, the
 second month imports with a success card, and only the notice says a month is missing. A log reaches

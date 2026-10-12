@@ -7,7 +7,10 @@ title: The Quietpurse module map and the path one statement takes through it
 Quietpurse is an Express API over Postgres with a React client, and one person runs all of it on
 their own machine. The database is PGlite, Postgres compiled to run inside the Node process, kept in
 a folder next to the uploaded statements. The API is the contract: the web client is one consumer,
-and native clients are planned. So nothing that decides an outcome lives in `web/`.
+and native clients are planned. So every figure and every classification comes from the API, and
+every write is checked there. What `web/` works out for itself is presentation, such as the months
+a summary leaves out, and its own chart list: trimming it to the bounds the API accepts, and moving
+a list an older version kept in the browser to the server.
 
 Two things shape the rest: **the data is one folder on one person's disk**, and **one upload button
 hides every parser**.
@@ -41,8 +44,8 @@ person reads, not in a partial import they miss.
 
 ### Why `sniff` reads bytes and not the extension
 
-A bank's export can be a signed container, a CMS envelope with `%PDF-` at byte 71, and a CSV whose
-first cell is a date starts with a byte that is also a valid ASN.1 tag. The policy is in
+A bank's export can be a signed container, a CMS envelope with `%PDF-` past its start, and a CSV
+whose first cell is a date starts with a byte that is also a valid ASN.1 tag. The policy is in
 `backend/src/providers/SPEC.md` under *Responsibility*, and the byte-level reasoning is the comment
 above the container test inside `sniff`: read it before touching the function.
 
@@ -115,8 +118,9 @@ import provenance and migrations are in `AGENTS.md` under *Invariants*.
    `backend/src/providers/statement.ts` gets a `case` for it.
 2. Add the type to `IMPORT_SOURCE_TYPES` in `backend/src/wire/index.ts`, and teach `sniff()` to
    recognise it **from the bytes**: by evidence that the format is there, never by the absence of
-   others. CSV is the one exception, the fallback when nothing else matches and the file starts with
-   no NUL byte.
+   others. CSV is the one exception, the fallback when nothing else matches: a UTF-16 byte-order
+   mark makes a file CSV outright, and otherwise a file that opens with `<`, as XML and HTML do, or
+   has a NUL byte near its start is refused.
 3. Add it to `PARSER_VERSION`, `SIZE_CAP` and `FORMAT_NAME` in `backend/src/providers/statement.ts`,
    and to the file dialog's list in `web/src/components/CsvImport.tsx`. `FORMAT_NAME` feeds the
    refusal that lists the accepted formats, and a format the person is not told about is one they

@@ -9,7 +9,7 @@ runs.
 
 **Platforms.** The web client is the product being built now; native iOS and Android come later. So
 the REST API, not the React app, is the contract: no logic a mobile client cannot reach, no state that
-lives only in the browser.
+lives only in the browser except the theme, which each device keeps as its own preference.
 
 ## About this file
 
@@ -27,7 +27,7 @@ backend/    Express 5 + TypeScript, Drizzle ORM over Postgres (PGlite in the pro
   src/providers/ the one ingestion surface and the per-format parsers behind it
   src/wire/     every route's answer declared once; the backend's types are inferred from it
   drizzle/      generated migrations
-  test/         vitest + pglite + supertest; every file not named *.test.ts is harness or fixture
+  test/         vitest + pglite + supertest; a file not named *.test.ts is harness, fixture or SPEC.md
 web/        React 19 + Vite + Recharts
   src/screens/  Overview, Transactions, Analytics, Goals, Settings
 package.json  setup and start, plus typecheck and test for both packages
@@ -77,16 +77,19 @@ unpinned version.
   `QUIETPURSE_HOME` (`~/Quietpurse`): the database in `db/`, the uploaded statements in
   `statements/`, and a lock file with the running process's pid. `DATABASE_URL` and
   `DOCUMENT_STORE_PATH` can move the database and the statements. PGlite does not refuse a second
-  opener, so the lock is all that stops two `npm start`s from corrupting it: `src/index.ts` calls
-  `src/lock.ts` before opening anything, and a live pid in the lock refuses the start. With
-  `DATABASE_URL` the server locks for itself and no lock file is written.
+  opener, so the lock is all that stops two `npm start`s from corrupting it: `backend/src/index.ts`
+  calls `backend/src/lock.ts` before opening anything, and a live pid in the lock refuses the
+  start. With `DATABASE_URL` the server locks for itself and no lock file is written.
 - **No sign-in, so the port is the boundary.** Whoever reaches the port owns the data. The server
   binds the loopback interface unless `QUIETPURSE_HOST` says otherwise, and no route asks who is
-  calling. Do not add a feature that needs to know who is acting: there is nowhere to read it from.
+  calling. `VITE_HOST=true` opens the data too: the development or preview server in `web/` then
+  listens on every interface and forwards `/api` with `Host` rewritten, so the server's `Host` check
+  passes (`SECURITY.md`, *Threat model*). Do not add a feature that needs to know who is acting:
+  there is nowhere to read it from.
 - **Transaction identity.** `transactions.id` is a surrogate UUID. Deduplication uses a separate key
-  computed from the row's content (`src/db/dedup.ts`), with a per-group ordinal so that a statement
-  listing the same charge twice keeps both. Ordinals stay dense across a delete. Conflating the two
-  keys brings duplicate imports back.
+  computed from the row's content (`backend/src/db/dedup.ts`), with a per-group ordinal so that a
+  statement listing the same charge twice keeps both. Ordinals stay dense across a delete.
+  Conflating the two keys brings duplicate imports back.
 - **Import provenance.** Every transaction the app inserts carries `import_id`. The column is
   nullable only for rows no import owns, which a restored backup can carry. `imports` is uniquely
   indexed on `file_hash WHERE status = 'committed'`: only `committed` means the rows are in the
@@ -94,13 +97,14 @@ unpinned version.
 - **A stored statement is the uploaded file, plain, named after its row.** The name is derived from
   the import id, the uploaded filename and the recognised format at every read and delete, never
   stored: a stored name is a path a crafted backup could choose. So those three fields are written
-  once and never updated, and a delete carries all three. `src/SPEC.md` explains the filename
-  reduction, and why a Windows device name before a dot (`con.txt.csv`) is the shape to worry about.
+  once and never updated, and a delete carries all three. `backend/src/SPEC.md` explains the
+  filename reduction, and why a Windows device name before a dot (`con.txt.csv`) is the shape to
+  worry about.
 - **Migrations stay squashed until the first release.** `npm run db:generate` writes SQL from
-  `src/db/schema.ts` into `backend/drizzle/`; migrations run when the database opens. No released
-  database needs upgrading yet, so there is one initial migration and its snapshot, and a schema
-  change is regenerated into it. From the first release on, applied migrations are immutable and each
-  change gets a new one.
+  `backend/src/db/schema.ts` into `backend/drizzle/`; migrations run when the database opens. No
+  released database needs upgrading yet, so there is one initial migration and its snapshot, and a
+  schema change is regenerated into it. From the first release on, applied migrations are immutable
+  and each change gets a new one.
 - **Categories are slugs** in the database and over the API; display names live in the client
   dictionary. The slug is a stable contract.
 - **Goals survive missing accounts.** A goal-to-account row has no account foreign key, on purpose.
@@ -146,21 +150,22 @@ covered `web/`.
 a real Postgres when `TEST_DATABASE_URL` is set. CI runs both. PGlite has one connection, so the
 default run exercises no concurrency: not a unique index losing a race, not two writers meeting.
 
-The suite runs in one process. `test/setup.ts` is a vitest setup file, so it runs **per test file**:
-it truncates every schema table, seeds the defaults, and points `QUIETPURSE_HOME` at a temporary
-folder so nothing reaches `~/Quietpurse`. Since it truncates what it connects to, it refuses a
-`TEST_DATABASE_URL` database not named `test` or `*_test`. Files share the PGlite instance and the
-module registry, not the rows; a file with exact figures repeats the truncate and the seed in its own
-`beforeAll`, so its figures rest on its own lines.
+The suite runs in one process. `backend/test/setup.ts` is a vitest setup file, so it runs **per
+test file**: it truncates every schema table, seeds the defaults, and points `QUIETPURSE_HOME` at a
+temporary folder so nothing reaches `~/Quietpurse`. Since it truncates what it connects to, it
+refuses a `TEST_DATABASE_URL` database not named `test` or `*_test`. Files share the PGlite instance
+and the module registry, not the rows; a file with exact figures repeats the truncate and the seed
+in its own `beforeAll`, so its figures rest on its own lines.
 
 **Coverage.** `npm run coverage` in either package prints a per-file reading of what the suite
 reached. It is a reading, not a gate: no threshold, and no CI step reads it.
 
 **Skips.** Some backend tests never run on Windows or as root, so a green local run there is short:
-the boot refusal of a statements folder that cannot be written to (`test/documents.test.ts`), the
-permission checks in `test/home-folder.test.ts`, and the lock's permission cases in
-`test/lock.test.ts`, one of which skips on Windows only. CI (Ubuntu, non-root) runs them all. Nothing
-else skips: `canvasabsent.test.ts` hides the package in a spawned child and runs everywhere.
+the boot refusal of a statements folder that cannot be written to
+(`backend/test/documents.test.ts`), the permission checks in `backend/test/home-folder.test.ts`, and
+the lock's permission cases in `backend/test/lock.test.ts`, one of which skips on Windows only. CI
+(Ubuntu, non-root) runs them all. Nothing else skips: `canvasabsent.test.ts` hides the package in a
+spawned child and runs everywhere.
 
 ## Conventions
 
@@ -188,9 +193,10 @@ is the only copy of its title.
   `depends-on`, `references`, `implements`. A line is `key: value` or `key: [a, b]`, nothing else.
 - A module spec opens with `## Responsibility` and has `## Boundary` and `## Invariants` for the
   rules no type and no test holds. Its other sections are its own, and the root keeps its own.
-- No line citation, commit sha, reference to the plan, or path a reader of the public tree cannot
-  open. `backend/test/specs.test.ts` refuses each of these and any other form of frontmatter, and
-  holds the parents to one tree. No counts either; review holds that one.
+- No line citation, commit sha, reference to planning notes outside the repository, or path a
+  reader of the public tree cannot open. `backend/test/specs.test.ts` refuses each of these and any
+  other form of frontmatter, and holds the parents to one tree. No counts either; review holds that
+  one.
 
 **A comment may not state a fact that something else could check.** Nothing tests prose, so a
 number, count, measurement, reachability claim or inventory in a comment is believed long after it
@@ -200,8 +206,9 @@ assertion sits beside its sentence; a comment in `csv.ts` that said "nothing rea
 the moment something read it, and nothing said so.
 
 - **Delete** on sight: a number, count, date, percentage, byte size, line number or file inventory;
-  a row number, task id, review round or decision reference; what a test does, what a fixture holds,
-  what a past run produced; what the next line already says; a section banner or divider.
+  a row, task or decision number from notes outside the repository, or a review round; what a test
+  does, what a fixture holds, what a past run produced; what the next line already says; a section
+  banner or divider.
 - **Keep** beside the code only what cannot be recovered by reading the code, *and* would break
   behaviour if wrong, *and* is broken by an edit to its own line:
   - **why something is ABSENT**: a deliberate missing clause, filter or check that looks like an
@@ -215,7 +222,7 @@ the moment something read it, and nothing said so.
   keeps are a data literal measured off a document no reader can open may honestly need a long keep
   list. If a comment mixes a kept reason with a checkable claim, cut it to the reason; no number "for
   context".
-- `COMPUTED_PREFIX`'s docblock in `src/db/dedup.ts` is the shape to copy.
+- `COMPUTED_PREFIX`'s docblock in `backend/src/db/dedup.ts` is the shape to copy.
 
 **Style.** Match the style, naming and idiom of the file you edit, **but never its comment volume**:
 copying a dense neighbour is how the density spread.

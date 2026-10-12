@@ -104,19 +104,20 @@ docblock gives its reason or its blind spots, they are not repeated here.
   the packages and untracked files included. Its docblocks give the reasons for its frontmatter
   grammar and its identity walk.
   - In specs and comments alike it refuses a path `.gitignore` keeps out of the tree, a line
-    citation, a commit sha and any reference to the plan, because a reader of the clone cannot open
-    them. It reads comments through `commentsOf` in the comment tool's pure core, so the words in a
-    string literal or in JSX text, which are the product's, are never read. A hash algorithm's or a
-    cloud bucket's letter-and-digit name in a comment fails too, and costs one word to rephrase.
+    citation, a commit sha and a reference to planning notes outside the repository, by name or by
+    number, because a reader of the clone cannot open them. It reads comments through `commentsOf`
+    in the comment tool's pure core, so the words in a string literal or in JSX text, which are the
+    product's, are never read. A hash algorithm's or a cloud bucket's letter-and-digit name in a
+    comment fails too, and costs one word to rephrase.
   - Not seen by those clauses, and none closed: a reference that names no number; one wrapped across
-    a line break in a `//` run or a starred block; a row of the plan written out in words; a row id
-    with its stage letter and no padding; a bare hash sign and a number; *pull request* in words;
-    the pipeline's own vocabulary; *this row* in the plan's sense; a sha not in backticks; an
-    absolute path; an unpublished file named by its stem. A path is read only with an extension the
-    citation clause knows, so a dotfile a reader creates for themselves is unseen, rightly.
+    a line break in a `//` run or a starred block; a numbered reference written out in words; a task
+    number with a letter after it and no leading zero; a bare hash sign and a number; *pull request*
+    in words; a reference by position, such as *this row*; a sha not in backticks; an absolute path;
+    an unpublished file named by its stem. A path is read only with an extension the citation clause
+    knows, so a dotfile a reader creates for themselves is unseen, rightly.
   - Its identity walk reads wide, so a spec written and not declared is found and refused by name.
-    What it cannot see: a spec under a directory `.gitignore` keeps out of the tree, which the
-    indexing tool still reads, and an identity in a form YAML reads and the walk's pattern does not.
+    What it cannot see: a spec under a directory `.gitignore` keeps out of the tree, and an identity
+    in a form YAML reads and the walk's pattern does not.
 - **`wire.test.ts`** requires every file under `backend/src/wire/` to import only `zod` or files in
   that directory, and counts the object schemas declared there so the strictness walk cannot skip
   one.
@@ -125,6 +126,9 @@ docblock gives its reason or its blind spots, they are not repeated here.
   level, and its entry, `backend/scripts/comment-check.ts`, to be the opposite of both.
 - **`initial-migration.test.ts`** reads `backend/drizzle/` and its journal and requires a single
   initial migration and snapshot, the pre-release rule in `AGENTS.md`.
+- **`currency.test.ts`** reads every script in `backend/src` outside `backend/src/providers/`,
+  except `backend/src/currency.ts`, with its comments taken out, and refuses a line that compares or
+  groups a currency without the shared fold: `sameCurrency`, `currencyKey` or `CURRENCY_KEY`.
 
 ## Invariants
 

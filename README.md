@@ -7,7 +7,7 @@
 
 <p align="center">
   A personal finance tracker that runs on your own machine.<br>
-  Upload statements from any bank and see where your money goes, in one currency.
+  Upload your bank statements and see where your money goes, in one currency.
 </p>
 
 <p align="center">
@@ -73,7 +73,9 @@ fetches from the internet is exchange rates.
     <img src="media/transactions.png" alt="The Transactions screen with categories and filters" width="800">
   </picture>
 
-- **Analytics:** spending and income by category, for a month or a year.
+- **Analytics:** charts you build yourself. Follow income, spending and net over time, or see
+  where your money comes from and where it goes, by category or by income source, over ranges from
+  three months to five years.
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="media/analytics-dark.png">
@@ -88,11 +90,17 @@ fetches from the internet is exchange rates.
     <img src="media/goals.png" alt="The Goals screen with progress towards each goal" width="800">
   </picture>
 
-- **Backup** of everything to one JSON file and back, and a dark mode.
+- **Export** every transaction, account and setting to one readable JSON file, from Settings. The
+  statements you uploaded are not in it: they stay as files in `~/Quietpurse/statements`. The app
+  has no button to restore an export.
+
+- **A dark mode**, and a light one.
 
 ## Configuration
 
-Nothing is required. The settings worth knowing; the rest are in `backend/.env.example`:
+Nothing is required. To change a setting, put it in `backend/.env` (copy `backend/.env.example`,
+which lists the rest) or in the environment of `npm start`; a `.env` at the repository root is not
+read. The settings worth knowing:
 
 | Variable | Default | What it does |
 |---|---|---|

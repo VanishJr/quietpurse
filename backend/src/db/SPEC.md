@@ -33,11 +33,13 @@ under *Invariants*, says which CI job catches it. Each conversion sits on the li
 column, because dropping it is an edit to that line. The same goes for alias case and money
 rounding.
 
-**`ResolvedAccountId` is an account id proven to be a row here, and the brand stops at this
-module.** It cannot be made without an explicit assertion, so a second way of turning a request into
-an account id is a compile error. Two callers that derive an id differently, say from a name, put a
-statement's rows in an account its own summary does not name. A producer brands only an id it has
-just read from a row. The brand is phantom and never crosses the wire.
+**`ResolvedAccountId` is an account id proven to be a row here.** It cannot be made without an
+explicit assertion, so a string taken from a request does not compile where the brand is required,
+and every way of turning a request into an account id is an assertion a reader can find. Two
+callers that derive an id differently, say from a name, put a statement's rows in an account its own
+summary does not name. A producer brands only an id it has just read from a row:
+`resolveUploadAccount` here, and `summaryScope` in `backend/src/app.ts` right after `getAccount`.
+The brand is phantom and never crosses the wire.
 
 ## What a caller owes this module
 
