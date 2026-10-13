@@ -23,6 +23,13 @@
   </picture>
 </p>
 
+> [!NOTE]
+> **Hi there!** I made Quietpurse partly as an experiment in building software with coding agents,
+> and partly because I needed it. I looked for apps and services to keep track of my finances, but
+> most of them were paid, or could not do what I needed.
+>
+> Feedback and critique are very welcome!
+
 ---
 
 ## Why
@@ -68,33 +75,77 @@ fetches from the internet is exchange rates.
   transaction like this one at once. Transfers between your own accounts, refunds and recurring
   payments are found for you.
 
+  <details>
+  <summary><b>The Transactions screen</b></summary>
+
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="media/transactions-dark.png">
     <img src="media/transactions.png" alt="The Transactions screen with categories and filters" width="800">
   </picture>
+  </details>
 
 - **Analytics:** charts you build yourself. Follow income, spending and net over time, or see
   where your money comes from and where it goes, by category or by income source, over ranges from
   three months to five years.
 
+  <details>
+  <summary><b>The Analytics screen</b></summary>
+
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="media/analytics-dark.png">
     <img src="media/analytics.png" alt="The Analytics screen: spending by category" width="800">
   </picture>
+  </details>
 
 - **Goals:** financial independence, an emergency fund, savings, paying off a debt, monthly
   income, savings rate and category limits, each computed from your own data.
+
+  <details>
+  <summary><b>The Goals screen</b></summary>
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="media/goals-dark.png">
     <img src="media/goals.png" alt="The Goals screen with progress towards each goal" width="800">
   </picture>
+  </details>
 
 - **Export** every transaction, account and setting to one readable JSON file, from Settings. The
   statements you uploaded are not in it: they stay as files in `~/Quietpurse/statements`. The app
   has no button to restore an export.
 
 - **A dark mode**, and a light one.
+
+## How a statement is read
+
+Every upload takes the same path, whatever the bank or the format, and nothing reaches your data
+until you have looked at what was read.
+
+```mermaid
+flowchart TD
+    upload(["You upload a statement"]) --> seen{{"Imported before?"}}
+    seen -->|"yes, the same file"| dup["Shown as already imported"]
+    seen -->|no| sniff{{"Which format?<br/>Read from the bytes"}}
+    sniff -->|".xls, compressed,<br/>XML or binary"| r1["Refused, with<br/>what to upload instead"]
+    sniff -->|"CSV, XLSX or PDF"| store["Size checked, and the file<br/>kept as you uploaded it"]
+    store -->|CSV| csv["Decoded as UTF-8, UTF-16<br/>or Windows-1252, delimiter<br/>found in the header"]
+    store -->|XLSX| xlsx["The visible sheet<br/>with a header row"]
+    store -->|PDF| pdf{{"Which bank's layout?"}}
+    pdf -->|"unknown or scanned"| r2["Refused, with<br/>what to upload instead"]
+    csv --> columns["Columns matched by name"]
+    xlsx --> columns
+    pdf -->|"Revolut, N26,<br/>C24 or monobank"| rows
+    columns --> rows["Every row read: date,<br/>amount, currency, fee"]
+    rows --> check{{"Do the balances add up?"}}
+    check -->|"no, even by a cent"| r3["Refused, nothing saved"]
+    check -->|yes| staged["Waits for your review"]
+    staged -->|"you confirm"| saved[("Saved, categorised and<br/>converted to one currency")]
+```
+
+The format comes from the file's content, so a statement the bank or the browser named oddly still
+reads, and a signed PDF wrapped in an envelope is found inside it. Where a statement prints its
+balances, the rows have to add up to them exactly: a statement read even one cent wrong is refused,
+not imported with a gap. [ARCHITECTURE.md](ARCHITECTURE.md) has the same path with the module behind
+each step.
 
 ## Configuration
 
@@ -120,9 +171,12 @@ npm test                      # both packages
 npm run typecheck             # both packages
 ```
 
-[ARCHITECTURE.md](ARCHITECTURE.md) is the module map, [SECURITY.md](SECURITY.md) the threat model
-and [CONTRIBUTING.md](CONTRIBUTING.md) how to propose a change. [AGENTS.md](AGENTS.md) holds the
-rules for changing the code, for people and AI agents alike.
+Read more:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): the module map, and the path one statement takes through it
+- [SECURITY.md](SECURITY.md): the threat model
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to propose a change
+- [AGENTS.md](AGENTS.md): the rules for changing the code, for people and AI agents alike
 
 ## License
 
