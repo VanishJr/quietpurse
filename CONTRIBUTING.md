@@ -41,6 +41,8 @@ which ones, how, and what you saw. *Verification has a hole* in `AGENTS.md` expl
 ## Pull requests
 
 - One change per pull request. Fill in the parts of the template that apply.
+- Every pull request asks the maintainer for a review, and merges once they approve it. CI on a
+  pull request from a fork starts after the maintainer has read the change, so its checks may wait.
 - Comments follow *Conventions* in `AGENTS.md`: the reasoning goes to the module's `SPEC.md`, and a
   comment never states a fact a test could check.
 - Contributions are accepted under the [MIT license](LICENSE).
